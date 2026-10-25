@@ -46,7 +46,11 @@ export default function LoginPage() {
       // be a campaign's root (a team lead with one active campaign), so it's tested by the shared
       // helper, not by comparing strings.
       const from = location.state?.from?.pathname;
-      const restore = from && isConsoleHomePath(dest);
+      // An automatic-pause alert link is restored whatever the landing would have been — the org picker
+      // or the super-admin home included — because its page picks the org itself (pages/PauseLinkPage.jsx).
+      // A password still owed wins: that route is the one place this never skips.
+      const pauseLink = Boolean(from?.startsWith('/pause/')) && dest !== '/change-password';
+      const restore = from && (isConsoleHomePath(dest) || pauseLink);
       navigate(restore ? from : dest, { replace: true });
     } catch (err) {
       setError(err.message);

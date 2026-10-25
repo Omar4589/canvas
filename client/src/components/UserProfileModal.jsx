@@ -1,15 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useIsMutating } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import PasswordInput from './PasswordInput.jsx';
 import PhoneInput from './ui/PhoneInput.jsx';
 import Badge from './ui/Badge.jsx';
+import DeleteMemberDialog from './DeleteMemberDialog.jsx';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { formatDate, formatRelative as sharedFormatRelative } from '../lib/dates.js';
 import { tempPasswordProblem, isValidTempPassword } from '../lib/validators.js';
 import { ACTION_LABELS } from '../lib/statusColors.js';
+import PacePauseProfileSection from './users/PacePauseProfileSection.jsx';
+import {
+  DELETED_ACCOUNT,
+  billingLocked,
+  canOfferDelete,
+  deleteAccountMutationKey,
+  deletedNotice,
+  deletionLine,
+  fullName,
+  goneNotice,
+  viewerHasBillingAccess,
+} from '../lib/memberDeletion.js';
 
 
 const ACTION_DOT_CLS = {
@@ -57,16 +70,82 @@ function Stat({ label, value }) {
   );
 }
 
-export default function UserProfileModal({ membership, onClose }) {
+// A deleted account's profile: the header, who deleted it and when, and the one thing left to do
+// with the row. Its email is the tombstone address and is never shown, here or in a confirm.
+const DeletedAccountView = ({ deletion, orgTz, feedback, removing, onRemove, onClose }) => (
+  <div
+    className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-overlay/40 px-4 py-8"
+    onClick={onClose}
+  >
+    <div className="w-full max-w-2xl rounded-xl bg-card shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-sunken text-lg font-bold text-fg-subtle">
+            ?
+          </div>
+          <div className="min-w-0">
+            <div className="text-lg font-semibold text-fg">{DELETED_ACCOUNT}</div>
+            {deletion && <div className="text-sm text-fg-muted">{deletionLine(deletion, orgTz)}</div>}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-fg-subtle hover:bg-sunken hover:text-fg-muted"
+          aria-label="Close"
+        >
+          <svg width="22" height="22" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M5.28 4.22a.75.75 0 00-1.06 1.06L8.94 10l-4.72 4.72a.75.75 0 101.06 1.06L10 11.06l4.72 4.72a.75.75 0 101.06-1.06L11.06 10l4.72-4.72a.75.75 0 00-1.06-1.06L10 8.94 5.28 4.22z" />
+          </svg>
+        </button>
+      </div>
+
+      {feedback && (
+        <div
+          className={`px-6 py-2 text-sm ${
+            feedback.type === 'success' ? 'bg-success-tint text-success' : 'bg-danger-tint text-danger'
+          }`}
+        >
+          {feedback.text}
+        </div>
+      )}
+
+      <div className="px-6 py-5">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">
+          Account
+        </h3>
+        <p className="mb-3 text-xs text-fg-muted">
+          Remove from org tidies this row away. Nothing on your reports changes.
+        </p>
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={removing}
+          className="rounded-md border border-danger/40 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-tint disabled:opacity-50"
+        >
+          Remove from org
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+export default function UserProfileModal({ membership, onClose, onDeleted }) {
   const qc = useQueryClient();
   const orgTz = useOrgTimeZone();
-  const { user: currentUser, isSuperAdmin, isOrgAdmin } = useAuth();
+  const { user: currentUser, isSuperAdmin, isOrgAdmin, activeMembership } = useAuth();
   const user = membership.user;
   const isSelf = currentUser?.id === user?.id;
   const membershipActive = !!membership.isActive;
   // The login email is shared across every org this user belongs to, so a plain
   // org admin can't change it for a multi-org user — only the user or a super-admin.
   const emailLocked = !!user.isMultiOrg && !isSuperAdmin && !isSelf;
+  // Removing or deleting someone who has billing access takes billing access (the server answers
+  // BILLING_ACCESS_REQUIRED otherwise), so neither is offered. A deleted account's row is exempt.
+  const viewerBilling = viewerHasBillingAccess({ isSuperAdmin, activeMembership });
+  const canRemove = !billingLocked(membership, viewerBilling);
+  // Account → More options → Delete account. Display only; the server decides.
+  const offerDelete = canOfferDelete({ isOrgAdmin, isSelf, membership, viewerBilling });
 
   const [form, setForm] = useState({
     firstName: user.firstName || '',
@@ -96,6 +175,12 @@ export default function UserProfileModal({ membership, onClose }) {
   const [showResetPw, setShowResetPw] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [feedback, setFeedback] = useState(null);
+  // "More options" starts closed on every open: this component mounts fresh each time.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  // Set by DeleteMemberDialog while it is mounted (see the Escape handler below).
+  const deleteFlowRef = useRef(false);
+  const deletePending = useIsMutating({ mutationKey: deleteAccountMutationKey(user.id) }) > 0;
   // The campaigns this member manages when their role is 'lead' (edited alongside the role).
   const [managedCampaignIds, setManagedCampaignIds] = useState(membership.managedCampaignIds || []);
 
@@ -111,26 +196,38 @@ export default function UserProfileModal({ membership, onClose }) {
     flashTimerRef.current = setTimeout(() => setFeedback(null), 4000);
   }
 
+  // Escape closes the profile, but not while the delete dialog is up (its own Escape closes only the
+  // dialog) or a delete is in flight (nothing closes then). On document in the CAPTURE phase on
+  // purpose: the dialog closes from ui/Overlay's bubbling document listener, and React 18 runs the
+  // dialog's effect cleanup, which clears deleteFlowRef, synchronously inside that same keydown. A
+  // listener later in the event (this one used to bubble on window) saw the flow already closed and
+  // shut the profile too; reproduced with trusted key events in Chrome. Capture runs before the
+  // dialog's handler, while the ref is still set, and still sits behind the password prompt, which
+  // stops Escape on window before it reaches document (ReauthModal).
   useEffect(() => {
-    function onKey(e) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || deleteFlowRef.current || deletePending) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose, deletePending]);
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const statsQ = useQuery({
+  // Also the delete review's numbers, refetched as it opens. The dialog gets these options, not this
+  // result: it observes the query itself (see DeleteMemberDialog for why).
+  const statsQuery = {
     queryKey: ['admin', 'membership-stats', user.id, tz],
-    queryFn: () =>
-      api(`/admin/memberships/${user.id}/stats?tz=${encodeURIComponent(tz)}`),
-    enabled: !!user.id,
-  });
+    queryFn: ({ signal }) =>
+      api(`/admin/memberships/${user.id}/stats?tz=${encodeURIComponent(tz)}`, { signal }),
+    enabled: !!user.id && !user.isDeleted,
+  };
+  const statsQ = useQuery(statsQuery);
 
   const activityQ = useQuery({
     queryKey: ['admin', 'membership-recent-activity', user.id],
     queryFn: () => api(`/admin/memberships/${user.id}/recent-activity?limit=20`),
-    enabled: !!user.id,
+    enabled: !!user.id && !user.isDeleted,
   });
 
   // Campaigns available to grant when this member is a team lead.
@@ -165,6 +262,7 @@ export default function UserProfileModal({ membership, onClose }) {
   const crewsQ = useQuery({
     queryKey: ['admin', 'member-crews', user.id],
     queryFn: () => api(`/admin/memberships/${user.id}/crews`),
+    enabled: !user.isDeleted,
   });
   const crews = crewsQ.data?.crews || [];
 
@@ -283,11 +381,44 @@ export default function UserProfileModal({ membership, onClose }) {
   function onRemove() {
     if (
       window.confirm(
-        `Remove ${user.email} from this organization? This also removes their campaign assignments here.`
+        // A deleted account's email is its tombstone address: never printed.
+        user.isDeleted
+          ? 'Remove this deleted account from the organization? Nothing on your reports changes.'
+          : `Remove ${user.email} from this organization? This also removes their campaign assignments here.`
       )
     ) {
       removeFromOrg.mutate();
     }
+  }
+
+  // The review reads today's numbers, so the stats this profile already shows are refetched.
+  const openDelete = () => {
+    statsQ.refetch();
+    setDeleteOpen(true);
+  };
+
+  // The account is deleted, or turned out to be gone already: close everything, tell the Users page,
+  // and refresh what showed this person.
+  const finishDelete = (notice) => {
+    onDeleted?.(notice);
+    onClose();
+    qc.invalidateQueries({ queryKey: ['memberships'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'membership-stats', user.id] });
+    qc.invalidateQueries({ queryKey: ['admin', 'membership-recent-activity', user.id] });
+    qc.invalidateQueries({ queryKey: ['admin', 'member-crews', user.id] });
+  };
+
+  if (user.isDeleted) {
+    return (
+      <DeletedAccountView
+        deletion={membership.deletion}
+        orgTz={orgTz}
+        feedback={feedback}
+        removing={removeFromOrg.isPending}
+        onRemove={onRemove}
+        onClose={onClose}
+      />
+    );
   }
 
   const stats = statsQ.data;
@@ -370,6 +501,8 @@ export default function UserProfileModal({ membership, onClose }) {
             {feedback.text}
           </div>
         )}
+
+        <PacePauseProfileSection userId={user.id} tz={orgTz} />
 
         <form
           onSubmit={onSaveProfile}
@@ -763,14 +896,16 @@ export default function UserProfileModal({ membership, onClose }) {
                 >
                   {membershipActive ? 'Deactivate membership' : 'Reactivate membership'}
                 </button>
-                <button
-                  type="button"
-                  onClick={onRemove}
-                  disabled={removeFromOrg.isPending}
-                  className="rounded-md border border-danger/40 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-tint disabled:opacity-50"
-                >
-                  Remove from org
-                </button>
+                {canRemove && (
+                  <button
+                    type="button"
+                    onClick={onRemove}
+                    disabled={removeFromOrg.isPending}
+                    className="rounded-md border border-danger/40 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-tint disabled:opacity-50"
+                  >
+                    Remove from org
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -804,6 +939,52 @@ export default function UserProfileModal({ membership, onClose }) {
                 </button>
               </div>
             </form>
+          )}
+          {/* Tucked away on purpose (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md, "It's hard to do by
+              accident"): Delete sits behind More options, next to the reminder that Remove from org
+              is usually the right call, and then takes two confirmations. */}
+          {offerDelete && (
+            <div className="mt-4">
+              <button
+                type="button"
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((o) => !o)}
+                className="text-sm font-medium text-fg-muted hover:text-fg"
+              >
+                More options <span aria-hidden="true">{moreOpen ? '▾' : '▸'}</span>
+              </button>
+              {moreOpen && (
+                <div className="mt-3 flex flex-wrap items-end justify-between gap-3 rounded-md border border-danger/30 p-4">
+                  <div className="min-w-[240px] flex-1">
+                    <div className="text-sm font-semibold text-fg">Delete account</div>
+                    <p className="mt-1 text-xs text-fg-muted">
+                      Permanently deletes {user.firstName?.trim() || 'this person'}&apos;s Doorline account.
+                      Usually you want Remove from org instead: it ends their access and keeps their name
+                      on your records.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openDelete}
+                    className="rounded-md border border-danger/40 px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger-tint"
+                  >
+                    Delete account…
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {/* Inside the card on purpose: React bubbles the dialog's scrim clicks through the portal,
+              and the card's stopPropagation keeps them from reaching this profile's own backdrop. */}
+          {deleteOpen && (
+            <DeleteMemberDialog
+              membership={membership}
+              statsQuery={statsQuery}
+              flowRef={deleteFlowRef}
+              onClose={() => setDeleteOpen(false)}
+              onDeleted={() => finishDelete(deletedNotice(fullName(user)))}
+              onGone={() => finishDelete(goneNotice(fullName(user)))}
+            />
           )}
         </div>
       </div>

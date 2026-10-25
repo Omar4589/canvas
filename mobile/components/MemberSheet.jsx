@@ -16,6 +16,7 @@ import { api } from '../lib/api';
 import ActivityRow from './ActivityRow';
 import PasswordInput from './PasswordInput';
 import { isValidTempPassword, tempPasswordProblem } from '../lib/validators';
+import { DELETED_ACCOUNT_LABEL, deletionLine } from '../lib/memberDeletion';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -30,6 +31,8 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 //   - temp password / deactivate / reactivate: admins for anyone; a LEAD only for CANVASSER
 //    targets on their campaigns
 //   - coordinator: canvasser targets, campaign context required
+//   - a DELETED account: none of the account actions (temp password, resend invite, assign,
+//    reactivate), and never its email — that's the tombstone address. Its work stays viewable.
 function initials(name) {
   return (name || '')
     .split(' ')
@@ -41,7 +44,7 @@ function initials(name) {
 }
 
 export default function MemberSheet({
-  member, // { role, isActive, status, coordinatorId, coordinatorName, assigned, user: {id,firstName,lastName,email} }
+  member, // { role, isActive, status, coordinatorId, coordinatorName, assigned, user: {id,firstName,lastName,email,lastLoginAt,isDeleted,deletion} }
   campaign, // { id, name, type } — the selected campaign context (required)
   // Has this campaign used the off-by-default "Not a target voter" outcome? Resolved by the caller
   // (lib/useOutcomeInUse.js) — this sheet's { id, name, type } campaign does not carry the fields.
@@ -57,7 +60,10 @@ export default function MemberSheet({
   const router = useRouter();
   const u = member.user;
   const cId = campaign?.id;
-  const name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
+  const isDeleted = !!u.isDeleted;
+  const name = isDeleted
+    ? DELETED_ACCOUNT_LABEL
+    : `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
   const isCanvasser = member.role === 'canvasser';
   const isAdminViewer = viewerRole === 'admin' || viewerRole === 'super';
   // A lead manages canvassers only; admins manage anyone (self-demotion guards live server-side).
@@ -249,10 +255,18 @@ export default function MemberSheet({
                   </Text>
                 </View>
               </View>
-              <Text style={styles.sub} numberOfLines={1}>
-                {u.email}
-                {member.status === 'deactivated' ? ' · Deactivated' : ''}
-              </Text>
+              {isDeleted ? (
+                u.deletion ? (
+                  <Text style={styles.sub} numberOfLines={2}>
+                    {deletionLine(u.deletion)}
+                  </Text>
+                ) : null
+              ) : (
+                <Text style={styles.sub} numberOfLines={1}>
+                  {u.email}
+                  {member.status === 'deactivated' ? ' · Deactivated' : ''}
+                </Text>
+              )}
             </View>
             <Pressable onPress={onClose} hitSlop={8}>
               <Text style={styles.close}>×</Text>
@@ -396,7 +410,7 @@ export default function MemberSheet({
             ) : null}
 
             {/* Temp password — admins for anyone; leads for canvassers on their campaigns. */}
-            {canManageAccount && member.status !== 'deactivated' ? (
+            {canManageAccount && !isDeleted && member.status !== 'deactivated' ? (
               <>
                 <Pressable onPress={() => setPwOpen((v) => !v)} style={styles.link}>
                   <Text style={styles.linkText}>{pwOpen ? 'Cancel temporary password' : 'Set a temporary password…'}</Text>
@@ -473,15 +487,16 @@ export default function MemberSheet({
                 <Pressable onPress={confirmUnassign} style={styles.danger} disabled={unassignMut.isPending}>
                   <Text style={styles.dangerText}>Remove from this campaign</Text>
                 </Pressable>
-              ) : (
+              ) : isDeleted ? null : (
                 <Pressable onPress={() => assignMut.mutate()} style={styles.btnPrimary} disabled={assignMut.isPending}>
                   <Text style={styles.btnPrimaryText}>{assignMut.isPending ? 'Assigning…' : 'Assign to this campaign'}</Text>
                 </Pressable>
               )
             ) : null}
 
-            {/* Account switch — org-wide by design; disclosed in the confirm. */}
-            {canManageAccount ? (
+            {/* Account switch — org-wide by design; disclosed in the confirm. A deleted account's
+                membership stays switched off for good. */}
+            {canManageAccount && !isDeleted ? (
               member.status === 'deactivated' || !member.isActive ? (
                 <Pressable onPress={confirmReactivate} style={styles.link}>
                   <Text style={styles.linkText}>Reactivate account</Text>

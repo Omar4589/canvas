@@ -18,6 +18,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-lead-walkthrough
 // Exports enqueue against Redis, which tests don't run; without this bound the ioredis
 // offline buffer would hang the request instead of failing fast (exports.int.test.js).
 process.env.EXPORT_ENQUEUE_TIMEOUT_MS = process.env.EXPORT_ENQUEUE_TIMEOUT_MS || '400';
+process.env.CLIENT_REPORT_QUEUE_TIMEOUT_MS = process.env.CLIENT_REPORT_QUEUE_TIMEOUT_MS || '400';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -367,9 +368,18 @@ test('11. client report: create, shape, publish, preview, share, tear down', { s
   const rid = rep.json.report._id;
   expectOk(await asLead('PATCH', `/admin/client-reports/${rid}`, { visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: ['support'], showMap: true } }), 'set visibility');
   expectOk(await asLead('GET', `/admin/client-reports/${rid}`), 'read report');
+  // The numbers build on the worker: the lead claims a recompute (no worker here, so it parks), and
+  // the real processor runs it with a fresh job id, as a Retry that reached the queue would.
+  expectOk(await asLead('POST', `/admin/client-reports/${rid}/recompute`), 'recompute');
+  const { processClientReportJob } = await import('../src/services/reports/clientReportBuilds.js');
+  const jobId = new mongoose.Types.ObjectId().toHexString();
+  await ClientReport.updateOne({ _id: rid }, { $set: { 'build.status': 'queued', 'build.jobId': jobId, 'build.startedAt': new Date() } });
+  assert.ok((await processClientReportJob({ id: jobId, data: { reportId: rid } }, 'token')).committed, 'the numbers built');
   expectOk(await asLead('POST', `/admin/client-reports/${rid}/publish`), 'publish');
   expectOk(await asLead('GET', `/admin/client-reports/${rid}/preview`), 'preview');
   expectOk(await asLead('GET', `/admin/client-reports/${rid}/preview/map`), 'preview map');
+  expectOk(await asLead('POST', `/admin/client-reports/${rid}/take-down`), 'take down');
+  expectOk(await asLead('POST', `/admin/client-reports/${rid}/put-back-up`), 'put back up');
   const share = await asLead('POST', '/admin/client-reports/shares', { campaignId: String(ctx.A._id), label: 'Client' });
   expectOk(share, 'mint share link');
   assert.ok(share.json.generatedPassword, 'the minted password is returned once');

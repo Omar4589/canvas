@@ -31,6 +31,7 @@ disclosed subprocessor — DPA §6 + the privacy policy's service-providers para
 | 8 | **Wind-down warning** | The nightly sweep finds a canceled org within ~30 days of data deletion — sent once, and the deletion **cannot proceed without it** | **Billing admins only** |
 | 9 | **Dormancy warning** | The nightly sweep finds a non-paying org nearing the ~30-month inactivity boundary — sent once; any recorded canvassing cancels the deletion | **Billing admins only** |
 | 10 | **Demo request** | A visitor submits the demo form on the public marketing site | **Us** — `DEMO_REQUEST_TO`, default `hello@doorline.app` |
+| 11 | **A canvasser was paused for review** | Automatic pause stops a canvasser whose doors came in faster than anyone could knock them ([AUDIT.md](AUDIT.md) → *Automatic pause*) — one email per recipient, the moment it happens | The org's **billing admins** by default, plus any org admins and team leads a billing admin picked (a lead only for campaigns they manage); **never the paused person** |
 
 **Email 10 is the odd one out and stays that way deliberately.** It is the only email addressed to
 Doorline rather than to a customer, so: it overrides the shared layout's footer (telling ourselves
@@ -39,6 +40,11 @@ sender to pass `replyTo` — the prospect's address, so Reply answers them inste
 and its subject is `Demo request — {organization}` and nothing else. That last one is a privacy
 constraint, not a style choice: subjects are copied verbatim into `EmailLog`, so the prospect's
 name and address live in the body, which is never logged. See [MARKETING_SITE.md](MARKETING_SITE.md).
+
+**Email 11 names no one and lists no addresses.** It says which campaign and organization, when, and that
+nothing has been removed, with a **Review the pause** button; who was paused and which doors are behind
+sign-in. Its subject is the same neutral sentence every time, because subjects are copied into `EmailLog`
+and the super-admin Emails page shows them without a support grant.
 
 **Billing admins only** (emails 7–9, an owner decision): these billing-grade notices go to the
 admins who hold **Billing access**, or — only when an org has none — to the **billing contact**
@@ -53,9 +59,21 @@ recipient.
   silently replaces the old.
 - An **invite / set-password link** (emails 2, 3, 6) works once and lasts **72 hours** — the same
   window as a typed temporary password.
-- A link dies early if the person sets a password any other way, or the account is deactivated.
+- A link dies early if the person sets a password any other way, or the account is deactivated or
+  deleted.
 - An expired or used link shows "This link is invalid or has expired" with a one-tap way to
   request a fresh one. A too-weak new password does **not** burn the link — fix it and resubmit.
+
+## When an account is deleted
+
+Whoever deletes it — the person, an org admin (since 2026-10-24), or Doorline — any invite or password
+link we emailed them stops working at once, and the send log (Doorline's own record of what went out,
+**Super-admin ▸ Emails**) **stops showing their address on the emails sent to them personally**:
+invites, password resets, the welcome email and the added-to notices. Two kinds keep the address, as
+evidence, because they reached the person as a billing admin rather than personally: **deletion
+warnings** (kept for good, as the proof that warnings went out) and **staff-access notices** (which
+expire after a year like ordinary rows). Accounts deleted before this existed are cleaned up by a one-off
+command ([OPERATIONS.md](OPERATIONS.md)).
 
 ## The install links in a canvasser's invite
 
@@ -112,7 +130,8 @@ already sent cannot be recalled, so the fix has to reach *future* mail immediate
 - **Test transport**: `RESEND_API_KEY='test:accept'` / `'test:reject'` (+ any `MAIL_FROM`)
   emulates a 2xx / a failure with no network, still pushing to `outbox` — the only way tests can
   exercise delivery-gated callers. Loud warning if it ever runs.
-- **`templates.js`** — 8 templates, each `{subject, html, text}`. One shared table-based light
+- **`templates.js`** — 10 templates, each `{subject, html, text}`: eight for emails 1–9 (2 and 3 share
+  `inviteSetPassword`), plus `demoRequest` and `pacePauseAlert`. One shared table-based light
   theme (all-inline CSS), `esc()` on every customer-typed string, long-form en-US dates in UTC.
   The brand row is the logomark PNG (served from `doorline.app/apple-touch-icon.png` — SVG and
   data: URIs are stripped by Gmail) beside the TEXT wordmark, inside the white card (the PNG has
@@ -131,7 +150,11 @@ already sent cannot be recalled, so the fix has to reach *future* mail immediate
 `routes/superAdmin/access.js` (supportGrantNotice — only when `createGrant` reports
 `created: true`) · `services/retention/triggers.js` (windDownWarning / dormancyWarning via
 `deliverWarning`) · `routes/public/demoRequest.js` (demoRequest — the only **public,
-unauthenticated** send site). All route sends are fire-and-forget (sendMail never rejects); token
+unauthenticated** send site) · `services/audit/pacePause.js` (pacePauseAlert — `dispatchPauseAlert`,
+detached from the canvasser's write and always `.catch`ed, one send per recipient spaced
+`PACE_ALERT_SEND_GAP_MS` (600 ms) apart for Resend's rate limit, each with `meta.userId` when the
+recipient has an account; its outcome lands on the pause as `alert { sent, failed }` for the review
+screen). All route sends are fire-and-forget (sendMail never rejects); token
 issuance is awaited first.
 
 **One exception to fire-and-forget:** `demoRequest` **awaits** the send and returns 502 if it
@@ -210,6 +233,11 @@ repaints them. **Deliberately not consumed: open/click events** — that is beha
 of recipients, the privacy policy says we don't, and tracking stays off in Resend.
 Setup: Resend dashboard → Webhooks → add `https://doorline.app/api/webhooks/resend`, select the
 four delivery events, copy the signing secret into the `RESEND_WEBHOOK_SECRET` config var.
+**A scrubbed row never takes bounce text** (2026-10-24): when the matched row's `to` holds a
+`@deleted.doorline.invalid` tombstone address — the account-deletion scrub below already emptied it — the
+webhook still records the status but stores `deliveryDetail: null`, because a bounce message usually
+quotes the very address that was erased. It checks before the write and again after it, for a scrub that
+lands in between.
 
 ## The send log (`models/EmailLog.js` + the super-admin Emails page)
 
@@ -223,6 +251,30 @@ expire** — they are the "we warned before we deleted" evidence. Served by
 `GET /super-admin/emails` (super-admin only; paged, filterable by kind/outcome/org, with a
 last-24h sent/failed rollup) and rendered on the web console's super-admin **Emails** page.
 The TTL + query indexes are schema-declared — run `migrate:build-indexes --apply` after deploy.
+
+**The per-account scrub (account deletion, 2026-10-24).** Every personal send — `passwordReset`,
+`inviteSetPassword` (create and resend), `addedToOrg`, `addedToCampaign`, `provisioningWelcome`, and each
+`pacePauseAlert` sent to someone with an account — stores the recipient's `userId` (`meta.userId`) and has
+that one recipient. So when an account is deleted, by any
+door, `scrubAccountEmailLog(userId)` ([deleteAccount.js](../server/src/services/users/deleteAccount.js),
+step 10 of the deletion) rewrites exactly the rows whose `userId` is that account: `to` becomes
+`[deleted+<id>@deleted.doorline.invalid]`, `error` and `deliveryDetail` go to null. **By account, never
+by address** (owner decision 2026-10-24): addresses get reused — someone re-added after a deletion, an
+email fix — and matching by address rewrote other live people's rows, the forever-kept warning evidence
+included. It covers an earlier address after an email fix, and never touches anyone else's row.
+
+- **The evidence rows keep their recipients.** `windDownWarning`/`dormancyWarning` and
+  `supportGrantNotice` rows carry no `userId` (they go to an org's billing admins), so a deleted billing
+  admin's address stays on them: the warnings forever, as the deletion-warning trail; the grant notices
+  until the ordinary 365-day TTL. A `pacePauseAlert` that fell back to the org's billing **contact** (no
+  account) keeps its address the same way, until the TTL.
+- **Late rows.** `mailer.js` writes the log row after the provider call, which can take seconds, so the
+  15-minute deletion sweep re-runs the scrub for every account deleted in the last 7 days.
+- **Rows from before the release:** `npm run migrate:scrub-deleted-email-log` (a dry run that counts
+  per account and rows), then `-- --apply`, once, from the Heroku dashboard's Run console
+  ([scrubDeletedEmailLog.js](../server/src/migrations/scrubDeletedEmailLog.js); idempotent; deleted
+  accounts only, by `userId`). See [OPERATIONS.md](OPERATIONS.md).
+- **The bounce rule** — see *Delivery truth*, above.
 
 ## Previewing templates
 

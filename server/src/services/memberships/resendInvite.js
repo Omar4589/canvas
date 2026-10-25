@@ -77,6 +77,8 @@ export async function resendInvite({ user, membership, org }) {
   // already sitting in their inbox dies right here. That is the intent, and it is why both clients
   // confirm before calling this.
   const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
+  // The account was deleted between the check above and the token write: there is nobody to invite.
+  if (!url) throw new ResendInviteError('ACCOUNT_DELETED', 'This account was deleted.', 409);
 
   // `role` decides app-vs-console copy and MUST come from the membership row: isFieldRole() tests
   // `role === 'canvasser'`, so passing undefined silently renders the console version and a

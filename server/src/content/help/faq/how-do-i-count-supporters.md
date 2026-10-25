@@ -35,5 +35,5 @@ Click the tag and you get a **By team** table: each crew's identified and still-
 ## Use it
 
 - **Re-canvass or phone-bank your supporters:** build a [saved search](saved-searches) with the **By tag** filter and export the CSV.
-- **Show it to your candidate:** in the [client report builder](client-reports), tick the tag under **Visible tags** — the published report gets a "Supporter — 400 identified · 380 still current" row. Unticked tags never appear.
+- **Show it to your candidate:** in the [client report builder](client-reports), tick the tag under **Voter groups** — the published report gets a "Supporter — 400 identified · 380 still current" row. Unticked tags never appear.
 - **See one round at a time:** the pass picker scopes both numbers to that round. Note that "current" then means "as of that round" — the all-rounds view is the one that answers "supporters today."

@@ -97,10 +97,12 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 
 | Job | When | What it does |
 | --- | --- | --- |
-| `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone who deleted their account >180 days ago, and unpairs that account from FbTime (its FbTime links go, and nothing is left tying it to an FbTime person). One record at a time: a record that fails stays due for the next night while the rest are purged, and a run with a failure doesn't count as a success — so a record that keeps failing turns the health check below red. |
+| `purge-deleted-identities` | Daily 03:17 UTC | Removes the retained name of anyone whose account was deleted >180 days ago — by themselves, by an org admin, or by Doorline — and unpairs that account from FbTime (its FbTime links go, and nothing is left tying it to an FbTime person). It first settles any account deletion a crash left half-done (the same sweep as the 15-minute job below), and it never purges a record whose account isn't actually deleted — it skips and counts those. One record at a time: a record that fails stays due for the next night while the rest are purged, and a run with a failure doesn't count as a success — so a record that keeps failing turns the health check below red. |
+| `deletion-lock-sweep` | Every 15 minutes (:07, :22, :37, :52) | **Settles an account deletion that a crash interrupted** (since 2026-10-24): finishes one that died after the account was scrubbed, or switches back on the memberships of one that died before it and frees the account for another try. Also re-scrubs the email log for accounts deleted in the last week, for mail logged after the deletion. Quiet unless it did something. Writes no run record of its own — the nightly purge runs the same sweep and records its counts — and the retention health banner deliberately doesn't watch it. Cron override: `DELETION_SWEEP_CRON`. |
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
 | `reconcile-campaign-stats` | Daily 04:07 UTC | **Re-checks every campaign's stored all-time counts** (`Campaign.stats` — what the campaigns list and the All-time dashboards read) against the knock and survey records, and writes back the true numbers. Same code as `npm run migrate:campaign-stats -- --apply`. When it had to repair something, the worker log carries a warning naming each campaign and count; a campaign that needs repairing every night is a bug in the counters. Cron override: `CAMPAIGN_STATS_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 | `retention-triggers` | Daily 04:41 UTC | **Warns, then condemns organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then hands each due org (wind-down, dormancy, due deletion requests) to **`org-delete-queue`** — one job per org, so a failure is isolated to that org instead of aborting the sweep, and the worker does the destroying minutes later. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. The run receipt reports `enqueued`; `purged` is 0 because this job no longer destroys anything itself. |
+| `client-report-row-sweep` | Daily 05:31 UTC | **Deletes client-report map rows nothing needs any more** (since the client reports upgrade, 2026-10-24): the door pins and area cells of reports that were deleted, of reports whose map is off (which includes old drafts from before the upgrade, whose maps are never shown), of builds that died or were replaced, and pre-upgrade rows of reports that have been rebuilt since. It never touches a report's live map, a build still running or new numbers waiting for review, and nothing a build started after the sweep read. Logs `[maintenance] client-report-row-sweep: N orphan, N map-off, N legacy, N stale row(s) over N report(s)`. Cron override: `CLIENT_REPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 | `sweep-stale-imports` | Daily 05:53 UTC | **Fails stuck imports and deletes orphaned upload files.** Expires import jobs whose worker died mid-run (no heartbeat for minutes) with a clear failure message, then deletes the **raw uploaded voter files** left behind by finished, failed, or vanished imports older than 24h — a crashed import used to keep the complete uploaded file forever — plus stray worker temp files. Cron override: `IMPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
@@ -122,6 +124,9 @@ had nothing to do, unless something is counting.
 | `ORG_DELETE_ENQUEUE_TIMEOUT_MS` | **5000** | How long a delete request waits on Redis before answering 503 rather than hanging. |
 | `ORG_DELETE_CHUNK` | **5000** | Batch size for the identity purge inside the org cascade. A test-only knob; there is no reason to change it in production. |
 | `CAMPAIGN_DELETE_JOB_CONCURRENCY` | **1** | Same, for campaign deletes. |
+| `CLIENT_REPORT_JOB_CONCURRENCY` | **2** | How many client-report builds (a draft's numbers, Refresh numbers, Switch to areas) the worker runs at once, on their own `client-report-queue`. Each build holds one batch of households in memory, whatever the campaign's size, and a build waiting for another change on its campaign (an answer edit, an unknock) gives up its slot while it waits. |
+| `CLIENT_REPORT_BATCH` | **2000** | How many households a client-report build reads at a time. Smaller uses less memory and takes longer; there is no reason to change it in production. |
+| `CLIENT_REPORT_MAP_CACHE_MB` | **64** | How much of the **web** dyno's memory may hold ready-made client report maps (since code review round 1 of the client reports upgrade, 2026-10-24). A map is built once and kept compressed, so a client opening a big report again, or several people opening it at once, doesn't rebuild it; each copy is served for at most 15 minutes and dropped from memory within about 16 (a sweep runs every minute). `0` turns it off. Leave it at 64 unless the web dyno runs short of memory. Holds door positions, statuses and answers already on the client's map, never addresses ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 38(j)). |
 
 ### Email (Resend) — the dormant/live switch
 
@@ -162,14 +167,16 @@ auto-purge** — the App Review demo tenant must not evaporate because nobody kn
 
 ### Why that job exists
 
-When someone taps **Delete my account**, we immediately destroy their login, name, email, phone and
-password. But **their knocks and GPS pins stay with the campaign** — that's the organization's data, and
-removing it would change your counts and your bill.
+When someone taps **Delete my account** — or, since 2026-10-24, an org admin deletes a member's account —
+we immediately destroy their login, name, email, phone and password. But **their knocks and GPS pins stay
+with the campaign** — that's the organization's data, and removing it would change your counts and your
+bill.
 
 That creates a problem: if we erased their name *everywhere*, you'd be left with a pile of GPS pins
 belonging to nobody. Someone could fake a day of doors, delete their account, and you'd have no way to
-prove who did it. So we keep **one hidden copy** of their name and email — invisible in the app, used only
-for auditing — so you can still say *"those pins were Dave."*
+prove who did it. So we keep **one copy of their name** — never their email or phone — shown only to the
+organizations whose records carry them, on their reports, team labels, GPS audit and exports, so you can
+still say *"those pins were Dave."*
 
 We keep that hidden copy for **180 days (about six months)** — long enough to catch fraud and settle a
 billing dispute — and then it has to go, because the app and the privacy policy both **promise the user**
@@ -725,6 +732,217 @@ canvasser's name off Door Outcomes change lines once their 180 days are up — i
 purged before this release, on its first run. Both log what they did on the worker
 (`[maintenance] sweep-orphan-snapshots: …`, `[maintenance] purge-deleted-identities: … names off run lines N`).
 
+### Release: admins can delete a member's account (October 2026)
+
+An org admin can now delete a member's account from the person's profile, on the web and the phone,
+behind two confirmations ([USERS.md](USERS.md) → *Deleting a member's account*). The same deploy lets a
+paused organization still delete an account, **Deactivate** and **Remove from org**
+([BILLING.md](BILLING.md)); makes Remove from org of someone with billing access need billing access;
+keeps a deleted person's name on eight more report screens for the 180 days; and stops the email send log
+showing a deleted person's address on their own mail ([EMAIL.md](EMAIL.md)). No config var, no index
+build, no client-version bump, no native build. The phone's clean-up of a deleted account's unsent doors is
+**not** in this release; it comes after Election Day. The leak fix and the staff-roster fix it builds on
+are already committed (`aa01027`). In order:
+
+1. **Before committing, on the combined working tree:** `npm run audit:mobile-api` (it reads uncommitted
+   files, so it must run before the commit), read its flagged diffs plus the `entitlement.js` and
+   `middleware/auth.js` diffs by hand, and run every suite CI runs. Then the one `git add -A` commit, with
+   the sessions' messages combined.
+2. **Deploy server and web from `main`** (Heroku dashboard → **Deploy → Manual deploy**). The worker
+   registers the new 15-minute `deletion-lock-sweep` job itself when it starts.
+3. **Run console — take deleted people's addresses off their own past mail, once.** Accounts deleted before
+   this release still show their address on their own invites, password resets and added-to notices in the
+   send log (Super-admin ▸ Emails). Dry run first — it counts the accounts and rows — then for real.
+   Harmless to run again:
+
+   ```
+   npm run migrate:scrub-deleted-email-log
+   npm run migrate:scrub-deleted-email-log -- --apply
+   ```
+
+   Run any other session's console steps in their own order.
+4. **Phone, staging first** — the delete sheet rides an over-the-air update. On your machine, in `mobile/`:
+   check `git status --short mobile/` prints nothing (an update bundles whatever is on disk), then
+   `npm run ota:staging`, then the staging check below on a staging build, then `git status --short
+   mobile/` again, then `npm run ota:production` from `main`. Until a phone has the update, admins delete
+   from the web; released phones keep working with this server.
+
+**The staging check (the delete sheet only).** **Staging builds talk to production**, so this is a real
+deletion. Never delete the store-review logins or the demo's review and background canvassers (if one is
+deleted, re-run `npm run seed:demo -- --apply`).
+
+1. As a break-glass super admin in the internal demo organization, add a throwaway canvasser to a demo
+   campaign. Don't sign in as it on any phone.
+2. On a staging phone, signed in as a demo-org admin who is **not** a review login (those are told
+   "App-review demo logins can't delete accounts"): **More → Users** → the throwaway (from a campaign's
+   list, **Manage profile ›** first) → **Account** → **More options** → **Delete account…**
+3. The review names the person and says they have no door results or surveys on your records and will
+   disappear from the Users list. (There is no "open the app with signal" line: that shows only for an
+   account somebody has used, and this one never signed in.)
+4. **Continue**, type a wrong email (**Delete permanently** stays grey), go **Back** (the field clears),
+   then **Continue** again, type it right and delete.
+5. The row is gone on the phone and on the web. Deleting the same person again from a profile still open
+   elsewhere closes with "<Name> is no longer in your organization.", since an unused account's row is
+   removed outright.
+6. Do the delete on **both** an iPhone and an Android staging phone: the profile closes and the Users list
+   comes back without flashing "User not found", with the deleted notice on it.
+7. **Remove from org on the phone:** add a second throwaway to a demo campaign, open its profile →
+   **Account** → **Remove from org** → **Remove**. The profile closes and the list says they're no longer
+   in the organization; a quick double tap on the button still asks only once.
+
+Don't try the leftover-doors behaviour here: in production it would put a door under the wrong account.
+
+### Release: client reports upgrade (October 2026)
+
+The Client Reports tab, its links and the client's pages, rebuilt ([CLIENT_PORTAL.md](CLIENT_PORTAL.md);
+plan and *As built* in [PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md)): visibility
+enforced on the server, numbers built on the worker, Publish that freezes the preview, Edit and Refresh
+numbers on published reports, Take down, team reports, area view, hardened links, per-link opens, the
+report logo and the tab's own History. A server deploy plus the web build; **no OTA, no client-version
+bump, no config var to set** (the phone calls none of these routes, and its campaign History is
+unchanged; the new settings above, `CLIENT_REPORT_MAP_CACHE_MB` included, are optional). In order:
+
+1. **Before committing, on the combined working tree:** `npm run audit:mobile-api` (the campaign history
+   route changed; its default response, which the phone reads, is the same as before).
+2. **Deploy server and web from `main`** (Heroku dashboard → **Deploy → Manual deploy**). The web and the
+   worker build the three new collections' indexes when they start (report series, area cells, report
+   branding); the worker starts the new `client-report-queue` (2 builds at a time,
+   `CLIENT_REPORT_JOB_CONCURRENCY`) and registers the nightly `client-report-row-sweep` (05:31 UTC) itself.
+3. **Run console — the two new indexes on existing collections.** Dry run first; it should list
+   `ClientReportMapPoint {"clientReportId":1,"snapshotId":1,"seq":1}` and `CampaignChange
+   {"campaignId":1,"clientReportId":1}`. Then for real:
+
+   ```
+   npm run migrate:build-indexes
+   npm run migrate:build-indexes -- --apply
+   ```
+
+4. **Run console — bring the existing reports and links up to date, once.** Dry run first, and read it:
+   - Step 0 says how many surveys get their follow-up record and the survey version that record starts
+     at, then names any survey with answers given under an older version (`0. surveys: … survey(s) with
+     answers older than that version (those versions' conditions can't be known — the builder warns):
+     …`). Doorline can't know what an old version's follow-up conditions were. The report builder warns
+     wherever those answers could reach a map beside a hidden chart: *Before you publish* on a draft, and
+     the **Worth a look** box on a published report. If a survey is listed, open that campaign's published
+     client reports and look for the warning (take a question off the map with **Edit** if it could have
+     been a follow-up of the hidden one).
+   - Step 1 lists any already-made report whose builder had **every** survey question unticked (that used
+     to show every chart; it now shows none).
+   - Step 2 lists any walk-list name that matches a canvasser's name, for you to look at.
+   - Steps 3 to 5 treat old **drafts** differently from published reports: a draft from before the
+     release has no map until its numbers are built again, so its stored map rows lose their answers
+     (step 5) and the nightly sweep deletes them; only published reports' map lists are narrowed (step 4).
+
+   Steps 4 and 5 discard information (a narrowed map-question list; the stored map rows of reports whose
+   map is off), so decide on step 1 before the real run. Then for real, adding `--keep-legacy-all` only if
+   you decided to keep those reports' charts. If you add the flag after a run without it, step 1 says
+   "charts only: its map answers were already discarded" next to a published report that already went
+   through steps 3 to 5: its charts come back, its map answers can't. Harmless to run again:
+
+   ```
+   npm run migrate:client-report-visibility
+   npm run migrate:client-report-visibility -- --apply
+   npm run migrate:client-report-visibility -- --apply --keep-legacy-all
+   ```
+
+   (The last line instead of the second, not after it.) Everything works before this runs, so it can wait
+   for a quiet moment; old reports' door details work from the first time their map is opened.
+
+**Tell your users:** a draft made before this release needs its numbers built again before it can be
+published (it starts when the draft is opened); a report unpublished under the old code is a draft and
+comes back the same way; existing links keep working, and a link whose password turns out to be shorter
+than 12 characters is flagged the next time it's used.
+
+**The checks after it's live:** turn the map off on an existing published report (the client's page shows
+no map); an existing link still unlocks and its report's map still shows door details; a team report beside
+the Timeline's team numbers (a home both teams visited counts in both); a password change signs out an open
+client tab; Take down and Put back up; Refresh numbers with an addition to the map.
+
+### Release: automatic pause — and the switch that stops it (October 2026)
+
+Doorline pauses a canvasser's recording when their doors come in faster than anyone could knock them,
+emails the people the organization chose, and lays the doors out for review on the Audit page — it never
+removes or hides a door ([AUDIT.md](AUDIT.md) → *Automatic pause*; design, real-data replay and the owner's
+decisions in [PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md)). Server, web and an over-the-air phone
+update. No native build and no client-version bump (every new field, endpoint and refusal code is an
+addition). No index build of its own: the new collection's indexes build when the dynos start.
+
+**The switch is one config var, `PACE_PAUSE`** (**Settings ▸ Reveal Config Vars**). The server reads it on
+every request; saving it restarts the dynos — no deploy.
+
+| `PACE_PAUSE` | What happens |
+| --- | --- |
+| **Unset** — how the deploy ships — or **`off`** | Nothing is judged and nobody is paused. The review screens, the Users-page card and the preview all work; the card says *Automatic pause isn't running for your organization right now.* |
+| **`orgs:<slug>,<slug>`** | Only those organizations, internal ones allowed — for the device check below. A mistyped slug does nothing, so check that organization's card no longer says it isn't running. |
+| **`on`** | Every customer organization whose own setting is on (the default; a billing admin can turn theirs off). Doorline's internal organizations are never paused. |
+| Anything else | Off, with one warning in the log. |
+
+**The rule's numbers** are config vars too, all optional — leave them unset unless you decide to tune, and
+try a change with the replay first (step 4): `PACE_DOOR_SEC` (15), `PACE_SURVEY_SEC` (45),
+`PACE_TRAVEL_MPS` (11.2 m/s = 25 mph), `PACE_WINDOW` (20), `PACE_FAILS_TO_PAUSE` (8), `PACE_SAME_VISIT_SEC`
+(600); and `PACE_ALERT_SEND_GAP_MS` (600, the gap between alert emails) and `PACE_PREVIEW_ROW_CAP`
+(250000, the preview's size limit). A value that isn't a positive number falls back to its default with a
+warning ([AUDIT.md](AUDIT.md) §G.1).
+
+**To release it, in this order:**
+
+1. **Before committing, on the combined working tree:** every suite CI runs, and `npm run audit:mobile-api`
+   with no argument. For this work it flags `routes/admin/pacePauses.js` (new), `routes/mobile/canvass.js`
+   and `routes/mobile/bootstrap.js` (an added `pace` field, the new `GET /mobile/pace`, and the 403
+   `PACE_PAUSED` refusal), `routes/admin/memberships.js` (a role change moves the pause count's restart
+   point) and `routes/admin/reports.js` (an added `openPacePauses`): all additions.
+2. **Deploy server and web from `main`** (**Deploy → Manual deploy**) with `PACE_PAUSE` unset. Nothing
+   blocks; the Help Center articles go live; the indexes build as the dynos start.
+3. **Run console:** `npm run migrate:build-indexes` (the pause indexes show as already built), then
+   `npm run migrate:build-indexes -- --apply` for whatever else the deploy added. Run every other session's
+   console steps in their own order.
+4. **Look before switching on.** On your own campaigns' Audit pages, open **What automatic pause would
+   have done**. Then, late in the evening (it reads every customer's history), in the Run console:
+
+   ```
+   npm run replay:pace-pause
+   npm run replay:pace-pause -- --since=2026-08-01 --door=20
+   ```
+
+   Counts per organization only — never a name — and a count under 3 prints as *fewer than 3*. The
+   second line shows how to try other numbers: `--door`, `--survey`, `--travel`, `--window`, `--fails`,
+   `--visit`, and `--since=<YYYY-MM-DD>`. Nothing is changed.
+5. **Phone, staging.** On your machine, in `mobile/`: check `git status --short mobile/` prints nothing
+   (an update bundles whatever is on disk), `npm run ota:staging`, run the device check below, then
+   `git status --short mobile/` again. The same update carries any other session's phone screens; run
+   their staging checks too.
+6. **The device check.** **Staging builds talk to production**, so use a test organization:
+   - as a super admin, create one from the web console's **New organization** dialog (a trial org; any
+     slug), with a survey campaign of made-up single-family addresses (apartments are never judged), a
+     published book assigned to a test canvasser account, and a test admin to unpause;
+   - set `PACE_PAUSE` = `orgs:<that slug>` (a quiet hour — it restarts the dynos);
+   - on a staging phone as the test canvasser, save eight different doors seconds apart from one spot, and
+     check: the alert *That door was saved. Recording is now paused for review…*, the greyed buttons, the
+     red banner and **Check again**, a survey opened while paused (a wall), an unpause from the test admin
+     reaching the door screen, and an offline upload while paused; on a production-lane phone still on the
+     old app, check that an online save is refused in an *Action not saved* alert;
+   - unset `PACE_PAUSE`, and delete the test organization.
+7. **Phone, production:** `npm run ota:production` from `main`.
+8. **Tell both customer organizations** (the text is in [PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md)
+   §J).
+9. **Leave time** for phones to take the update — an old app still lets doors saved offline through while
+   paused.
+10. **Switch on:** `PACE_PAUSE` = `on`, **early in the morning before shifts start** — doors saved earlier
+    that day count toward the first pauses.
+
+**If something looks wrong:** set `PACE_PAUSE` = `off`. Nothing blocks on the server at once, and phones
+clear on their next check (the banner's 30-second poll, **Check again**, the map's update). Pauses left
+open block again the moment it is switched back on — so before then (also before shifts), if they were
+false alarms, resolve them:
+
+```
+npm run pace:resolve-open
+npm run pace:resolve-open -- --apply
+```
+
+The first is a dry run (how many, per organization, no names); the second lifts them all and starts each
+person's count over.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -940,6 +1158,22 @@ read green (checked from the repo root against a throwaway database: zero rows a
 pre-deletion shifts with no FbTime person, and that holds only while they are older than the hours sync's
 120-day re-pull when the purge reaches them — a younger shift would be re-pulled and re-paired.
 
+**The deletion sweep and the purge guard (2026-10-24).** An account's deletion lock is its pending
+`DeletedUserRecord` ([USERS.md](USERS.md) → *The deletion model*), so a crash can leave a record half-done,
+and a record can briefly exist for a live account. `sweepDeletionLocks`
+([deleteAccount.js](../server/src/services/users/deleteAccount.js)) settles them: it finishes a deletion
+that died after the account was scrubbed, switches back on the memberships of one that died before it and
+frees the lock, stamps a pre-lock record of a deleted account finished, deletes one left on a live account,
+and re-scrubs the email log for accounts deleted in the last 7 days. It runs every 15 minutes as its own
+job (`deletion-lock-sweep`, cron `7,22,37,52 * * * *`, override `DELETION_SWEEP_CRON`, in
+`MAINTENANCE_JOBS` so the retention health banner doesn't watch it, and logging only when it did
+something), and again as the purge's first step, whose `RetentionRun` records its counts
+(`deletionsFinished`, `deletionsReleased`, `liveRecordsDeleted`, `legacyRecordsFinished`,
+`emailRowsRescrubbed`) with failures folded into `failed`. The purge then **skips and counts
+(`skippedLive`) any due record whose account isn't deleted** — "deleted" meaning `deletedAt` is set or there
+is no User document at all — because its FbTime step deletes links and must never run for a live account.
+A dry run (`npm run purge:deleted-identities`) runs the sweep counting only.
+
 Without this on a schedule, the retention promise made in
 [`DeleteAccountSheet`](../mobile/components/DeleteAccountSheet.jsx), on
 [`/delete-account`](../client/public/delete-account.html) and in the privacy policy is not kept. See
@@ -955,6 +1189,10 @@ fraud audit).
 | `npm run lock:account` | Lists every deletion-locked account |
 | `npm run migrate:build-indexes -- --apply` | Any deploy that adds or changes a schema index |
 | `npm run purge:deleted-identities` | Dry run of the scheduled job, to see what it *would* do |
+| `npm run migrate:scrub-deleted-email-log` | **Read-only.** Counts the deleted accounts whose own mail rows (invites, resets, added-to notices — matched by the row's `userId`, never by address) still show an address, error or bounce text ([scrubDeletedEmailLog.js](../server/src/migrations/scrubDeletedEmailLog.js)) |
+| `npm run migrate:scrub-deleted-email-log -- --apply` | **Once, after the admin account-deletion release.** Rewrites those rows' recipient to the account's tombstone address and clears their error and bounce text — the same `scrubAccountEmailLog` a deletion now runs itself. Deletion-warning and support-grant notice rows carry no `userId` and keep their recipients. Idempotent |
+| `npm run migrate:client-report-visibility` | **Read-only.** What the client-reports migration would do, step by step ([clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*): surveys whose follow-up record (and the version it starts at) it would seed, surveys with answers older than that version, legacy reports whose operator unticked every question, reports to put in a series (and walk-list names matching a canvasser's), backfills, the two steps marked as discarding information, the links' new fields, and open drafts that need a rebuild |
+| `npm run migrate:client-report-visibility -- --apply` | **Once, after the client reports upgrade deploy** (add `--keep-legacy-all` to keep the charts of legacy reports whose operator unticked every question). Writes only what is still missing, so a second run, or one over documents the new code wrote, changes nothing |
 | `npm run sweep:raw-imports` | Once after the import-fix release (purges the pre-fix backlog of orphaned raw voter-file uploads), or whenever an import looks wedged — same code as the nightly `sweep-stale-imports` job ([sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js)) |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
@@ -977,6 +1215,9 @@ fraud audit).
 | `npm run audit:gps-stamps` | **Read-only.** Stored GPS stamps the stamp rules in [PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §I refuse, store as unknown or judge differently for new stamps (its first production run, 2026-10-05, found none on any ledger): per ledger, negative, zero (by month and mock-location flag) and non-finite accuracies, non-finite, off-Earth and (0, 0) coordinates, each against the rows scanned; and what the read-side clamp changes (audit far reasons removed, severities that drop, the per-canvasser Far count and forgiven), measured by running the far rule with the old arithmetic and with the current one. Counts only, never a coordinate, name or id. One collection scan per ledger, so run it late in the evening. `-- --since=<time>` limits it to rows created at or after a full time with its UTC offset (`2026-10-13T23:45-05:00`) or a date read as 00:00 UTC; a time without an offset, an impossible date and a future time are refused. Test `auditGpsStamps.int.test.js` runs it as a child process over the real script |
 | `npm run migrate:campaign-stats` | **Read-only.** Recomputes every campaign's `Campaign.stats` from the ledgers and lists the ones that differ (`DRIFTED`) or were never seeded (`UNSEEDED`) — [see below](#contactknockcount-and-the-required-recompute-migratecampaign-stats) |
 | `npm run migrate:campaign-stats -- --apply` | **Once, straight after the Not-a-target release deploy** (seeds `contactKnockCount`); otherwise any time counter drift is suspected. Recomputes and stamps **every** campaign — the same code as the nightly `reconcile-campaign-stats` job |
+| `npm run replay:pace-pause` | **Read-only, counts only.** Automatic pause's season replay across every customer organization: per org, canvassers and days scanned, the days and people it would have paused, pauses in total, the pattern mix (vehicle / one spot / walking), fails on long hops, and how often a visit began Not home and ended surveyed. Counts under 3 print as *fewer than 3*; no name, id, address or coordinate. Skips internal and deleting orgs. Flags: `--since=<YYYY-MM-DD>` and the rule's numbers (`--door --survey --travel --window --fails --visit`); an unknown flag exits 2. A full ledger scan — run it late ([replayPacePause.js](../server/src/migrations/replayPacePause.js)) |
+| `npm run pace:resolve-open` | **Read-only.** How many automatic pauses are open, per organization, no names ([resolveOpenPacePauses.js](../server/src/migrations/resolveOpenPacePauses.js)) |
+| `npm run pace:resolve-open -- --apply` | **Rollback only**, after `PACE_PAUSE` was set to `off` because pauses misfired: lifts every open pause (`resolvedVia: 'switch_off'`) and moves each person's restart point, so the old fails never count again |
 | `npm run migrate:fbtime-deletion-gaps` | **Read-only.** Counts, per step, what the FbTime deletion-gaps backfill would change ([`backfillFbtimeDeletionGaps.js`](../server/src/migrations/backfillFbtimeDeletionGaps.js)) |
 | `npm run migrate:fbtime-deletion-gaps -- --apply` | **Once, straight after the door-counts release deploy.** (1) nulls `fbtimeEmail` on FbTime links of deleted accounts; (2) strips `detail.userEmail` from **every** `link-created` integration event (nothing reads it, and a per-user match would miss rows whose `detail.userId` is stored upper-case); (3) runs the purge's FbTime step for records purged before it existed (expected 0 — the first default purge is around 2027-01-08). Idempotent; a record that fails is printed, the exit code is 1, and a re-run retries it |
 
@@ -1246,6 +1487,27 @@ a second process, so the 15-minute and nightly FbTime jobs (and the one-off org 
 for the same organization twice at once. Every send and clear re-checks before each request (the key-filtered
 ledger write, the reporter predicate, each person's set of accounts), which narrows what an interleaving
 could do but doesn't make it safe — so the formation stays at one worker dyno.
+
+### The automatic-pause switch (`PACE_PAUSE`)
+
+[`paceSwitch()`](../server/src/services/audit/pacePause.js) reads `process.env.PACE_PAUSE` on every call
+(`off`/unset, `on`, `orgs:<slug,…>`; anything else is off, warned once) and `switchCovers(org)` applies it:
+`on` covers every org that isn't `isInternal`; `orgs:` covers exactly the slugs listed, internal ones
+included. Everything that matters goes through `paceBlocks` (the one predicate — the switch, the org's own
+`pacePause.enabled`, an active canvasser, an open pause), so the switch reaches:
+
+- **the gate** — a fresh write from a paused canvasser is 403 `PACE_PAUSED`; off, nobody is refused;
+- **every phone answer** — `pace.paused` on the bootstrap, `/changes`, every recording reply and
+  `GET /mobile/pace`; off, it reads `false`, so updated phones stop blocking on their next check;
+- **the live check** — off, `runPaceCheck` returns before reading anything, so no pause is created;
+- **the badges** — `openPausesByCampaign` returns nothing for an org the switch doesn't cover.
+
+Turning it off **resolves nothing**: open pauses stay open, simply not blocking (the review screens say
+*Not blocking — automatic pause is switched off*), and block again when it comes back on. That is what
+`pace:resolve-open -- --apply` is for. The org's own setting differs on purpose: a billing admin turning it
+off resolves that org's open pauses at once (`setting_off`), and turning it back on stamps
+`pacePause.enabledAt`, which restarts every count there. The preview and the replay ignore the switch —
+they never pause anyone.
 
 ### `contactKnockCount` and the required recompute (`migrate:campaign-stats`)
 

@@ -17,6 +17,7 @@ const { Subscription } = await import('../src/models/Subscription.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { currentUsage } = await import('../src/services/billing/statement.js');
+const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -257,8 +258,22 @@ test('LAST_BILLING_ADMIN guard: no console door can strip an org of its only bil
   assert.strictEqual(deact2.status, 409);
   assert.strictEqual(deact2.json.code, 'LAST_BILLING_ADMIN');
 
-  // Door 4: removing the membership from the org — refused.
-  const removed = await call('DELETE', `/admin/memberships/${gBill.userId}`, gPlain);
+  // Door 4: removing the membership from the org. A plain admin is now stopped one step earlier:
+  // billing access protects its holder from removal (BILLING_ACCESS_REQUIRED, 2026-10-24 — without
+  // it, Remove-then-re-add quietly stripped the flag). So the LAST guard itself is checked with the
+  // one caller that rule exempts: staff, here under a support grant (without one, orgContext
+  // answers SUPPORT_ACCESS_REQUIRED before any of this).
+  const notYours = await call('DELETE', `/admin/memberships/${gBill.userId}`, gPlain);
+  assert.strictEqual(notYours.status, 403);
+  assert.strictEqual(notYours.json.code, 'BILLING_ACCESS_REQUIRED');
+  const staffU = await makeUser('Gstaff', { isSuperAdmin: true });
+  await SupportAccessGrant.create({
+    actorUserId: staffU._id,
+    organizationId: gOrg._id,
+    reason: 'billing guard test',
+    expiresAt: new Date(Date.now() + 3_600_000),
+  });
+  const removed = await call('DELETE', `/admin/memberships/${gBill.userId}`, { token: signUserToken(staffU), orgId: gOrg._id });
   assert.strictEqual(removed.status, 409);
   assert.strictEqual(removed.json.code, 'LAST_BILLING_ADMIN');
 

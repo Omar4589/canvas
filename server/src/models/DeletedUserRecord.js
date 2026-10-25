@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
 
-// The identity of a self-deleted account, kept for a bounded and disclosed window so an
-// org can still attribute past field work — above all the GPS/quality flags — to a real
-// person after they delete themselves.
+// The identity of a deleted account — deleted by the person, by their org's admin, or by Doorline
+// staff — kept for a bounded and disclosed window so an org can still attribute past field work —
+// above all the GPS/quality flags — to a real person after the account is gone.
 //
 // Why this has to exist. Scrubbing the User doc is what satisfies the stores, but it also
-// destroys the only join key the fraud audit has: flagDetection resolves a flagged
-// canvasser through User.firstName/lastName/email. Without this snapshot, a canvasser
+// destroys the name every audit surface shows: flagDetection and the report lookups name a
+// flagged canvasser through hydrateCanvassers, which reads this record (org-scoped by
+// organizationIds) for a scrubbed account. Without this snapshot, a canvasser
 // could fabricate a day of billable doors, delete their account, and leave the org holding
 // a GPS trail it cannot attach to anybody — then rejoin later under the freed email with a
 // clean flag history. The flagged rows survive a scrub; the *attribution* is what dies.
@@ -16,8 +17,10 @@ import mongoose from 'mongoose';
 // told — so the in-app deletion sheet and the privacy policy both say, in plain language,
 // that the org keeps a record of who did the field work.
 //
-// Readable by admins of the orgs the person belonged to, and by super-admins. Nothing else
-// joins it. purgeDeletedIdentities.js scrubs the snapshot once retentionUntil passes, after
+// Readable by admins (and, through team labels, leads) of the orgs in organizationIds — every
+// membership in any status plus every org holding the person's own doors or surveys — and by
+// super-admins. The same document is the deletion's LOCK while it runs (pendingAt/pendingToken,
+// below): one deletion at a time per account. purgeDeletedIdentities.js scrubs the snapshot once retentionUntil passes, after
 // which the field records no longer directly identify the person (they remain keyed to the
 // account id — de-identified, not anonymous; keep this wording in sync with the policy).
 const deletedUserRecordSchema = new mongoose.Schema(
@@ -58,14 +61,36 @@ const deletedUserRecordSchema = new mongoose.Schema(
     // referenced; both callers passed a value into a void. It is persisted now.
     //   'self'        — the account holder, in-app (DELETE /auth/account)
     //   'operator'    — npm run delete:account, honouring an emailed request
-    //   'super_admin' — the console, break-glass (DELETE /super-admin/users/:userId)
+    //   'super_admin' — the console, break-glass (DELETE /super-admin/users/:userId); also staff
+    //                   deleting inside an org under a grant, or in an internal org without a membership
+    //   'org_admin'   — an org's own admin, from the person's profile (DELETE /admin/memberships/:userId/account)
     reason: {
       type: String,
-      enum: ['self', 'operator', 'super_admin'],
+      enum: ['self', 'operator', 'super_admin', 'org_admin'],
       default: 'self',
     },
     // null for a self-deletion — there is no third party to name.
     deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+    // ── The deletion lock (services/users/deleteAccount.js) ─────────────────────────────────
+    // A record whose pendingAt is set and finishedAt is null is an attempt in flight: one deletion
+    // at a time per account. EVERY one of these is declared on purpose — Mongoose's strictQuery
+    // drops an undeclared path from a filter, so a sweep filtering on an undeclared `pendingAt`
+    // would silently match every record (reproduced in review).
+    pendingAt: { type: Date, default: null },
+    // Which attempt holds the lock. A refusal deletes the record only by its own token.
+    pendingToken: { type: String, default: null },
+    // Set on the org path for an account nobody used: finishing removes that org's membership row
+    // and leaves the name blank, as the review promised the admin.
+    unusedOrgId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
+    // Memberships this attempt switched off before the gate, written as it goes, so a crash before
+    // the gate leaves the sweep enough to switch exactly those back on.
+    touchedMemberships: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Membership' }],
+    // Set when finishDeletion completes. A finished record is NEVER claimable: an attempt that read
+    // the account before another finished must not take over (and then, refusing, delete) the
+    // finished record. Legacy records lack the field; they read as null, which is safe because an
+    // attempt refuses an already-deleted account before it ever tries to claim.
+    finishedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

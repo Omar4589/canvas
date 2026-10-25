@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import PasswordInput from '../components/PasswordInput.jsx';
 import UserProfileModal from '../components/UserProfileModal.jsx';
+import PacePauseSettingsCard from '../components/users/PacePauseSettingsCard.jsx';
 import CampaignChips from '../components/integrations/CampaignChips.jsx';
 import { tempPasswordProblem } from '../lib/validators.js';
+import { DELETED_ACCOUNT, deletionLine } from '../lib/memberDeletion.js';
 import {
   Card,
   Button,
@@ -90,6 +92,7 @@ function BillingToggle({ on, pending, onToggle, label }) {
 export default function UsersPage() {
   const qc = useQueryClient();
   const { canViewBilling } = useAuth();
+  const orgTz = useOrgTimeZone();
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('return'); // set when arriving from a campaign's setup flow
   const { data, isLoading } = useQuery({
@@ -98,6 +101,14 @@ export default function UsersPage() {
   });
   // Campaigns to grant a team lead (their managed set).
   const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
+  // Automatic pause: who is blocked right now, for the row chip (docs/PROPOSAL_PACE_PAUSE.md §G.4).
+  const pausedQ = useQuery({
+    queryKey: ['admin', 'pace-pauses', 'list', 'org-paused'],
+    queryFn: () => api('/admin/pace-pauses?status=paused'),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  });
+  const pausedUserIds = new Set((pausedQ.data?.pauses || []).filter((p) => p.blocking).map((p) => p.userId));
   const campaigns = campaignsQ.data?.campaigns || [];
 
   const [showForm, setShowForm] = useState(false);
@@ -107,6 +118,8 @@ export default function UsersPage() {
   // Set only when adding a member actually moved existing ledger rows onto a team (a returning
   // canvasser whose knocks outlived their old membership).
   const [restampNotice, setRestampNotice] = useState('');
+  // Set by the profile after Delete account ("Sam Rivera's account was deleted.").
+  const [deleteNotice, setDeleteNotice] = useState('');
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [search, setSearch] = useState('');
@@ -162,7 +175,10 @@ export default function UsersPage() {
       if (statusFilter === 'active' && !active) return false;
       if (statusFilter === 'inactive' && active) return false;
       if (term) {
-        const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
+        // A deleted account is found by its label, never by the tombstone address it now holds.
+        const hay = (
+          m.user.isDeleted ? DELETED_ACCOUNT : `${m.user.firstName} ${m.user.lastName} ${m.user.email}`
+        ).toLowerCase();
         if (!hay.includes(term)) return false;
       }
       return true;
@@ -248,6 +264,8 @@ export default function UsersPage() {
           {showForm ? 'Cancel' : 'Add member'}
         </Button>
       </div>
+
+      <PacePauseSettingsCard />
 
       {showForm && (
         <Card as="form" onSubmit={onSubmit} className="mb-6 grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
@@ -430,6 +448,25 @@ export default function UsersPage() {
         </div>
       )}
 
+      {/* After Delete account on a profile. A used account's row turns into "Deleted account"; an
+          unused one's leaves the list, and then this is the only sign the delete landed. */}
+      {deleteNotice && (
+        <div
+          role="status"
+          className="mb-4 flex items-start gap-3 rounded-md border border-brand-600 bg-brand-tint px-3 py-2 text-sm text-fg"
+        >
+          <span className="flex-1">{deleteNotice}</span>
+          <button
+            type="button"
+            onClick={() => setDeleteNotice('')}
+            className="shrink-0 font-semibold hover:opacity-70"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* A refused billing-access change (notably LAST_BILLING_ADMIN — the org can't be left with
           no billing admin) surfaces here. The toggle itself is server-data-driven, so it snaps
           back on its own; this is the "why". Clears on the next toggle attempt (mutate resets). */}
@@ -478,18 +515,32 @@ export default function UsersPage() {
                 className="group cursor-pointer transition-colors hover:bg-sunken/60"
               >
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <Avatar user={u} />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 font-medium text-fg">
-                        <span className="truncate">{u.firstName} {u.lastName}</span>
-                        {u.isSuperAdmin && (
-                          <Badge variant="warning" className="uppercase tracking-wide">super</Badge>
+                  {/* A deleted account's row: "Deleted account", then who deleted it and when. Its
+                      email is the tombstone address, never shown. */}
+                  {u.isDeleted ? (
+                    <div className="flex items-center gap-3">
+                      <Avatar name="?" />
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-fg">{DELETED_ACCOUNT}</div>
+                        {m.deletion && (
+                          <div className="truncate text-xs text-fg-muted">{deletionLine(m.deletion, orgTz)}</div>
                         )}
                       </div>
-                      <div className="truncate text-xs text-fg-muted">{u.email}</div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <Avatar user={u} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 font-medium text-fg">
+                          <span className="truncate">{u.firstName} {u.lastName}</span>
+                          {u.isSuperAdmin && (
+                            <Badge variant="warning" className="uppercase tracking-wide">super</Badge>
+                          )}
+                        </div>
+                        <div className="truncate text-xs text-fg-muted">{u.email}</div>
+                      </div>
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   {/* Rostered campaigns (CampaignAssignment), active-only chips.
@@ -508,9 +559,16 @@ export default function UsersPage() {
                   </Badge>
                 </td>
                 <td className="px-4 py-3">
-                  <Badge variant={active ? 'success' : 'neutral'} dot>
-                    {active ? 'Active' : 'Inactive'}
-                  </Badge>
+                  {u.isDeleted ? (
+                    <Badge variant="neutral">Deleted</Badge>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant={active ? 'success' : 'neutral'} dot>
+                        {active ? 'Active' : 'Inactive'}
+                      </Badge>
+                      {pausedUserIds.has(u.id) && <Badge variant="danger">Paused for review</Badge>}
+                    </div>
+                  )}
                 </td>
                 {showHours && (
                   <td className="px-4 py-3">
@@ -518,6 +576,9 @@ export default function UsersPage() {
                       <Badge variant="success" title={m.fbtime.personName || undefined}>
                         Measured
                       </Badge>
+                    ) : u.isDeleted ? (
+                      // Nobody can link a deleted account, so no "Not linked" nudge.
+                      <span className="text-fg-subtle">—</span>
                     ) : (
                       <Link
                         to="/integrations"
@@ -531,7 +592,7 @@ export default function UsersPage() {
                 )}
                 {canViewBilling && (
                   <td className="px-4 py-3">
-                    {m.role === 'admin' ? (
+                    {m.role === 'admin' && !u.isDeleted ? (
                       <BillingToggle
                         on={!!m.billingAccess}
                         pending={saveBilling.isPending && saveBilling.variables?.userId === u.id}
@@ -571,7 +632,11 @@ export default function UsersPage() {
       )}
 
       {selectedMember && (
-        <UserProfileModal membership={selectedMember} onClose={() => setSelectedUserId(null)} />
+        <UserProfileModal
+          membership={selectedMember}
+          onClose={() => setSelectedUserId(null)}
+          onDeleted={setDeleteNotice}
+        />
       )}
     </div>
   );

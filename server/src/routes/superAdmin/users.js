@@ -316,7 +316,8 @@ router.get('/:userId/deletion-check', requireBreakGlass, async (req, res, next) 
     if (!mongoose.isValidObjectId(req.params.userId)) {
       return res.status(400).json({ error: 'Invalid userId' });
     }
-    const { user, blockers } = await checkDeletionBlockers(req.params.userId);
+    // 'other' phrasing: the operator is deleting someone else ("This person is the only admin of…").
+    const { user, blockers } = await checkDeletionBlockers(req.params.userId, { subject: 'other' });
     res.json({
       canDelete: blockers.length === 0,
       blockers,
@@ -365,12 +366,13 @@ router.delete('/:userId', requireBreakGlass, async (req, res, next) => {
       deletedBy: req.user._id,
     });
     // Mirrors [org-delete]. Ephemeral on Heroku, so it is the incident-response copy, not the
-    // record — DeletedUserRecord.deletedBy/reason is the durable one.
+    // record — DeletedUserRecord.deletedBy/reason is the durable one. Ids, never the address: the
+    // person asked for their email to be erased, and a log line is not exempt.
     console.warn(
-      `[user-delete] ${req.user.email || req.user._id} deleted account ${target.email} ` +
+      `[user-delete] ${req.user._id} deleted account ${req.params.userId} ` +
         `(orgs: ${result.organizationIds.length})`
     );
-    res.json(result);
+    res.json({ deletedAt: result.deletedAt, retentionUntil: result.retentionUntil, organizationIds: result.organizationIds });
   } catch (err) {
     if (err instanceof AccountDeletionError) {
       if (err.code === 'NOT_FOUND') return res.status(404).json({ error: err.message, code: err.code });

@@ -9,17 +9,21 @@ Recording is also **location-gated**: a canvasser cannot record a door at all un
 a fresh GPS fix (see §B.6).
 
 - **Part 1 — For everyone** is plain language: what gets flagged and why, the two places you review
-  them (a dedicated Audit page and the map), and what "reviewing" a flag does.
+  them (a dedicated Audit page and the map), what "reviewing" a flag does, and **automatic pause** —
+  the one place the audit acts on its own, pausing a canvasser whose doors come in faster than anyone
+  could knock them.
 - **Part 2 — Technical reference** is for developers (and Claude): the live detector + its five
   algorithms, the thresholds, the review model (open = no record), the location-required gate, the
-  endpoints, and the frontend.
+  endpoints, the frontend, and automatic pause (§G).
 
 Related: [MAPS.md](MAPS.md) (the admin map this overlays — pins, pings, and the "far from house"
 distance a ping already shows), [GPS_ACCURACY.md](GPS_ACCURACY.md) (how accurate a phone's fix really
 is next to houses, and how the far rule's accuracy subtraction absorbs it), [METRICS.md](METRICS.md) (the overlap/duplicate-survey audits, a
 sibling quality check), [DATE_FILTERS.md](DATE_FILTERS.md) (the date window that scopes the audit —
 the map now opens on **Today**), [ROLES.md](ROLES.md) (who can audit: admins, team leads for their
-campaigns, and super-admins), [TIMEZONES.md](TIMEZONES.md) (the campaign-day the window resolves in).
+campaigns, and super-admins), [TIMEZONES.md](TIMEZONES.md) (the campaign-day the window resolves in),
+[PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md) (automatic pause's design record: the rule's numbers,
+the real-data replay behind them, and the owner's decisions).
 
 ---
 
@@ -210,6 +214,11 @@ The nudge counts **open mock-location flags only** — the one flag that is affi
 evidence, never noise — over the audit's date window, and every badge drops the moment the flag is
 reviewed or dismissed. Other flag types don't nudge; they wait in the Audit page as usual.
 
+**A canvasser paused for review outranks it** (see *Automatic pause* below): while a campaign has one, the
+same Audit badge counts paused canvassers (its hover reads *1 canvasser paused*), the campaign home shows a
+red banner above the mock-GPS one, and the phone's pills read *N paused*. The badge drops the moment
+they're unpaused.
+
 ## What "reviewing" does
 
 A flag starts **Open**. You mark it:
@@ -255,8 +264,10 @@ decision time — just written N times.
 **Reviewing is a recorded decision, not a data edit.** It never deletes the entry or removes it from
 any report's numbers — a confirmed-issue knock still counts everywhere. What a review drives is the
 **open-flag counts**: the badges, the mock-GPS nudge, and the client-report builder's publish-time
-warning when open mock-location flags fall inside a report's window (the count at the moment of
-publish is stamped on the report as `openMockFlagsAtPublish`, operator-visible only).
+warning when open mock-location flags fall inside a report's window, and since 2026-10-24 inside
+its scope too (a walk-list or team report counts only its own walk list's or crews' flags); the
+count at the moment of publish is stamped on the report as `openMockFlagsAtPublish`,
+operator-visible only.
 
 One deliberate blind spot: **admin desk marks** (`via: 'bulk'` — marking a whole book, or a single
 home, restricted from the desk; see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)) are invisible to flag
@@ -269,6 +280,91 @@ canvasser actually did — and a single-home mark's "location" is just the house
 
 The audit is for the console — **admins**, **team leads** (only for the campaigns they manage), and
 **super-admins**. Same access rules as the rest of the campaign dashboards (see [ROLES.md](ROLES.md)).
+
+**A deleted account stays named here for 180 days.** When a canvasser's account is deleted — by them, by
+an org admin, or by Doorline — their entries stay, and the audit (its page, the map's flag overlay and the
+phone's GPS audit screen) still names them, and whoever reviewed their flags, for 180 days; then it reads
+"Deleted user". That holds even if they were deactivated before the deletion, and in any organization
+where they recorded doors or surveys. **Nobody can delete their way out of an audit.** Until 2026-10-24
+the audit read the scrubbed account and showed "Deleted user" at once. (Other screens, such as a door's
+history, still do — see [USERS.md](USERS.md) → *Deleting a member's account*.)
+
+## Automatic pause (doors faster than anyone could knock them)
+
+The flags above wait for someone to open the Audit page. **Automatic pause acts on its own**: once a
+canvasser's doors stop being physically possible, Doorline pauses their recording, emails the people your
+organization chose, and lays the doors behind it out for review. **It pauses recording only.** It never
+deactivates anyone, signs anyone out, removes a door or hides a number. It exists because in October 2026
+a canvasser logged two shifts of doors from a moving car; the rapid flag marked them, but nobody opened the
+Audit page in peak season.
+
+**The rule.** Every time a canvasser saves a door, Doorline compares it with the last thing they saved **at a
+different house**: the seconds between the two, and the straight-line distance between the two GPS readings
+(less both readings' accuracy, so a wobbly fix never counts against anyone). A door **fails** when there
+wasn't time to drive from the last house at 25 mph and still spend 15 seconds at this door — 45 seconds for a
+survey. Everything saved at one house within 10 minutes is one **visit**, judged once (a second person
+surveyed, a changed result, a Not home and then a survey when someone finally answers); a survey in the visit
+must also come 45 seconds after the last house. Saving a door again, any number of times, can't hide it.
+When **8 of any 20 judged visits in a row** have failed, recording pauses. Two houses about 200 ft apart
+need about 20 seconds; an honest canvasser who knocks, waits and walks on takes 50 or more.
+
+**What's judged:** Not home, Refused, Surveyed and Not a target voter, by **canvassers**. **Not judged:**
+Wrong address, No soliciting and Restricted access (often logged quickly from the street at a gate), any
+address with an apartment or unit number or in a condo complex, lit drops, desk entries, and everything
+admins and team leads save — they review and unpause, and they enter paper results door by door. Not-judged
+doors still count as "the last thing saved" for the next door's timing. **An accepted gap:** Wrong address
+and No soliciting are billed knocks, so faking those two from a car won't pause anyone; watch for that on
+this page and Door Outcomes (owner ruling, 2026-10-24).
+
+**What the canvasser sees.** The door that tips it is saved, and one alert says *That door was saved.
+Recording is now paused for review. Call your team lead.* From then on a red banner on the map, door,
+building and survey screens says *Recording is paused for review. Call your team lead.*, with **Check
+again** and a link to their Help article; the outcome buttons grey out and **Add person** is hidden. A survey
+already being typed keeps its answers on screen, and its Save says recording is paused. Doors waiting to
+upload from a dead zone still upload, and are kept. They can still open the map, their books, their stats
+and the Help Center. An unpause reaches the phone within 30 seconds, or at once on **Check again**. On an
+app older than this release, an online save is refused with the same words in the usual *Action not saved*
+alert.
+
+**What you see.**
+
+- **An email** to each chosen person, one each: *A canvasser was paused for review*. It names no one and
+  lists no addresses — its **Review the pause** button opens the details behind sign-in.
+- **A red badge** on the campaign's Audit link and a **banner** on its home page; a **Paused for review**
+  chip on the web Users page and in the person's profile; on the phone, a **Paused for review** section at
+  the top of the GPS audit (across every campaign you manage), a *paused* badge on the Users list, and the
+  pills above.
+- **The review** (the campaign's Audit page on the web, a summary screen on the phone): who, when, on which
+  campaign, and whether the email went out; the 20 visits behind the pause with the failing ones
+  highlighted — time, address, result, seconds since the last house, distance, speed, and the seconds the
+  rule needed; a plain sentence such as *6 of the 8 too-fast doors were at vehicle speed (7–11 mph), 1 was
+  saved from one spot — usually several doors saved at once — and 1 at walking pace*; how far their phone was
+  from each house that day (a hint, never a verdict); and on the web, every door they saved that day,
+  marked (part of the pause, saved after it, or not judged and why). If the hops are faster than any car,
+  the screen suggests two phones may be signed in to one account.
+- **A team lead sees only their own campaign's doors.** A door on another campaign shows only as *a door
+  on another campaign*, and a lead whose canvasser is paused on a campaign they don't manage sees only
+  *Paused for review — an org admin can unpause*.
+
+**Unpausing, and fixing the doors.** Org admins, and the team leads who manage the campaign where it
+happened, unpause with one tap (the phone too); the count starts over, so old fails can't re-pause them.
+**Nothing is removed automatically:** every entry stays in every number, export, report, invoice and
+FbTime count until someone changes it on **Door Outcomes** (web, org admins) — Unknock the fake ones, or
+change a result or an answer. An org admin can delete the record of a resolved pause (a false alarm);
+deleting it never brings old fails back.
+
+**Who gets the email.** The organization's **billing admins** by default. A billing admin can add org
+admins and team leads on the Users page's **Automatic pause** card — a lead only for campaigns they manage,
+and a lead can be your client. *Billing admins (always)* is its own choice, so a billing admin added later
+is included. The paused person is never emailed about their own pause.
+
+**On, off, and the preview.** On for every customer organization by default; a billing admin turns it off
+on the same card, which unpauses anyone paused at once, and turning it back on starts everyone's count
+fresh. Doorline's own internal organizations are never paused. Doorline has a switch of its own that decides
+whether it runs at all ([OPERATIONS.md](OPERATIONS.md)); while it's off nobody is paused, and the settings,
+review screens and preview still work. On each campaign's Audit page, org admins can open **What automatic
+pause would have done**: every moment, over up to 120 days, when the rule would have paused someone —
+nobody is actually paused.
 
 ---
 
@@ -292,7 +388,7 @@ collection, no worker job — the GPS the detector reads has been captured on ev
 | Map overlay + panel | [client/src/lib/mapRender.js](../client/src/lib/mapRender.js), [MapFilters.jsx](../client/src/components/MapFilters.jsx), [FlaggedEntryPanel.jsx](../client/src/components/FlaggedEntryPanel.jsx) |
 | Shared review control / badges / client meta | [FlagReviewControl.jsx](../client/src/components/FlagReviewControl.jsx), [FlagReasonBadges.jsx](../client/src/components/FlagReasonBadges.jsx), [client/src/lib/flags.js](../client/src/lib/flags.js) |
 | Nudge count (`openMockFlags`) | [server/src/services/reports/campaignSummaries.js](../server/src/services/reports/campaignSummaries.js) (rides `GET /admin/campaigns` + the campaign-rollup; badges in `Layout.jsx`/`BottomNav.jsx`/`DashboardPage.jsx` + the mobile admin screens) |
-| Client-report publish gate (`countOpenMockFlags`) | [campaignSummaries.js](../server/src/services/reports/campaignSummaries.js) + [routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js) (`GET /:id` sibling + `openMockFlagsAtPublish` stamp; warning UI in `ClientReportBuilderPage.jsx`) |
+| Client-report publish gate (`countOpenMockFlags`) | [campaignSummaries.js](../server/src/services/reports/campaignSummaries.js) + [routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js) (`GET /:id` sibling + `openMockFlagsAtPublish` stamp), scoped by `scopedOpenMockFlags` in [clientReportChecks.js](../server/src/services/reports/clientReportChecks.js) (`effortId`, and the team's crews through `crewsMatch`); warning UI in `BeforePublish.jsx` and `PublishDialog.jsx` ([components/clientReports/](../client/src/components/clientReports/)) |
 
 ## B. The detector
 
@@ -305,7 +401,12 @@ surfaces. It:
    households' pins/addresses (one query each), then groups rows into a **per-canvasser timeline**.
 2. Runs the five detectors (below) into a per-action reason map.
 3. Left-joins `FlagReview` by `actionId` (absent → `status:'open'`) and resolves canvasser/reviewer
-   names, then returns `{ entries, summary, windowActionCount }`.
+   names, then returns `{ entries, summary, windowActionCount }`. Names go through `hydrateCanvassers(ids,
+   organizationId)` ([canvasserIdentity.js](../server/src/services/reports/canvasserIdentity.js)), not a
+   bare `User.find`: a deleted account's name comes back from its `DeletedUserRecord` for the retention
+   window, for this org only (the record's `organizationIds`), never with an email — the reason that
+   record exists. Before 2026-10-24 this read the scrubbed row and printed "Deleted user"
+   ([USERS.md](USERS.md) → *Account deletion*; pinned in `test/deletedUserNames.int.test.js`).
 
 **Reads `CanvassActivity` only — deliberately.** A survey submit double-writes a `SurveyResponse` *and*
 a `survey_submitted` `CanvassActivity`; the ledger already has a row per survey, so reading it alone
@@ -833,3 +934,163 @@ compares every ping's verdict with `/flags` for five seeded doors.
   deploy (dry-run first). The location gate, banner, context line, nudge badges + imperial units
   are JS-only: web deploy + mobile **OTA** (no native build — app.json untouched, expo-location
   already installed).
+
+## G. Automatic pause
+
+The design record — the rule's derivation, the replay over two real exports, the owner's decisions 1–19
+and both review rounds — is [PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md). This is the as-built map.
+Unlike the flags (computed live, never stored), a pause is an **event with a lifecycle**, so it is stored,
+with its evidence frozen at the moment it fired.
+
+| Piece | File |
+|---|---|
+| The rule (pure: visits, verdicts, windows, summaries) | [services/audit/paceRule.js](../server/src/services/audit/paceRule.js) |
+| The rows it reads (standing rows, unknocked chunk rows, unit facts) | [services/audit/paceTimeline.js](../server/src/services/audit/paceTimeline.js) |
+| Switch, the one predicate, live check, unpause, recipients, alert, badges | [services/audit/pacePause.js](../server/src/services/audit/pacePause.js) |
+| Model | [models/PacePause.js](../server/src/models/PacePause.js); `Membership.paceRestartAt`; `Organization.pacePause` |
+| Gate + after-write check | [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) `paceRefusal`, `paceAfterWrite` |
+| The phone's state | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) (`/bootstrap`, `/changes`, `GET /mobile/pace`) |
+| Review, unpause, delete, preview, settings | [routes/admin/pacePauses.js](../server/src/routes/admin/pacePauses.js), mounted at `/admin/pace-pauses` |
+| Console | [migrations/replayPacePause.js](../server/src/migrations/replayPacePause.js), [migrations/resolveOpenPacePauses.js](../server/src/migrations/resolveOpenPacePauses.js) |
+| Web | `components/audit/PacePausePanel.jsx`, `PausedCanvassers.jsx`, `PacePausePreview.jsx`; `components/users/PacePauseSettingsCard.jsx`, `PacePauseProfileSection.jsx`; `pages/PauseLinkPage.jsx`; wording in `lib/pacePause.js` |
+| Phone | rules in `mobile/lib/pace.js`; `setPace` + the local block in `lib/recordAction.js`; `components/PausedBanner.jsx`, `PausedCanvassersSection.jsx`; `app/(app)/admin/pause/[id].jsx`; `lib/pacePauses.js`; wording in `lib/pacePauseText.js` (a MIRROR of the web's, compared by its test) |
+
+### G.1 The rule (`paceRule.js`)
+
+Config, all overridable by config var (an unusable value falls back with one warning; `failsToPause`
+clamps to `window`):
+
+| Key | Var | Default | Meaning |
+|---|---|---|---|
+| `doorSec` | `PACE_DOOR_SEC` | 15 | seconds at a door |
+| `surveySec` | `PACE_SURVEY_SEC` | 45 | seconds at a door for a survey |
+| `travelMps` | `PACE_TRAVEL_MPS` | 11.2 | 25 mph between doors |
+| `window` | `PACE_WINDOW` | 20 | judged visits per window |
+| `failsToPause` | `PACE_FAILS_TO_PAUSE` | 8 | fails in a window that pause |
+| `sameVisitSec` | `PACE_SAME_VISIT_SEC` | 600 | entries at one door this close are one visit |
+| `stillM` | `PACE_STILL_M` | 20 | label only: moved less = "saved from one spot" |
+| `vehicleMph` | `PACE_VEHICLE_MPH` | 5 | label only: at or above = "vehicle speed" |
+
+- **Entries** (`entriesOf`): every standing row plus each row's `replaced.history` (G.2), by tap time.
+- **Visits** (`visitsOf`): one canvasser's entries at one door no more than `sameVisitSec` apart.
+- **Judging** (`judgeVisits`): each visit once, from its **predecessor** — the latest entry before the
+  visit's first entry at a *different* door, found in one pass. Check 1, the first entry: fails when
+  `gap < effective ÷ travelMps + doorSec` (`surveySec` when the first entry is a survey). Check 2, the first
+  later survey in the visit: the same test with `surveySec`, from the same predecessor. `effective` is the
+  haversine distance less both readings' accuracy, floored at 0. Not judged (`why`): a result outside
+  `JUDGED_RESULTS` (`not_home`, `refused`, `survey_submitted`, `not_target`, read through
+  `reclassified.from`), a unit address (`isUnitAddress`) or condo complex (`loadUnitFacts`), and the day's
+  first door. Patterns: `still`, `vehicle`, `walking` — labels for people, never part of the verdict.
+- **The window** (`findPause`): any run of `window` consecutive *counted* verdicts holding `failsToPause`
+  fails. Counted = judged and after the restart point (`countsAfter`: a live entry by `createdAt`, server
+  time; a replay by tap time).
+- **Restart points**: `Membership.paceRestartAt`, moved with `$max` on every resolve (unpause,
+  `setting_off`, `switch_off`) and on any role change (`routes/admin/memberships.js`); and
+  `Organization.pacePause.enabledAt`, stamped only on an off → on change. `restartPointOf` takes the later.
+  They live off the pause records so deleting a resolved pause can never bring old fails back.
+
+### G.2 `replaced.history`
+
+"Latest wins" deletes a canvasser's earlier entry at a door before the new row is created (§B.5), so a visit
+could otherwise be erased by saving the door again. `buildReplacedSnapshot` now also stamps
+`history: historyFor(prior)` — up to `HISTORY_CAP` (20) earlier saves, oldest first, each `{ at, lat, lng,
+accuracy, actionType (reclassified.from ?? actionType), createdAt, offline }`. Server-side only, never from
+the body; a legacy one-level snapshot converts on the next save. Same row, same retention as the snapshot.
+
+### G.3 The switch and the one predicate
+
+- **`PACE_PAUSE`** (read on every call): unset or `off` — nothing runs, nothing blocks; `on` — every
+  customer org, never an `isInternal` one; `orgs:<slug,…>` — only those, internal allowed (the device
+  check before go-live). Anything else is off, with one warning.
+- **`paceBlocks(org, membership)`**, the ONE predicate behind the gate, every phone answer, the badges and
+  the review screens: the switch covers the org, `pacePause.enabled !== false`, the member is an active
+  **canvasser**, and an open pause exists. With the switch off every answer reads `paused: false`, so the
+  kill switch reaches updated phones too. `pauseIsBlocking(org, member, pause)` is the per-pause version.
+
+### G.4 The gate and the after-write check
+
+- **Fresh writes while blocked** are refused **before any write, after the access checks**, with 403
+  `{ error: PACE_PAUSED.message, code: 'PACE_PAUSED', pace: { paused: true, at } }` — on the door results
+  (`recordHouseholdAction`), the survey route, and the walk-up add.
+- **Replays** (`wasOfflineSubmission: true`) are always accepted: the phone's queue deletes anything a 4xx
+  answers, which would destroy an honest canvasser's work and a cheat's evidence alike.
+- **After a judged write** (`paceAfterWrite`): `runPaceCheck` is awaited inside a try/catch — the write has
+  committed whatever happens. It judges the tap's day in the campaign's zone over the canvasser's rows in
+  **every campaign of the org** that day. Every recording response (201, and the 200 `superseded`) carries
+  `pace: { paused, at }` with server time; the write that created the pause adds `tipped: true`. The walk-up
+  add writes no door row, so it has no after-write check.
+- **One open pause per canvasser per org**: a partial unique index; a racing second tip hits E11000 and
+  reads as "already paused".
+
+### G.5 `PacePause`
+
+- **Fields:** org, campaign (the tipping visit's), user; `status` `paused | resolved`; `firedAt`,
+  `triggerActivityId`, `triggerAt`, `day`, `timeZone`; `config` (the numbers in force); `window` — the
+  judged visits behind it, each with ids, result, times, predecessor, seconds, meters, needed seconds,
+  verdict, pattern and its survey check; `alert { status pending|done, sent, failed, at }`; `resolvedAt`,
+  `resolvedBy`, `resolvedVia unpause | setting_off | switch_off`. **No coordinates, addresses, email
+  addresses or free text** — addresses and names are read live when a review opens. Nothing reads this
+  collection to change a count, export, report, bill or FbTime (no hold — decision 2).
+- **Indexes:** the partial unique `{organizationId, userId}` (status paused), `{organizationId, userId,
+  firedAt: -1}`, `{campaignId, status}`. Built at boot on both dynos (`syncPacePauseIndexes` in `server.js`
+  and `worker.js`), because production autoIndex is off and the unique index must exist before the first
+  pause — **no `migrate:build-indexes` run needed**.
+- **Lifecycle:** unpause resolves exactly the addressed open pause (409 `NOT_OPEN` otherwise), moving the
+  restart point first; turning the setting off resolves the org's (`setting_off`); the console command
+  resolves everyone's (`switch_off`). `DELETE` is org admins only and resolved only (409 `NOT_RESOLVED`).
+- **Retention:** deleted with the campaign (`deleteCampaign.js` `CAMPAIGN_SCOPED`) and the organization
+  (`deleteOrganization.js` `ORG_SCOPED`), swept by `lateWriteSweep.js`. **Survives account deletion** like
+  door rows: `deleteAccount.js` counts its orgs among those that attribute the person's work, so their name
+  stays for the DeletedUserRecord window.
+
+### G.6 Endpoints (`/admin/pace-pauses`, `requireOrgRole('admin', 'lead')`, every lookup org-scoped)
+
+| Route | Who | What |
+|---|---|---|
+| `GET /` | admins: the org; leads: managed campaigns | `?status=paused\|resolved\|all`, `?campaignId`, `?userId` → `{ pauses, rosterLines, enabled, live }`, newest 200. A lead's `rosterLines` name their roster's canvassers blocked on a campaign they don't manage, nothing more. An unmanaged `campaignId` is 403 `FORBIDDEN_ROLE`. |
+| `GET /settings` | org admins | `{ enabled, billingAdmins, alertUserIds, live, changedAt, changedByName, canEdit, eligible, openPauses }` |
+| `PATCH /settings` | org admin with billing access, or super admin | zod `.strict()`, dotted paths only; on → off resolves the org's open pauses; off → on resolves leftovers, then stamps `enabledAt`. Alert recipients: active org admins and leads, at most 25. |
+| `GET /preview` | org admins | `?campaignId&from&to` (1–120 days): every would-be pause on the campaign, each lifted at once; live rows merged with unknocked chunk rows (live wins by `_id`); refuses with 422 `TOO_MANY_ROWS` over `PACE_PREVIEW_ROW_CAP` (250,000) rather than truncating. |
+| `GET /:id` | org admins; leads on its campaign | the facts, the redacted `window`, `summary`, `implausible` (a failing hop of over 200 m at over 100 mph), `medianDistanceFromHouseM`, `dayEntries` (the day re-judged live, marked), `canUnpause`, `canDelete`, `doorOutcomesUrl` (admins only), `mapUrl` |
+| `POST /:id/unpause` | same | 409 `NOT_OPEN` when it isn't open |
+| `DELETE /:id` | org admins | resolved only, 409 `NOT_RESOLVED` |
+
+**Lead redaction** (`shapeWindowVisit`): a visit on a campaign the lead doesn't manage is `{ at, fail,
+otherCampaign }`; a hop whose other end they can't see keeps only its seconds and verdict — two hops between
+known houses would otherwise locate the hidden door. The summary sentence counts only the visible hops.
+
+### G.7 Alerts
+
+`dispatchPauseAlert`, detached from the write and always `.catch`ed (the web process has no
+unhandledRejection handler). Recipients (`pauseRecipients`): the chosen org admins and leads (a lead only
+for a campaign they manage) plus the billing admins unless that choice is off, de-duplicated by address,
+never the paused person; nobody eligible → the billing admins once more. One email per recipient, kind
+`pacePauseAlert`, `meta.userId` when the recipient has an account, spaced `PACE_ALERT_SEND_GAP_MS` (600)
+apart for Resend's rate limit. The link is `/pause/:orgId/:campaignId/:pauseId` (`PauseLinkPage` switches to
+the org when the reader has a console role there, then opens the review). See [EMAIL.md](EMAIL.md).
+
+### G.8 The phone
+
+The state lives in the cached bootstrap (file-backed); `setPace` (`recordAction.js`) is its one writer, and
+`lib/pace.js newerPace` keeps the newer answer by server time, so a slow reply can't undo a newer one. Every
+input feeds it: the roster fetch (`bootstrapQuery.js`), the `/changes` fold (outside the households/voters
+guard — an unpause arrives on an empty delta), every recording reply and refusal, the banner's own 30-second
+poll of `GET /mobile/pace` (from inside its `queryFn`), and the offline queue (`setFlushPaceSink`, only for
+an item recorded under the active org). The local block sits at the top of `optimisticSubmit`, inside the
+in-flight lock and before the door-change confirmation; pin fixes (`requireFix: false`) pass. See
+[CANVASSER_APP.md](CANVASSER_APP.md) and [ADMIN_APP.md](ADMIN_APP.md).
+
+### G.9 Invariants / gotchas
+
+- **One predicate.** Never test "is paused" any other way than `paceBlocks` / `pauseIsBlocking`; a badge
+  or phone answer that disagrees with the gate is a bug.
+- **Never refuse a replay.** A 4xx to a queued item deletes it on the phone.
+- **The after-write check never fails the write.** Keep it inside its try/catch, after the commit.
+- **Restart points move forward only** (`$max`), and live on the membership and the org — never on a pause
+  record that can be deleted.
+- **The window is frozen.** Review screens read it, not the live ledger — Unknock removes rows, and the
+  "why" must survive the fix. Only `dayEntries` is re-judged live.
+- **No PII in the record.** Adding an address, a coordinate, an email or a note to `PacePause` changes
+  privacy item 39 ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)).
+- **`replaced.history` must stay server-built.** Accepting it from a body would let a client forge or erase
+  visits.

@@ -5,6 +5,31 @@ import mongoose from 'mongoose';
 // campaign's report hub (latest + history). The token is an unguessable capability string; a
 // password (bcrypt) adds a second factor; rotate = new token, revoke = isActive:false. See
 // docs/CLIENT_PORTAL.md and routes/public/share.js.
+//
+// Hardened in docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 / §O7: a credential version every change
+// bumps, a rolling failure budget, and a one-year life. OLD LINKS LACK EVERY FIELD BELOW `lastAccessedAt`
+// until the migration fills them, so every filter on one tolerates its absence and every JavaScript
+// read goes through services/reports/shareLinks.js, never a Mongoose default.
+
+// One wrong-password reservation: when, and a random id so a correct password can take back exactly
+// its own reservation (never someone else's).
+const failedUnlockSchema = new mongoose.Schema(
+  {
+    at: { type: Date, required: true },
+    id: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+// Wrong passwords per UTC day ('YYYY-MM-DD'), the last 7 days only — the panel's "last week".
+const failedDaySchema = new mongoose.Schema(
+  {
+    day: { type: String, required: true },
+    n: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const reportShareLinkSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -40,7 +65,36 @@ const reportShareLinkSchema = new mongoose.Schema(
     expiresAt: { type: Date, default: null, index: true },
     isActive: { type: Boolean, default: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Stamped only when access is GRANTED (a password accepted, a valid share token, an open legacy
+    // link) — never by the password screen or a wrong guess. The panel's "Last opened".
     lastAccessedAt: { type: Date, default: null },
+
+    // Bumped by every credential change: a password change (a first password on a legacy open link
+    // included), rotate, renew and disable. The share JWT carries it as `cv` and requireShareAccess
+    // requires the two to match, so any of those signs out every device at once. Missing reads as 0,
+    // so a link nobody has touched keeps every token it already issued.
+    credentialVersion: { type: Number },
+    // Is the password 12 or more characters? true for every password set or generated under the rule;
+    // for an older link unknown (null) until its next successful unlock checks the entered password's
+    // length — the password itself is never stored. NO DEFAULT on purpose: null means unknown, and a
+    // default would claim to know.
+    passwordMeetsRule: { type: Boolean },
+    // The failure budget: the wrong-password reservations of the last 24 hours, at most 50. A guess
+    // reserves its entry BEFORE bcrypt runs (share.js), so no link ever accepts more than 50 wrong
+    // passwords in any 24 hours however many arrive at once; 50 entries = locked until the oldest is
+    // 24 hours old. Unlock now and rotate clear it. A lock never ends a session already open.
+    failedUnlockAt: { type: [failedUnlockSchema], default: undefined },
+    // Every wrong password this link has ever had, and the last 7 days by day — the panel's counts.
+    failedUnlocksTotal: { type: Number },
+    failedByDay: { type: [failedDaySchema], default: undefined },
+    // The latest lock: when it began and when it ends (the oldest of its 50 plus 24 hours). For the
+    // record — whether the link is locked NOW is read from failedUnlockAt itself.
+    lockedUntil: { type: Date, default: null },
+    lastLockedAt: { type: Date, default: null },
+    // Where the link's one-year life starts: expiresAt may never pass it + 365 days. Read through
+    // lifetimeStart() (lifetimeStartAt ?? createdAt). Unset on a legacy link that never expires, until
+    // it gains an expiry; renew starts a new life.
+    lifetimeStartAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

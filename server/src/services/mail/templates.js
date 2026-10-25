@@ -401,3 +401,32 @@ export function demoRequest({ name, email, organization, teamSize, message }) {
   ].join('\n');
   return { subject, html, text };
 }
+
+// Automatic pause (docs/PROPOSAL_PACE_PAUSE.md §F.2) — one email per recipient, sent the moment a canvasser
+// is paused. It deliberately names NO ONE and lists no address: privacy.html says Resend receives the
+// recipient's name and email address, and the details (who, which doors, why) are behind sign-in. The
+// subject is neutral for the same reason a demo request's is constrained: EmailLog copies subjects
+// verbatim, and the super-admin Emails page shows them without a support grant. `when` is the date and
+// time already formatted in the campaign's zone (services/audit/pacePause.js formats it).
+export const pacePauseAlert = ({ orgName, campaignName, when, reviewUrl }) => {
+  const subject = 'A canvasser was paused for review';
+  const html = layout(
+    heading('A canvasser was paused for review') +
+    para(`A canvasser on <strong>${esc(campaignName)}</strong> (${esc(orgName)}) was paused ${esc(when)} for saving doors faster than is possible.`) +
+    para('They can\'t record until someone on your team unpauses them. Nothing has been removed: their doors stay in your numbers unless you change them on Door Outcomes.') +
+    button('Review the pause', reviewUrl) +
+    muted('You get this email because your organization chose you to receive automatic pause alerts. A billing admin can change who gets them, or turn automatic pause off, on the Users page.')
+  );
+  const text = [
+    `A canvasser on ${campaignName} (${orgName}) was paused ${when} for saving doors faster than is possible.`,
+    '',
+    'They can\'t record until someone on your team unpauses them. Nothing has been removed: their doors stay in your numbers unless you change them on Door Outcomes.',
+    '',
+    `Review the pause: ${reviewUrl}`,
+    '',
+    'You get this email because your organization chose you to receive automatic pause alerts. A billing admin can change who gets them, or turn automatic pause off, on the Users page.',
+    '',
+    '— Doorline',
+  ].join('\n');
+  return { subject, html, text };
+};

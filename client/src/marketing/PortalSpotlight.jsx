@@ -19,12 +19,12 @@ export default function PortalSpotlight() {
           <p className="mt-4 max-w-[54ch] text-base text-stone-600 text-justify">
             Publish a weekly report and the numbers freeze — coverage, contact rates, survey
             results, and a door-status map with all canvasser and voter identity stripped out.
-            Share one link and whoever needs to see it just opens it. No accounts, no logins,
-            no &ldquo;can you re-send the file&rdquo;.
+            Share one link and its password, and whoever needs to see it opens it. No accounts,
+            no logins, no &ldquo;can you re-send the file&rdquo;.
           </p>
           <p className="mt-6 inline-flex flex-wrap items-center gap-2 rounded-full border border-brand-200 bg-white px-4 py-1.5 text-[12px] text-stone-500">
             Share link · <code className="text-[11.5px] text-brand-600">doorline.app/r/kx84…</code> ·
-            optional password · revocable
+            password-protected · expires · revocable
           </p>
         </Reveal>
         <Reveal delay={120}>

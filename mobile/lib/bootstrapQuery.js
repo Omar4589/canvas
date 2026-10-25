@@ -5,6 +5,7 @@ import { api } from './api';
 import { getSessionGeneration } from './authState';
 import { saveBootstrap, loadBootstrap, loadActiveCampaign } from './cache';
 import { reconcilePendingHouseholds, reconcilePendingLocations } from './recordAction';
+import { newerPace } from './pace';
 import { rosterErrorIsFinal, seatedRosterView } from './seatedRoster';
 
 export { isForeignRoster, rosterErrorIsFinal } from './seatedRoster';
@@ -40,6 +41,10 @@ export function bootstrapQueryFn(qc, campaignId) {
       const fresh = await api(`/mobile/bootstrap?campaignId=${campaignId}`);
       if (sessionChanged()) throw new Error('The session changed while the houses were loading.');
       fresh.households = reconcilePendingLocations(reconcilePendingHouseholds(fresh.households));
+      // The automatic-pause state (lib/pace.js): a roster that left the server before a newer answer
+      // landed — a door write's reply, the paused banner's poll — keeps that newer answer.
+      const pace = newerPace(qc.getQueryData(['bootstrap'])?.pace, fresh.pace);
+      if (pace) fresh.pace = pace;
       // Fire-and-forget: saveBootstrap never rejects, and awaiting a multi-MB
       // disk write here would only delay first paint of the fresh data.
       saveBootstrap(fresh);

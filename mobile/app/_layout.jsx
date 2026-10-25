@@ -21,6 +21,8 @@ import {
   setServerSignOutNotifier,
 } from '../lib/authState';
 import { api, setSessionEndedHandler } from '../lib/api';
+import { setFlushPaceSink } from '../lib/offlineQueue';
+import { applyFlushedPace } from '../lib/recordAction';
 import { phoneAction, inCanvassFlow, retryUnless401, keepReauthInPlace } from '../lib/sessionEnd';
 import { promptSupportAccess } from '../lib/supportAccessState';
 import { refreshSession } from '../lib/session';
@@ -163,6 +165,10 @@ const queryClient = new QueryClient({
   queryCache: new QueryCache({ onError: onGlobalError }),
   mutationCache: new MutationCache({ onError: onGlobalError }),
 });
+
+// A queued door the offline queue uploads answers with the automatic-pause state too; it reaches the cached
+// state only when it is about the org this phone is in now (lib/recordAction.js applyFlushedPace).
+setFlushPaceSink((pace, item) => applyFlushedPace(queryClient, pace, item));
 
 // Pause React Query interval polling while the app is backgrounded (battery).
 // refetchIntervalInBackground defaults to false, so once focusManager knows the

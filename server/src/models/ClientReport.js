@@ -1,10 +1,11 @@
 import mongoose from 'mongoose';
 
 // A FROZEN weekly report shown to a client (candidate) in the read-only portal. The
-// operator builds it under /admin/client-reports, reviews it, and publishes — at which
-// point the computed numbers are snapshotted here and never recomputed, so a published
-// report can't drift when live data changes later. The map's frozen household points live
-// in a companion collection (ClientReportMapPoint) to keep this doc small (16MB BSON cap).
+// operator builds it under /admin/client-reports, reviews it, and publishes — which freezes
+// exactly the snapshot the operator previewed, so a published report can't drift when live data
+// changes later. Its numbers change only through Refresh numbers (a before-and-after the operator
+// applies); its words through Edit. The map's frozen rows live in companion collections
+// (ClientReportMapPoint, ClientReportAreaCell) to keep this doc small (16MB BSON cap).
 //
 // Every aggregate is stored for TWO windows: `cumulative` (all activity through the week's
 // end instant) and `period` (just the week). The "Activity at a glance" cards render the
@@ -70,6 +71,18 @@ const windowStatsSchema = new mongoose.Schema(
     // figures), never shown to the client: shapeWindow (clientReportView.js) is a whitelist. Must be
     // declared — strict mode dropped it at the stats assignment, so the notes never appeared.
     provenance: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { _id: false }
+);
+
+// One kind of opener's count for a report: how many visits the page counted, and when. Written by
+// one updateOne with $inc/$min/$max (stage 2's /opened ping); declared, because a plain nested
+// object on a Map value would be stripped silently.
+const openCountSchema = new mongoose.Schema(
+  {
+    opens: { type: Number, default: 0 },
+    firstOpenedAt: { type: Date, default: null },
+    lastOpenedAt: { type: Date, default: null },
   },
   { _id: false }
 );
@@ -146,11 +159,20 @@ const clientReportSchema = new mongoose.Schema(
 
     // Editorial control over what the client sees.
     visibility: {
-      // Survey questions the client may see. Empty = all.
+      // Survey questions the client may see. EMPTY = SHOW NONE, for every report (it used to mean
+      // all, so unticking every question showed all of them). Create, Next and the builder always
+      // write explicit keys. Read through visibleKeysFor (services/reports/reportVisibility.js).
       visibleQuestionKeys: { type: [String], default: [] },
-      // Which survey-answer keys become client-side map filters.
+      // Which survey-answer keys become client-side map filters. Empty = none. Never holds a key
+      // outside mapKeysFor: a key that leaves that set leaves this list too.
       mapAnswerKeys: { type: [String], default: [] },
       showMap: { type: Boolean, default: true },
+      // Exact door pins (missing reads as pins) or shaded areas (H3 hexagons, services/reports/
+      // areaCells.js). On a published report these change only through a build: Switch to areas
+      // is a remap, anything else a Refresh. The map a client sees follows the LIVE snapshot's
+      // mode (liveInputs), never this setting.
+      mapMode: { type: String, enum: ['pins', 'area'], default: 'pins' },
+      areaSize: { type: String, enum: ['small', 'large'], default: 'small' },
       // Tags the client may see. EMPTY = SHOW NONE — the OPPOSITE default of
       // visibleQuestionKeys' empty=all, on purpose: tag names are operator-authored strings
       // rendered on an unauthenticated share page, so each one is an explicit opt-in tick,
@@ -165,11 +187,112 @@ const clientReportSchema = new mongoose.Schema(
 
     // Denormalized count of frozen ClientReportMapPoint docs (for list views).
     mapPointCount: { type: Number, default: 0 },
+    // The same for an area report's ClientReportAreaCell docs.
+    areaCellCount: { type: Number, default: 0 },
+
+    // ── The live snapshot (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F2) ──────────────────────────
+    // A snapshot is one build's frozen output: the numbers above and the map rows tagged with its
+    // snapshotId. A build never writes over a live snapshot; it writes a new one and one atomic
+    // update swaps it in (services/reports/clientReportBuilds.js).
+    //
+    // OLD DOCUMENTS LACK EVERY FIELD BELOW, and JavaScript never trusts a Mongoose default for them:
+    // each is read through one helper with an explicit fallback (reportVisibility.js — liveInputs,
+    // numbersCutOff, seriesKeyOf). Hence no defaults on the Mixed fields: a missing snapshotInputs
+    // must stay missing, never hydrate as "nothing on the map".
+    //
+    // null on a report built before this change, whose rows carry no snapshotId ({ snapshotId: null }
+    // matches the missing field). snapshotKey is its opaque random twin, the only one the client
+    // sees (an ObjectId's first bytes are a timestamp); legacy reports read as 'legacy'.
+    snapshotId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    snapshotKey: { type: String, default: null },
+    // What the live snapshot was built with: { showMap, mapMode, areaSize, mapKeys, questionDeps,
+    // coordinatorIds }. Removals prune it in place (the one removal path); anything that adds to it
+    // needs a new build. questionDeps is [[questionKey, [keys it depends on]], …], frozen at build.
+    snapshotInputs: { type: mongoose.Schema.Types.Mixed },
+    // The live snapshot's cut-off instant (the build's fence). Stored; the client only ever gets a
+    // date (`numbersThrough`). Read through numbersCutOff (statsComputedAt ?? publishedAt).
+    statsComputedAt: { type: Date, default: null },
+    // Incremented by every PATCH; Publish compares it with what the builder previewed.
+    editVersion: { type: Number },
+    // The map's bounding box, frozen from the pins (or the cells' boundaries on an area report):
+    // { minLng, minLat, maxLng, maxLat }. The client map opens on it.
+    extent: { type: mongoose.Schema.Types.Mixed },
+    // Earlier totals (owner ruling 10-24): the previous report of this series, recomputed by this
+    // build up to that report's cut-off, card by card — compared at READ time with what that report
+    // froze (clientReportRead.js earlierTotalsLine), so a report taken down or replaced later drops
+    // the clause.
+    earlierTotals: { type: mongoose.Schema.Types.Mixed, default: null },
+    comparedReportId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // The compared report's live snapshot when this build compared with it (null when that report
+    // had none). Once that report's numbers are refreshed its snapshot moves, and the comparison no
+    // longer means anything: the line is hidden rather than read as totals going down (NUM-1).
+    comparedSnapshotId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Knocks in this report's scope created after the fence but timed before the period ended — "3
+    // knocks arrived while these numbers were being built — Recompute to include them".
+    arrivedDuringBuild: { type: Number, default: null },
+
+    // The build in flight or its result: { kind: recompute | refresh | remap, status: queued |
+    // waiting | running | ready | failed | idle, jobId, snapshotId, snapshotKey, inputs, fenceAt,
+    // fenceSeen, startedAt, beatAt, waitingSince, rebuilds, progress, waitingFor, error: { code,
+    // message, … }, result, requestedBy, cancelledAt, cancelledBy }. Mixed and always replaced
+    // WHOLE on a claim, cancel or reset: every worker write matches on build.jobId and
+    // build.snapshotId, which a replacement removes, so a cancelled build's heartbeat, commit and
+    // failure writes all miss (setting only build.status would not do that).
+    build: { type: mongoose.Schema.Types.Mixed },
+
+    // ── Series, scope and lifecycle ─────────────────────────────────────────────────────────────
+    // The run of reports this one belongs to (ClientReportSeries) — whole campaign, a walk list, a
+    // team or a team on one walk list. scope.label is FROZEN at creation; the client groups by the
+    // opaque seriesKey (seriesKeyOf) and shows the series' current label.
+    seriesId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientReportSeries', default: null },
+    scope: {
+      type: new mongoose.Schema(
+        {
+          kind: { type: String, enum: ['campaign', 'walk_list', 'team', 'team_walk_list'] },
+          label: { type: String, default: '' },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
+    // Take down hides a published report from the client but keeps it exactly as it was; Put back
+    // up shows it again with its original publish date. Every public route filters takenDownAt:
+    // null. There is no path from published back to draft.
+    takenDownAt: { type: Date, default: null },
+    takenDownBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // An accepted edit (or a switch to areas) on a published report — the client sees "Edited".
+    contentEditedAt: { type: Date, default: null },
+    contentEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // An applied Refresh — the client sees "Numbers refreshed".
+    numbersRefreshedAt: { type: Date, default: null },
+    numbersRefreshedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Next report: the notes it copied ({ reportId, weekStart, weekEnd }) and whether the operator
+    // ticked "I've reviewed these notes" (null on a report that copied nothing).
+    copiedFrom: { type: mongoose.Schema.Types.Mixed, default: null },
+    copiedNotesReviewed: { type: Boolean, default: null },
+    // The draft Next made from this report — the insert-first CAS that makes a double click return
+    // one draft (routes/admin/clientReports.js POST /:id/next).
+    nextReportId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Bumped by every Erase of this report's History text; a Restore's CAS requires it unchanged, so
+    // an Erase landing mid-restore wins (services/reports/clientReportHistory.js).
+    eraseEpoch: { type: Number },
+
+    // Who opened this report (§F7, written by stage 2's /opened ping): per share link, and members
+    // of the org (by role) and Doorline staff separately. No IP, no device. Declared as a Map of a
+    // subschema: a plain nested object would be stripped silently.
+    views: {
+      byLink: { type: Map, of: openCountSchema, default: undefined },
+      members: {
+        admins: { type: openCountSchema, default: undefined },
+        leads: { type: openCountSchema, default: undefined },
+        others: { type: openCountSchema, default: undefined },
+        staff: { type: openCountSchema, default: undefined },
+      },
+    },
 
     // How many times a client opened this report through a public share link, and when last.
-    // Best-effort signal for the operator (admin previews don't count; see routes/public/share.js).
-    // Missing on old reports — `$inc` treats absent as 0 and the defaults apply on read, so no
-    // backfill/migration is needed.
+    // Best-effort signal for the operator (admin previews don't count). No longer incremented —
+    // `views` replaced it — and kept so the panel can say "N views before per-link counts".
     viewCount: { type: Number, default: 0 },
     lastViewedAt: { type: Date, default: null },
 

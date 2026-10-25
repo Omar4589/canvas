@@ -45,17 +45,35 @@ const campaignChangeSchema = new mongoose.Schema(
     // frozen English — services/canvass/answerEditRuns.js). Server-side only — the history
     // route deliberately does not ship `source` to the clients, so adding a value here is never a
     // client change.
+    // 'client_report' rows are the Client Reports tab's own History (fields 'clientReport.*',
+    // 'clientReportSeries.*' and stage 2's 'reportLink.*' — services/reports/clientReportHistory.js).
+    // They are KEPT OUT of the campaign's general feed by a filter in the history route's query, so
+    // the web campaign History and the phone (which calls it unfiltered) see exactly what they saw
+    // before, 200-row cap included; the tab asks for them with ?include=client_reports.
     source: {
       type: String,
-      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock', 'answer_edit'],
+      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock', 'answer_edit', 'client_report'],
       required: true,
     },
+    // Client-report rows. DECLARED, because strictQuery drops an undeclared filter key — Erase-all
+    // by clientReportId would otherwise match every row of the campaign. An edit row keeps only the
+    // EARLIER text, in fromValue (toValue stays null: the current text lives on the report), so each
+    // version is kept in exactly one row; other rows name the report's period, never its title.
+    clientReportId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientReport', default: null },
+    seriesId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientReportSeries', default: null },
+    shareLinkId: { type: mongoose.Schema.Types.ObjectId, ref: 'ReportShareLink', default: null },
+    periodLabel: { type: String, default: null },
+    // Erase (admins): the earlier text is removed from fromValue and the row says who erased it.
+    erasedAt: { type: Date, default: null },
+    erasedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
 );
 
 // "What happened to this campaign?" — the feed's only query shape.
 campaignChangeSchema.index({ campaignId: 1, createdAt: -1 });
+// Erase-all of a report's earlier text, including after the report is deleted.
+campaignChangeSchema.index({ campaignId: 1, clientReportId: 1 });
 // "What happened in my org?" — mirrors CoordinatorChange, for a future org-wide activity view.
 campaignChangeSchema.index({ organizationId: 1, createdAt: -1 });
 

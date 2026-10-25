@@ -104,7 +104,7 @@ A canvasser who's already linked can't be moved straight to a different FbTime p
 
 Unlinking one person happens straight away, with **Undo** in the banner; unlinking several at once asks first. Either way their reports go back to estimated hours straight away.
 
-When someone you're unlinking **deleted their account**, or Doorline has **sent door counts** for them, Unlink always asks first — **Was the link right?**:
+When the account of someone you're unlinking **was deleted** (by them or by an admin), or Doorline has **sent door counts** for them, Unlink always asks first — **Was the link right?**:
 
 - **Yes — keep** — they left, or they'll come back with a new account. The old account keeps counting for that FbTime person: its past hours stay measured, and — with door counts — what Doorline sent stays, and corrections stop reaching FbTime for them.
 - **No — the link was wrong** — Doorline clears every number it sent to FbTime for that person, brings back numbers someone had typed there, and won't suggest that pair again.
@@ -113,7 +113,7 @@ After an unlink, **Undo** cancels a clear that hasn't run yet. A deleted account
 
 ## Earlier accounts, and clearing one person
 
-- **also counts** — an FbTime person's row names an earlier account you kept for them with **Yes — keep** (someone who deleted their account and came back with a new one). **Stop counting** removes it if that was a mistake: the earlier account's hours go back to the current link, so its past rates become estimated, and door counts are re-sent without it. For a deleted account that can't be undone.
+- **also counts** — an FbTime person's row names an earlier account you kept for them with **Yes — keep** (someone whose account was deleted, by them or by an admin, and who came back with a new one). **Stop counting** removes it if that was a mistake: the earlier account's hours go back to the current link, so its past rates become estimated, and door counts are re-sent without it. For a deleted account that can't be undone.
 - **Clear the numbers Doorline sent for …** — on the row of an FbTime person who is no longer linked but whose numbers Doorline sent. It takes those numbers off FbTime and brings back anything typed there.
 
 ## Two rows that mean something is wrong

@@ -109,6 +109,9 @@ export default function AdminMore() {
     staleTime: 60 * 1000,
   });
   const openMockTotal = (campaignsQ.data?.campaigns || []).reduce((n, c) => n + (c.openMockFlags || 0), 0);
+  // Canvassers paused for review (automatic pause), summed the same way; they outrank the mock-GPS count on
+  // the row's one badge (docs/PROPOSAL_PACE_PAUSE.md §F.5).
+  const openPauseTotal = (campaignsQ.data?.campaigns || []).reduce((n, c) => n + (c.openPacePauses || 0), 0);
 
   // FbTime integration status — READ-ONLY here by design. Pasting a 43-character
   // API key and driving the two-roster mapping table are desktop work; this row
@@ -203,8 +206,14 @@ export default function AdminMore() {
             emphasis="menu"
             leading={<RowEmoji>🚩</RowEmoji>}
             label="GPS audit"
-            sub="Review flagged entries"
-            badge={openMockTotal > 0 ? { text: String(openMockTotal) } : null}
+            sub={
+              openPauseTotal > 0
+                ? openPauseTotal === 1
+                  ? '1 canvasser paused'
+                  : `${openPauseTotal} canvassers paused`
+                : 'Review flagged entries'
+            }
+            badge={openPauseTotal > 0 ? { text: String(openPauseTotal) } : openMockTotal > 0 ? { text: String(openMockTotal) } : null}
             onPress={() => router.push('/(app)/admin/audit')}
           />
           <InsetNavRow emphasis="menu" leading={<RowEmoji>📝</RowEmoji>} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />

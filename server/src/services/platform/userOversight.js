@@ -53,7 +53,11 @@ export async function buildUserOversight(userId) {
       { $match: { userId: user._id } },
       { $group: { _id: '$organizationId', surveys: { $sum: 1 } } },
     ]),
-    DeletedUserRecord.findOne({ userId: user._id }, 'deletedAt retentionUntil purgedAt organizationIds').lean(),
+    // Only a DELETED account's record: a live account can briefly hold a pending one (a deletion
+    // in flight is its own lock), which must not read as "deleted" on this page.
+    user.deletedAt
+      ? DeletedUserRecord.findOne({ userId: user._id }, 'deletedAt retentionUntil purgedAt organizationIds').lean()
+      : null,
   ]);
 
   const activityByOrg = new Map(activityAgg.map((a) => [String(a._id), a]));

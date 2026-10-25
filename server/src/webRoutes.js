@@ -22,6 +22,7 @@ export const WEB_SEGMENTS = new Set([
   'forgot-password', // public: request a reset link
   'reset-password', // public: /reset-password/:token — emailed reset + invite links must NEVER 404
   'r', // public client-report hub; /r/:token links are emailed — must NEVER 404
+  'pause', // /pause/:orgId/:campaignId/:pauseId — the automatic-pause alert email's link, must NEVER 404
   'change-password',
   'select-org',
   'campaigns',

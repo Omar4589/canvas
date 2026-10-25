@@ -17,7 +17,7 @@ const ITEMS = [
   },
   {
     q: 'What shows up in a shared report?',
-    a: 'Only what you publish: a frozen weekly report with coverage, results, and a door-status map. Canvasser identities and voter names are stripped by design. Links are revocable and can be password-protected.',
+    a: 'Only what you publish: a frozen weekly report with coverage, results, and a door-status map. Canvasser identities and voter names are stripped by design. Every link is password-protected, expires on its own, and can be revoked.',
   },
   {
     q: 'Can different teams work the same campaign?',

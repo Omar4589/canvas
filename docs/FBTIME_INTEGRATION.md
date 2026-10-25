@@ -131,9 +131,9 @@ Finding the person you want:
   and you tick off any that look wrong before applying. (The blind *Auto-match everyone by email*
   button still exists under **Settings**; it's the quicker tool for a first connect.)
 - **Tick several rows** and link or unlink them together. Unlinking asks first and tells you what
-  happens: those people's reports go back to estimated hours immediately. When one of them deleted
-  their account, or Doorline has sent door counts for one of them, the question is **Was the link
-  right?** instead (see *Unlinking — was the link right?* below).
+  happens: those people's reports go back to estimated hours immediately. When one of them has had
+  their account deleted (by them or by an admin), or Doorline has sent door counts for one of them, the
+  question is **Was the link right?** instead (see *Unlinking — was the link right?* below).
 - **A linked canvasser can't be moved straight to another FbTime person.** Unlink them first —
   which asks whether the old link was right — then link them to the right person.
 
@@ -357,9 +357,9 @@ is live, editable once it is revoked — unless an admin clears them.
 ### Unlinking — was the link right?
 
 Unlinking **never clears anything by itself**. When Doorline has sent door counts for the person, or
-the canvasser deleted their account, **Unlink** asks one question — **was the link right?** (For a
-deleted account it asks even where door counts aren't available: the answer also decides whose
-hours are whose.)
+the canvasser's account was deleted — by them or, since 2026-10-24, by an org admin — **Unlink** asks one
+question — **was the link right?** (For a deleted account it asks even where door counts aren't
+available: the answer also decides whose hours are whose.)
 
 - **Yes — keep** (they left, or they'll come back with a new account). The old account **keeps
   counting** for that FbTime person: its clocked hours stay its own in Doorline's reports, so its
@@ -1028,8 +1028,11 @@ Door counts closed two older deletion gaps (the proposal's decision 10):
   now runs **record by record**, and for each record runs the FbTime step (`depairFbtimeAccount`,
   [`purgePairing.js`](../server/src/services/fbtime/purgePairing.js)) **before** the record's
   `purgedAt` stamp. It is keyed on the **account**, across every org and every connection status — a
-  disconnected or errored connection, and an org the person had already left, keep links and events too
-  (`DeletedUserRecord.organizationIds` lists only the memberships active at deletion). **De-pairing,
+  disconnected or errored connection, and an org the person had already left, keep links and events too.
+  (`DeletedUserRecord.organizationIds` is wider since 2026-10-24, on every deletion path — every
+  membership in any status, plus every org holding the person's own door results or surveys — but an org
+  they left before recording anything there can still hold a link, so the account stays the key; it used
+  to list only the memberships active at deletion.) **De-pairing,
   not reverting** — reverting the account's shifts flipped every campaign rate over their days to
   estimated (reproduced):
   1. the account's `FbTimePersonLink`s are deleted;
@@ -1052,6 +1055,14 @@ Door counts closed two older deletion gaps (the proposal's decision 10):
   must never make a dead job read green. All of this holds while `DELETED_IDENTITY_RETENTION_DAYS` is
   **≥ 121** (default 180) — a shift clocked before the deletion is then older than the 120-day re-pull,
   so no later sync re-pairs it with its person.
+
+  **The purge guard (2026-10-24).** The purge picks records by `retentionUntil` alone, and the FbTime step
+  deletes links and de-persons shifts without asking whether the account was deleted. Now an account's
+  deletion lock is its pending `DeletedUserRecord`, so a record can briefly exist for a **live** account;
+  the purge therefore skips, and counts (`skippedLive` on its `RetentionRun`), any due record whose account
+  isn't deleted ("deleted" = `deletedAt` set, or no User document at all, as in older fixtures), and it
+  first runs the deletion sweep, which finishes or releases any lock a crash left behind
+  ([USERS.md](USERS.md) → *The deletion model*). A live account's FbTime pairing is never touched.
 - **Rows from before the deploy:** `npm run migrate:fbtime-deletion-gaps`
   ([`backfillFbtimeDeletionGaps.js`](../server/src/migrations/backfillFbtimeDeletionGaps.js); a dry run
   by default, `-- --apply` writes, idempotent; proxied in the root `package.json` and run from the

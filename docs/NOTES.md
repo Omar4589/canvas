@@ -85,6 +85,12 @@ Each note tells you who wrote it, when, and (when known) the voter and address. 
   its info panel. Because a note can be about an old knock, the map automatically shows **all time** so
   the door is guaranteed to be on screen.
 
+**Notes by someone whose account was deleted** — by them or by an org admin — stay, with the rest of
+their work. Here their author reads **Deleted user** straight away, because the hub reads the account
+itself, and they drop out of the **Author** filter, which lists the campaign's team. The **Notes** export
+(*Export these*) still names them for 180 days, like every export (see [USERS.md](USERS.md) → *Deleting a
+member's account*).
+
 ## What it doesn't do
 
 It's **read-only**. You can't edit or delete a note here — you edit an admin note on the voter's profile,
@@ -201,6 +207,12 @@ already attaches the Bearer token + `X-Org-Id`, so mobile reuses it **as-is** �
   with no cap — see [EXPORTS.md](EXPORTS.md).
 - The timestamp field is **`note.timestamp`** (not `createdAt`); format it with the response's
   **`timeZone`/`tzAbbrev`** (server-resolved: campaign → org → ET), so every client shows the same clock.
+- **`author` and `edited.by` come from one plain `User.find`** over the page's author and editor ids, so a
+  deleted account reads `{ id, name: 'Deleted user' }` at once — the hub is one of the ~45 lookups that
+  don't restore a deleted person's retained name ([USERS.md](USERS.md) → *Names on the promised
+  screens*). The `notes` export resolves the same ids through `hydrateCanvassers` and names them for the
+  retention window. Both clients build the Author filter from the campaign roster (web `useCampaignTeam`,
+  phone `/assignments`), which a deletion releases, so a deleted author isn't offered there.
 
 ## Web frontend
 

@@ -52,6 +52,16 @@ export async function canManageCampaign(req, campaignId) {
   return Boolean(grant);
 }
 
+// Does THIS user (not the requester) hold a lead grant for this campaign in this org? canManageCampaign
+// answers for whoever made the request, which is the wrong person when the server acts on someone else's
+// behalf — automatic pause choosing who to email during a canvasser's own write (services/audit/pacePause.js).
+// Grant only: an org admin's unscoped authority is the caller's to check from their Membership role.
+export const userManagesCampaign = async (userId, organizationId, campaignId) => {
+  if (!userId || !organizationId || !campaignId) return false;
+  if (![userId, organizationId, campaignId].every((id) => mongoose.isValidObjectId(id))) return false;
+  return Boolean(await CampaignManager.exists({ userId, organizationId, campaignId }));
+};
+
 // Can the requester CREATE/EDIT/DUPLICATE this survey template? Surveys are org-level
 // templates, so admins manage any; a LEAD may only touch one they authored (createdBy)
 // or one attached to a campaign they manage — as that campaign's default

@@ -1,9 +1,8 @@
 User-agent: *
 Allow: /
 Disallow: /api
-# Public shared report pages carry per-address canvass data behind an unguessable token. They are for
-# the recipient of the link, not for search engines — keep them out of the index. (Legacy open links
-# stay reachable until revoked; this ensures they are at least never crawled.)
-Disallow: /r/
+# Shared report pages (/r/...) are deliberately NOT disallowed here: a crawler kept out by robots.txt
+# never fetches the page, so it never sees the page's noindex, and can still list a forwarded link's
+# bare URL. Every /r/ page is served with "X-Robots-Tag: noindex, nofollow" instead.
 
 Sitemap: https://doorline.app/sitemap.xml

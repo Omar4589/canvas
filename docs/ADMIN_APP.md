@@ -553,6 +553,73 @@ never widens access).
   on `admin/index.jsx`. One shared `userRow` renderer serves both sections *and* the unscoped org
   view, so a row cannot drift between them; the org view is still one flat list.
 
+### Deleting a member's account (admins, 2026-10-24)
+
+**Part 1 — For everyone.** An org admin can delete a member's account from the phone too, the same way as
+on the web ([USERS.md](USERS.md) → *Deleting a member's account*). It's tucked away: **More → Users** →
+the person (from a campaign's list the row opens a sheet first — tap **Manage profile ›**) → **Account**
+→ **More options** → **Delete account…**. **More options** sits under **Deactivate**, and it folds away
+again whenever you leave the screen. Team leads never see it, and nobody sees it on their own profile, a
+Doorline staff account, an account already deleted, or — unless you have billing access too — someone
+with billing access.
+
+The sheet asks twice, with the web's words:
+
+- **The review** names the person (name, role, email) and lists what deleting them means: the door
+  results and surveys that stay, the books that come back and the ones that stay with other canvassers,
+  a crew they lead, and doors still on their phone — for any account somebody has used, asking you to
+  have them open the app with signal first, more firmly if their phone sent doors in the last week, and
+  saying what has to happen first if they're switched off. **Continue** or **Cancel**. If the account
+  can't be deleted, it lists why instead (each reason saying what to do) and offers only **Close**.
+- **Type their email.** **Delete permanently** stays grey until it matches. **Back** clears it. While the
+  delete is running nothing closes the sheet, Android's Back button included.
+
+Afterwards the profile closes and the Users list says the account was deleted. An account somebody used
+stays on the list as **Deleted account** with who deleted it and when; its profile shows only that and
+**Remove from org** (to tidy the row away), and its sheet offers none of the account actions. An account
+nobody used leaves the list.
+
+**Remove from org** (since 2026-10-24, as on the web) sits under **Deactivate** in the same **Account**
+section, for admins only. It ends the person's access to the organization and takes them off its
+campaigns, books and crews; their door results and name stay on your reports. It asks once ("Remove
+sam@example.com from this organization?"), then the profile closes and the Users list says they're no
+longer in the organization. Someone with billing access can only be removed by an admin who has it too,
+and the organization's last admin can't be removed at all — the server says why.
+
+*Part 2:* `mayOfferRemove` in [lib/memberDeletion.js](../mobile/lib/memberDeletion.js) is the web's
+rule (admins and super admins; not oneself; a live `billingAccess` member only to a viewer with billing
+access; a deleted row exempt) and `removeConfirm` the web's words. The profile calls
+`DELETE /admin/memberships/:userId`; on success it freezes on the person, leaves `goneNotice` for the
+list and pops back through the same `leaveProfile` the delete uses (which leaves only once), and the
+mutation refreshes `touchedByDeletion`'s caches even if the screen is already gone. A ref keeps a double
+tap from stacking two confirms.
+
+**Part 2 — Technical reference.** [admin/users/[id].jsx](../mobile/app/(app)/admin/users/[id].jsx) shows
+**More options** when `mayOfferDelete` holds — `(viewerRole === 'admin' || viewerRole === 'super') &&
+!isSelf && !user.isDeleted && !user.isSuperAdmin`, and not on a `billingAccess` member unless the viewer
+has billing access (`viewerHasBillingAccess`, from the viewer's own membership in the active org) — a
+display gate; the server decides ([USERS.md](USERS.md) → *The org door*). `useFocusEffect` collapses it on
+leaving. [components/DeleteMemberSheet.jsx](../mobile/components/DeleteMemberSheet.jsx) (an arrow
+function, the `DeleteAccountSheet` pattern, the `colors.backdrop` token) fetches the preflight with an
+abort signal and holds the two steps; its `TextInput` is `autoCapitalize="none"`, `autoCorrect={false}`,
+`autoComplete="off"`, `textContentType="none"`, `keyboardType="email-address"`, cleared on every open;
+while the DELETE is pending `requestClose` ignores Cancel, Back and the hardware Back. A failed DELETE is
+read by `afterFailedDelete`: `USAGE_CHANGED` or `BLOCKED` sends it back to a freshly loaded review with
+`reloadNote` on top (for a block, the reasons themselves); no answer at all (a timeout) does the same with
+"couldn't confirm the delete", and that review's preflight finds out; `ALREADY_DELETED` (a lost answer to
+this very delete) leaves exactly as a success, and `NOT_A_MEMBER` leaves with "<Name> is no longer in your
+organization." (`goneNotice`). On success the profile freezes its render on the person (`frozenMemberRef`), leaves the list its
+notice through a small module store ([lib/deletionNotice.js](../mobile/lib/deletionNotice.js)), pops
+back, and invalidates the Users list, rosters, crews and books it changed. Every sentence is built in
+[lib/memberDeletion.js](../mobile/lib/memberDeletion.js) (pure, pinned word for word by its test).
+[admin/users.jsx](../mobile/app/(app)/admin/users.jsx) threads `isDeleted` and `deletion` into the user
+it hands [MemberSheet.jsx](../mobile/components/MemberSheet.jsx), which hides temp password, Resend
+invite, Assign and Reactivate on a deleted row; the list row reads **Deleted account** with
+`deletionLine(deletion)` beneath, never the tombstone email, and search skips that email. Ships over the
+air; no server version gate (the routes are additive). The phone clean-up of a deleted account's unsent
+doors is not in this build — it ships after Election Day
+([PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md) §E2).
+
 ### Drilling into a survey answer (campaign screen)
 On a campaign's detail screen, the survey results list each answer with its count — **tap a count**
 to open the entries behind it. That screen now has a **Voters | By canvasser** toggle (who *recorded*
@@ -668,6 +735,26 @@ admin screen — **GPS audit, Notes, Exports, Overlaps, Duplicate surveys, Timel
   tile seats the campaign before it navigates, so drilling in and tapping **Notes** gives you
   *that* campaign's notes rather than whichever one the chip was last left on.
 
+### Canvassers paused for review (automatic pause)
+
+When a canvasser is paused for saving doors faster than anyone could knock them ([AUDIT.md](AUDIT.md) →
+*Automatic pause*), the phone shows it where the mock-GPS nudge already lives, and outranks it:
+
+- **The badges:** the campaign row on Overview reads *N paused*, the campaign screen's **GPS audit** tile
+  says *1 canvasser paused* with the count, and More → **GPS audit** carries the total across every
+  campaign you can see.
+- **GPS audit → Paused for review**, a section at the very top, above the campaign chip — it covers every
+  campaign you manage, not just the chip's, and names each pause's campaign. A team lead also sees their
+  canvassers paused on a campaign they don't manage, as *Paused for review — an org admin can unpause*,
+  with nothing to open. Long lists fold to three, with **Show all**.
+- **The pause screen** (tap a card): who, when, which campaign, whether the email went out, the plain
+  sentence (*6 of the 8 too-fast doors were at vehicle speed…*), how far their phone was from each house,
+  the doors behind the pause with the too-fast ones marked, **Unpause** (it asks first; their count
+  starts over and nothing they saved changes), and **See their day**. Fixing the doors is an org admin's
+  job on the web's Door Outcomes page, and the screen says so.
+- **Users:** a *paused* badge on the row (after *deleted* and *inactive* — one badge per row), and on the
+  profile a red *Paused for review on {campaign} since {time} · Review ›* line.
+
 ### The More hub
 It reads as a **settings menu**: your name and email in a prominent row at the very top (it opens the
 profile screen), then small all-caps section captions over rows that each carry an icon, a label and
@@ -677,12 +764,15 @@ where relevant a grey line of explanation.
   their campaigns): a campaign filter chip splits the list into **On this campaign** and a collapsed
   **Not on this campaign** (above); the old standalone campaign Team screen
   merged in here, so a campaign's "Team" tile lands pre-filtered. Rows open a member sheet —
-  campaign KPIs, a **Coordinator dropdown**, recent doors (each taps through to the live map, "See
+  campaign KPIs, a **Coordinator dropdown** (its confirm quotes the doors that move, but doesn't yet name
+  the client-report teams whose numbers the move changes, as the web's does; that needs an app update,
+  [USERS.md](USERS.md)), recent doors (each taps through to the live map, "See
   all" opens the paged activity screen), temp password, assign/unassign (admins), deactivate/
-  reactivate. The Add sheet creates a canvasser straight onto the selected campaign with an optional
+  reactivate; its **Manage profile ›** opens the full profile, where an admin also finds **More options
+  → Delete account** (*Deleting a member's account*, above). The Add sheet creates a canvasser straight onto the selected campaign with an optional
   **coordinator** picked at birth. Every screen in this group works the campaign named in its **campaign chip** (above).
 **GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
-  entry has "View on map"; **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)), where a survey's
+  entry has "View on map", and canvassers paused for review are listed at the top (above); **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)), where a survey's
 note reads *edited* only when someone changed the note itself — since October 2026 an admin's edit
 of the survey's answers never marks it, and a mark from an earlier edit stays (a server change; no
 app update needed); **Exports** —
@@ -1260,6 +1350,33 @@ same hook ([NOTES.md](NOTES.md), [EXPORTS.md](EXPORTS.md)). Not gated, because t
 exists: the fuchsia `house-not_target` pin on the admin map and the book map, the fuchsia ping on
 the admin map and point on a canvasser's Territory map (their `circleColor` matches), and the
 `CoverageBar` segment, whose full legend skips `not_target` at 0.
+
+## Automatic pause on the phone (admin side)
+
+Server and rule: [AUDIT.md](AUDIT.md) §G; design: [PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md) §F.5,
+§G.3–G.4.
+
+- **One list query**, `usePausedList` ([lib/pacePauses.js](../mobile/lib/pacePauses.js)) on
+  `['admin','pace-pauses','list','paused']` → `GET /admin/pace-pauses?status=paused` (server-scoped: the
+  org for admins, managed campaigns plus `rosterLines` for leads). The GPS audit section
+  ([components/PausedCanvassersSection.jsx](../mobile/components/PausedCanvassersSection.jsx)) polls it every
+  20 s with `useFocusedPoll` while the screen's Live toggle is on; the Users list and profile read the same
+  cache. `pausedUserIds` ([lib/pace.js](../mobile/lib/pace.js), tested) is who shows as paused: open
+  **blocking** pauses plus roster lines.
+- **The pause screen**, [app/(app)/admin/pause/[id].jsx](../mobile/app/(app)/admin/pause/[id].jsx),
+  registered in `admin/_layout.jsx` as `<Tabs.Screen name="pause/[id]" options={{ href: null }} />`: reads
+  `GET /admin/pace-pauses/:id` (20 s poll; a 404 or 403 says so and stops retrying), unpauses with `POST
+  …/unpause` behind a Cancel-first confirm, and links `admin/canvasser/[id]/day/[date]` with the pause's
+  `campaignId`. No Delete and no day list on the phone — the web has both. Redacted rows (`otherCampaign`)
+  render as *A door on another campaign*.
+- **Wording** is [lib/pacePauseText.js](../mobile/lib/pacePauseText.js), a MIRROR of
+  `client/src/lib/pacePause.js`; `pacePauseText.test.js` imports both and compares every sentence, so the
+  two can't drift.
+- **Badges** read `openPacePauses` from `GET /admin/campaigns` (`campaignSummaries.js`; blocking pauses of
+  active canvassers), in the same three places as `openMockFlags` — `admin/index.jsx` `campaignRowProps`,
+  `CampaignHome.jsx`'s GPS audit tile, `admin/more.jsx`'s GPS audit row — with paused winning the one badge.
+- **`invalidatePaceCaches(qc)`** (lib/pacePauses.js) after an unpause refreshes the pause queries, the
+  campaigns list and the campaign rollup, so every badge drops at once.
 
 ## Web-dashboard admin surfaces (file map)
 These tools are web-only (the mobile More hub links out to the web for them). Listed here so the file

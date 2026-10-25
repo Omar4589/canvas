@@ -35,6 +35,11 @@ export const QUEUE_NAMES = {
   // still on the previous deploy never sees these jobs (the old conversion processor would have
   // "completed" one as a missing run), and so an edit never queues behind a long conversion.
   ANSWER_EDIT: 'answer-edit-queue',
+  // Client-report builds (services/reports/clientReportBuilds.js): the numbers and map of a report,
+  // built a slice at a time off the web dyno — Create, Next, Recompute, Refresh numbers and Switch
+  // to areas. Its own lane so a big report never queues behind an import, and a waiting build
+  // (another change holds its campaign) parks in the delayed set instead of holding a slot.
+  CLIENT_REPORT: 'client-report-queue',
   // Future: GEOCODE: 'geocode-queue'
 };
 

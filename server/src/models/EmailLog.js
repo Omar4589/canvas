@@ -19,7 +19,7 @@ const emailLogSchema = new mongoose.Schema(
   {
     // Template kind — 'passwordReset' | 'inviteSetPassword' | 'addedToOrg' | 'addedToCampaign' |
     // 'provisioningWelcome' | 'supportGrantNotice' | 'windDownWarning' | 'dormancyWarning' |
-    // 'demoRequest' (+ 'preview' from the dev preview script). Free string, not an enum, so a new
+    // 'demoRequest' | 'pacePauseAlert' (+ 'preview' from the dev preview script). Free string, not an enum, so a new
     // template can't crash logging by existing before this file learns about it.
     // 'demoRequest' is the one kind whose recipient is US, not a customer — its `to` is our own
     // address and the prospect's details stay in the unlogged body (services/mail/templates.js).

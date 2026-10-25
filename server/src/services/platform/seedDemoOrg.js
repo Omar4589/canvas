@@ -59,6 +59,7 @@
 import path from 'path';
 import fs from 'fs';
 import { randomBytes } from 'crypto';
+import mongoose from 'mongoose';
 import { fileURLToPath } from 'url';
 
 // Only to locate the address fixture, which still lives beside the CLI in utils/demoData/.
@@ -90,6 +91,8 @@ import { Subscription } from '../../models/Subscription.js';
 import { VotedPendingId } from '../../models/VotedPendingId.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
+import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
+import { ClientReportSeries } from '../../models/ClientReportSeries.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { Person } from '../../models/Person.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
@@ -106,7 +109,19 @@ import { generateTurf } from '../turf/generateTurf.js';
 import { ensureCampaignAssignments } from '../campaignRoster.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
-import { computeWindowStats, buildFrozenMapPoints } from '../reports/computeReport.js';
+import { buildReportSnapshot } from '../reports/buildReportSnapshot.js';
+import { inputsFromSettings, newSnapshotKey } from '../reports/clientReportBuilds.js';
+import { ensureSeries, CAMPAIGN_LABEL } from '../reports/clientReportSeries.js';
+import { choiceKeysOf, closeUnderDeps, depsMap, questionDepsOf } from '../reports/reportVisibility.js';
+import {
+  DAY_MS,
+  SHARE_DEFAULT_DAYS,
+  SHARE_MAX_DAYS,
+  CLEARED_FOR_NEW_ADDRESS,
+  lifetimeStart,
+  passwordMeetsRule,
+  plusOne,
+} from '../reports/shareLinks.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { stageDemoActivity, persistDemoActivity, ARCHIVED_DAY_OFFSETS } from './demoActivity.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
@@ -576,24 +591,40 @@ async function publishClientReport({ campaign, template, adminId }) {
   const weekStart = dayStr(-7);
   const weekEnd = dayStr(-1);
   const range = zonedDayRange(weekStart, weekEnd, CAMPAIGN_TZ);
-  const keys = template.questions
-    .filter((q) => q.type === 'single_choice' || q.type === 'multiple_choice')
-    .map((q) => q.key);
+  // Explicit keys (empty means none): every choice question's chart, and on the map every one
+  // whose follow-up conditions the others meet — what a new report gets from the builder.
+  const keys = choiceKeysOf(template);
   const supportQuestionKey = 'candidate_support';
+  const series = await ensureSeries({
+    organizationId: campaign.organizationId,
+    campaignId: campaign._id,
+    kind: 'campaign',
+    createdBy: adminId,
+  });
+  const visibility = {
+    visibleQuestionKeys: keys,
+    mapAnswerKeys: closeUnderDeps(keys, depsMap(questionDepsOf(template))),
+    showMap: true,
+    mapMode: 'pins',
+    areaSize: 'small',
+  };
 
-  const report = new ClientReport({
+  const report = await ClientReport.create({
     organizationId: campaign.organizationId,
     campaignId: campaign._id,
     campaignType: campaign.type,
     title: 'Weekly field report',
+    seriesId: series._id,
+    scope: { kind: 'campaign', label: CAMPAIGN_LABEL },
     weekStart,
     weekEnd,
     timeZone: CAMPAIGN_TZ,
     rangeStartUtc: range.$gte,
     rangeEndUtc: range.$lt,
     status: 'draft',
+    editVersion: 0,
     supportQuestionKey,
-    visibility: { visibleQuestionKeys: keys, mapAnswerKeys: keys, showMap: true },
+    visibility,
     observations: [
       {
         heading: 'This week on the doors',
@@ -607,29 +638,41 @@ async function publishClientReport({ campaign, template, adminId }) {
     createdBy: adminId,
   });
 
-  const base = { orgId: campaign.organizationId, campaignId: campaign._id, campaignType: campaign.type, template, supportQuestionKey };
-  const [cumulative, period] = await Promise.all([
-    computeWindowStats({ ...base, range: { $lt: report.rangeEndUtc } }),
-    computeWindowStats({ ...base, range: { $gte: report.rangeStartUtc, $lt: report.rangeEndUtc } }),
-  ]);
-  report.stats = { cumulative, period };
-  report.markModified('stats');
-  await report.save();
-
-  // Publish sequence, mirroring routes/admin/clientReports.js.
-  const { points, coverage, count } = await buildFrozenMapPoints({
-    report, campaign, mapAnswerKeys: report.visibility?.mapAnswerKeys || [],
+  // Built with the same builder the worker runs (services/reports/buildReportSnapshot.js), inline:
+  // the demo campaign is small and synthetic. Then frozen exactly as Publish freezes a preview.
+  const inputs = inputsFromSettings({ visibility, template });
+  const snapshotId = new mongoose.Types.ObjectId();
+  const fenceAt = new Date();
+  const built = await buildReportSnapshot({
+    report: report.toObject(),
+    campaign,
+    template,
+    inputs,
+    snapshotId,
+    fenceAt,
   });
-  await ClientReportMapPoint.deleteMany({ clientReportId: report._id });
-  if (points.length) await ClientReportMapPoint.insertMany(points);
-  report.stats.cumulative.coverage = coverage;
-  report.markModified('stats');
-  report.mapPointCount = count;
-  report.status = 'published';
-  report.publishedAt = new Date();
-  report.publishedBy = adminId;
-  await report.save();
-  return report;
+  const now = new Date();
+  await ClientReport.updateOne(
+    { _id: report._id },
+    {
+      $set: {
+        stats: built.stats,
+        goalSnapshot: built.goalSnapshot,
+        mapPointCount: built.mapPointCount,
+        areaCellCount: built.areaCellCount,
+        extent: built.extent,
+        snapshotId,
+        snapshotKey: newSnapshotKey(),
+        snapshotInputs: inputs,
+        statsComputedAt: fenceAt,
+        status: 'published',
+        publishedAt: now,
+        publishedBy: adminId,
+        build: { kind: 'recompute', status: 'idle', finishedAt: now },
+      },
+    }
+  );
+  return ClientReport.findById(report._id).lean();
 }
 
 async function ensureShareLink({ campaign, adminId, log, requireSharePassword }) {
@@ -656,17 +699,45 @@ async function ensureShareLink({ campaign, adminId, log, requireSharePassword })
   // The data behind it is synthetic, but a class statement admits no exceptions. Password comes
   // from SEED_DEMO_SHARE_PASSWORD (so reviewers/demos get a stable one) or is generated and
   // printed once. Expiry refreshes on every demo reset, so the link never dies mid-demo.
-  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-  let share = await ReportShareLink.findOne({ campaignId: campaign._id, isActive: true });
+  //
+  // And the hardened link's rules (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6, §O7;
+  // services/reports/shareLinks.js): a one-year life from lifetimeStartAt that no expiry passes, a
+  // credential version that a first password bumps, and passwordMeetsRule from the password's length
+  // (an env password shorter than 12 is flagged in the panel, never claimed to meet the rule). A
+  // reset whose life can't cover another 90 days renews the link the way the panel's Renew does — a
+  // new address (unless SEED_DEMO_SHARE_TOKEN pins it), a new life, the version bumped, the failure
+  // budget cleared. Pipeline writes with $literal: a bcrypt hash starts with '$'.
+  const now = new Date();
+  const wanted = new Date(now.getTime() + SHARE_DEFAULT_DAYS * DAY_MS);
+  const lit = (v) => ({ $literal: v });
+  let share = await ReportShareLink.findOne({ campaignId: campaign._id, isActive: true }).lean();
   if (share) {
-    const patch = { expiresAt };
+    const set = {};
     if (!share.passwordHash) {
       const pw = process.env.SEED_DEMO_SHARE_PASSWORD || randomBytes(9).toString('base64url');
-      patch.passwordHash = await bcrypt.hash(pw, 10);
+      set.passwordHash = lit(await bcrypt.hash(pw, 10));
+      set.passwordMeetsRule = lit(passwordMeetsRule(pw));
+      set.credentialVersion = plusOne('credentialVersion');
       log(`  · demo share link upgraded: password ${process.env.SEED_DEMO_SHARE_PASSWORD ? 'from SEED_DEMO_SHARE_PASSWORD' : `generated → ${pw} (save it now — it is not shown again)`}`);
     }
-    await ReportShareLink.updateOne({ _id: share._id }, { $set: patch });
-    return share;
+    // A link that never expired starts its life now, as Extend's "Set an expiry" does.
+    const start = share.expiresAt ? lifetimeStart(share) : now;
+    const end = new Date(start.getTime() + SHARE_MAX_DAYS * DAY_MS);
+    if (wanted <= end) {
+      // Never shorter than it is, never past the end of its life.
+      const current = share.expiresAt ? new Date(share.expiresAt).getTime() : 0;
+      set.expiresAt = lit(new Date(Math.min(Math.max(current, wanted.getTime()), end.getTime())));
+      if (!share.lifetimeStartAt) set.lifetimeStartAt = lit(start);
+    } else {
+      set.token = lit(process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'));
+      set.lifetimeStartAt = lit(now);
+      set.expiresAt = lit(wanted);
+      set.credentialVersion = plusOne('credentialVersion');
+      Object.assign(set, CLEARED_FOR_NEW_ADDRESS);
+      log(`  · demo share link renewed: its one-year life was up${process.env.SEED_DEMO_SHARE_TOKEN ? '' : ' — it has a new address'}`);
+    }
+    await ReportShareLink.updateOne({ _id: share._id }, [{ $set: set }]);
+    return ReportShareLink.findById(share._id).lean();
   }
   const pw = process.env.SEED_DEMO_SHARE_PASSWORD || randomBytes(9).toString('base64url');
   if (!process.env.SEED_DEMO_SHARE_PASSWORD) {
@@ -678,7 +749,13 @@ async function ensureShareLink({ campaign, adminId, log, requireSharePassword })
     token: process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'),
     label: 'Client demo link',
     passwordHash: await bcrypt.hash(pw, 10),
-    expiresAt,
+    expiresAt: wanted,
+    lifetimeStartAt: now,
+    credentialVersion: 0,
+    passwordMeetsRule: passwordMeetsRule(pw),
+    failedUnlockAt: [],
+    failedUnlocksTotal: 0,
+    failedByDay: [],
     createdBy: adminId,
   });
   return share;
@@ -699,7 +776,10 @@ async function resetActivityLayer(campaign, log) {
   ]);
   const reports = await ClientReport.find({ campaignId }, '_id').lean();
   await ClientReportMapPoint.deleteMany({ clientReportId: { $in: reports.map((r) => r._id) } });
+  await ClientReportAreaCell.deleteMany({ campaignId });
   await ClientReport.deleteMany({ campaignId });
+  // The demo's report series go with its reports; a rebuild makes a fresh whole-campaign one.
+  await ClientReportSeries.deleteMany({ campaignId });
   // fullyVoted is safe to clear — recomputeFullyVoted rebuilds it from the VotedVoter rows wiped
   // just above. fullyDnc is NOT: it derives from org-wide Voter.doNotContact.flagged, which this
   // reset never touches, and nothing here recomputes it. Clearing it let a do-not-contact door

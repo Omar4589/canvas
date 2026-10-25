@@ -1103,7 +1103,15 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
             <NavTileGrid
               items={[
                 { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: goMap },
-                { label: 'GPS audit', subtitle: 'Review flagged entries', badge: campaign?.openMockFlags || 0, onPress: goAudit },
+                // Canvassers paused for review outrank mock-GPS flags on the one badge (docs/PROPOSAL_PACE_PAUSE.md §F.5).
+                campaign?.openPacePauses > 0
+                  ? {
+                      label: 'GPS audit',
+                      subtitle: campaign.openPacePauses === 1 ? '1 canvasser paused' : `${campaign.openPacePauses} canvassers paused`,
+                      badge: campaign.openPacePauses,
+                      onPress: goAudit,
+                    }
+                  : { label: 'GPS audit', subtitle: 'Review flagged entries', badge: campaign?.openMockFlags || 0, onPress: goAudit },
                 { label: 'Notes', subtitle: 'Door, survey & admin notes', onPress: goNotes },
                 // "Team" opens the Users hub pre-filtered to this campaign — the old
                 // standalone Team page merged into Users (one people surface, lead-scoped

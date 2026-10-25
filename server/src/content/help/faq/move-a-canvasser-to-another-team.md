@@ -28,7 +28,7 @@ Because history follows the current crew, **a team number you gave someone last 
 Four things soften that:
 
 - **It's contained.** Only the campaign you changed is affected. Whatever you've quoted for your other campaigns stays put.
-- **The app shows you the damage first.** Before it saves, it tells you how many of *that campaign's* doors and surveys will move, and between which two teams.
+- **The app shows you the damage first.** Before it saves, it tells you how many of *that campaign's* doors and surveys will move, and between which two teams. If either crew belongs to a team that has client reports, the confirmation on the web also names that team: *"This also changes the numbers in the Paid team client report."* (The phone's confirmation doesn't show that line yet; it comes with an app update.) Reports you've already published don't change until you refresh their numbers.
 - **It's reversible.** Set the coordinator back to what it was and the numbers return exactly as they were.
 - **It's recorded.** Every change keeps a note of who moved whom, on which campaign, from which team to which, and how many doors went with them.
 
@@ -41,7 +41,7 @@ Four things soften that:
 
 ## Three things worth knowing
 
-**Somebody leaving doesn't move anything.** Deactivating an account, removing someone from a campaign or the organization, or a canvasser deleting their own account all leave their doors exactly where they are — on the team they worked for. Only a coordinator change moves work between teams. See [A canvasser quit — do their knocks still count?](canvasser-left-the-team).
+**Somebody leaving doesn't move anything.** Deactivating an account, removing someone from a campaign or the organization, or an account being deleted (by its owner or by an admin) all leave their doors exactly where they are — on the team they worked for. Only a coordinator change moves work between teams. See [A canvasser quit — do their knocks still count?](canvasser-left-the-team). That goes for a coordinator too: if a coordinator's account is deleted, their team keeps the doors it has and shows their name for 180 days, then *Deleted user*. Their crew has no coordinator until you set one — and setting one is a crew change like any other, so those people's doors on that campaign move to the new team.
 
 **You can still fix the crew of someone you switched off — but not of someone you took off the campaign.** A deactivated canvasser is still on the campaign's team, so their crew is still yours to set, and their doors still move when you set it. Someone you *removed* from the campaign no longer has a place on it to hold a crew; their doors stay frozen on the team they were on. If you need to move them, add them back to the campaign first, then set the crew.
 

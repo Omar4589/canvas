@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { recordHouseholdAction } from '../../../lib/recordAction';
+import { isPaused } from '../../../lib/pace';
 import { isOutcomeOn } from '../../../lib/outcomeToggles';
 import { guardedPush } from '../../../lib/navGuard';
 import { sameAddressSiblings } from '../../../lib/buildings';
@@ -23,6 +24,7 @@ import FixPinModal from '../../../components/FixPinModal';
 import AddPersonModal from '../../../components/AddPersonModal';
 import VoterMeta from '../../../components/VoterMeta';
 import DirectionsButton from '../../../components/DirectionsButton';
+import PausedBanner from '../../../components/PausedBanner';
 import { timeAgo, formatExact } from '../../../lib/datetime';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -202,6 +204,9 @@ export default function HouseholdDetail() {
   // (the server 402s them anyway — this is the courteous version). Missing
   // entitlement (older cache / super admin) fails open.
   const canCanvass = bootstrap?.entitlement ? bootstrap.entitlement.canCanvass !== false : true;
+  // Paused for review (automatic pause, lib/pace.js): the same greyed buttons, with the banner saying why.
+  const paused = isPaused(bootstrap);
+  const canRecord = canCanvass && !paused;
   const { household, voters } = findHouseholdAndVoters(bootstrap, id);
 
   const [note, setNote] = useState('');
@@ -254,7 +259,7 @@ export default function HouseholdDetail() {
   // lag behind the tap). If the gate blocks, re-enable the buttons so the canvasser
   // can fix location and tap again.
   function submitAction(action) {
-    if (!canCanvass) return; // org paused — buttons are disabled, belt & braces
+    if (!canRecord) return; // org or canvasser paused — buttons are disabled, belt & braces
     if (firedRef.current) return; // double-tap: an action is already recording
     firedRef.current = true;
     setIsSubmitting(true);
@@ -300,6 +305,8 @@ export default function HouseholdDetail() {
           <Text style={styles.back}>‹ Map</Text>
         </Pressable>
       </View>
+
+      <PausedBanner paused={paused} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -388,7 +395,9 @@ export default function HouseholdDetail() {
         )}
 
         {/* Same gate-at-the-mount rule as FixPinModal: a stale showAddPerson must not be
-            able to present a modal whose save the server would refuse. */}
+            able to present a modal whose save the server would refuse. A pause is deliberately not
+            part of that gate: unmounting an open modal would lose the name being typed, so it stays
+            open and its Save is refused on the phone (lib/recordAction.js); only the links hide. */}
         {canAddPerson && (
           <AddPersonModal
             visible={showAddPerson}
@@ -411,7 +420,7 @@ export default function HouseholdDetail() {
                     {surveyedCount}/{contactable.length} surveyed
                   </Text>
                 )}
-                {canAddPerson && (
+                {canAddPerson && !paused && (
                   <Pressable onPress={() => setShowAddPerson(true)} hitSlop={6} disabled={isSubmitting}>
                     <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>＋ Add person</Text>
                   </Pressable>
@@ -423,7 +432,7 @@ export default function HouseholdDetail() {
                 <Text style={type.caption}>
                   No registered voters listed here.
                 </Text>
-                {canAddPerson && (
+                {canAddPerson && !paused && (
                   <Pressable onPress={() => setShowAddPerson(true)} hitSlop={6} disabled={isSubmitting} style={{ marginTop: spacing.sm }}>
                     <Text style={{ color: colors.brand, fontSize: 13, fontWeight: '700' }}>
                       ＋ Add the person you spoke to
@@ -490,12 +499,12 @@ export default function HouseholdDetail() {
           {campaignType === 'lit_drop' ? (
             <Pressable
               onPress={() => submitAction('lit_dropped')}
-              disabled={isSubmitting || !canCanvass}
+              disabled={isSubmitting || !canRecord}
               style={({ pressed }) => [
                 styles.primaryButton,
                 {
                   backgroundColor: colors.status.lit_dropped,
-                  opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1,
+                  opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1,
                 },
               ]}
             >
@@ -509,11 +518,11 @@ export default function HouseholdDetail() {
             <>
               <Pressable
                 onPress={() => submitAction('not_home')}
-                disabled={isSubmitting || !canCanvass}
+                disabled={isSubmitting || !canRecord}
                 style={({ pressed }) => [
                   styles.actionButton,
                   styles.actionNotHome,
-                  { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                  { opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1 },
                 ]}
               >
                 <Text style={styles.actionButtonText}>Not home</Text>
@@ -522,11 +531,11 @@ export default function HouseholdDetail() {
               {outcomeOn('wrong_address') && (
                 <Pressable
                   onPress={() => submitAction('wrong_address')}
-                  disabled={isSubmitting || !canCanvass}
+                  disabled={isSubmitting || !canRecord}
                   style={({ pressed }) => [
                     styles.actionButton,
                     styles.actionWrongAddress,
-                    { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                    { opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1 },
                   ]}
                 >
                   <Text style={styles.actionButtonText}>Wrong address</Text>
@@ -536,11 +545,11 @@ export default function HouseholdDetail() {
               {outcomeOn('refused') && (
                 <Pressable
                   onPress={() => submitAction('refused')}
-                  disabled={isSubmitting || !canCanvass}
+                  disabled={isSubmitting || !canRecord}
                   style={({ pressed }) => [
                     styles.actionButton,
                     styles.actionRefused,
-                    { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                    { opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1 },
                   ]}
                 >
                   <Text style={styles.actionButtonText}>Refused</Text>
@@ -554,11 +563,11 @@ export default function HouseholdDetail() {
               {notTargetOn && (
                 <Pressable
                   onPress={() => submitAction('not_target')}
-                  disabled={isSubmitting || !canCanvass}
+                  disabled={isSubmitting || !canRecord}
                   style={({ pressed }) => [
                     styles.actionButton,
                     styles.actionNotTarget,
-                    { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                    { opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1 },
                   ]}
                 >
                   <Text style={[styles.actionButtonText, styles.actionButtonTextOnDark]}>Not a target voter</Text>
@@ -571,11 +580,11 @@ export default function HouseholdDetail() {
           {outcomeOn('no_soliciting') && (
             <Pressable
               onPress={() => submitAction('no_soliciting')}
-              disabled={isSubmitting || !canCanvass}
+              disabled={isSubmitting || !canRecord}
               style={({ pressed }) => [
                 styles.actionButton,
                 styles.actionNoSoliciting,
-                { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                { opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1 },
               ]}
             >
               <Text style={styles.actionButtonText}>No soliciting</Text>
@@ -586,11 +595,11 @@ export default function HouseholdDetail() {
           {outcomeOn('restricted') && (
             <Pressable
               onPress={() => submitAction('restricted')}
-              disabled={isSubmitting || !canCanvass}
+              disabled={isSubmitting || !canRecord}
               style={({ pressed }) => [
                 styles.actionButton,
                 styles.actionRestricted,
-                { opacity: isSubmitting ? 0.6 : pressed ? 0.85 : 1 },
+                { opacity: isSubmitting || !canRecord ? 0.6 : pressed ? 0.85 : 1 },
               ]}
             >
               <Text style={[styles.actionButtonText, styles.actionButtonTextOnDark]}>Restricted access</Text>

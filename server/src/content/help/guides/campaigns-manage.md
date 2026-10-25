@@ -103,7 +103,7 @@ Sometimes the visit and the survey were real and only an answer is wrong — a c
 - **Nothing else moves.** The knock, the Surveyed status, the note, the time, location, canvasser, round and team stay as recorded, so knocks, billable doors, contact rate and survey rate stay exactly where they are — the review step says so first. Survey results, tag counts and exports follow the edited answers.
 - **Only what you filtered changes.** With an answer filter on, only the surveys that matched it change; anyone else surveyed at that visit is left alone. A blank stays blank — nothing gets filled in that nobody recorded. An answer the survey would no longer have asked after your change goes too, and the review names it.
 - **The earlier answers are kept.** Each changed survey reads *Edited by ‹admin› on ‹date›*, its earlier answers stay on the voter's record, and **Undo** puts them back — except on a survey someone changed afterwards, which keeps the newer answers and is named.
-- **Copies made before don't update:** saved searches, walk lists and rounds already cut, files already exported, and a published client report until it's published again.
+- **Copies made before don't update:** saved searches, walk lists and rounds already cut, files already exported, and a published client report until you refresh its numbers (**Refresh numbers** on the report).
 
 As a team lead you see these edits the same way you see every other correction, but only org admins can make them. Each edit and its undo appear in the campaign's [History](#history--who-changed-what).
 

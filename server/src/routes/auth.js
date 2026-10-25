@@ -13,7 +13,8 @@ import {
   SESSION_MAX_MS,
   ENDED_SESSIONS_KEPT,
 } from '../services/auth/tokens.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, ended } from '../middleware/auth.js';
+import { stampSessionClock } from '../services/auth/sessionStamps.js';
 import { MIN_CLIENT_API_VERSION } from '../config/clientVersion.js';
 import { strongPasswordSchema } from '../utils/validators.js';
 import { sendMail } from '../services/mail/mailer.js';
@@ -150,7 +151,7 @@ router.post('/login', async (req, res, next) => {
       }
     }
 
-    User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } }).catch(() => {});
+    stampSessionClock(user._id, 'lastLoginAt').catch(() => {});
 
     const token = signUserToken(user, { authMs });
     const memberships = await loadMembershipsForUser(user._id);
@@ -188,6 +189,7 @@ router.post('/forgot-password', async (req, res) => {
     // instead of waiting on an admin.
     if (!user || !user.isActive || user.deletedAt) return;
     const { url } = await issuePasswordResetToken(user._id, { hours: RESET_TOKEN_HOURS });
+    if (!url) return; // deleted since the lookup above: nothing to send
     await sendMail({ to: user.email, ...passwordReset({ firstName: user.firstName, resetUrl: url }), kind: 'passwordReset', meta: { userId: user._id } });
   } catch (err) {
     console.error('[auth] forgot-password: detached send failed:', err.message);
@@ -293,8 +295,10 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
     // auth_ms equals passwordChangedAt, so it passes the strict `<` check and every older session
     // fails it.
     const changedAt = new Date();
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
+    // Conditional on the account still being live: a deletion between requireAuth and here must not
+    // get a usable password written back onto its tombstone.
+    const user = await User.findOneAndUpdate(
+      { _id: req.user._id, deletedAt: null },
       // passwordChangedAt revokes every OTHER session (requireAuth's SESSION_REVOKED check);
       // the fresh token below is minted after the stamp, so THIS device continues seamlessly —
       // critical for a canvasser mid-shift completing the forced change after an admin reset,
@@ -311,6 +315,7 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
       },
       { new: true }
     );
+    if (!user) return ended(res, 'deleted');
     const memberships = await loadMembershipsForUser(user._id);
     res.json({ token: signUserToken(user, { authMs: changedAt.getTime() }), user: user.toSafeJSON(), memberships });
   } catch (err) {
@@ -326,11 +331,13 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
 router.patch('/me', requireAuth, async (req, res, next) => {
   try {
     const { firstName, lastName, phone } = updateProfileSchema.parse(req.body);
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
+    // Conditional, like change-password: a name and phone must never land on a tombstone.
+    const user = await User.findOneAndUpdate(
+      { _id: req.user._id, deletedAt: null },
       { firstName, lastName, phone: phone || null },
       { new: true }
     );
+    if (!user) return ended(res, 'deleted');
     const memberships = await loadMembershipsForUser(user._id);
     res.json({ user: user.toSafeJSON(), memberships });
   } catch (err) {
@@ -428,10 +435,12 @@ router.delete('/account', requireAuth, async (req, res, next) => {
     if (!ok) return res.status(401).json({ error: 'That password is incorrect.' });
 
     const result = await deleteAccount(req.user._id, { reason: 'self' });
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, deletedAt: result.deletedAt, retentionUntil: result.retentionUntil, organizationIds: result.organizationIds });
   } catch (err) {
     if (err instanceof AccountDeletionError) {
-      const status = err.code === 'BLOCKED' ? 409 : 400;
+      // A refusal or a deletion already under way (an admin deleting this account at the same
+      // moment) is a conflict, not bad input; the phone shows `error` as-is.
+      const status = ['BLOCKED', 'DELETION_IN_PROGRESS', 'ALREADY_DELETED'].includes(err.code) ? 409 : 400;
       return res.status(status).json({ error: err.message, code: err.code, ...err.details });
     }
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

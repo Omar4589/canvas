@@ -26,9 +26,15 @@ export default function StatCard({ label, value, hint, accent, delta, deltaTone,
       {prominent && (
         <span className={`absolute inset-y-0 left-0 w-1 ${a.rail || 'bg-border'}`} aria-hidden="true" />
       )}
+      {/* The label may wrap — inside a long word too, on a card too narrow for it — so the (i) always
+          keeps its place beside it: it used to be pushed past the edge of a narrow card and cut off. */}
       <div className="flex items-center gap-1 text-xs uppercase tracking-wide text-fg-muted">
-        <span>{label}</span>
-        {help && <InfoHint label={`What "${label}" counts`}>{help}</InfoHint>}
+        <span className="min-w-0 break-words">{label}</span>
+        {help && (
+          <InfoHint className="shrink-0" label={`What "${label}" counts`}>
+            {help}
+          </InfoHint>
+        )}
       </div>
       <div
         className={`mt-1 ${valueSize} font-semibold tabular-nums ${a.text || 'text-fg'}`}
@@ -39,7 +45,7 @@ export default function StatCard({ label, value, hint, accent, delta, deltaTone,
         <span
           className={
             'mt-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ' +
-            (deltaTone === 'up' ? 'bg-success-tint text-success' : 'bg-sunken text-fg-muted')
+            (deltaTone === 'up' ? 'bg-success-tint text-success-fg' : 'bg-sunken text-fg-muted')
           }
         >
           {delta}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,8 +11,9 @@ import {
   Platform,
   Modal,
   Alert,
+  AccessibilityInfo,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
@@ -30,6 +31,10 @@ import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 import { useConsoleRole, useConsoleRoleLabel } from '../../../lib/useConsoleRole';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
+import { DELETED_ACCOUNT_LABEL, deletionLine } from '../../../lib/memberDeletion';
+import { takeDeletionNotice } from '../../../lib/deletionNotice';
+import { usePausedList } from '../../../lib/pacePauses';
+import { pausedUserIds } from '../../../lib/pace';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -82,7 +87,7 @@ const Avatar = ({ name, role }) => {
 };
 
 // The old pill strip (role / assigned / coordinator / active) collapsed into one quiet meta
-// line — the grammar allows ONE badge, and it's reserved for the exceptional state (inactive).
+// line — the grammar allows ONE badge, and it's reserved for the exceptional state (deleted, inactive, paused).
 // No 'assigned' / 'not assigned' word: campaign-scoped rows now live under a section header that
 // already says which side they are on, and restating it on every row is exactly the noise this
 // single line was written to kill.
@@ -171,6 +176,9 @@ export default function AdminUsers() {
     queryKey: ['admin', 'memberships'],
     queryFn: () => api('/admin/memberships'),
   });
+  // Who is paused for review right now (automatic pause) — the row's badge after deleted and inactive.
+  const pausedQ = usePausedList();
+  const pausedIds = useMemo(() => pausedUserIds(pausedQ.data), [pausedQ.data]);
 
   // Campaign context: the roster (assigned state + coordinator) + who can BE a coordinator.
   const assignmentsQ = useQuery({
@@ -200,6 +208,18 @@ export default function AdminUsers() {
   const [sheetUserId, setSheetUserId] = useState(null);
   // The "not on this campaign" section starts collapsed — see the render.
   const [offOpen, setOffOpen] = useState(false);
+
+  // "Sam Rivera's account was deleted." — left by the profile that deleted it, which pops back here.
+  // Read on focus, shown until dismissed.
+  const [deletedNotice, setDeletedNotice] = useState(null);
+  useFocusEffect(
+    useCallback(() => {
+      const text = takeDeletionNotice();
+      if (!text) return;
+      setDeletedNotice(text);
+      AccessibilityInfo.announceForAccessibility(text);
+    }, [])
+  );
 
   const createUser = useMutation({
     mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
@@ -241,6 +261,8 @@ export default function AdminUsers() {
         isActive: m.isActive && m.user.isActive,
         membershipActive: m.isActive,
         addedAt: m.addedAt,
+        // A deleted account's who-and-when (null: no record yet); user.isDeleted is already above.
+        deletion: m.deletion || null,
       })),
     [usersQ.data]
   );
@@ -252,7 +274,9 @@ export default function AdminUsers() {
       if (statusFilter === 'active' && !u.isActive) return false;
       if (statusFilter === 'inactive' && u.isActive) return false;
       if (term) {
-        const hay = `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase();
+        // A deleted row matches on the label it shows, "Deleted account" — never on its scrubbed name
+        // ("Deleted user") or its email, the tombstone address, neither of which is on screen.
+        const hay = (u.isDeleted ? DELETED_ACCOUNT_LABEL : `${u.firstName} ${u.lastName} ${u.email}`).toLowerCase();
         if (!hay.includes(term)) return false;
       }
       return true;
@@ -288,18 +312,29 @@ export default function AdminUsers() {
   // One row renderer for both sections and for the flat org view, so a row can never drift
   // between them. Keyed on u.id, so a re-sort re-orders instead of remounting.
   const userRow = (u) => {
-    const name = `${u.firstName} ${u.lastName}`.trim();
+    // A deleted account's row reads "Deleted account" and who deleted it — never its email, which
+    // is the tombstone address (deleted+<id>@deleted.doorline.invalid), nobody's real one.
+    const name = u.isDeleted ? DELETED_ACCOUNT_LABEL : `${u.firstName} ${u.lastName}`.trim();
     return (
       <InsetNavRow
         key={u.id}
         leading={<Avatar name={name} role={u.role} />}
         label={name || u.email}
-        sub={u.email}
+        sub={u.isDeleted ? (u.deletion ? deletionLine(u.deletion) : null) : u.email}
         unit={userMeta({
           role: u.role,
           coordinatorName: cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined,
         })}
-        badge={u.isActive ? null : { text: 'inactive' }}
+        // One badge, the most exceptional state: deleted, then inactive, then paused for review.
+        badge={
+          u.isDeleted
+            ? { text: 'deleted' }
+            : !u.isActive
+              ? { text: 'inactive' }
+              : pausedIds.has(String(u.id))
+                ? { text: 'paused' }
+                : null
+        }
         // Campaign scoped → the member sheet (campaign actions); org view → full page.
         onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
       />
@@ -422,6 +457,19 @@ export default function AdminUsers() {
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
       >
+        {deletedNotice ? (
+          <View style={styles.notice}>
+            <Text style={styles.noticeText}>{deletedNotice}</Text>
+            <Pressable
+              onPress={() => setDeletedNotice(null)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
+            >
+              <Text style={styles.noticeClose}>×</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <ArchivedCampaignBanner campaignId={cId} />
         {usersQ.isLoading || usersQ.isError || visibleUsers.length === 0 ? (
           <InsetGroup>
@@ -504,8 +552,17 @@ export default function AdminUsers() {
                   coordinatorName: roster?.coordinatorName || null,
                   assigned: !!roster,
                   // lastLoginAt gates the resend-invite action (never-signed-in only) — MemberSheet has no
-                  // way to fetch it itself, so it has to be threaded through here.
-                  user: { id: String(u.id), firstName: u.firstName, lastName: u.lastName, email: u.email, lastLoginAt: u.lastLoginAt },
+                  // way to fetch it itself, so it has to be threaded through here. So do isDeleted and
+                  // deletion: a deleted account's sheet offers no account actions and hides its email.
+                  user: {
+                    id: String(u.id),
+                    firstName: u.firstName,
+                    lastName: u.lastName,
+                    email: u.email,
+                    lastLoginAt: u.lastLoginAt,
+                    isDeleted: !!u.isDeleted,
+                    deletion: u.deletion,
+                  },
                 }}
                 campaign={selectedCampaign}
                 notTargetInUse={notTargetInUse}
@@ -917,6 +974,21 @@ function makeStyles(t) {
   },
   sortChevron: { fontSize: 11, color: colors.textSecondary },
   countText: { ...type.caption },
+
+  // successFg, not success: the raw tint fails contrast at caption size (see theme.js).
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.successBg,
+    borderColor: colors.successBorder,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  noticeText: { ...type.caption, flex: 1, color: colors.successFg, fontWeight: '600' },
+  noticeClose: { fontSize: 18, lineHeight: 18, fontWeight: '700', color: colors.successFg },
 
   userAvatar: {
     width: 44,

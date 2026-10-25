@@ -41,4 +41,8 @@ your org are simply using the product — their permissions are governed by thei
 The one exception is Doorline's own internal demo organizations, which contain only fictional data —
 never a customer's — so staff work in those directly.
 
+If Doorline staff ever delete an account in your organization — for example, at the person's own emailed
+request — that person's row on your **Users** page says *Deleted through Doorline support*, with the date.
+(An account nobody ever used may leave the list instead.)
+
 The full commitment is in our [Privacy Policy](https://doorline.app/privacy).

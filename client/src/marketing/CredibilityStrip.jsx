@@ -18,7 +18,7 @@ const TRUTHS = [
   },
   {
     title: "Reports that can't drift",
-    body: 'Client reports freeze when published; the numbers never change under you.',
+    body: 'Client reports freeze when published. Numbers change only when you refresh them, and the report says when.',
   },
 ];
 

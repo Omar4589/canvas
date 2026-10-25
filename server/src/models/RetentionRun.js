@@ -39,6 +39,21 @@ const retentionRunSchema = new mongoose.Schema(
     // Deletion warnings delivered this run (wind-down + dormancy) — the "we warned before we
     // deleted" half of the promise, countable next to the deletions themselves.
     warned: { type: Number, default: 0 },
+    // The deletion-lock sweep the identity purge runs first (services/users/deleteAccount.js
+    // sweepDeletionLocks). DECLARED, every one: strict mode drops an undeclared field from a $set, so
+    // the counts would vanish silently. Its failures fold into `failed` above, so health sees them.
+    //   deletionsFinished      — crashed AFTER the gate, finished now
+    //   deletionsReleased      — crashed BEFORE the gate: memberships switched back on, lock freed
+    //   liveRecordsDeleted     — a pre-lock record left on a live account (an old crash), removed
+    //   legacyRecordsFinished  — a pre-lock record of a deleted account, stamped finished
+    //   emailRowsRescrubbed    — mail logged after a deletion's scrub ran, scrubbed now
+    //   skippedLive            — due records the purge left alone because the account isn't deleted
+    deletionsFinished: { type: Number, default: 0 },
+    deletionsReleased: { type: Number, default: 0 },
+    liveRecordsDeleted: { type: Number, default: 0 },
+    legacyRecordsFinished: { type: Number, default: 0 },
+    emailRowsRescrubbed: { type: Number, default: 0 },
+    skippedLive: { type: Number, default: 0 },
     error: { type: String, default: null },
   },
   { timestamps: true }

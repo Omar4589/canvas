@@ -60,6 +60,7 @@ const WalkListsPage = lazy(() => import('./pages/WalkListsPage.jsx'));
 const QueuesPage = lazy(() => import('./pages/QueuesPage.jsx'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage.jsx'));
 const SelectOrgPage = lazy(() => import('./pages/SelectOrgPage.jsx'));
+const PauseLinkPage = lazy(() => import('./pages/PauseLinkPage.jsx'));
 const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage.jsx'));
 const SuperAdminHomePage = lazy(() => import('./pages/SuperAdminHomePage.jsx'));
 const MonthClosePage = lazy(() => import('./pages/MonthClosePage.jsx'));
@@ -137,6 +138,16 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        {/* The automatic-pause alert email's link (pages/PauseLinkPage.jsx): no active org required, so a
+            multi-org admin or a super admin reaches it straight from sign-in; it picks the org itself. */}
+        <Route
+          path="/pause/:orgId/:campaignId/:pauseId"
+          element={
+            <ProtectedRoute requireActiveOrg={false} requireConsoleAccess>
+              <PauseLinkPage />
+            </ProtectedRoute>
+          }
+        />
         {/* ── Console shell A: ORG-SCOPED. One Layout for every in-org console screen.
             The outer gate is ORG-level only (auth → password → membership → active org →
             "do you have a console role in THIS org?") and may only REDIRECT. Role gates
@@ -181,6 +192,8 @@ export default function App() {
           <Route path="/campaigns/:campaignId/team" element={<CampaignTeamPage />} />
           <Route path="/campaigns/:campaignId/timeline" element={<TimelinePage />} />
           <Route path="/campaigns/:campaignId/audit" element={<AuditPage />} />
+          {/* One automatic pause, opened from the list or the alert email (read with useParams). */}
+          <Route path="/campaigns/:campaignId/audit/pauses/:pauseId" element={<AuditPage />} />
           <Route path="/campaigns/:campaignId/explorer" element={<SurveyExplorerPage />} />
           <Route path="/campaigns/:campaignId/notes" element={<NotesPage />} />
           <Route path="/campaigns/:campaignId/overlaps" element={<OverlapsPage />} />

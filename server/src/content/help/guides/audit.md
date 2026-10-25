@@ -27,7 +27,7 @@ Every time a canvasser marks a door, the app quietly records **where the phone w
 
 The app also refuses to record a door **without** a location: a canvasser with location off, denied, or set to approximate is blocked at the tap with instructions to fix it. So "no GPS trail at all" isn't something you'll see — entries either carry a stamp or don't exist.
 
-You don't have to go looking for mock-location flags: when one is waiting, a red **Mock GPS** alert appears on the campaign dashboard and a red count badge appears on **Audit** in the sidebar (and on the GPS-audit row and campaign cards in the mobile admin app). Click through and the Audit page opens already filtered to the open mock-location entries. The badges clear as you review.
+You don't have to go looking for mock-location flags: when one is waiting, a red **Mock GPS** alert appears on the campaign dashboard and a red count badge appears on **Audit** in the sidebar (and on the GPS-audit row and campaign cards in the mobile admin app). Click through and the Audit page opens already filtered to the open mock-location entries. The badges clear as you review. (While a canvasser on the campaign is paused for review, that same red badge counts paused canvassers first — see **Automatic pause** below.)
 
 Each flag also carries a **severity** — low, medium, or high — so the worst ones stand out.
 
@@ -69,5 +69,17 @@ A few things the app does to keep a sweep safe:
 - **Notes are protected.** A sweep with an empty note only changes statuses — it never erases a note someone wrote on an individual entry. Type a shared note and it's stamped on everything in the sweep.
 
 A bulk decision is the same recorded decision as a single one — who decided, when, and why it was flagged — just applied to many entries at once. Nothing is deleted, and no report numbers change.
+
+## Automatic pause
+
+Flags wait for someone to open the Audit page. **Automatic pause** doesn't wait: if your organization uses it, a canvasser whose doors come in faster than anyone could knock them — tapped from a moving car, or several saved at once from one spot — is paused automatically. Their phone stops recording and says *"Recording is paused for review. Call your team lead."*, the people your organization chose get an email, and the doors behind the pause are laid out for review.
+
+- **It pauses recording only.** Nobody is deactivated or signed out, and no door is removed, held or hidden: everything stays in your numbers until someone changes it.
+- **It pauses canvassers only.** An org admin's or a team lead's account is never paused; their doors still show in the flags like everyone's.
+- **Where you see it:** the red badge on **Audit**, a banner on the campaign home, a **Paused canvassers** panel at the top of the Audit page, and on the phone a **Paused for review** section at the top of the GPS audit.
+- **The review** says what kind of fast it was — at vehicle speed, saved from one spot, or at walking pace — and lists every door behind it.
+- **Unpausing** is one tap for an org admin, or for a team lead on the campaign where it happened. Fixing the doors is an org admin's job, on Door Outcomes.
+
+Step by step: [A canvasser was paused for review — what do I do?](a-canvasser-was-paused)
 
 Admins, team leads (for the campaigns they manage), and super-admins can use the audit. See [Team lead vs. admin](team-lead-vs-admin) for who sees what.

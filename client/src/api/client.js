@@ -101,6 +101,11 @@ export async function api(path, options = {}) {
     // Never report a session end from this call (the page-load check, the password prompt's login,
     // a sign-out).
     quiet = false,
+    // A public call that names whoever is signed in on this browser, if anyone — the share page's
+    // "opened" ping, so the server counts the org's own people apart from the link's. Never more
+    // than that: sentToken stays null and the call is quiet, so a stale sign-in can't set off the
+    // session-ended handling from a public page.
+    identifyIfSignedIn = false,
     // Internal: this is the one retry after the session was restored.
     _retried = false,
   } = options;
@@ -115,6 +120,14 @@ export async function api(path, options = {}) {
     const orgId = getActiveOrgId();
     if (sentToken) finalHeaders.Authorization = `Bearer ${sentToken}`;
     if (orgId) finalHeaders['X-Org-Id'] = orgId;
+  } else if (identifyIfSignedIn) {
+    let signedIn = null;
+    try {
+      signedIn = getToken();
+    } catch {
+      /* storage blocked: nobody to name */
+    }
+    if (signedIn) finalHeaders.Authorization = `Bearer ${signedIn}`;
   }
   if (shareToken) finalHeaders['X-Share-Token'] = shareToken;
 
@@ -199,7 +212,7 @@ export async function api(path, options = {}) {
     // that could never succeed. Acted on only when this request carried the token still stored
     // (sessionEndDecision): after a password change rotates the token, a poll that left with the
     // OLD one can land 401 here, and must not touch the new session.
-    if (!quiet && typeof window !== 'undefined') {
+    if (!quiet && !identifyIfSignedIn && typeof window !== 'undefined') {
       const ended = sessionEndDecision({ status: res.status, data, sentToken, storedToken: getToken() });
       if (ended) {
         // Held for the password (see pendingRestore above): a run-out, or — while the prompt is

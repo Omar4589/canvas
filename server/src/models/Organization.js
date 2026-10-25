@@ -53,6 +53,20 @@ const organizationSchema = new mongoose.Schema(
     // on what DOORLINE charges this org — our price is flat per campaign per month.
     // Set by the org's own billing admin (PATCH /admin/billing/settings).
     billRestrictedDoors: { type: Boolean, default: false },
+    // Automatic pause (docs/PROPOSAL_PACE_PAUSE.md §H). On for every customer by default; read
+    // `pacePause?.enabled !== false`, so an org saved before this field existed is on with no migration.
+    // `alertUserIds` undefined = nobody chosen beyond the billing admins (never default an array here: a []
+    // default would be written into every org on its next save). `enabledAt` is stamped ONLY by an off → on
+    // change and restarts every member's count; `changedAt`/`changedBy` record any change. Set by a billing
+    // admin (PATCH /admin/pace-pauses/settings), always by dotted path.
+    pacePause: {
+      enabled: { type: Boolean, default: true },
+      billingAdmins: { type: Boolean, default: true },
+      alertUserIds: { type: [mongoose.Schema.Types.ObjectId], default: undefined },
+      enabledAt: { type: Date, default: null },
+      changedAt: { type: Date, default: null },
+      changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    },
     // Dormancy-deletion warning bookkeeping (services/retention/triggers.js). `dormancyWarnedAt`
     // is stamped ONLY when the warning email was actually accepted for delivery (or the org has
     // no reachable recipient at all) — the purge refuses to run without it, and refuses before

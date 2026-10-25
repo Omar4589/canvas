@@ -8,9 +8,12 @@ import { AnswerEditRun } from '../../models/AnswerEditRun.js';
 import { AnswerEditRunChunk } from '../../models/AnswerEditRunChunk.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
+import { PacePause } from '../../models/PacePause.js';
 import { SurveyConversionRun } from '../../models/SurveyConversionRun.js';
 import { ConversionStrike } from '../../models/ConversionStrike.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
+import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
+import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
 
 // Door Outcomes writes that land after a delete cascade has swept past them.
 //
@@ -39,10 +42,16 @@ import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 // Outcomes work from a campaign that then stayed (round 4). Either mark goes on before its cascade's
 // first sweep. A cascade that failed leaves its leftovers to its Retry, which sweeps them with the rest.
 
-// What a Door Outcomes write can add to, and what both cascades sweep last.
+// What a Door Outcomes write can add to, and what both cascades sweep last. A client-report build
+// writes map rows (street addresses) batch by batch on the worker, and runs inside sweptAfter too
+// (services/reports/clientReportBuilds.js), so its rows join the list: a batch that lands after a
+// cascade swept past must not outlive the deletion.
 export const LATE_WRITE_MODELS = [
   SurveyResponse, CanvassActivity, SurveyResponseArchive, CampaignChange, AnswerEditRun, AnswerEditRunChunk,
   UnknockRun, UnknockRunChunk, SurveyConversionRun, ConversionStrike, ReclassifyRun,
+  ClientReportMapPoint, ClientReportAreaCell,
+  // An automatic-pause check that finishes after the sweep (docs/PROPOSAL_PACE_PAUSE.md §D.4).
+  PacePause,
 ];
 
 /** The tenant whose delete cascade is running (or done), as a filter — { organizationId } or { campaignId } — or null. */

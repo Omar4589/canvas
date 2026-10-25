@@ -20,6 +20,7 @@ import { doorStateFromDoorPass, surveyedVotersFromDoorPass } from '../../service
 import { canvasserScopeWithPasses, isOrgAdminOrSuper } from '../../services/canvass/canvasserScope.js';
 import { availableOptInOutcomes, effectiveEnabledOutcomes, doorConfigStamp } from '../../services/canvass/outcomeToggles.js';
 import { effectivePinSuspect } from '../../services/households/pinState.js';
+import { paceStateOf } from '../../services/audit/pacePause.js';
 
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgMember);
@@ -434,6 +435,9 @@ router.get('/bootstrap', async (req, res, next) => {
         // disabledOutcomes, enabledOutcomes, doorAddPolicy, canAddVoters, doorConfigStamp.
         ...(await doorConfigFor(req, campaign)),
       },
+      // Automatic pause (docs/PROPOSAL_PACE_PAUSE.md §E.1): blocked or not, with server time so the phone
+      // applies answers in order. Older bundles ignore it.
+      pace: await paceStateOf(req.activeOrg, req.activeMembership),
       activeSurvey: survey,
       surveys,
       households,
@@ -446,6 +450,17 @@ router.get('/bootstrap', async (req, res, next) => {
       entitlement: req.entitlement || null,
       generatedAt: new Date().toISOString(),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Automatic pause: just the phone's pace state (docs/PROPOSAL_PACE_PAUSE.md §E.1). The paused banner polls
+// this on the door and survey screens, where the map's /changes poll is stopped (useFocusedPoll), and Check
+// again calls it. One indexed read.
+router.get('/pace', async (req, res, next) => {
+  try {
+    res.json(await paceStateOf(req.activeOrg, req.activeMembership));
   } catch (err) {
     next(err);
   }
@@ -572,6 +587,8 @@ router.get('/changes', async (req, res, next) => {
       activePassIds: (await activePassIds(cId)).map(String),
       // Only when the phone's door settings are stale (see above).
       ...(doorConfig ? { doorConfig } : {}),
+      // Automatic pause, on every poll: an unpause arrives on an otherwise empty delta.
+      pace: await paceStateOf(req.activeOrg, req.activeMembership),
     });
   } catch (err) {
     next(err);

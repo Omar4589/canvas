@@ -28,10 +28,14 @@ export async function issuePasswordResetToken(userId, { hours = RESET_TOKEN_HOUR
   const rawToken = crypto.randomBytes(32).toString('base64url');
   const tokenHash = sha256Hex(rawToken);
   const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
-  await User.updateOne(
-    { _id: userId },
+  // Never onto a deleted account: a deletion that lands between a caller's check and this write must
+  // not end up with a fresh token on its tombstone. Nothing written means no link to send — every
+  // caller skips its email when `url` comes back null.
+  const r = await User.updateOne(
+    { _id: userId, deletedAt: null },
     { $set: { passwordResetToken: tokenHash, passwordResetExpiresAt: expiresAt } }
   );
+  if (!r.matchedCount) return { rawToken: null, url: null };
   return { rawToken, url: resetPasswordUrl(rawToken) };
 }
 

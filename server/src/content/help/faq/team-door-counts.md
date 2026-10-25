@@ -23,9 +23,11 @@ This is why the "Doors" number is a little lower than the raw count of everythin
 
 ## People who left the team
 
-**Their doors still count, and they still count toward their team.** Somebody who knocked for you and then quit — whose account you deactivated, who you removed from the campaign or the organization, or who deleted their account — keeps their doors on the team they were on. You don't have to do anything.
+**Their doors still count, and they still count toward their team.** Somebody who knocked for you and then quit — whose account you deactivated, who you removed from the campaign or the organization, or whose account was deleted, by them or by an admin — keeps their doors on the team they were on. You don't have to do anything.
 
 **Losing a person never moves a number.** The one thing that does is changing somebody's coordinator, and that's on purpose — see below.
+
+**If a coordinator's account is deleted,** their team keeps every door it already has, and it's still labelled with their name for 180 days — in the by-team table and the Coordinator column alike — then *Deleted user*. The people on their crew have no coordinator until you set one on the campaign's **Team** tab, and when you do, their doors on that campaign move to the new team, as below.
 
 One wrinkle if you ever want to *change* a departed person's team: a **deactivated** account that's still on the campaign is fine — open the campaign's **Team** tab and set their crew as usual. Somebody you **removed from the campaign** isn't on that Team tab anymore, so there's nothing there to set; add them back to the campaign first, then set it.
 
@@ -51,6 +53,10 @@ Another one, for the same reason: **running a crew in one campaign doesn't make 
 ## "Knocked by two different teams"
 
 If you ever see that note under the by-team table, two teams have worked some of the same houses. Each team is credited for the work they actually did, and the campaign still counts the house once — so the numbers stay honest. But it usually means two walk lists overlapped, and it's worth a look.
+
+## Team client reports don't add up the same way
+
+A **client report** for a team counts differently from this table. Each team report counts that team's own work, so a home both teams visited counts in **both** team reports (each report says so), and the team reports **don't add up to the campaign total**. The whole-campaign report counts that home once, like the **Campaign** row here. Team reports also leave out doors marked at the office, and never show a door goal. See [How do team reports work?](how-do-team-reports-work)
 
 ## Surveys: doors vs voters
 

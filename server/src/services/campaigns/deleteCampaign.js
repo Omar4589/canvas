@@ -14,6 +14,8 @@ import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CampaignManager } from '../../models/CampaignManager.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
+import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
+import { ClientReportSeries } from '../../models/ClientReportSeries.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
@@ -31,6 +33,7 @@ import { CampaignChange } from '../../models/CampaignChange.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
+import { PacePause } from '../../models/PacePause.js';
 import { ConversionStrike } from '../../models/ConversionStrike.js';
 import { waitForDoorOutcomesToStop } from '../canvass/answerEditRuns.js';
 import { LATE_WRITE_MODELS } from '../platform/lateWriteSweep.js';
@@ -176,9 +179,9 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
   const CAMPAIGN_SCOPED = [
     Household, Effort, EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot,
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
-    CampaignManager, CoordinatorChange, CampaignChange, ReclassifyRun, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk, AnswerEditRun, AnswerEditRunChunk, ClientReport, ClientReportMapPoint, ReportShareLink,
+    CampaignManager, CoordinatorChange, CampaignChange, ReclassifyRun, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk, AnswerEditRun, AnswerEditRunChunk, ClientReport, ClientReportMapPoint, ClientReportAreaCell, ClientReportSeries, ReportShareLink,
     CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
-    ExportJob,
+    ExportJob, PacePause,
   ];
 
   // The raw uploaded spreadsheets, FIRST — while we can still find the ImportJob rows that name

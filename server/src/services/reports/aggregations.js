@@ -159,6 +159,15 @@ export function teamMatch(coordinatorId, allLeadIds = []) {
   return { $or: [{ coordinatorId: id }, { userId: id, coordinatorId: null }] };
 }
 
+// Several crews as ONE team clause — a client-report team covers one or more coordinators, current
+// and past (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F4): each one's teamMatch, OR'd. A team with
+// no crews at all matches NOTHING, never everything. Cast like teamMatch, for aggregation $matches.
+export function crewsMatch(coordinatorIds = []) {
+  const ids = [...new Set((coordinatorIds || []).map(String))];
+  if (!ids.length) return { _id: { $in: [] } };
+  return { $or: ids.flatMap((id) => teamMatch(id).$or) };
+}
+
 // Merge a team clause into a match. NEVER spread it — teamMatch can return `$or` (which a plain
 // spread would clobber against the cross-timezone date windows' own `$or`), and the `none` shape
 // carries a `userId` key that would silently REPLACE a canvasser-drill's userId filter. $and

@@ -17,4 +17,6 @@ The admin you set up with the account starts with billing access automatically. 
 
 One guardrail to know: billing admins are also who receives important account emails (like a notice before any scheduled data deletion), so the app **won't let you remove, demote, or switch off the last admin with billing access** — you'll see *"Give billing access to another admin first."* Grant it to a second admin, then make your change.
 
+**Billing access also protects the person who has it.** Only an admin who has billing access too can **remove** someone with billing access from the organization or **delete** their account. If you don't have billing access, neither option shows on their profile. (Doorline support isn't held to this.) See [How do I delete someone's account?](delete-an-account)
+
 See [Billing and your account](billing) for how pricing and trials work.

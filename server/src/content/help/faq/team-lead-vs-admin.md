@@ -6,7 +6,7 @@ kind: faq
 order: 35
 sourceDoc: ROLES.md
 summary: A lead runs the campaigns they're granted; org-wide actions stay with admins.
-tags: roles, team lead, admin, permissions, not a target voter
+tags: roles, team lead, admin, permissions, not a target voter, automatic pause, unpause
 ---
 
 A **team lead** is a campaign-scoped admin. On the campaigns they've been granted, a lead can do the day-to-day: manage passes, cut and assign books, import voters, run reports, print walk packets, export the campaign's data, and **build and attach surveys** — a lead authors their own survey templates, and their survey library shows exactly what's theirs: surveys they wrote plus the ones already on their campaigns, never the rest of the organization's.
@@ -21,6 +21,8 @@ What stays with an **org admin**:
 - **Turning Not a target voter on or off** — an optional door button on survey campaigns, for someone who answers but isn't on the list and won't give a name. It starts off on every campaign: no name is taken, so an entry can't be checked, and trusting a crew with it is the organization's call (once Doorline has made it available, a lead sees the switch and whether it's on, but can't change it — and can still switch the campaign's other outcome buttons off and on). Once it's on, **everyone on that campaign** gets the button — including anyone a lead adds to the crew later.
 
 So a lead runs the operation; an admin owns the organization.
+
+**Automatic pause.** If your organization uses it, a canvasser whose doors come in faster than anyone could knock them is paused for review until someone on the team lifts it. An org admin can unpause them, and so can a team lead who manages the campaign where it happened. Fixing the doors behind a pause stays with org admins, and turning automatic pause off — or choosing who is emailed when it happens — is for an admin with billing access.
 
 **Where a lead lands in the console:** a lead has no organization Overview. With one active campaign, they open straight into it; with more than one, or none yet, on **Campaigns**. **‹ Campaigns** at the top of the sidebar always opens the list. The org-only areas (Voters, Surveys, Tags, Billing) aren't in their navigation. If a lead reaches one of those pages by URL, they'll see an "admin access required" notice with their navigation still on screen — no dead end.
 

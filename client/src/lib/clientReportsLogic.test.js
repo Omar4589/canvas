@@ -1,0 +1,417 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { addDays, daysBetween, periodDays, formatPeriod, gapBetween, defaultPeriod } from '../components/clientReports/reportDates.js';
+import { buildStateOf, displayStatusOf, buildPollInterval, isLiveBuild, freshestBuild } from '../components/clientReports/buildState.js';
+import {
+  linkBadges,
+  noUsableLinkReason,
+  linksLine,
+  extendChoices,
+  usableLinks,
+  failureLine,
+  opensLine,
+  shortUrl,
+  rotateConfirmLines,
+  disableConfirmText,
+  renewText,
+} from '../components/clientReports/linkState.js';
+import { copyMessageFor, linkMessageFor, messageReportOf } from '../components/clientReports/copyMessage.js';
+import { rowsFor, toggleChart, toggleMap, setHeadline, showAll, showNone, depsMapOf, closeUnderDeps } from '../components/clientReports/questionRules.js';
+import { clientReportHistoryLine, isClientReportField, earlierTextSummary, labelForField, reportRowName } from './campaignHistory.js';
+
+// The Client Reports pages' rules, run without React (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G1-§G8):
+// the dates a row and the New report dialog read, the build states, what makes a link usable and how
+// each link state reads, the copy-ready message, the per-question rules, and the History's words.
+
+const NOW = Date.parse('2026-10-24T15:00:00Z');
+const DAY = 86400000;
+
+test('dates: civil arithmetic, a DST week is 7 days, gaps only between reports', () => {
+  assert.equal(addDays('2026-10-31', 1), '2026-11-01');
+  assert.equal(periodDays('2026-11-01', '2026-11-07'), 7, 'the week the clocks change is still 7 days');
+  assert.equal(daysBetween('2026-03-08', '2026-03-15'), 7);
+  assert.equal(formatPeriod('2026-10-13', '2026-10-19'), 'Oct 13 – Oct 19');
+  assert.equal(formatPeriod('2026-10-13', '2026-10-13'), 'Oct 13');
+  assert.equal(formatPeriod('2025-12-29', '2026-01-04'), 'Dec 29, 2025 – Jan 4, 2026');
+  assert.deepEqual(gapBetween({ weekStart: '2026-10-13' }, { weekEnd: '2026-10-07' }), { start: '2026-10-08', end: '2026-10-12' });
+  assert.equal(gapBetween({ weekStart: '2026-10-13' }, { weekEnd: '2026-10-12' }), null, 'touching reports leave no gap');
+  assert.equal(gapBetween({ weekStart: '2026-10-10' }, { weekEnd: '2026-10-12' }), null, 'overlapping reports leave no gap');
+});
+
+test('dates: the default period starts the day after the last report and never ends after yesterday', () => {
+  assert.deepEqual(defaultPeriod({ today: '2026-10-24' }), { weekStart: '2026-10-17', weekEnd: '2026-10-23', fromLast: false });
+  assert.deepEqual(
+    defaultPeriod({ today: '2026-10-24', lastReport: { weekStart: '2026-10-06', weekEnd: '2026-10-12' } }),
+    { weekStart: '2026-10-13', weekEnd: '2026-10-19', fromLast: true }
+  );
+  // The natural end would be tomorrow: it stops at yesterday.
+  assert.deepEqual(
+    defaultPeriod({ today: '2026-10-24', lastReport: { weekStart: '2026-10-11', weekEnd: '2026-10-17' } }),
+    { weekStart: '2026-10-18', weekEnd: '2026-10-23', fromLast: true }
+  );
+  // The last report already reached yesterday: the next period lies ahead and keeps its length.
+  const ahead = defaultPeriod({ today: '2026-10-24', lastReport: { weekStart: '2026-10-17', weekEnd: '2026-10-23' } });
+  assert.deepEqual(ahead, { weekStart: '2026-10-24', weekEnd: '2026-10-30', fromLast: true });
+});
+
+test('dates: after a long gap the default is the stretch ending yesterday, and it names the days it skips (§O4)', () => {
+  const week = { weekStart: '2026-10-06', weekEnd: '2026-10-12' }; // natural next: Oct 13 – Oct 19
+  // One day short of a whole extra week after the natural period: exactly as before.
+  assert.deepEqual(defaultPeriod({ today: '2026-10-26', lastReport: week }), { weekStart: '2026-10-13', weekEnd: '2026-10-19', fromLast: true });
+  // A whole week (Oct 20 – Oct 26) would still be unreported after it: the week ending yesterday, and the skipped days.
+  assert.deepEqual(defaultPeriod({ today: '2026-10-27', lastReport: week }), {
+    weekStart: '2026-10-20',
+    weekEnd: '2026-10-26',
+    fromLast: true,
+    skipped: { start: '2026-10-13', end: '2026-10-19' },
+  });
+  // Months later: still the week ending yesterday, and everything since the last report is named.
+  assert.deepEqual(defaultPeriod({ today: '2027-01-15', lastReport: week }).skipped, { start: '2026-10-13', end: '2027-01-07' });
+  // Across a year boundary, on both sides of the threshold.
+  const december = { weekStart: '2025-12-15', weekEnd: '2025-12-21' };
+  assert.deepEqual(defaultPeriod({ today: '2026-01-04', lastReport: december }), { weekStart: '2025-12-22', weekEnd: '2025-12-28', fromLast: true });
+  assert.deepEqual(defaultPeriod({ today: '2026-01-05', lastReport: december }), {
+    weekStart: '2025-12-29',
+    weekEnd: '2026-01-04',
+    fromLast: true,
+    skipped: { start: '2025-12-22', end: '2025-12-28' },
+  });
+  // A 14-day series keeps its length: the gap must be a whole 14 days past the natural period (Sep 15 – Sep 28).
+  const fortnight = { weekStart: '2026-09-01', weekEnd: '2026-09-14' };
+  assert.deepEqual(defaultPeriod({ today: '2026-10-12', lastReport: fortnight }), { weekStart: '2026-09-15', weekEnd: '2026-09-28', fromLast: true });
+  assert.deepEqual(defaultPeriod({ today: '2026-10-13', lastReport: fortnight }), {
+    weekStart: '2026-09-29',
+    weekEnd: '2026-10-12',
+    fromLast: true,
+    skipped: { start: '2026-09-15', end: '2026-09-28' },
+  });
+  assert.equal(periodDays('2026-09-29', '2026-10-12'), 14);
+});
+
+test('build states: every state reads as §G1 names it, and only live ones poll', () => {
+  assert.equal(buildStateOf({ status: 'queued', queuePosition: 2 }).label, 'Queued (2 ahead)');
+  assert.equal(buildStateOf({ status: 'queued', queuePosition: 0 }).label, 'Queued');
+  assert.equal(buildStateOf({ status: 'queued' }).canCancel, true);
+  const waiting = buildStateOf({ status: 'waiting', waitingFor: 'for the answer edit on this campaign to finish' });
+  assert.equal(waiting.label, 'Waiting');
+  assert.equal(waiting.detail, 'Waiting for the answer edit on this campaign to finish.');
+  assert.equal(waiting.canCancel, true);
+  assert.equal(buildStateOf({ status: 'running', progress: 41.6 }).label, 'Building 42%');
+  assert.equal(buildStateOf({ status: 'running', progress: 10 }, { hasSnapshot: false }).label, 'Building the first numbers 10%');
+  assert.equal(buildStateOf({ status: 'running', kind: 'remap', progress: 5 }).label, 'Building areas 5%');
+  assert.equal(buildStateOf({ status: 'running', progress: 50 }).canCancel, true, 'Cancel is offered while running too');
+  assert.equal(buildStateOf({ status: 'ready', kind: 'refresh' }).label, 'New numbers ready to review');
+  const failed = buildStateOf({ status: 'failed', error: { code: 'CHANGED_DURING_BUILD', message: 'The campaign’s records changed twice.' } });
+  assert.equal(failed.label, 'Failed');
+  assert.equal(failed.canRetry, true);
+  assert.equal(failed.detail, 'The campaign’s records changed twice.');
+  assert.equal(buildStateOf({ status: 'failed', error: { code: 'DELETING' } }).canRetry, false);
+  const team = buildStateOf({ status: 'failed', error: { code: 'TEAM_CHANGED', seriesId: 's1' } });
+  assert.equal(team.label, 'Team changed');
+  assert.equal(team.teamChanged, true);
+  assert.ok(!team.canRetry, 'the team card, never Retry');
+  assert.equal(buildStateOf({ status: 'stalled' }).label, 'Stalled');
+  assert.equal(buildStateOf({ status: 'stalled' }).canRetry, true);
+  // A queued build the server judged dead (a lost job) reads Stalled.
+  assert.equal(displayStatusOf({ status: 'queued', live: false }), 'stalled');
+  assert.equal(displayStatusOf({ status: 'queued', live: null }), 'queued', 'a list row (live unknown) is trusted');
+  assert.equal(buildStateOf({ status: 'idle' }), null);
+  assert.equal(buildPollInterval({ status: 'running' }), 3000);
+  assert.equal(buildPollInterval({ status: 'waiting' }), 15000);
+  assert.equal(buildPollInterval({ status: 'ready' }), false);
+  assert.equal(buildPollInterval({ status: 'queued', live: false }), false, 'a dead build is not polled');
+  assert.equal(isLiveBuild({ status: 'failed' }), false);
+});
+
+test('build views: the newer one wins, but a poll that found this build dead outranks a newer list copy of it', () => {
+  const listCopy = { kind: 'recompute', status: 'queued', live: null, startedAt: '2026-10-24T10:00:00Z' };
+  const deadPoll = { ...listCopy, live: false };
+  // A lost job: the list refetched after the poll, yet the poll's verdict stands — no poll ⇄ refetch loop.
+  const shown = freshestBuild({ polled: deadPoll, polledAt: 100, source: listCopy, sourceAt: 200 });
+  assert.equal(displayStatusOf(shown), 'stalled');
+  assert.equal(isLiveBuild(shown), false);
+  // A NEW claim (Retry) is a different build: the newer copy wins and polling resumes.
+  const retried = { ...listCopy, startedAt: '2026-10-24T11:00:00Z' };
+  assert.equal(freshestBuild({ polled: deadPoll, polledAt: 100, source: retried, sourceAt: 200 }), retried);
+  // Otherwise simply the newer.
+  const running = { ...listCopy, status: 'running', progress: 40 };
+  assert.equal(freshestBuild({ polled: running, polledAt: 300, source: listCopy, sourceAt: 200 }), running);
+  assert.equal(freshestBuild({ polled: running, polledAt: 100, source: listCopy, sourceAt: 200 }), listCopy);
+  assert.equal(freshestBuild({ source: listCopy }), listCopy);
+});
+
+const link = (over = {}) => ({
+  id: 'l1',
+  token: 'tok1',
+  label: 'Candidate',
+  isActive: true,
+  hasPassword: true,
+  expiresAt: new Date(NOW + 60 * DAY).toISOString(),
+  lifetimeEndsAt: new Date(NOW + 300 * DAY).toISOString(),
+  passwordMeetsRule: true,
+  lock: { locked: false, until: null },
+  failures: { last24h: 0, last7d: 0, total: 0 },
+  ...over,
+});
+const keys = (s) => linkBadges(s, { now: NOW, tz: 'America/New_York' }).map((b) => b.key);
+
+test('links: every row state from §G7, and the short-password flag only when known', () => {
+  assert.deepEqual(keys(link()), ['active']);
+  assert.deepEqual(keys(link({ isActive: false })), ['disabled']);
+  assert.deepEqual(keys(link({ expiresAt: new Date(NOW + 5 * DAY + 1000).toISOString() })), ['expiring']);
+  assert.equal(linkBadges(link({ expiresAt: new Date(NOW + 5 * DAY + 1000).toISOString() }), { now: NOW })[0].label, 'Expires in 5 days');
+  assert.deepEqual(keys(link({ expiresAt: new Date(NOW - DAY).toISOString() })), ['expired']);
+  assert.match(linkBadges(link({ expiresAt: new Date(NOW - DAY).toISOString() }), { now: NOW })[0].detail, /new address — send your client the new link/);
+  assert.deepEqual(keys(link({ failures: { last24h: 12, last7d: 12, total: 12 } })), ['active', 'wrong']);
+  const locked = link({ lock: { locked: true, until: new Date(NOW + 3 * 3600000).toISOString() }, failures: { last24h: 50, last7d: 50, total: 50 } });
+  assert.deepEqual(keys(locked), ['locked'], 'a lock replaces the wrong-password badge');
+  assert.match(linkBadges(locked, { now: NOW, tz: 'America/New_York' })[0].detail, /after 50 wrong passwords\. Devices already signed in still work\./);
+  assert.deepEqual(keys(link({ passwordMeetsRule: false })), ['active', 'short']);
+  assert.deepEqual(keys(link({ passwordMeetsRule: null })), ['active'], 'unknown is never flagged');
+  assert.deepEqual(keys(link({ hasPassword: false, expiresAt: null, lifetimeEndsAt: null })), ['active', 'nopw', 'noexp'], 'a legacy open link');
+  assert.equal(failureLine({ last24h: 12, last7d: 30, total: 41 }), '12 wrong passwords in the last day · 30 this week · 41 in total');
+  // With the window's first wrong password (the server's failures.since): "since Oct 24, 9:12 AM EDT".
+  assert.match(failureLine({ last24h: 12, since: '2026-10-24T13:12:00Z', last7d: 12, total: 12 }, 'America/New_York'), /^12 wrong passwords since Oct 24, 9:12\sAM EDT · 12 this week · 12 in total$/);
+  assert.equal(shortUrl('https://doorline.app/r/e67TqWZpXk'), 'doorline.app/r/e67Tq…');
+});
+
+test('links: the wrong-password counts show whenever there are any; the warning badge is for the last day (WALK-2)', () => {
+  // None in the last day: no badge, but the week and the total still read — the first part says what they count.
+  assert.deepEqual(keys(link({ failures: { last24h: 0, last7d: 3, total: 41 } })), ['active']);
+  assert.equal(failureLine({ last24h: 0, last7d: 3, total: 41 }), '3 wrong passwords this week · 41 in total');
+  assert.equal(failureLine({ last24h: 0, last7d: 0, total: 41 }), '41 wrong passwords in total');
+  assert.equal(failureLine({ last24h: 0, last7d: 1, total: 1 }), '1 wrong password this week · 1 in total');
+  assert.equal(failureLine({ last24h: 0, last7d: 0, total: 0 }), '', 'nothing to say');
+  assert.equal(failureLine(undefined), '');
+  // The badge is the last day's, and it carries no sentence of its own: the counts line is the row's.
+  const wrong = linkBadges(link({ failures: { last24h: 2, last7d: 5, total: 9 } }), { now: NOW, tz: 'America/New_York' }).find((b) => b.key === 'wrong');
+  assert.deepEqual(wrong, { key: 'wrong', variant: 'warning', label: 'Wrong passwords' });
+  // Locked and expired links wear no wrong-password badge, but their counts still read.
+  const fails = { last24h: 50, last7d: 50, total: 50 };
+  assert.deepEqual(keys(link({ lock: { locked: true, until: new Date(NOW + 3600000).toISOString() }, failures: fails })), ['locked']);
+  assert.deepEqual(keys(link({ expiresAt: new Date(NOW - 1000).toISOString(), failures: fails })), ['expired']);
+  assert.equal(failureLine(fails), '50 wrong passwords in the last day · 50 this week · 50 in total');
+});
+
+test('links: an expired link points only at Renew, and "devices still work" is said only when true (ADMINUX-8)', () => {
+  const lock = { locked: true, until: new Date(NOW + 3 * 3600000).toISOString() };
+  const fails = { last24h: 50, last7d: 50, total: 50 };
+  // Expired a moment after it locked: nobody can open it (410), and Renew clears the wrong passwords.
+  assert.deepEqual(keys(link({ expiresAt: new Date(NOW - 1000).toISOString(), lock, failures: fails })), ['expired'], 'no lock, no wrong-password badge');
+  // Locked while disabled: the disable signed every device out.
+  const off = linkBadges(link({ isActive: false, lock, failures: fails }), { now: NOW, tz: 'America/New_York' });
+  assert.deepEqual(off.map((b) => b.key), ['disabled', 'locked']);
+  assert.match(off[1].detail, /after 50 wrong passwords\.$/);
+  assert.ok(!off[1].detail.includes('still work'));
+});
+
+test('links: each confirm promises what the share routes do — rotate, disable, renew (ADMINUX-8)', () => {
+  const tz = 'America/New_York';
+  const [rotated, after] = rotateConfirmLines(link({ expiresAt: '2026-12-01T17:00:00Z' }), { now: NOW, tz });
+  assert.equal(rotated, 'It gets a new address, and everyone using the old one is signed out. The password stays the same. It still expires Dec 1, 2026.');
+  assert.equal(after, 'Send your client the new link afterwards.');
+  // A locked link: rotate clears the wrong passwords with the old address.
+  const lock = { locked: true, until: new Date(NOW + 3600000).toISOString() };
+  assert.match(rotateConfirmLines(link({ lock }), { now: NOW, tz })[0], / It also lifts the lock\.$/);
+  // A disabled link stays disabled, so its new address opens nothing yet.
+  assert.equal(rotateConfirmLines(link({ isActive: false }), { now: NOW, tz })[1], 'It stays disabled — nobody can open the new address until you enable it. Then send your client the new link.');
+  // A legacy open link: no password to keep, no expiry to keep.
+  assert.equal(rotateConfirmLines(link({ hasPassword: false, expiresAt: null }), { now: NOW, tz })[0], 'It gets a new address, and everyone using the old one is signed out.');
+  // Disable bumps the credential version: enabling again asks for the password again.
+  assert.equal(disableConfirmText(link()), 'Nobody can open it until you enable it again. Everyone using it now is signed out — once you enable it, they need the password again.');
+  assert.equal(disableConfirmText(link({ hasPassword: false })), 'Nobody can open it until you enable it again.');
+  assert.equal(renewText(link()), 'Renew gives this link a new address — send your client the new link. The password stays the same.');
+  assert.equal(
+    renewText(link({ isActive: false })),
+    'Renew gives this link a new address. It stays disabled until you enable it — then send your client the new link. The password stays the same.'
+  );
+});
+
+test('links: usable means active, unexpired and unlocked; the publish line names why none is', () => {
+  assert.equal(noUsableLinkReason([], NOW).text, 'No link yet — create one.');
+  assert.equal(noUsableLinkReason([link({ expiresAt: new Date(NOW - 1).toISOString() })], NOW).text, 'Your only link expired — renew it.');
+  assert.equal(noUsableLinkReason([link({ lock: { locked: true, until: new Date(NOW + 1000).toISOString() } })], NOW).text, 'Your only link is locked — unlock or rotate it.');
+  assert.equal(noUsableLinkReason([link({ isActive: false })], NOW).text, 'Your only link is disabled — enable it.');
+  assert.equal(noUsableLinkReason([link({ isActive: false }), link({ id: 'l2', expiresAt: new Date(NOW - 1).toISOString() })], NOW).code, 'mixed');
+  assert.equal(noUsableLinkReason([link({ isActive: false }), link({ id: 'l2' })], NOW), null);
+  // A lock whose time has passed no longer counts.
+  assert.equal(usableLinks([link({ lock: { locked: true, until: new Date(NOW - 1000).toISOString() } })], NOW).length, 1);
+  const line = linksLine([link(), link({ id: 'l2', label: 'Consultant' }), link({ id: 'l3', isActive: false })], NOW);
+  assert.equal(line.text, 'It shows on 2 links: Candidate, Consultant.');
+});
+
+test('links: Extend shows the resulting date and offers only later ones, capped a year from creation', () => {
+  const s = link({ expiresAt: new Date(NOW + 60 * DAY).toISOString(), lifetimeEndsAt: new Date(NOW + 200 * DAY).toISOString() });
+  const choices = extendChoices(s, NOW);
+  assert.deepEqual(choices.map((c) => c.days), [90, 180, 365], 'never a choice that ends sooner than now');
+  assert.equal(choices[0].until.getTime(), NOW + 90 * DAY);
+  assert.equal(choices[2].capped, true);
+  assert.equal(choices[2].until.getTime(), NOW + 200 * DAY, 'capped at the link’s one-year life');
+  assert.equal(choices.length, 3, 'two choices that cap to the same date collapse');
+  // Already at its cap: nothing to offer.
+  assert.deepEqual(extendChoices(link({ expiresAt: new Date(NOW + 200 * DAY).toISOString(), lifetimeEndsAt: new Date(NOW + 200 * DAY).toISOString() }), NOW), []);
+});
+
+test('links: opens read "about", per link, with the organization and staff apart', () => {
+  const r = {
+    views: { byLink: { l1: { opens: 2 }, gone: { opens: 1 } }, members: { admins: { opens: 3 }, staff: { opens: 1 } } },
+    viewCount: 4,
+  };
+  assert.equal(
+    opensLine(r, [link()]),
+    'Opened via Candidate: about 2 visits · a deleted link: about 1 · your organization: 3 visits · Doorline staff: 1 visit · 4 views before per-link counts'
+  );
+  assert.equal(opensLine({}, []), '');
+});
+
+test('the copy-ready message names the scope and dates, deep-links, and never carries the password', () => {
+  const row = {
+    id: 'r9',
+    weekStart: '2026-10-13',
+    weekEnd: '2026-10-19',
+    scope: { kind: 'team', label: 'Volunteer team' },
+    seriesLabel: 'Volunteer team',
+    headline: { cumulative: { doorsKnocked: 3412, surveysTaken: 1980 }, period: { doorsKnocked: 412, surveysTaken: 260 } },
+  };
+  const msg = copyMessageFor({ report: { ...messageReportOf(row), campaignType: 'survey' }, link: link(), origin: 'https://doorline.app' });
+  assert.equal(
+    msg,
+    'The Volunteer team report for Oct 13 – Oct 19 is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). ' +
+      'Open it here: https://doorline.app/r/tok1/reports/r9 — use the password I sent you.'
+  );
+  const whole = copyMessageFor({
+    report: { ...messageReportOf({ ...row, scope: { kind: 'campaign', label: 'Whole campaign' }, seriesLabel: null }), campaignType: 'lit_drop' },
+    link: link({ hasPassword: false }),
+    origin: 'https://doorline.app',
+  });
+  assert.match(whole, /^The report for Oct 13 – Oct 19 is up: 3,412 doors knocked so far \(\+412 in that period\) and 0 lit dropped \(\+0\)\./);
+  assert.ok(!/password/.test(whole), 'an open link’s message says nothing about a password');
+  assert.ok(!/k7Hq9mXr2wPz/.test(linkMessageFor({ link: link(), origin: 'https://doorline.app' })));
+  assert.equal(linkMessageFor({ link: link(), origin: 'https://doorline.app' }), 'Here\'s the link to our reports: https://doorline.app/r/tok1 — I’ll send the password separately.');
+});
+
+const breakdowns = [
+  { questionKey: 'support', questionLabel: 'Support for Smith?', type: 'single_choice' },
+  { questionKey: 'recall', questionLabel: 'Back the recall?', type: 'single_choice' },
+  { questionKey: 'sign', questionLabel: 'Yard sign?', type: 'multiple_choice' },
+  { questionKey: 'why', questionLabel: 'Why not?', type: 'single_choice' },
+];
+// "Yard sign?" follows "Back the recall?"; "Why not?" follows a written answer (not in the breakdowns).
+const deps = depsMapOf([['sign', ['recall']], ['why', ['comment']]]);
+const settings = (vis, support = null) => ({
+  title: '',
+  observations: [],
+  supportQuestionKey: support,
+  visibility: { visibleQuestionKeys: [], mapAnswerKeys: [], showMap: true, visibleTags: [], showGoal: false, mapMode: 'pins', areaSize: 'small', ...vis },
+});
+
+test('questions: a follow-up maps only with its parent, a written parent never, and None means none', () => {
+  const s = settings({ visibleQuestionKeys: ['support', 'recall', 'sign', 'why'], mapAnswerKeys: ['support'] }, 'support');
+  const rows = rowsFor({ breakdowns, settings: s, deps });
+  const sign = rows.find((r) => r.key === 'sign');
+  assert.equal(sign.isFollowUp, true);
+  assert.equal(sign.followUp, 'Asked only on some paths through “Back the recall?” — mapping it shows who took that path.');
+  assert.equal(sign.mapDisabled, true, 'its parent is off the map');
+  assert.match(sign.mapBlocked, /only with “Back the recall\?”, so it’s best left off/);
+  const why = rows.find((r) => r.key === 'why');
+  assert.equal(why.textParent, true);
+  assert.equal(why.mapBlocked, 'Asked only after a written answer, so it can’t go on the map.');
+  // The parent mapped: the follow-up can be ticked, and the copy still says what it shows.
+  const s2 = toggleMap(s, 'recall', deps).settings;
+  assert.equal(rowsFor({ breakdowns, settings: s2, deps }).find((r) => r.key === 'sign').mapDisabled, false);
+  // toggleMap refuses a follow-up whose parent isn't mapped (closed under deps).
+  assert.deepEqual(toggleMap(s, 'sign', deps).settings.visibility.mapAnswerKeys, ['support']);
+  const s3 = toggleMap(s2, 'sign', deps).settings;
+  assert.deepEqual(s3.visibility.mapAnswerKeys.sort(), ['recall', 'sign', 'support']);
+  // Unticking the parent's Map takes the follow-up with it, and says which.
+  const off = toggleMap(s3, 'recall', deps);
+  assert.deepEqual(off.settings.visibility.mapAnswerKeys, ['support']);
+  assert.deepEqual(off.removedFromMap, ['sign']);
+  // Unticking a chart takes the question off the map and out of the headline.
+  const noChart = toggleChart(s3, 'support', deps);
+  assert.ok(!noChart.settings.visibility.mapAnswerKeys.includes('support'));
+  assert.equal(noChart.settings.supportQuestionKey, null);
+  assert.deepEqual(noChart.removedFromMap, ['support']);
+  // A hidden chart can't be the headline.
+  assert.equal(setHeadline(noChart.settings, 'support').supportQuestionKey, null);
+  // None: no chart, nothing on the map, no headline. All: every chart.
+  const none = showNone(s3);
+  assert.deepEqual(none.visibility.visibleQuestionKeys, []);
+  assert.deepEqual(none.visibility.mapAnswerKeys, []);
+  assert.equal(none.supportQuestionKey, null);
+  assert.deepEqual(showAll(none, breakdowns).visibility.visibleQuestionKeys, ['support', 'recall', 'sign', 'why']);
+  assert.deepEqual(closeUnderDeps(['sign', 'support'], deps), ['support']);
+});
+
+test('questions: on a published report the map only shrinks in place — an addition is Refresh numbers', () => {
+  const s = settings({ visibleQuestionKeys: ['support', 'recall'], mapAnswerKeys: ['support'] });
+  const rows = rowsFor({ breakdowns, settings: s, deps, published: true, liveMapKeys: ['support'] });
+  assert.equal(rows.find((r) => r.key === 'recall').mapBlocked, 'Add this with Refresh numbers.');
+  assert.equal(rows.find((r) => r.key === 'support').mapDisabled, false, 'unticking is always allowed');
+  // Map off: the column explains itself.
+  const off = rowsFor({ breakdowns, settings: settings({ visibleQuestionKeys: ['support'], showMap: false }), deps });
+  assert.equal(off[0].mapBlocked, 'Turn on the map to use questions as map filters.');
+});
+
+test('History: every client-report row reads in words, naming the period, never a title', () => {
+  const line = (field, extra = {}) => clientReportHistoryLine({ field, periodLabel: 'Oct 13 – Oct 19', ...extra });
+  assert.deepEqual(line('clientReport.published'), { headline: 'Published', subject: 'Oct 13 – Oct 19 report', detail: '' });
+  assert.equal(line('clientReport.edited', { fromValue: { title: 'Week 3', observations: [{ heading: 'A', body: 'b' }] } }).detail, 'Earlier title: “Week 3” · Earlier notes: 1 section');
+  assert.equal(line('clientReport.edited', { fromValue: null, erasedAt: '2026-10-22' }).detail, 'Earlier text erased');
+  assert.match(line('clientReport.edited', { fromValue: null }).detail, /no text was replaced/);
+  assert.equal(
+    line('clientReport.numbersRefreshed', { fromValue: { doorsKnocked: 3412, surveysTaken: 1980 }, toValue: { doorsKnocked: 3420, surveysTaken: 1980 } }).detail,
+    'Doors 3,412 → 3,420'
+  );
+  assert.equal(line('clientReport.remapped', { toValue: { mapMode: 'area', areaSize: 'large' } }).detail, 'Large areas');
+  assert.deepEqual(clientReportHistoryLine({ field: 'clientReportSeries.renamed', fromValue: 'Team A', toValue: 'Paid team' }), {
+    headline: 'Renamed',
+    subject: 'Paid team',
+    detail: '“Team A” → “Paid team”',
+  });
+  assert.equal(
+    clientReportHistoryLine({ field: 'clientReportSeries.crewsChanged', fromValue: { coordinatorIds: ['a'] }, toValue: { coordinatorIds: ['a', 'b'], pastCoordinatorIds: ['c'] } }).detail,
+    '1 crew → 2 crews · past doors kept for 1 crew'
+  );
+  assert.equal(clientReportHistoryLine({ field: 'reportLink.rotated', toValue: { label: 'Candidate' } }).subject, 'Candidate');
+  assert.equal(clientReportHistoryLine({ field: 'reportLink.wrongPasswords', toValue: { count: 12 } }).detail, '12 wrong passwords');
+  for (const f of ['clientReport.created', 'clientReportSeries.ended', 'reportLink.locked']) assert.ok(isClientReportField(f), f);
+  assert.ok(!isClientReportField('doorGoal'));
+  // The general feed's labels are untouched.
+  assert.equal(labelForField('doorGoal'), 'Door goal');
+  assert.equal(earlierTextSummary({ title: '' }), 'Earlier title: none');
+});
+
+test('History names the tab and the team (WALK-3): four tabs’ publishes of one week read apart; old rows still read', () => {
+  const seriesLabels = new Map([['s-paid', 'Paid team'], ['s-camp', 'Whole campaign'], ['s-vol', 'Volunteer team']]);
+  const row = (field, extra = {}) => clientReportHistoryLine({ field, periodLabel: 'Oct 12 – Oct 18, 2026', ...extra }, { seriesLabels });
+  assert.equal(row('clientReport.published', { seriesId: 's-paid' }).subject, 'Oct 12 – Oct 18, 2026 · Paid team report');
+  assert.equal(row('clientReport.published', { seriesId: 's-camp' }).subject, 'Oct 12 – Oct 18, 2026 · Whole campaign report');
+  assert.equal(row('clientReport.edited', { seriesId: 's-paid', fromValue: { title: 'x' } }).subject, 'Oct 12 – Oct 18, 2026 · Paid team report');
+  // A row from before series, a series the list doesn't hold, or no list yet: the period alone.
+  assert.equal(row('clientReport.published').subject, 'Oct 12 – Oct 18, 2026 report');
+  assert.equal(row('clientReport.published', { seriesId: 's-gone' }).subject, 'Oct 12 – Oct 18, 2026 report');
+  assert.equal(clientReportHistoryLine({ field: 'clientReport.published', periodLabel: 'Oct 12 – Oct 18, 2026', seriesId: 's-paid' }).subject, 'Oct 12 – Oct 18, 2026 report');
+  assert.equal(clientReportHistoryLine({ field: 'clientReport.published', seriesId: 's-paid' }, { seriesLabels }).subject, 'Paid team report');
+  assert.equal(clientReportHistoryLine({ field: 'clientReport.published' }, { seriesLabels }).subject, 'A report');
+  assert.equal(reportRowName({ periodLabel: 'Oct 12 – Oct 18, 2026', seriesId: 's-vol' }, seriesLabels), 'Oct 12 – Oct 18, 2026 · Volunteer team');
+  assert.equal(reportRowName({ periodLabel: null, seriesId: null }, seriesLabels), null);
+
+  // Team rows name the team they were written with — and the newer name never rewrites an older row.
+  const team = (field, extra = {}) => clientReportHistoryLine({ field, seriesId: 's-paid', ...extra }, { seriesLabels });
+  assert.deepEqual(team('clientReportSeries.ended', { toValue: { label: 'Paid canvassers' } }), { headline: 'Team ended', subject: 'Paid canvassers', detail: '' });
+  assert.deepEqual(team('clientReportSeries.continued', { toValue: { label: 'Paid team', coordinatorIds: ['a', 'b'] } }), {
+    headline: 'Team continued',
+    subject: 'Paid team',
+    detail: '2 crews',
+  });
+  assert.deepEqual(
+    team('clientReportSeries.crewsChanged', { fromValue: { coordinatorIds: ['a'] }, toValue: { label: 'Paid team', coordinatorIds: ['a', 'b'], pastCoordinatorIds: [] } }),
+    { headline: 'Crews changed', subject: 'Paid team', detail: '1 crew → 2 crews' }
+  );
+  // Rows written before they named the team: its current name, else "A team".
+  assert.equal(team('clientReportSeries.ended', { toValue: null }).subject, 'Paid team');
+  assert.equal(team('clientReportSeries.crewsChanged', { fromValue: { coordinatorIds: ['a'] }, toValue: { coordinatorIds: ['b'] } }).subject, 'Paid team');
+  assert.equal(clientReportHistoryLine({ field: 'clientReportSeries.ended', seriesId: 's-paid' }).subject, 'A team');
+  assert.ok(isClientReportField('clientReportSeries.continued'));
+});

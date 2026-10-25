@@ -1,11 +1,18 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { connectDb } from './config/db.js';
+import { syncClientReportIndexes } from './services/reports/clientReportIndexes.js';
+import { syncPacePauseIndexes } from './services/audit/pacePause.js';
 
 const PORT = Number(process.env.PORT || 4000);
 
 async function main() {
   await connectDb(process.env.MONGODB_URI);
+  // The client-report collections this dyno WRITES (series, area cells) get their indexes before
+  // the first request can — autoIndex is off in production (services/reports/clientReportIndexes.js).
+  await syncClientReportIndexes('canvass-server');
+  // Automatic pause's one-open-pause-per-canvasser index must exist before a door can write a pause.
+  await syncPacePauseIndexes('canvass-server');
   const app = createApp();
   const server = app.listen(PORT, () => {
     console.log(`[canvass-server] listening on http://localhost:${PORT}`);

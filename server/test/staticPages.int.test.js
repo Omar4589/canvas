@@ -140,6 +140,30 @@ test('every known client route still gets the SPA shell with a 200', { skip }, a
   }
 });
 
+// A client's report link is for its recipient, never a search index (docs/PROPOSAL_CLIENT_REPORTS_
+// UPGRADE.md §F6 "Headers"): the /r/ pages and every /api/share response say noindex themselves, and
+// robots.txt no longer blocks /r/ — a crawler kept out by robots.txt never sees a noindex.
+test('the /r/ report pages and /api/share say noindex, nofollow; other pages do not; robots.txt no longer hides /r/', { skip }, async () => {
+  for (const p of ['/r/tok3n', '/r/tok3n/reports/rep1', '/R/tok3n']) {
+    const res = await get(p);
+    assert.strictEqual(res.status, 200, p);
+    assert.strictEqual(res.headers.get('x-robots-tag'), 'noindex, nofollow', p);
+  }
+  for (const p of ['/', '/login', '/campaigns', '/rr', '/reports-x']) {
+    assert.strictEqual((await get(p)).headers.get('x-robots-tag'), null, `${p} stays indexable as before`);
+  }
+  // This suite has no database, so it asks the share router for a path that never reaches one; the
+  // headers are the router's, on every response (shareLinks.int.test.js covers the rest with a DB).
+  const share = await get('/api/share/');
+  assert.strictEqual(share.status, 404);
+  assert.strictEqual(share.headers.get('x-robots-tag'), 'noindex, nofollow');
+  assert.strictEqual(share.headers.get('cache-control'), 'no-store');
+  assert.ok((await share.json()).code, 'a coded 404');
+  const robots = fs.readFileSync(path.join(PUBLIC_DIR, 'robots.txt'), 'utf8');
+  assert.ok(!/^\s*Disallow:\s*\/r\//m.test(robots), 'no Disallow: /r/');
+  assert.match(robots, /^Disallow: \/api$/m, '/api stays disallowed');
+});
+
 test('unknown /api paths still get the JSON 404', { skip }, async () => {
   const res = await get('/api/definitely-not-a-route');
   assert.strictEqual(res.status, 404);

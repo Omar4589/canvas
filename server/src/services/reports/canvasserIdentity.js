@@ -106,7 +106,10 @@ export async function hydrateCanvassers(userIds, orgId, { fields = '' } = {}) {
   //
   // After the retention window lapses the snapshot is purged and the records no longer directly
   // identify the person. That is the intended end state, not a bug.
-  const deletedIds = users.filter((u) => u.deletedAt).map((u) => u._id);
+  // FAIL CLOSED without an org: resolveDeletedIdentities drops its org filter when handed none, which
+  // would restore a deleted person's name to whoever asked. Every caller passes the request's org
+  // today; a future one that forgets gets "Deleted user", never another org's names.
+  const deletedIds = orgId ? users.filter((u) => u.deletedAt).map((u) => u._id) : [];
   const restored = deletedIds.length
     ? await resolveDeletedIdentities(deletedIds, { organizationId: orgId })
     : new Map();

@@ -592,7 +592,8 @@ router.post('/', async (req, res, next) => {
       // mail hiccup must not fail provisioning). The temp password above stays in the 201 response for
       // out-of-band hand-off; it never appears in the email.
       const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
-      sendMail({ to: user.email, ...provisioningWelcome({ firstName: user.firstName, orgName: org.name, setPasswordUrl: url }), kind: 'provisioningWelcome', meta: { organizationId: org._id, organizationName: org.name, userId: user._id } });
+      // A url only comes back null for an account deleted in the meantime; there is nobody to invite.
+      if (url) sendMail({ to: user.email, ...provisioningWelcome({ firstName: user.firstName, orgName: org.name, setPasswordUrl: url }), kind: 'provisioningWelcome', meta: { organizationId: org._id, organizationName: org.name, userId: user._id } });
     }
 
     res.status(201).json({ organization: org, admin, tempPassword });

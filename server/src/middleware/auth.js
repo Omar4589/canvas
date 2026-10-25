@@ -7,6 +7,7 @@ import {
 import { User } from '../models/User.js';
 import { canManageCampaign } from '../services/authz/campaignManagement.js';
 import { shouldStampLastSeen } from './lastSeen.js';
+import { stampSessionClock } from '../services/auth/sessionStamps.js';
 
 // Every way a session can end answers the SAME 401 code, SESSION_REVOKED, plus a `reason`. Reusing
 // the code is deliberate: every phone bundle since 2026-07-18 and the web already turn it into "go
@@ -23,7 +24,9 @@ const ENDED_TEXT = {
   password_changed: 'Your password was changed — sign in again.',
 };
 
-const ended = (res, reason) =>
+// Exported for the self-service writes in routes/auth.js, which answer `deleted` the same way when
+// a deletion lands between requireAuth and their own write.
+export const ended = (res, reason) =>
   res.status(401).json({ error: ENDED_TEXT[reason], code: 'SESSION_REVOKED', reason });
 
 // A fault on OUR side (no JWT_SECRET, the user lookup threw) is a 503, never a 401: once a coded 401
@@ -94,11 +97,7 @@ export const requireAuth = async (req, res, next) => {
     // false because the schema sets them — without it every active user's updatedAt would read
     // "~now" forever.
     if (shouldStampLastSeen(String(user._id))) {
-      User.updateOne(
-        { _id: user._id },
-        { $set: { lastSeenAt: new Date() } },
-        { timestamps: false }
-      ).catch(() => {});
+      stampSessionClock(user._id, 'lastSeenAt', { timestamps: false }).catch(() => {});
     }
     req.user = user;
     // For GET /auth/me's extension and POST /auth/logout.

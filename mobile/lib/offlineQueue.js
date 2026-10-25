@@ -84,6 +84,14 @@ function isAuthFailure(err) {
   return err.status === 403 && err.data?.code === 'PASSWORD_CHANGE_REQUIRED';
 }
 
+// Who hears each uploaded write's automatic-pause answer (docs/PROPOSAL_PACE_PAUSE.md §E.2): registered in
+// app/_layout.jsx with lib/recordAction.js applyFlushedPace, which owns the cached state — this module can't
+// import it (recordAction imports this one). Given the item too, so the org it was recorded under decides.
+let flushPaceSink = null;
+export const setFlushPaceSink = (fn) => {
+  flushPaceSink = fn;
+};
+
 async function doFlush() {
   let sent = 0;
   const errors = [];
@@ -94,13 +102,16 @@ async function doFlush() {
     const item = queue[0];
     try {
       // Pinned org header (see enqueue) — legacy items without one use the active org.
-      await api(item.path, {
+      const response = await api(item.path, {
         method: 'POST',
         body: item.body,
         ...(item.orgId ? { orgId: item.orgId } : {}),
       });
       sent++;
       await removeItem(item.id);
+      // Fire-and-forget, after the item is safely off the queue: the answer only updates what the phone
+      // shows, and nothing it does may stall or fail the flush.
+      if (flushPaceSink && response?.pace) Promise.resolve().then(() => flushPaceSink(response.pace, item)).catch(() => {});
     } catch (err) {
       // Network error: stop and try again later
       if (!err.status) {

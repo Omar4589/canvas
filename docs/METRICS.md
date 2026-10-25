@@ -614,6 +614,14 @@ map/panel; if you want to reconcile a specific day's or week's numbers, use the 
   this same per-canvasser count: one result per door per round, the latest, so a door recorded again
   in the same round moves to the later day there too. See [FBTIME_INTEGRATION.md](FBTIME_INTEGRATION.md)
   → *Door counts to FbTime*.
+- **A deleted account keeps its numbers and, for 180 days, its name.** Deleting an account — the person
+  themselves, or an org admin since 2026-10-24 — never moves a count: every door and survey stays, on the
+  team it was stamped with. The leaderboard, the Timeline, each canvasser's own page and the canvasser
+  CSV keep showing the person's name for 180 days, and so do **team labels**: a deleted coordinator's
+  team keeps its row and its numbers in the by-team tables, labelled with their name — as is the
+  Coordinator column — for the same window, then "Deleted user". Their crew is left with no coordinator
+  until one is set, and setting one moves those people's doors as any crew change does (§F, *Teams*).
+  See [USERS.md](USERS.md) → *Deleting a member's account*.
 
 ---
 
@@ -1081,12 +1089,24 @@ than writing a field that no longer means anything.)
 
 **The one exception, and it is load-bearing: DEPARTURE never re-stamps.** When a coordinator leaves
 the org, [`releaseAssignedWork`](../server/src/services/users/deleteAccount.js) hard-deletes their
-own roster rows and clears `Membership.coordinatorId` on their crew — but deliberately leaves the
-ledger alone. That stamp is the only remaining record of who supervised those doors. (⚠️ The
-`Membership` clear is now vestigial: the field it writes is no longer read, so a departed
-coordinator's crew keeps `CampaignAssignment.coordinatorId` pointing at them and *future* knocks
-still stamp that team until a lead re-picks. Nothing already counted moves either way; it is the
-forward-looking half of "nobody keeps supervising from outside" that the field move left behind.)
+own roster rows and clears `CampaignAssignment.coordinatorId` on their crew's roster rows (in the
+scope released — the org for Remove from org, everywhere for account deletion), so the crew's *next*
+knocks stamp no team — but it deliberately leaves the ledger alone. That stamp is the only remaining
+record of who supervised those doors. (This paragraph used to warn that the crew's roster link kept
+pointing at a departed coordinator; the per-campaign crews commit, `0ffca4c`, moved the clear onto
+`CampaignAssignment`, and nothing writes `Membership.coordinatorId` there any more.)
+
+**A deleted coordinator's team keeps its name for the retention window** (2026-10-24). Every team label —
+the Coordinator column on `/canvassers` and `/canvasser-timeline` (`ledgerCoordinatorLabels`),
+`/team-breakdown`, `/tag-teams`, and the canvasser CSV's crew stamp (`crewStampLabel`) — resolves names
+through one `teamNamesOf(teamIds, orgId)` in [reports.js](../server/src/routes/admin/reports.js), which
+calls `hydrateCanvassers`: a deleted coordinator's name comes back from their `DeletedUserRecord` for
+**the request's org only** (team labels are lead-visible, and a lead can be the paying client), then
+"Deleted user" once the record is purged. Before, these read the scrubbed account row and printed
+"Deleted user" at once. The export builders already named teams this way, so screens and files agree.
+One residual: a coordinator removed from an org where they never knocked is not on that org's record, so
+if their account is deleted later, that org's labels read "Deleted user" straight away. Removal alone
+keeps the name, since the account — and its name — stays.
 
 **Departure vs. removal are now two distinct rules, and the difference is a real capability:**
 

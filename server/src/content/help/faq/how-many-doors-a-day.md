@@ -35,7 +35,7 @@ It sits in the header rather than down with the other numbers on purpose — see
 
 ## Can the client see it?
 
-Only if you put it there. A published weekly report can show goal progress, but it's **off by default** and has to be ticked per report in the report builder. When it is on, the client sees progress and nothing else — no pace, no "behind" — because a frozen judgement on a document read weeks later stops being true. See [Sharing reports with a client](client-reports).
+Only if you put it there. A published client report can show goal progress, but it's **off by default** and has to be ticked per report in the report builder. When it is on, the client sees progress and nothing else — no pace, no "behind" — because a frozen judgement on a document read weeks later stops being true. A **team report** or a report for a single walk list never shows the goal: it's a whole-campaign number, and measuring part of the campaign against it would undersell you. See [Client reports and share links](client-reports).
 
 ## Canvassers never see it
 

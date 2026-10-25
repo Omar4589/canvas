@@ -11,6 +11,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { FbTimeConnection } from '../../models/FbTimeConnection.js';
 import { FbTimePersonLink } from '../../models/FbTimePersonLink.js';
+import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { isOrgAdmin, managedCampaignIds } from '../../services/authz/campaignManagement.js';
@@ -24,9 +25,18 @@ import { restampSummary } from '../../services/memberships/setCoordinator.js';
 import {
   isLastBillingAdmin,
   strandsBilling,
+  countLiveAdmins,
   LAST_BILLING_ADMIN_ERROR,
+  LAST_ADMIN_ERROR,
 } from '../../services/memberships/billingGuards.js';
-import { releaseAssignedWork } from '../../services/users/deleteAccount.js';
+import {
+  releaseAssignedWork,
+  reviewOrgDeletion,
+  deleteAccount,
+  convergeIfDeleted,
+  AccountDeletionError,
+} from '../../services/users/deleteAccount.js';
+import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg } from '../../services/mail/templates.js';
 import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
@@ -173,6 +183,33 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// reason → how the Users list words it ("Deleted by Alex Kim", "Deleted their own account", ...).
+const DELETION_HOW = { self: 'self', org_admin: 'admin', super_admin: 'support', operator: 'support' };
+
+const tombstoneDeletionLines = async (userIds, orgId) => {
+  if (!userIds.length) return new Map();
+  const records = await DeletedUserRecord.find({ userId: { $in: userIds } })
+    .select('userId reason deletedBy deletedAt pendingAt finishedAt')
+    .lean();
+  const settled = records.filter((r) => !r.pendingAt || r.finishedAt);
+  const deleterIds = [...new Set(settled.filter((r) => r.reason === 'org_admin' && r.deletedBy).map((r) => String(r.deletedBy)))];
+  const [deleterMembers, deleters] = deleterIds.length
+    ? await Promise.all([
+        Membership.find({ organizationId: orgId, userId: { $in: deleterIds } }).distinct('userId'),
+        User.find({ _id: { $in: deleterIds }, deletedAt: null }).select('firstName lastName').lean(),
+      ])
+    : [[], []];
+  const memberHere = new Set(deleterMembers.map(String));
+  const nameById = new Map(deleters.map((u) => [String(u._id), `${u.firstName || ''} ${u.lastName || ''}`.trim()]));
+  return new Map(
+    settled.map((r) => {
+      const how = DELETION_HOW[r.reason] || 'unknown';
+      const byName = how === 'admin' && memberHere.has(String(r.deletedBy)) ? nameById.get(String(r.deletedBy)) || null : null;
+      return [String(r.userId), { at: r.deletedAt, how, byName }];
+    })
+  );
+};
+
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -268,12 +305,23 @@ router.get('/', async (req, res, next) => {
       }
     }
 
+    // Who deleted a tombstone row, and when — for this org's admins (a deleted account's roster rows
+    // are released, so a lead's list never holds one). A pending record (a deletion still finishing)
+    // reads as plain "Deleted account". The deleter is NAMED only when they are an admin with a
+    // membership (any status) in THIS org: a link that raced the deletion into another org must not
+    // show that org's admin by name.
+    const deletionByUser = await tombstoneDeletionLines(
+      members.filter((m) => m.userId.deletedAt).map((m) => m.userId._id),
+      activeOrgId(req)
+    );
+
     res.json({
       members: members.map((m) => ({
         membershipId: String(m._id),
         role: m.role,
         isActive: m.isActive,
         addedAt: m.createdAt,
+        deletion: deletionByUser.get(String(m.userId._id)) || null,
         billingAccess: !!m.billingAccess,
         managedCampaignIds: managedByUser.get(String(m.userId._id)) || [],
         campaignIds: campaignsByUser.get(String(m.userId._id)) || [],
@@ -354,6 +402,10 @@ router.post('/', requireAdminRole, async (req, res, next) => {
         grantedBy: req.user._id,
         campaignIds: managed,
       });
+      // createOrgMember re-checked after its insert; the grants above are this route's last write.
+      if (await convergeIfDeleted({ userId: user._id, organizationId: orgId, membershipId: membership._id })) {
+        return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+      }
     }
 
     // Notify the person we just added — best-effort, never awaited (a mail hiccup must not fail the
@@ -364,7 +416,8 @@ router.post('/', requireAdminRole, async (req, res, next) => {
       sendMail({ to: user.email, ...addedToOrg({ firstName: user.firstName, orgName: req.activeOrg.name, role: data.role }), kind: 'addedToOrg', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     } else {
       const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
-      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, setPasswordUrl: url, role: data.role }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
+      // A url only comes back null for an account deleted in the meantime; there is nobody to invite.
+      if (url) sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, setPasswordUrl: url, role: data.role }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     }
 
     res.status(201).json({
@@ -450,6 +503,12 @@ router.patch('/:userId', requireAdminRole, async (req, res, next) => {
     if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return;
     const orgId = activeOrgId(req);
     const data = updateMembershipSchema.parse(req.body);
+    // A deleted account's row is a tombstone: no role, no billing flag, no reactivation. Asked before
+    // any billing or role logic, and again after the last write below for a deletion that raced it.
+    const targetAccount = await User.findById(req.params.userId).select('deletedAt').lean();
+    if (targetAccount?.deletedAt) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
     // You can't strip your own org-admin (demote yourself to lead or canvasser) —
     // that would lock you out of org administration. Ask another admin.
     if (
@@ -491,6 +550,13 @@ router.patch('/:userId', requireAdminRole, async (req, res, next) => {
     const billingBefore = wasBillingAdmin
       ? { billingAccess: membership.billingAccess, role: membership.role, isActive: membership.isActive }
       : null;
+    // The same snapshot for admin standing: demoting or switching off an active admin is re-counted
+    // after the save (LAST_ADMIN_ERROR in billingGuards.js).
+    const adminBefore =
+      membership.role === 'admin' && membership.isActive
+        ? { role: membership.role, isActive: membership.isActive, billingAccess: membership.billingAccess }
+        : null;
+    const stripsAdmin = Boolean(adminBefore) && ((data.role !== undefined && data.role !== 'admin') || data.isActive === false);
 
     const nextRole = data.role || membership.role;
     // Validate the grant set before writing anything (only when the result is a lead).
@@ -506,6 +572,12 @@ router.patch('/:userId', requireAdminRole, async (req, res, next) => {
     // key is still destructured away so an older client that keeps sending it gets a clean no-op
     // rather than writing a field that no longer means anything.
     const { managedCampaignIds: _omitGrants, coordinatorId: _omitCoord, ...membershipUpdate } = data;
+    // Automatic pause: a role change restarts this member's count (docs/PROPOSAL_PACE_PAUSE.md §B.5), so a
+    // lead's paper entry earlier today can't pause them the moment they are a canvasser again. Forward only.
+    if (data.role !== undefined && data.role !== membership.role) {
+      const now = new Date();
+      if (!membership.paceRestartAt || membership.paceRestartAt < now) membership.paceRestartAt = now;
+    }
     Object.assign(membership, membershipUpdate);
     await membership.save();
 
@@ -515,6 +587,11 @@ router.patch('/:userId', requireAdminRole, async (req, res, next) => {
       membership.set(billingBefore);
       await membership.save();
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
+    if (stripsAdmin && (await countLiveAdmins(orgId)) === 0) {
+      membership.set(adminBefore);
+      await membership.save();
+      return res.status(409).json(LAST_ADMIN_ERROR);
     }
 
     // Reconcile grants: leaving the lead role clears every grant; staying/becoming
@@ -528,6 +605,12 @@ router.patch('/:userId', requireAdminRole, async (req, res, next) => {
         grantedBy: req.user._id,
         campaignIds: managedResult,
       });
+    }
+
+    // A deletion that finished while this request ran: put back what it undid (off, no billing, no
+    // grants) rather than leave the tombstone an active admin. After the LAST write, grants included.
+    if (await convergeIfDeleted({ userId: req.params.userId, organizationId: orgId, membershipId: membership._id })) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
     }
 
     const finalGrants = await CampaignManager.find({ userId: req.params.userId, organizationId: orgId })
@@ -560,11 +643,25 @@ router.delete('/:userId', requireAdminRole, async (req, res, next) => {
     }
     const orgId = activeOrgId(req);
     const target = await Membership.findOne({ userId: req.params.userId, organizationId: orgId });
+    // Billing access protects its holder from removal too: otherwise Remove followed by re-adding the
+    // same email would quietly strip a billing admin's flag (the account-deletion rule's back door).
+    // Staff are exempt, and so is a DELETED account's row — anyone may tidy a tombstone away, and
+    // accounts deleted before this rule never had the flag cleared.
+    if (target?.billingAccess && !req.user.isSuperAdmin && !req.activeMembership?.billingAccess) {
+      const account = await User.findById(req.params.userId).select('deletedAt').lean();
+      if (!account?.deletedAt) {
+        return res.status(403).json({
+          error: 'Only an admin with billing access can remove this person.',
+          code: 'BILLING_ACCESS_REQUIRED',
+        });
+      }
+    }
     if (target && (await isLastBillingAdmin(target))) {
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
     }
     const wasBillingAdmin =
       target && target.billingAccess && target.role === 'admin' && target.isActive;
+    const wasAdmin = target && target.role === 'admin' && target.isActive;
     await Membership.deleteOne({ userId: req.params.userId, organizationId: orgId });
     // Post-write backstop for the concurrency race (see isLastBillingAdmin/strandsBilling). Re-count
     // BEFORE releaseAssignedWork, and re-insert the exact row (same _id) if this delete raced the
@@ -572,6 +669,12 @@ router.delete('/:userId', requireAdminRole, async (req, res, next) => {
     if (wasBillingAdmin && (await strandsBilling(orgId))) {
       await Membership.create(target.toObject());
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
+    }
+    // …and the same for LIVE admins: a Remove racing an account deletion of the remover (or a staff
+    // actor removing the only admin) must not leave the org with nobody to administer it.
+    if (wasAdmin && (await countLiveAdmins(orgId)) === 0) {
+      await Membership.create(target.toObject());
+      return res.status(409).json(LAST_ADMIN_ERROR);
     }
     // This used to drop CampaignAssignment + CampaignManager only, which left the removed
     // person still holding every TurfAssignment and EffortMember row they had — so their
@@ -581,6 +684,93 @@ router.delete('/:userId', requireAdminRole, async (req, res, next) => {
     const released = await releaseAssignedWork(req.params.userId, { organizationId: orgId });
     res.json({ ok: true, released });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ── Delete a member's account (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md) ───────────────────────
+// Admins only — never leads (requireAdminRole). An account can be deleted from here only when it
+// belongs to this organization alone; the rules, in order, live in reviewOrgDeletion, which both
+// routes run so the review the admin read and the rule the DELETE enforces are the same code.
+// Both routes name the person in the support-access log when a grant-holder calls them.
+
+const deletionGuards = async (req, res) => {
+  if (!ensureOrgScoped(req, res)) return false;
+  if (!mongoose.isValidObjectId(req.params.userId)) {
+    res.status(400).json({ error: 'Invalid userId' });
+    return false;
+  }
+  if (await refuseVendorStaffTarget(req, res, { userId: req.params.userId })) return false;
+  addAuditSubjects(res, 'user', req.params.userId);
+  return true;
+};
+
+// An unknown id and a member of another org get the SAME 404, so the route can't be used to test
+// whether an id exists elsewhere.
+const deletionErrorResponse = (res, err) => {
+  if (err.code === 'NOT_A_MEMBER') return res.status(404).json({ error: 'Member not in this org', code: 'NOT_A_MEMBER' });
+  if (err.code === 'NOT_FOUND') return res.status(404).json({ error: 'Member not in this org', code: 'NOT_A_MEMBER' });
+  return res.status(409).json({ error: err.message, code: err.code, ...err.details });
+};
+
+// The review: what deleting this person means, worked out from their own records, and anything that
+// stands in the way. A membership elsewhere answers with that one blocker and nothing else.
+router.get('/:userId/deletion-check', requireAdminRole, async (req, res, next) => {
+  try {
+    if (!(await deletionGuards(req, res))) return;
+    const review = await reviewOrgDeletion({ userId: req.params.userId, req });
+    if (review.otherOrganization) {
+      return res.json({ canDelete: false, blockers: review.blockers });
+    }
+    res.json({
+      canDelete: review.blockers.length === 0,
+      blockers: review.blockers,
+      confirmEmail: review.confirmEmail,
+      kind: review.kind,
+      usage: review.usage,
+      holding: review.holding,
+    });
+  } catch (err) {
+    if (err instanceof AccountDeletionError) return deletionErrorResponse(res, err);
+    next(err);
+  }
+});
+
+// Delete it. `confirmEmail` is the address the admin typed back; `expectKind` is the kind the review
+// showed them, so an account that changed from unused to used since (they just signed in) is
+// refused rather than deleted on terms the admin never read.
+router.delete('/:userId/account', requireAdminRole, async (req, res, next) => {
+  try {
+    if (!(await deletionGuards(req, res))) return;
+    const orgId = activeOrgId(req);
+    const review = await reviewOrgDeletion({ userId: req.params.userId, req });
+    if (review.blockers.length) {
+      return res.status(409).json({ error: 'This account can’t be deleted.', code: 'BLOCKED', blockers: review.blockers });
+    }
+    const confirmEmail = String(req.body?.confirmEmail || '').trim().toLowerCase();
+    if (!confirmEmail || confirmEmail !== String(review.confirmEmail || '').toLowerCase()) {
+      return res.status(400).json({
+        error: 'Type the account’s email exactly to confirm.',
+        code: 'confirm-email-mismatch',
+      });
+    }
+    if (req.body?.expectKind !== review.kind) {
+      return res.status(409).json({
+        error: 'Something about this account changed since you reviewed it. Review it again before deleting.',
+        code: 'USAGE_CHANGED',
+      });
+    }
+    const result = await deleteAccount(req.params.userId, {
+      reason: review.reason,
+      deletedBy: req.user._id,
+      org: { organizationId: orgId, unused: review.kind === 'unused' },
+      reviewed: true,
+    });
+    // Ids, never the address: Heroku's log is the incident-response copy, DeletedUserRecord the record.
+    console.warn(`[user-delete] ${req.user._id} deleted account ${req.params.userId} in org ${orgId} (${review.kind})`);
+    res.json({ ok: true, deletedAt: result.deletedAt, kind: review.kind, released: result.released });
+  } catch (err) {
+    if (err instanceof AccountDeletionError) return deletionErrorResponse(res, err);
     next(err);
   }
 });
@@ -640,8 +830,10 @@ router.patch('/:userId/user', async (req, res, next) => {
       }
     }
 
-    const user = await User.findByIdAndUpdate(req.params.userId, data, { new: true });
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    // Conditional on the account still being live: a deletion that lands between the check above and
+    // this write must not get a real name and email written back onto its tombstone.
+    const user = await User.findOneAndUpdate({ _id: req.params.userId, deletedAt: null }, data, { new: true });
+    if (!user) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
     res.json({ user: user.toSafeJSON() });
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Email already exists' });
@@ -691,12 +883,12 @@ router.patch('/:userId/password', async (req, res, next) => {
     // This is a TEMPORARY password: the user is forced to choose a new one at
     // their next login, so an admin never holds a working key to the user's
     // other orgs. See passwordGate.js and POST /auth/change-password.
-    const user = await User.findByIdAndUpdate(
-      req.params.userId,
+    const user = await User.findOneAndUpdate(
+      { _id: req.params.userId, deletedAt: null },
       { passwordHash, mustChangePassword: true, tempPasswordSetAt: new Date() },
       { new: true }
     );
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
     res.json({ user: user.toSafeJSON() });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
@@ -776,6 +968,10 @@ router.patch('/:userId/deactivate', async (req, res, next) => {
       await Membership.updateOne({ _id: existing._id }, { isActive: true });
       return res.status(409).json(LAST_BILLING_ADMIN_ERROR);
     }
+    if (existing.role === 'admin' && existing.isActive && (await countLiveAdmins(activeOrgId(req))) === 0) {
+      await Membership.updateOne({ _id: existing._id }, { isActive: true });
+      return res.status(409).json(LAST_ADMIN_ERROR);
+    }
     res.json({ membership });
   } catch (err) {
     next(err);
@@ -802,6 +998,10 @@ router.patch('/:userId/reactivate', async (req, res, next) => {
       { new: true }
     );
     if (!membership) return res.status(404).json({ error: 'Membership not found' });
+    // The check above can't see a deletion that finishes in between; this one can.
+    if (await convergeIfDeleted({ userId: req.params.userId, organizationId: activeOrgId(req), membershipId: membership._id })) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
     res.json({ membership });
   } catch (err) {
     next(err);

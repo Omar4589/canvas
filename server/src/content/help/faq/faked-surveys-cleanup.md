@@ -6,7 +6,7 @@ kind: faq
 order: 65
 sourceDoc: CAMPAIGNS.md
 summary: Unknock the fake entries from Door Outcomes — the knocks stop counting, the answers are archived, and the doors are knockable again in the same round.
-tags: fake, fraud, cleanup, remove answers, unknock, door outcomes, corrections, integrity, billing, not a target voter, offline, edit answers, wrong answer
+tags: fake, fraud, cleanup, remove answers, unknock, door outcomes, corrections, integrity, billing, not a target voter, offline, edit answers, wrong answer, automatic pause, paused
 ---
 
 The full cleanup is **Unknock**, on the **[Door Outcomes page](page-door-outcomes)**: filter to that canvasser (a date range narrows it further, and on a survey campaign you can filter to a **specific answer** — "everyone they marked *Supporter*"), select the entries, and press **Unknock…**. The fake entries are removed from the record entirely:
@@ -16,6 +16,8 @@ The full cleanup is **Unknock**, on the **[Door Outcomes page](page-door-outcome
 - **The answers are archived, never destroyed** — they stay listed by name on the change, and undoing it brings them back, because in an investigation the removed answers are the evidence. The struck entries themselves are kept on the change too, which is what makes **Undo** exact. (The voter's profile shows them as **Removed**, without a Restore button: an unknocked visit has no survey to put them into.)
 
 Only that canvasser's work is touched. A second canvasser's honest visit to the same door survives, and so does a restricted mark the office placed. The change is listed under **Removed entries** with the filter that produced it and a one-click Undo.
+
+**Caught by automatic pause?** If your organization uses it and the canvasser was paused for review, start from the pause: its review on the Audit page has **Open these doors in Door Outcomes**, which opens this page already filtered to that canvasser and day, and the review's list of doors shows which ones were too fast. The pause itself removed and held nothing, so there is nothing about it to undo. Clean up here, then **Unpause** them on the review — an org admin can, and so can a team lead on that campaign. More in [A canvasser was paused for review — what do I do?](a-canvasser-was-paused)
 
 **If you want to keep the knock and only fix the label** — the canvasser really was at the door, they just recorded the wrong thing — change the entries to **Not home** instead. That's the lighter tool: the review step still names whose answers are removed (archived the same way), but the visit stays counted, and the doors come back into play with the next round rather than this one.
 

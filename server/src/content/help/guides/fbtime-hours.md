@@ -68,7 +68,7 @@ the table always says how many are hidden). When several people match by email, 
 them as a list you can review and untick before linking, rather than linking them silently — and
 you can tick several rows to link or unlink them together.
 
-Unlinking one person happens straight away, with **Undo**; unlinking several at once asks first — and when it's someone who deleted their account, or Doorline has sent door counts for them, it always asks (see *Unlinking: was the link right?* below). A canvasser who's already linked can't be moved straight to a different FbTime person — unlink them first, then link them to the right one.
+Unlinking one person happens straight away, with **Undo**; unlinking several at once asks first — and when it's someone whose account was deleted (by them or by an admin), or Doorline has sent door counts for them, it always asks (see *Unlinking: was the link right?* below). A canvasser who's already linked can't be moved straight to a different FbTime person — unlink them first, then link them to the right one.
 
 To check one person without coming here, open them from Users or a campaign's Team page — their
 profile says **FbTime linked** or **FbTime not linked**, with a shortcut back to this page. Team
@@ -85,7 +85,7 @@ Don't want to wait? Press **Refresh hours** in the connection bar at the top of 
 
 ## Unlinking: was the link right?
 
-Unlinking never clears anything by itself. Usually it simply unlinks, and that person's reports go back to estimated hours straight away. But when a canvasser **deleted their account**, or Doorline has **sent door counts** to FbTime for them, **Unlink** asks one question — **Was the link right?**
+Unlinking never clears anything by itself. Usually it simply unlinks, and that person's reports go back to estimated hours straight away. But when a canvasser's account **was deleted** — by them or by an admin — or Doorline has **sent door counts** to FbTime for them, **Unlink** asks one question — **Was the link right?**
 
 - **Yes — keep.** They left, or they'll come back with a new account. The old account keeps counting for that FbTime person: the hours it clocked stay its own, so its past doors-per-hour stays measured. If your organization sends door counts, what Doorline sent stays on FbTime, corrections stop reaching FbTime for them, and the old account's doors are added to a new account's once you link one.
 - **No — the link was wrong.** Doorline clears every number it sent to FbTime for that person, brings back any numbers someone had typed there, and won't suggest that pairing again. If you then link the FbTime person to the right canvasser while door counts are on, their last 120 days refill in the same run. Where nothing was sent, it simply unlinks.

@@ -222,3 +222,57 @@ test('the response carries no credentials', { skip }, async () => {
   assert.equal(typeof res.body.staged.activities, 'number');
   assert.equal(typeof res.body.staged.surveys, 'number');
 });
+
+test('the demo link follows the hardened link rules: its fields, its one-year life on reset, a renewal when the life is up', { skip }, async () => {
+  const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
+  const DAY = 24 * 60 * 60 * 1000;
+  const reset = () => seedDemoOrg({ apply: true, reset: true, allowImport: false, syncPasswords: false, requireExisting: true, log: () => {} });
+  const link = await ReportShareLink.findOne({ campaignId: ctx.campaign._id, isActive: true }).lean();
+  assert.ok(link.lifetimeStartAt, 'a one-year life from when it was made');
+  assert.equal(link.credentialVersion, 0);
+  assert.equal(link.passwordMeetsRule, true, 'the generated password is 12 characters');
+  assert.deepEqual(link.failedUnlockAt, []);
+  assert.equal(link.failedUnlocksTotal, 0);
+  assert.ok(+link.expiresAt <= +link.lifetimeStartAt + 365 * DAY);
+
+  // A reset well inside the life: the expiry moves out 90 days; the life, the address and every
+  // device's sign-in stay.
+  const start = new Date(Date.now() - 200 * DAY);
+  await ReportShareLink.updateOne({ _id: link._id }, { $set: { lifetimeStartAt: start, expiresAt: new Date(Date.now() + 5 * DAY) } });
+  await reset();
+  let after = await ReportShareLink.findById(link._id).lean();
+  assert.equal(after.token, link.token);
+  assert.equal(+after.lifetimeStartAt, +start);
+  assert.ok(Math.abs(+after.expiresAt - (Date.now() + 90 * DAY)) < 60 * 60 * 1000, 'about 90 days out');
+  assert.equal(after.credentialVersion, 0);
+
+  // A life that can't cover another 90 days never runs past its end: the reset renews it, as the
+  // panel's Renew does — a new address, a new life, the version bumped, the failure budget cleared.
+  await ReportShareLink.updateOne(
+    { _id: link._id },
+    { $set: { lifetimeStartAt: new Date(Date.now() - 300 * DAY), failedUnlockAt: [{ at: new Date(), id: 'x' }] } }
+  );
+  await reset();
+  after = await ReportShareLink.findById(link._id).lean();
+  assert.notEqual(after.token, link.token, 'a new address');
+  assert.ok(Date.now() - after.lifetimeStartAt < 10 * 60 * 1000, 'a new life');
+  assert.ok(+after.expiresAt <= +after.lifetimeStartAt + 365 * DAY);
+  assert.equal(after.credentialVersion, 1, 'every token the old address issued is signed out');
+  assert.deepEqual(after.failedUnlockAt, []);
+
+  // An open link gaining its password: the version bumps, and an env password shorter than 12 is
+  // flagged rather than claimed to meet the rule.
+  await ReportShareLink.updateOne({ _id: link._id }, { $set: { passwordHash: null }, $unset: { passwordMeetsRule: 1 } });
+  const prev = process.env.SEED_DEMO_SHARE_PASSWORD;
+  process.env.SEED_DEMO_SHARE_PASSWORD = 'short-pw';
+  try {
+    await reset();
+  } finally {
+    if (prev === undefined) delete process.env.SEED_DEMO_SHARE_PASSWORD;
+    else process.env.SEED_DEMO_SHARE_PASSWORD = prev;
+  }
+  after = await ReportShareLink.findById(link._id).lean();
+  assert.ok(after.passwordHash && after.passwordHash.startsWith('$2'), 'a bcrypt hash, stored as itself');
+  assert.equal(after.passwordMeetsRule, false);
+  assert.equal(after.credentialVersion, 2);
+});

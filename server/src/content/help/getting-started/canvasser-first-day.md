@@ -27,6 +27,8 @@ Everything you need is right here in the app — the web console is for admins a
 
 At each house you record what happened. On a **survey** campaign that's **Not home**, **Wrong address**, **Refused**, or the survey itself; on a **lit-drop** campaign you tap **Lit dropped**. Either way, two more buttons show on every campaign: **No soliciting** if the door has a posted sign you're honoring, and **Restricted access** if you can't reach the door at all — a locked gate or building. Your pin recolors as soon as the app has your location — usually instantly — so you always know what's done. For what each outcome means, see [Marking a door](canvasser-dispositions).
 
+**Record each door at the door** — right after you knock, or right after you finish talking with someone — before you move on to the next house. If your organization uses automatic pause, doors saved faster than anyone could knock them, like a batch saved later from the car, pause your recording until your team lead reviews them: [Why is my recording paused?](why-is-recording-paused)
+
 If your campaign has it turned on, you'll also see **Not a target voter** (survey campaigns only), for someone who answers the door but isn't on your list and won't give their name. If you don't see **Not a target voter**, record the door as you do today and mention it to your lead.
 
 If a door already shows a result this round — yours or a teammate's — and you tap a different one, the app asks before changing it, and warns you if the change would delete a survey you took there. See [Why does the app ask before I change a door's result?](why-does-the-app-ask-before-changing).

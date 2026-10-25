@@ -7,7 +7,9 @@ import { changePrompt, buildChangePrompt } from '../../../../lib/doorChange';
 import { surveyPath } from '../../../../lib/doorPaths';
 import { surveyForDoor } from '../../../../lib/doorSurvey';
 import { optimisticSubmit } from '../../../../lib/recordAction';
+import { isPaused } from '../../../../lib/pace';
 import SurveyForm, { SurveyWall } from '../../../../components/SurveyForm';
+import PausedBanner from '../../../../components/PausedBanner';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useStagingCrash } from '../../../../lib/stagingCrash';
 import { DoorCrashCard } from '../../../../components/CrashCard';
@@ -54,12 +56,23 @@ export default function VoterSurvey() {
   // teammate's delta could otherwise pop it up in the middle of a survey.
   const doorCheckedRef = useRef(false);
 
+  // Paused for review (automatic pause, lib/pace.js). A screen that opens while paused shows a wall until
+  // the pause clears; a pause that lands while the form is showing never replaces it — what was typed stays,
+  // and Save is refused on the phone (lib/recordAction.js). So the wall is decided at mount, and once it has
+  // lifted it never comes back on this screen.
+  const paused = isPaused(bootstrap);
+  const [pauseWall, setPauseWall] = useState(paused);
+  useEffect(() => {
+    if (pauseWall && !paused) setPauseWall(false);
+  }, [pauseWall, paused]);
+
   // Smart re-survey confirm — at mount, before any answer is entered, once per visit. Fires
   // ONLY when a TEAMMATE surveyed this voter this round (surveyedByMe === false); an own
   // re-survey stays the one-tap self-heal, and an absent flag (old cache/server) fails open —
   // the server preserves the replaced response either way, so a missed confirm loses nothing.
   // Declared with the other hooks, before the DNC early return, and skips DNC voters (that
-  // wall renders instead — the two alerts must never stack).
+  // wall renders instead — the two alerts must never stack). A paused canvasser is skipped the same way, until
+  // the pause clears and the form shows.
   //
   // The same mount check also asks before CHANGING the door's result (lib/doorChange.js, owner
   // ruling 2026-10-02): a door already marked Not home, Refused, … this round gets "Take a survey
@@ -68,7 +81,7 @@ export default function VoterSurvey() {
   // Re-survey, and Add person → Add & take survey — before any answer is entered.
   useEffect(() => {
     if (resurveyPromptedRef.current) return;
-    if (!voter || voter.dnc) return;
+    if (!voter || voter.dnc || paused) return;
     if (shouldConfirmResurvey(voter)) {
       resurveyPromptedRef.current = true;
       const p = buildResurveyPrompt();
@@ -88,7 +101,7 @@ export default function VoterSurvey() {
       { text: w.cancelText, style: 'cancel', onPress: () => router.back() },
       { text: w.confirmText },
     ]);
-  }, [voter, household, router, colors]);
+  }, [voter, household, router, colors, paused]);
 
   // Do-not-contact wall: the server 403s the submit anyway — this is the
   // courteous version, before any answers get typed. After the hooks above so
@@ -107,6 +120,14 @@ export default function VoterSurvey() {
 
   if (!voter || !survey) {
     return <SurveyWall message={!voter ? 'Voter not found.' : 'No active survey configured.'} />;
+  }
+
+  if (pauseWall && paused) {
+    return (
+      <SurveyWall title="Recording paused" message="Surveys can't be saved until you're unpaused.">
+        <PausedBanner paused={paused} />
+      </SurveyWall>
+    );
   }
 
   // Gate-then-optimistic: optimisticSubmit first acquires the GPS stamp (no location =
@@ -208,6 +229,7 @@ export default function VoterSurvey() {
       saveLabel="Save Response"
       isSubmitting={isSubmitting}
       onSave={onSave}
+      banner={<PausedBanner paused={paused} />}
     />
   );
 }

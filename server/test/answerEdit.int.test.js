@@ -13,6 +13,7 @@ import mongoose from 'mongoose';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-answer-edit';
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
 process.env.ANSWER_EDIT_ENQUEUE_TIMEOUT_MS = '300';
+process.env.CLIENT_REPORT_QUEUE_TIMEOUT_MS = '300';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -1076,12 +1077,23 @@ test('the tag preview reads an answer text that starts with "$" as text, and equ
 // ── the client report builder's internal note ─────────────────────────────────────────────────
 
 test('the client report builder counts edited answers for the operator, and the client page never carries them', { skip }, async () => {
-  // Through the routes, the way the builder reads it: computed on create, SAVED, read back by the
+  // Through the routes, the way the builder reads it: computed by the build, SAVED, read back by the
   // preview. The count once vanished at the save (the report's stats schema didn't declare it).
+  // The numbers build on the worker (services/reports/clientReportBuilds.js); the queue is down
+  // here, so the real processor runs with a fresh job id, as a Retry that reached the queue would.
+  const { processClientReportJob } = await import('../src/services/reports/clientReportBuilds.js');
+  const { ClientReport } = await import('../src/models/ClientReport.js');
+  const build = async (reportId) => {
+    const jobId = new mongoose.Types.ObjectId().toHexString();
+    await ClientReport.updateOne({ _id: reportId }, { $set: { 'build.status': 'queued', 'build.jobId': jobId, 'build.startedAt': new Date() } });
+    const out = await processClientReportJob({ id: jobId, data: { reportId: String(reportId) } }, 'token');
+    assert.ok(out?.committed, JSON.stringify(out));
+  };
   const day = (offset) => new Date(Date.now() + offset * 86400_000).toISOString().slice(0, 10);
   const created = await call('POST', '/admin/client-reports', asAdmin({ campaignId: String(ctx.campaign._id), weekStart: day(-7), weekEnd: day(1) }));
   assert.strictEqual(created.status, 201, JSON.stringify(created.json));
   const id = created.json.report._id;
+  await build(id);
   const preview = await call('GET', `/admin/client-reports/${id}/preview`, asAdmin());
   assert.strictEqual(preview.status, 200, JSON.stringify(preview.json));
   const edited = await SurveyResponse.countDocuments({ campaignId: ctx.campaign._id, editedAt: { $ne: null } });
@@ -1093,7 +1105,8 @@ test('the client report builder counts edited answers for the operator, and the 
   assert.strictEqual(cumulative.deskEnteredResponses, await SurveyResponse.countDocuments({ campaignId: ctx.campaign._id, deskEntry: { $exists: true } }));
   // Recompute keeps them, and the client-shaped report (what the share link serves) never has them.
   const again = await call('POST', `/admin/client-reports/${id}/recompute`, asAdmin());
-  assert.strictEqual(again.status, 200, JSON.stringify(again.json));
+  assert.strictEqual(again.status, 202, JSON.stringify(again.json));
+  await build(id);
   assert.strictEqual((await call('GET', `/admin/client-reports/${id}/preview`, asAdmin())).json.provenance.cumulative.editedResponses, edited);
   assert.ok(!JSON.stringify(preview.json.report).includes('editedResponses'), 'never in the client view');
   assert.ok(!JSON.stringify(preview.json.report).includes('deskEnteredResponses'), 'never in the client view');

@@ -15,8 +15,10 @@ import { loadShiftOwners } from './shiftOwner.js';
 // their userId and lose the PERSON instead.
 //
 // Keyed on the ACCOUNT, across every org and every connection status: a disconnected or
-// errored connection, and an org the person had already left, keep links and events too
-// (DeletedUserRecord.organizationIds lists only the memberships active at deletion).
+// errored connection, and an org the person had already left, keep links and events too.
+// (DeletedUserRecord.organizationIds is wider since 2026-10-24 — every membership in any status
+// plus every org holding the person's own knocks or surveys — but an org they left before ever
+// recording anything there can still hold a link, so the account stays the key.)
 //
 // Holds while DELETED_IDENTITY_RETENTION_DAYS ≥ 121 (default 180): a shift clocked before
 // the deletion is then older than the hours sync's 120-day deep window, so no later pull

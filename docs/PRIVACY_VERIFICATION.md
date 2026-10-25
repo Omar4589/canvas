@@ -75,7 +75,13 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
     (deliberately not automatic). Legacy links otherwise remain live — see gaps. *[2026-08-07:
     revoke-legacy now carries a per-route `requireOrgRole('admin')` — before this, any team lead
     could enumerate and bulk-revoke the org's legacy-open links, including on campaigns they held no
-    grant for. Pinned in `reportSecurity.int.test.js`.]*
+    grant for. Pinned in `reportSecurity.int.test.js`.]* *[v6 2026-10-24, the client reports upgrade
+    (item 38): robots.txt is no longer the control and no longer disallows `/r/` — a crawler kept out by
+    robots.txt never fetches the page, so it never sees a noindex, and can still list a forwarded link's
+    bare URL. Every `/r/` HTML response now carries `X-Robots-Tag: noindex, nofollow` (the SPA fallback in
+    `app.js`, the only place that HTML is served; pinned in `staticPages.int.test.js`), and so does every
+    `/api/share` response, beside `Cache-Control: no-store`. The client-side meta stays. The revoke-legacy
+    switch now also bumps each swept link's credential version.]*
 11. **Device storage**: the bootstrap moved to `FileSystem.cacheDirectory` (excluded from iCloud and
     Android backup; a startup migration removes the old Documents copy; sign-out clears every copy),
     and `android.allowBackup: false` landed in `app.json`. **allowBackup is native-build-contingent**
@@ -101,6 +107,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   **plus the export-creation carve-outs** (`POST /admin/exports` and its count-only
   `/estimate` preview are the two writes a read-only org may perform — see the v4 2026-08-01
   Export Center entry below).
+  *[v6 2026-10-24: and, since item 37, the four writes that END access — delete an account, remove a
+  member, and both Deactivates. Nothing that turns access back on rides through.]*
 - Backups *"up to 12 months"* — an **Atlas console setting, not code**; verify against the console.
 - Geocode cache *"expire automatically after 18 months of disuse"* — the TTL index, inert until built.
 - The 180-day name retention on deletion records — still cron-kept on the worker dyno.
@@ -185,6 +193,14 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   paragraph + Last-updated bump, in the SAME commit as the mail code, so one deploy flips the
   published pages and the capability together; the env vars were pre-set in Heroku and are inert
   until that deploy. Customer §6 notice = owner, before deploying.)*
+  *[v6 2026-10-24: a deleted account's OWN EmailLog rows (userId = the account: invites, resets,
+  added-to notices) now lose the address and any bounce text — by account, never by address (item 37).
+  Warning and support-notice rows carry no userId and keep their recipients, as evidence.]*
+  *[v6 2026-10-24 — item 39: a new kind, `pacePauseAlert` (automatic pause): one row per recipient, each
+  with `meta.userId` when the recipient has an account, so it is scrubbed by account at deletion like the
+  personal sends; the billing-contact fallback carries no account and keeps its address for the 365 days,
+  as the billing notices do. Its subject is the same neutral sentence every time and names no one, so
+  nothing about the paused person reaches the log or the super-admin Emails page.]*
 
 - *(v4 2026-07-20)* **New internal collection: `CoordinatorChange`.** Team attribution changed so
   that the **current** coordinator owns all of a canvasser's history — assigning or changing someone's
@@ -487,6 +503,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   during that period", privacy.html; terms.html §13; DPA §9) is real for the queued-export
   path, not just legacy GETs. The watchlist's 60-day line above anchors here too. Narrowness
   guard-tested (`test/billing.int.test.js`: control write and export-DELETE still 402).
+  *[v6 2026-10-24: no longer the only writes — item 37 adds the four that END access (delete an account,
+  remove a member, both Deactivates), method-and-path exact and anchored; Reactivate and every other
+  write still 402 (`test/orgAccountDeletion.int.test.js`).]*
   **Assessment: NO published-policy sentence changes; two get TRUER.** (a) DPA §7's "including
   through the Service's export … capabilities" was an over-statement against §B8's "no
   full-account export" — the Export Center closes it. (b) The wind-down export sentences were
@@ -518,6 +537,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   method-and-path exact ×2 in `middleware/entitlement.js`; a wind-down org must be able to
   preview what it is about to export). Still no other write rides through — export DELETE
   remains 402; narrowness re-pinned in `test/billing.int.test.js`.
+  *[v6 2026-10-24: amended again by item 37 — the four writes that END access also pass in a read-only
+  org. Still nothing that turns access back on.]*
   **(ii) Match-key columns.** The `Voter ID` header in the activity/survey/notes CSVs is
   renamed `State voter ID`, and a `UID` column (the vendor id from the customer's own import,
   `Voter.uid`) is added beside it in those four files. Same-audience data: `uid` already
@@ -1091,6 +1112,45 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `services/campaignRoster.js`), pinned by `test/staffRosterScope.int.test.js`. Re-verify on any new
     assign path and on any new "staff skip the membership check" rule: staff skip it only in an internal
     org.
+- *(v6 2026-10-24)* **Account deletion by an org admin (item 37).** Five lines to keep true, each pinned in
+  `test/orgAccountDeletion.int.test.js`:
+  - an org admin can delete only an account with no membership in any other organization, active or switched
+    off;
+  - an account with billing access can't be deleted, or removed from the org, by an admin without billing access;
+  - support-tier staff can delete only an account nobody used; a used one needs break-glass;
+  - no deletion, Remove, demotion or Deactivate leaves an organization without a live admin, and no deletion
+    leaves it without a live billing admin;
+  - nothing writes to a deleted account: the eleven writers refuse or converge.
+- *(v6 2026-10-24)* **Client reports (items 34 and 38).** Lines in privacy.html `:101` the code now keeps
+  true, each with its owner:
+  - "door statuses and, where the customer chooses, responses to selected survey questions": a map off
+    serves nothing and a hidden question never reaches the map (`mapServed`, `servedMapKeys` in
+    `services/reports/reportVisibility.js`; `reportSecurity.int.test.js`);
+  - "never the typed text": `publicPointAnswer` on every map answer, and area cells hold only choice
+    labels;
+  - "exclude voter names, canvasser identities, and action timestamps": team labels refused when they
+    carry a canvasser's name (`TEAM_LABEL_HAS_NAME`), civil dates only on the wire (`reportDates` in
+    `clientReportView.js`);
+  - "90 days by default, or a period of up to one year": `SHARE_LINK_DEFAULT_DAYS` must stay 90, and Extend
+    never passes `lifetimeStart + 365 days` (`routes/admin/clientReportShares.js`);
+  - "a password can never be removed": `SHARE_PASSWORD_REQUIRED`.
+  Plus `:97`, which covers per-link open counts (owner ruling: no sentence of their own) and Keep me signed
+  in. A change that adds a field to the client payload, a map payload or the area cells re-verifies here.
+  *[v6 2026-10-24, code review round 1: re-verified for `visibility.mapVersion` (an opaque HMAC of the
+  live snapshot's key, mode, area size and served questions only; item 34(d) stamp) and the map payload
+  cache (the same bytes, held in web memory; item 38(j)). The lines above still hold.]*
+- *(v6 2026-10-24)* **Automatic pause (item 39).** Lines the code keeps true, each with its owner:
+  - privacy.html `:94` ("We collect location only at the time an action is recorded"): the rule reads only
+    the stamps of recorded actions (`services/audit/paceRule.js`); no trail, no extra capture. A design that
+    samples location between doors is a policy change, not a code change.
+  - `:127` and the record's own promise: `PacePause` stores no coordinate, address, email address, name or
+    free text (`models/PacePause.js`; `pacePause.int.test.js` checks a stored record).
+  - `:106` (Resend receives the recipient's name and email address): the alert names no one and lists no
+    address (`pacePauseAlert`, `services/mail/templates.js`).
+  - `:105` and the role walls: a lead never receives another campaign's household, address, result,
+    campaign, distance or needed seconds (`shapeWindowVisit`, `routes/admin/pacePauses.js`).
+  - `:122`: `PacePause` is in `CAMPAIGN_SCOPED`, `ORG_SCOPED` and `LATE_WRITE_MODELS`.
+  A change that adds a field to `PacePause`, the email or a lead's view re-verifies here.
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -3028,7 +3088,16 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     `visibility.mapAnswerKeys` is sent raw, and `supportQuestionKey` is sent even when that question is
     hidden (`clientReportView.js:68, 88-91`). Keys are slugs of the question's title
     (`SurveyBuilder.jsx:107-110`), so a key gives away the hidden question's wording. No client screen
-    reads `visibility.mapAnswerKeys`. **Policy text:** privacy.html
+    reads `visibility.mapAnswerKeys`. (e) *[verified]* Unticking every survey question shows all of them
+    to the client: an empty `visibleQuestionKeys` means "all" (`clientReportView.js:10-12`), so an
+    operator who meant to share no survey breakdowns shares every one. (f) *[2026-10-24, review round 3,
+    verified with the real `normalizeAndFilterAnswers`]* A follow-up question on the map reveals the
+    hidden question it depends on, door by door. Survey questions can be conditional (`visibleIf`,
+    `SurveyTemplate.js`), and the field submit drops answers to questions that weren't shown
+    (`normalizeAnswers.js`), so if "Yard sign?" is asked only after a Yes to a hidden "Back the recall?",
+    every door carrying a yard-sign answer is a recall supporter. The map path never considers
+    `visibleIf`. The fix (PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F1) keeps a follow-up off the map unless
+    every question it depends on is on it too. **Policy text:** privacy.html
     `:101` says the map shows door statuses "and, where the customer chooses, responses to selected
     survey questions, shown at the address level" — (a) means a customer who chose no map still has
     address-level points served behind the link; (b) and (c) are control gaps, not false sentences. The
@@ -3036,6 +3105,76 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     sentence true as written, with no policy, Terms or DPA edit. Until they ship, treat that sentence as
     at risk. Separately, the same line says links expire "after 90 days by default, or a period of up to
     one year chosen by an administrator": the API accepts it, the share panel offers no way to choose it.
+    *[v6 2026-10-24 — CLOSED IN CODE by the client reports upgrade (PROPOSAL_CLIENT_REPORTS_UPGRADE.md,
+    built 2026-10-24, uncommitted; deploy pending — stamp the deploy date here when it ships, and run
+    `migrate:client-report-visibility -- --apply` for the reports published before it). What the code
+    now does, read from it and pinned by `reportSecurity.int.test.js`, `clientReportBuild.int.test.js`,
+    `clientReportMigration.int.test.js` and `shareLinks.int.test.js`:*
+    - *(a) Map off serves nothing. Turning the map off deletes every map row of the report in the same
+      PATCH and prunes the live snapshot's and any build's inputs (`routes/admin/clientReports.js`); a
+      build commits no rows when its inputs say the map is off (`commitBuild`, `clientReportBuilds.js`);
+      the readers serve a map only when both the report's setting and its live snapshot say yes
+      (`mapServed`, `services/reports/reportVisibility.js`), else `404 MAP_NOT_SHARED`
+      (`checkMapRequest`, `services/reports/clientReportMap.js`); the nightly `client-report-row-sweep`
+      deletes any row left on a map-off report; the migration deletes the legacy rows of map-off reports
+      (step 5).*
+    - *(b) A hidden question reaches neither the charts nor the map. Map questions are `mapKeysFor` =
+      `mapAnswerKeys` ∩ the visible questions (empty means none), intersected with the live snapshot's
+      own map keys (`servedMapKeys`); `mapFilterSurvey` and the map payloads carry only those; answers
+      outside them are `$pull`ed from the stored rows at the edit and at every build's commit, and the
+      migration narrows legacy reports (steps 4-5).*
+    - *(c) A link password set by the operator needs 12 characters, on create and on change (`400
+      SHARE_PASSWORD_TOO_SHORT`, `routes/admin/clientReportShares.js`); an older short one is flagged
+      after its next successful unlock (`passwordMeetsRule`, item 38(e)). Guessing is budgeted per link:
+      no link checks more than 50 wrong passwords in any 24 hours, the slot reserved before bcrypt runs
+      (`reserveUnlockSlot`, `services/reports/shareLinks.js`), beside the per-IP limiter.*
+    - *(d) The client payload's `visibility` is `{ showMap, mapMode, areaSize }` only, and
+      `supportQuestionKey` is sent only when that question is visible (`shapeReportForClient`,
+      `services/reports/clientReportView.js`).* *[v6 2026-10-24, code review round 1 (PUBUX-1):
+      `visibility` also carries `mapVersion`, an opaque 16-character HMAC (`opaqueKey`, salted with the
+      server's secret) of the live snapshot's key, the map mode, the area size and the SERVED map
+      questions — only what the map payload already shows the link holder; null when no map is served.
+      No hidden question's key, no id, no time.]*
+    - *(e) Empty means none for visible questions (`visibleKeysFor`, `shapeWindow`), on every report. The
+      migration lists the legacy reports whose operator had unticked every question (step 1); by default
+      they now show none, and `--keep-legacy-all` keeps their charts.*
+    - *(f) A follow-up reaches the map only with every question it depends on (`closeUnderDeps` over the
+      build's frozen `questionDeps`: the transitive closure of today's `visibleIf` and the survey's
+      monotone `SurveyTemplate.depsEver` record, item 38(b)), in every writer and reader; a rule accepting
+      every option of its parent isn't a dependency. Map answers come only from the campaign's own
+      survey. In area view a follow-up shows area answers only when its parents do (item 38(a)).*
+      *[v6 2026-10-24, code review round 1 (LEGACY-1) — reports published BEFORE the upgrade: their map
+      rows were frozen from whatever survey gave the answers, and the campaign's survey may have been
+      swapped, detached or edited since, so reading their dependencies from the current survey alone
+      could still put a hidden question's follow-up on the map (and the migration would have frozen
+      that). Now such a report takes its dependencies from EVERY survey with a response in its campaign,
+      plus the current one (`legacyTemplatesFor`, `services/reports/clientReportMap.js`), united
+      (`questionDepsOf`), and fails closed: a map question that is no question of any of those surveys
+      is never served, and with no survey at all no map question is (`liveInputs`,
+      `services/reports/reportVisibility.js`). Only a PUBLISHED report without `snapshotInputs` reads
+      this way; any other report without them (a draft) has nothing live — no map, no map questions —
+      so its old rows are never served. The migration follows the same rule (steps 3-5). One case code
+      can't close: a condition removed BEFORE the deploy, with answers given under that older version —
+      nobody stored that version's conditions. The migration's step 0 lists every survey with answers
+      older than the version its record starts at (`olderVersionTemplates`, from the new
+      `SurveyTemplate.depsEverFromVersion`, item 38(b)), and the builder's Before you publish warns on a
+      draft whenever such an answer could reach a shown map beside a hidden question
+      (`checks.conditionsUnknown`, `services/reports/clientReportChecks.js`). Said plainly: Before you
+      publish renders on drafts only, so a report ALREADY published — including every report published
+      before the upgrade, the case this matters for most — gets no on-screen warning; for those the
+      migration's step-0 list is the only notice, and the owner should look over the map questions of
+      the listed surveys' campaigns' published reports that hide a chart. Pinned by
+      `clientReportEdits.int.test.js` (the survey swap, the migration's listing) and
+      `clientReportChecks.int.test.js` (the warning).]* *[v6 2026-10-24, code review round 2 (P-2): the
+      "no on-screen warning" gap above is closed — a published report's builder now shows the same
+      warning in a **Worth a look** box (`PublishedChecks`, `client/src/components/clientReports/
+      BeforePublish.jsx`), reports published before the upgrade included. The migration's step-0 list
+      stays as the record.]*
+    - *The expiry remark is closed too: the panel offers 30, 90, 180 or 365 days (default 90, still
+      `SHARE_LINK_DEFAULT_DAYS`), Extend moves an expiry later but never past one year from the link's
+      lifetime start, and an expired link is renewed to a new address. **Policy text:** privacy.html
+      `:101` is true as written for these points once this deploys; no Privacy Policy, Terms or DPA edit.
+      The new stores and records this upgrade adds are item 38.]*
 
 35. **[v6 2026-10-24 — Per-person report drills returned other organizations' people, and let a team
     lead open anyone in their own organization. FIXED 2026-10-24; deploy pending (stamp the deploy
@@ -3162,6 +3301,402 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       identities as written.
     - **Watchlist:** the 2026-10-24 bullet in *New policy sentences to keep true* covers this direction
       too.
+37. **[v6 2026-10-24 — An org admin can delete a member's account. BUILT 2026-10-24; deploy pending (stamp the
+    deploy date here when it ships). Privacy-affecting: a new deletion path, and changes to what every
+    deletion leaves behind. No published sentence becomes false; two get truer.]** Plan, rulings and review
+    log: [PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md).
+    - **The new path.** `GET /admin/memberships/:userId/deletion-check` (the review) and
+      `DELETE /admin/memberships/:userId/account` (body `{ confirmEmail, expectKind }`), admins only, never team
+      leads. Both run `reviewOrgDeletion` (`services/users/deleteAccount.js`); the first refusal ends it:
+      - the person must be a member of this org (an unknown id gets the same 404);
+      - who is asking, in `orgContext`'s order: staff with a non-admin membership here are refused
+        (`ADMIN_ONLY`); staff in an internal org without a membership may delete; staff under a support grant
+        may delete an unused account at support tier and any account at break-glass
+        (`BREAK_GLASS_REQUIRED`); the store-review logins may not (`REVIEW_LOGIN`);
+      - never yourself, never a staff account (a grant-holder aiming at staff gets `STAFF_SELF_MINT`);
+      - **any membership in another organization, active or switched off, refuses**
+        (`OTHER_ORGANIZATION`, owner decision 2026-10-24). The response then holds that one blocker and
+        nothing else: no name, id or count of the other org;
+      - billing access protects its holder: only an admin with billing access, or staff, may delete them
+        (`BILLING_TARGET`);
+      - the existing blockers, for this org only: a locked review account, the last live admin, the last live
+        billing admin.
+    - **Attribution.** `DeletedUserRecord.reason` gains `org_admin`; staff deleting inside an org record
+      `super_admin`. `deletedBy` is the actor. The org's admins see the deletion on the person's row ("Deleted by
+      Alex Kim", "Deleted their own account", "Deleted through Doorline support"); the deleter is named only to an
+      org where they hold a membership. A grant-holder's review and deletion name the account in `AccessLog`.
+    - **One model, all four doors** (self, the platform page, the CLI, the org door): one deletion at a time per
+      account (the pending name record is the lock, `DELETION_IN_PROGRESS`); memberships switched off one row at a
+      time, then a recount of LIVE admins and billing admins (`billingGuards.js` now counts live accounts only);
+      the 14-field scrub as one conditional write; an idempotent finish; a sweep every 15 minutes and before the
+      nightly purge for a crash on either side; and a purge that skips any record whose account isn't deleted.
+    - **What a deletion now leaves, on every path:**
+      - **The name record covers more organizations:** every membership in any status, plus every org where the
+        person recorded their own doors or surveys (desk marks excluded). It used to be only the memberships
+        active at deletion. That is new name exposure, inside the window privacy.html `:128` describes and only to
+        orgs whose records carry the person (stamped at A4).
+      - **Eight more lookups restore the name for the window:** the GPS audit, the leaderboard's and Timeline's
+        team labels, the team breakdown and tag-team totals, the per-canvasser summary and responses, the Survey
+        Results voters-by-answer CSV, and the canvasser CSV's crew stamp. All are org-scoped through
+        `hydrateCanvassers`, which now restores nothing when handed no org. Team labels are lead-visible, and a
+        lead can be the client. About 45 other surfaces still show "Deleted user" at once (a follow-up).
+      - **An unused account** (created on or after 2026-05-15, never signed in, nothing on record here, never a
+        coordinator) deleted from the org door loses that org's membership row, and the record keeps no name.
+      - **Memberships lose `billingAccess`** when a deletion switches them off, so a deleted account's row never
+        reads as a bill-payer and any admin can tidy it away.
+      - **The email send log:** rows whose `userId` is the account (its own invites, resets and added-to
+        notices) get the tombstone address in `to`, with `error` and `deliveryDetail` cleared: by account, never
+        by address (owner decision 2026-10-24). A late bounce on such a row stores no text. **Residual:**
+        deletion-warning and support-grant notice rows carry no `userId` and keep their recipient's address, as
+        the evidence those notices went out (warnings for good, notices for the log's 365 days). Accounts deleted
+        before this ships: `npm run migrate:scrub-deleted-email-log`, then `-- --apply` (Heroku Run console).
+    - **No write lands on a deleted account.** The login and last-seen stamps, the self-service profile and
+      password writes, reset and invite tokens, and an admin's identity and temp-password edits are conditional on
+      the account being live. The membership edit, both Reactivates, the crew add and a member link re-check after
+      their last write and converge: off, no billing access, no grants.
+    - **Paused (read-only) orgs** may now delete an account, remove a member and Deactivate (both doors): the
+      writes that END access. Nothing that turns access back on passes. (Stamped at each "exports only" passage.)
+    - **Billing access now protects its holder from Remove from org** too (`BILLING_ACCESS_REQUIRED`), except on a
+      deleted account's row.
+    - **No org is left without a live admin, by any door.** Remove from org, a demotion and Deactivate now re-count
+      live admins after their write and undo one that reached zero (`LAST_ADMIN`), the same backstop billing access
+      already had. With deletion, two admins can take each other out from two doors at once; and staff can no
+      longer remove, demote or switch off an org's only admin.
+    - **Policy text.** No sentence becomes false, and none is added (owner answer 2026-10-23):
+      - privacy.html `:118` keeps information "as otherwise instructed by the customer organization", and DPA §2
+        counts the customer's "use and configuration of the Service's features" as instructions. DPA §9's 180-day
+        sentence describes self-deletion; the admin path rests on §2.
+      - **Truer:** privacy.html `:127` ("your email address … removed") now holds for a person's own mail in the
+        send log, and privacy.html `:115` ("disable access promptly") now holds in a paused org too.
+    - **Still open, recorded for the owner:** the address in `Subscription.billingContact.email`,
+      `SubscriptionEvent` and `OrgDeletionRequest.requestedByEmail`, and in the 12-month backups; the ~45
+      surfaces; until the phone clean-up (plan §E2) ships after Election Day, a deleted account's unsent doors go
+      up under whoever signs in next on that phone (the review tells the admin to let the phone sync first); a
+      refused deletion can drop a live phone's sync if it lands in the ~100 ms switch-off window.
+    - **Pinned by** `test/orgAccountDeletion.int.test.js` (32 tests, incl. the crash and race cases a review
+      reproduced on 2026-10-24), `test/deletedUserNames.int.test.js` (6) and the updated
+      `test/billingAccess.int.test.js` (the Remove door checked with a staff actor).
+    - **Watchlist:** five lines in *New policy sentences to keep true* (2026-10-24, account deletion).
+38. **[v6 2026-10-24 — The client reports upgrade: what it stores, shows and keeps. BUILT 2026-10-24,
+    uncommitted; deploy pending (stamp the deploy date here when it ships). Privacy-affecting (new stored
+    records, new retention, a new reader of History), but no new subprocessor, and no published Privacy
+    Policy, Terms or DPA sentence becomes false.]** Plan, rulings and *As built*:
+    [PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md); doc of record
+    [CLIENT_PORTAL.md](CLIENT_PORTAL.md). It closes item 34 (stamped there) and changes D11 (stamped
+    there). Everything below was read from the code.
+    - **(a) Area cells, a new stored aggregate with no address.** `ClientReportAreaCell` (new collection):
+      per fixed H3 hexagon of an area-view report (resolution 9, about 1,100–1,400 ft across, or 8, about
+      0.55–0.7 mi), the doors reached, the doors by status, and single-choice answer counts with `n`, the
+      homes there that answered. No address, door coordinate, voter, canvasser or time. A question shows
+      answers by area only when every area has at least five answers to it (all or nothing per question,
+      owner ruling 2026-10-24; the decision reads counts only), and a follow-up only when its parents do,
+      applied when the cells are written and again when they are read (`services/reports/areaCells.js`).
+      What it can still reveal, and the builder says so in plain words: an area where every answering home
+      agreed shows how each of them answered; statuses show for one-home areas; other reports on the same
+      link can narrow things down (*Before you publish* names them). Replaced by each build, deleted with
+      the report, the campaign (campaign cascade) and the organization (`ORG_SCOPED`), in
+      `LATE_WRITE_MODELS`, swept nightly. privacy.html `:101`'s "shown at the address level" over-describes
+      an area report, which shows less: an optional owner refinement, not a false sentence.
+    - **(b) `SurveyTemplate.depsEver`**: every question-to-question dependency a survey has ever had, as
+      question-key pairs. Survey structure, no personal data; it only ever keeps a follow-up off a client's
+      map. Seeded by `migrate:client-report-visibility` (step 0), kept by survey create, edit and Duplicate.
+      *[v6 2026-10-24, code review round 1 (LEGACY-1): beside it, `SurveyTemplate.depsEverFromVersion`, a
+      version number — the oldest survey version that record is complete for (1 on create and Duplicate;
+      the replaced version on the first questions edit that finds it missing; the current version when the
+      migration seeds it). Survey structure again, no personal data. It drives the builder's warning
+      (`conditionsUnknown`) and the migration's list of surveys with answers older than their record
+      (gap 34(f)).]*
+    - **(c) Per-link open counts.** `ClientReport.views`: per share link `{ opens, firstOpenedAt,
+      lastOpenedAt }`, and apart from them the organization's own members by role (admins, leads, others)
+      and Doorline staff. The report page pings once per report per browser per day, remembered by a
+      `localStorage` marker holding the link's day and report ids. If the browser is signed in to
+      Doorline, the page sends that session token, and the server resolves it with `requireAuth`'s checks
+      (`resolveSessionUser`, no last-seen stamp) only to choose the bucket; it never grants or refuses
+      anything. **No IP address, no device, and nothing identifying the link holder is stored.** Shown to
+      the campaign's admins and leads ("Opened via Candidate: about 2 visits"). Lives on the report and is
+      deleted with it, the campaign or the organization. **Owner ruling 2026-10-24: no policy sentence.**
+      privacy.html `:97` already covers it: "we automatically collect … the pages or resources you request,
+      and the date and time of your request". The same paragraph's "We use local storage on your device to
+      keep you signed in" doesn't say *only*; the once-a-day marker is a second, non-identifying use of
+      local storage on the report page. (The pre-upgrade `viewCount` counter also still moves on link
+      opens: a counter, no new data; its label is a code-review item, PROPOSAL §P3.) *[v6 2026-10-24,
+      code review round 1 (ADMINUX-12): no longer — opens don't move `viewCount` or `lastViewedAt` at all;
+      both are frozen at their before-the-upgrade values, which the panel shows as "N views before
+      per-link counts" (`recordReportOpen`, `services/reports/reportOpens.js`; pinned by
+      `clientReportOpens.int.test.js`).]*
+    - **(d) Wrong-password counts and times on each link.** `ReportShareLink.failedUnlockAt` (the times of
+      up to 50 wrong passwords within the last 24 hours, each with a random id), `failedByDay` (counts per
+      UTC day, the last 7), `failedUnlocksTotal` (lifetime), `lockedUntil` and `lastLockedAt`, plus
+      History rows when a UTC day reaches 10 wrong passwords and at each lock. **Never the attempted
+      password, an IP address or a user agent** (the per-IP limiter's in-memory counter is unchanged).
+      Shown on the link panel to the campaign's admins and leads. Unlock now clears the 24-hour list,
+      rotate and renew also clear the per-day counts, and the total lasts as long as the link (deleted with
+      it, the campaign or the organization). Terms §6's "Anyone with an unrevoked, unexpired link (and its
+      password) can view the report" is broader than the code during a lock, when a new device is refused
+      until the oldest of the 50 is a day old or someone presses Unlock now or rotates: a risk disclosure,
+      and the plan (§I, §O7) proposes no edit.
+    - **(e) `passwordMeetsRule`**, a boolean on each link: true for every password set or generated under
+      the 12-character rule; on an older link `null` until its next successful unlock, which records only
+      whether the entered password's length met the rule (`notePasswordRule`, pinned to the hash it was
+      checked against). The password is never stored; only its bcrypt hash, as before.
+    - **(f) Keep me signed in on this device** (opt-in on the password screen): the share token lasts 30
+      days instead of 24 hours and sits in the browser's `localStorage` instead of `sessionStorage`, on the
+      client's own device. It ends at any credential change (password change, rotate, renew, disable: the
+      token's `cv`), when the link expires, is deleted or the organization is suspended (the page drops it),
+      and at **Sign out on this device**. Covered by privacy.html `:97`'s "We use local storage on your
+      device to keep you signed in."
+    - **(g) The Client Reports tab's History, customer-facing.** `CampaignChange` rows with source
+      `client_report` (`services/reports/clientReportHistory.js`): report events (created, published,
+      edited, numbers refreshed or discarded, taken down, put back up, deleted, switched to areas), team
+      events (created, renamed, crews changed, ended) and link events (created, password changed, rotated,
+      renewed, extended, disabled, enabled, wrong passwords, locked, unlocked, deleted), each naming who did
+      it: a customer's admin or lead, or Doorline staff working under a support grant. **An edit row keeps
+      the report's earlier title and notes** (operator-written text that can describe the campaign's
+      voters) until an admin **Erases** it (one row, or every row of a report, including after the report
+      is deleted, and optionally the same text in later drafts Next copied it into), or the campaign or
+      organization is deleted (both cascades delete `CampaignChange`). Deleting a report keeps its History
+      unless the admin ticks the erase option. **Readable by the organization's admins and by team leads
+      on the campaign, who may be the client.** Link rows never hold the link's URL token, a password or its
+      hash, an IP address or a user agent. The rows are kept out of the campaign's general History and the
+      phone (`GET /admin/campaigns/:campaignId/history` filters them unless `?include=client_reports`). No
+      policy edit; recorded here as customer-facing, with Erase. *[v6 2026-10-24, code review round 1
+      (STATE-3): one more writer of the existing "deleted" row — ending a team with "delete its open
+      drafts" now writes one per draft it actually deletes (only what is still a draft; a draft published
+      meanwhile is left alone), naming who ended the team and the draft's period, as Delete does
+      (`routes/admin/clientReports.js`). Same row shape, same readers, same Erase and cascades.]*
+      *[v6 2026-10-24, code review round 2 (WALK-3): one new team event, **"Team continued"**
+      (`clientReportSeries.continued`), written when an ended team is continued. It holds the team's label
+      and its coordinators' user ids (`toValue: { label, coordinatorIds }`), exactly like the existing
+      created and crews-changed rows; the "Team ended" and "Crews changed" rows now also carry the team's
+      label as it read at the time. Operator data (a team name, which crew leads it covers), no canvasser
+      beyond the crew-lead ids those rows already held. Same readers (the organization's admins and the
+      campaign's leads), same cascades.]*
+    - **(h) `OrgBranding`** (new collection): one logo per organization, stored as a fresh PNG the server
+      writes from the upload's validated pixels (`services/branding/png.js`), so no metadata or other chunk
+      of the uploaded file is kept; its size, and who changed it last. Admins write; it shows on the
+      organization's client report pages and PDFs to anyone holding a link and its password. Deleted with
+      the organization (`ORG_SCOPED`); it has no campaign.
+    - **(i) Report series** (`ClientReportSeries`, new collection): each run of reports (whole campaign, a
+      walk list, a team, a team on one walk list) with an operator-typed label and, for a team, the ids of
+      the coordinators whose crews it covers, current and past. A team label containing a crew member's or
+      coordinator's first or last name is refused, and a walk-list label that matches one needs the
+      operator to confirm it names a place, so privacy.html `:101`'s "exclude … canvasser identities" holds
+      for labels as for walk-list names before. A team report that one canvasser worked shows one person's
+      work, without their identity; the builder warns. Deleted with the campaign and the organization.
+    - **(j) [v6 2026-10-24, code review round 1 (PUBUX-4)] An in-process copy of each map payload.** The
+      client map's pins and areas payloads are built once and kept gzipped in the web process's memory
+      (`sendMapPayload` / `gzippedMapPayload`, `services/reports/clientReportMap.js`): door coordinates
+      (rounded to six decimal places), door statuses, answer indexes into the served questions' options
+      and the served questions' legend for a pins report; hexagon outlines, door counts by status and the
+      area answer counts the area rule allows for an area report. **No street address** (a tapped door's
+      address is still fetched per request and is not cached), no voter, no canvasser, no time, no id. It
+      is exactly what the map endpoint already serves the link holder, built from the report's frozen
+      rows, which stay in MongoDB as before. Held in that one process's memory only (the app writes it
+      nowhere else: no file, no Redis, no database), to a byte budget (`CLIENT_REPORT_MAP_CACHE_MB`,
+      default 64; `0` turns it off). An entry is served for at most 15 minutes after it was built; expiry is checked when an
+      entry is asked for, so one nobody asks for again stays in memory until newer payloads push it out of
+      the budget or the process restarts — never served in the meantime after a take-down, deletion, map
+      switched off or question taken off, because every read passes the link's (or the admin route's)
+      access checks and `checkMapRequest` before the cache is asked, and the cache key includes the live
+      snapshot and the served questions. No new third party. Said out loud: it is a new, short-lived copy
+      of already-stored map data, and a deleted report's map can sit unread in that memory until eviction
+      or restart; no Privacy Policy, Terms or DPA sentence becomes false (DPA §9's deletion is an aim
+      "within 30 days", and nothing here outlives a process restart). *[v6 2026-10-24, code review round 2
+      (P-1) — the "stays in memory until newer payloads push it out or the process restarts" sentences
+      above are superseded: a sweep every minute now drops every expired entry, asked for again or not,
+      so no payload is held more than **at most about 16 minutes** after it was built (15-minute expiry,
+      checked each minute; `sweepMapCache`, `services/reports/clientReportMap.js`). The sweep runs only
+      while the cache holds something. `CLIENT_REPORT_MAP_CACHE_TTL_MS` / `…_SWEEP_MS` exist to shorten
+      both times in tests; production uses the defaults. A deleted report's map can therefore sit unread
+      in memory for at most about 16 minutes, never served.]*
+    - **(k) [v6 2026-10-24, code review round 1 (LEGACY-1 ruling)] Old drafts' map rows go sooner.** Under the
+      legacy fallback rule (gap 34(f)), a draft from before the upgrade — or any draft before its first
+      build commits — has nothing live, so its old map rows are never served. The nightly
+      `client-report-row-sweep` now counts such a report as map-off and deletes those rows
+      (`services/reports/clientReportSweep.js`), and the migration's step 5 strips every answer from any
+      it finds (`migrations/clientReportVisibility.js`). Retention only shrinks: rows that used to wait for
+      the draft's first build to commit are deleted at the next nightly sweep.
+    - **(l) [v6 2026-10-24, code review round 2 (CONCUR-2, P-3)] The builder's copy on the operator's own
+      device.** The report builder keeps a change that hasn't reached the report in the operator's own
+      browser (`localStorage`, one entry per report, `doorline.clientReport.unsentEdit.<reportId>`;
+      `readUnsent`/`writeUnsent`, `client/src/components/clientReports/hooks.js`): since round 1, an
+      unsent edit of a published report (and a draft change refused because someone published the report
+      meanwhile); **since round 2 also a draft change that didn't save when leaving** — written before the
+      unmount keepalive is sent, so a refused one is offered back. It holds the report's editable settings
+      as the operator had them and as they started from (title, observation sections, which charts, map
+      questions and voter groups show, the headline question, map and goal switches), so **it may include
+      observation text** the operator wrote, which can describe a campaign's voters. It never holds a
+      voter record, an answer, an address or a credential. It stays only in that browser until the
+      operator restores it (it then goes to the server like any edit), discards it, cancels the edit, or
+      the builder sees the change already landed and clears it; a newer copy replaces an older one, and a
+      private window or blocked storage keeps nothing. **No server collection, no new third party**, and
+      Doorline staff can't read it. privacy.html `:97` says "We use local storage on your device to keep
+      you signed in"; like the report page's once-a-day marker under (c), this is another use of local
+      storage that sentence doesn't exclude (it doesn't say *only*): the operator's own device, holding the
+      operator's own unsaved work. No policy sentence becomes false; an owner refinement could mention it.
+    - **What reaches a link holder is otherwise less than before**: a door's street line only when tapped
+      (`…/map/doors`, at most 200 per request, from the live snapshot only), coordinates rounded to six
+      decimal places (about 4 in, still exact for a house), no internal ids or keys, and dates as civil
+      dates (the report's own id, an ObjectId, carries the draft's creation time, not the numbers'
+      cut-off). The "earlier totals were updated" line tells the client that earlier numbers moved, never
+      why. *[v6 2026-10-24, code review round 2 (PRIV-2) — "no internal ids or keys" was not true of the
+      sign-in token itself, whose payload any holder can read: it carried the link's and the campaign's
+      ObjectIds, each with a creation time. Now: new share sign-in tokens are `{ kind, link, cv, iat, exp }`,
+      where `link` is an HMAC-SHA256 of the link's id under the server's secret (`shareLinkKey`,
+      `services/auth/tokens.js`; checked by `requireShareAccess` through `shareTokenNamesLink`,
+      `routes/public/share.js`), with no ObjectId and no campaign id. Tokens issued before named the link
+      and the campaign by ObjectId; they keep working on the old check until they expire (24 hours, or 30
+      days with Keep me signed in), so for up to 30 days after the deploy a device signed in earlier still
+      holds one.]*
+    - **No new subprocessor.** H3 runs inside our server (`h3-js`), the logo is stored in our MongoDB, area
+      hexagons are drawn on the Mapbox tiles the map already loads, and Mapbox's Static Images API is not
+      used. DPA §6 is unchanged and no customer notice is due.
+    - **Policy text.** No Privacy Policy, Terms or DPA sentence becomes false. privacy.html `:101`'s link
+      sentence ("90 days by default, or a period of up to one year chosen by an administrator"; "a password
+      can never be removed") is kept true by `SHARE_LINK_DEFAULT_DAYS` = 90 and the one-year lifetime cap
+      (`services/reports/shareLinks.js`); leads may choose expiry too, under the owner's 2026-10-23 reading
+      that "administrator" covers them. **The demo organization's link follows the same one-year life**
+      (`ensureShareLink`, `services/platform/seedDemoOrg.js`): a demo reset moves its expiry out to 90 days,
+      never shorter and never past the year, and once less than 90 days of the year remain it renews the link
+      as the panel's Renew does (a new token unless `SEED_DEMO_SHARE_TOKEN` pins it, a new life, the
+      credential version bumped, the failure budget cleared); its password's `passwordMeetsRule` comes from
+      the password's length, so a short `SEED_DEMO_SHARE_PASSWORD` is flagged, never claimed to meet the rule.
+      *[v6 2026-10-24, code review round 1 — re-checked after its fixes (stamps on (b), (c), (g), new (j)
+      and (k), and gap 34(d) and (f)): still **no Privacy Policy, Terms or DPA sentence becomes false**, and
+      still no new subprocessor (the map payload cache is in our own web process; DPA §6 unchanged, no
+      customer notice). The round's other fixes narrow exposure rather than widen it: the series picker no
+      longer reads another organization's crew names (SEC-1 — a cross-tenant read in the new, never-deployed
+      picker, refused now with a 404), a draft's auto-save can no longer put
+      half-written text in front of a client (ADMINUX-2), and an old report's follow-up can no longer
+      reach the map through a swapped survey (LEGACY-1). privacy.html `:101`'s "shown at the address
+      level" remark under (a) is unchanged.]*
+      *[v6 2026-10-24, code review round 2 — re-checked after its fixes (stamps on (g), (j), the link-holder
+      bullet, new (l), and gap 34(f)): still **no Privacy Policy, Terms or DPA sentence becomes false**, and
+      still no new subprocessor (DPA §6 unchanged, no customer notice). Two fixes narrow exposure: the share
+      sign-in token no longer carries ObjectIds (PRIV-2), and the map cache holds nothing much past 16
+      minutes (P-1). Versioned edits (contract C8) close the path by which a stale builder screen could put a
+      hidden chart, a deleted observation section or a removed map question back in front of a client
+      (PRIV-1, CONCUR-1). The one widening is (l): the builder's on-device copy now also holds a draft change
+      that didn't save on the way out, in the operator's own browser only. privacy.html `:97` and `:101` and
+      Terms §6 still hold.]*
+    - **Watchlist:** the 2026-10-24 client-reports bullet in *New policy sentences to keep true*.
+39. **[v6 2026-10-24 — Automatic pause: Doorline pauses a canvasser's recording when their doors come in
+    faster than anyone could knock them. BUILT 2026-10-24, uncommitted; deploy pending, and it acts only once
+    the `PACE_PAUSE` config var is set (stamp both dates here when they happen). Privacy-affecting — the first
+    automated adverse action about a named worker, a new stored machine verdict, more of the action-time GPS
+    stamps kept when a door is re-saved, and a new email — but no new subprocessor, and no published Privacy
+    Policy, Terms or DPA sentence becomes false.]** Plan, the owner's decisions 1–19 and both review rounds:
+    [PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md); doc of record [AUDIT.md](AUDIT.md) → *Automatic pause*
+    and §G. Everything below was read from the code.
+    - **(a) The pause, and the record of it.** When 8 of any 20 judged visits in a canvasser's day came in
+      faster than anyone could get there and knock, `runPaceCheck` (`services/audit/pacePause.js`) writes a
+      `PacePause` (new collection, `models/PacePause.js`), and the mobile write routes refuse that canvasser's
+      fresh door writes (`403 PACE_PAUSED`) until a person on their team unpauses them. It is the product's
+      **first automated adverse action about a named worker** — recording stops; nothing is removed, hidden or
+      re-counted, and no reader of `PacePause` changes a count, export, report, bill or FbTime (decision 2) —
+      and its **first stored machine verdict** (the GPS-audit flags are computed live and never stored,
+      H16(c)). Stored: the organization, campaign and canvasser ids; when it fired; the tipping row's id and
+      time; the campaign day and time zone; the rule's numbers in force; the window of judged visits (each:
+      row, household and campaign ids, the result, its time, the previous door's household, campaign, result
+      and time, seconds, meters, the seconds the rule needed, the verdict, a pattern label, the survey check);
+      the alert's outcome as counts (sent, failed, when); and who resolved it, when and how. **No coordinates,
+      no addresses, no email addresses, no names and no free text** — addresses and names are read live when a
+      review opens, through the existing readers (`hydrateCanvassers`, org-scoped).
+    - **(b) `CanvassActivity.replaced.history`**: the earlier saves at the same door by the same canvasser in
+      the same round, up to 20 — each save's time, GPS stamp (lat, lng, accuracy), result, server receive time
+      and offline flag. "Latest wins" deletes the earlier row before the new one is written; its `replaced`
+      snapshot already kept the last of them ([AUDIT.md](AUDIT.md) §B.5), and now keeps the rest too, so a
+      visit can't be erased by saving the door again (C10, stamped). Built on the server from the pre-delete
+      row, never accepted from a request. Same row, same readers, same retention as the row (the campaign, the
+      organization, an unknock's frozen copy). Action-time stamps only: nothing new is captured.
+    - **(c) `Membership.paceRestartAt` and `Organization.pacePause`**: a date per member (when their count last
+      restarted — on an unpause, the org turning it off, the console rollback, or a role change), and the
+      organization's setting (on or off, whether billing admins get the alert, the chosen recipients' user ids,
+      when it was last turned on, who changed it and when). Each lives and goes with its document.
+    - **(d) Who can see it.** Org admins: every pause. Team leads: pauses on the campaigns they manage, with
+      another campaign's doors redacted to their time and verdict (no address, result, campaign or distance;
+      and a hop whose other end is hidden keeps only its seconds and verdict, so two hops can't locate the
+      door). A lead also learns, through a **roster line**, that a canvasser on their roster is blocked by a
+      pause on a campaign they don't manage — the name only, nothing about the other campaign: the one fact
+      `memberships.js` otherwise withholds, disclosed because that canvasser can't work the lead's campaign
+      either. A lead may be the client ([ROLES.md](ROLES.md)). The paused canvasser sees only that they are
+      paused, never the evidence. Doorline staff: under a support grant, like any of the organization's pages
+      (E12, stamped).
+    - **(e) The preview** (org admins, in the product): every moment, over up to 120 days, when the rule would
+      have paused someone on a campaign, with names, days, doors and addresses — a re-reading of the
+      organization's own ledger and unknock copies; nothing is stored. The console replay
+      (`npm run replay:pace-pause`, Run console) prints **counts only** per customer organization — no name, id,
+      address or coordinate, a count under 3 as *fewer than 3* — and skips internal and deleting orgs.
+    - **(f) The alert email** (`pacePauseAlert`): one per recipient; a neutral subject (*A canvasser was paused
+      for review*); a body naming the campaign, the organization, the day and the time, **no person and no
+      address**, and a link behind sign-in. So Resend receives no more than privacy.html `:106` says (the
+      recipient's name and email address): the address, and the organization and campaign names any
+      organization notice carries. EmailLog: one
+      row per recipient with `meta.userId`, scrubbed by account at deletion like the personal sends; the
+      billing-contact fallback carries no account and keeps its address for EmailLog's 365 days, as the existing
+      billing notices do; rows outlive organization deletion as today (stamped at the EmailLog entry).
+    - **(g) Retention.** Deleted with its campaign (`deleteCampaign.js` `CAMPAIGN_SCOPED`) and its organization
+      (`deleteOrganization.js` `ORG_SCOPED`), and in `LATE_WRITE_MODELS`. It **survives account deletion**, like
+      door rows and `FlagReview`, for fraud attribution: `deleteAccount.js` counts the organizations holding a
+      pause about the person among those that attribute their work, so their name shows on it for the
+      DeletedUserRecord window (stamped at A4). An org admin may delete a **resolved** pause (decision 17); an
+      open one lifts only by Unpause. No TTL.
+    - **(h) What the canvasser is told — narrowed (H16(c), stamped).** Their Help Center now says their doors
+      are checked for pace and that only a person on their team can lift a pause (`faq/why-is-recording-paused.md`,
+      audience canvasser), and the phone's banner and alert say so. They are still not told about the far,
+      rapid, one-spot and weak-GPS flags or the review records, and the article states no numbers.
+    - **(i) No new subprocessor.** The email goes through Resend, already listed (DPA §6, privacy.html `:106`);
+      nothing else leaves our servers. No DPA §6 notice event. The owner tells both customer organizations about
+      the feature itself (decision 16; PROPOSAL §J) — a courtesy, not a §6 notice.
+    - **(j) Claims checked, each against its line** (privacy.html, terms.html, delete-account.html and DPA.md
+      are unchanged in this tree; lines at `aa01027`):
+      - privacy.html `:90` (canvassing activity: "Authorized administrators within the same organization may
+        review this activity. We use it to operate the canvass and to provide reporting") — a pause is the
+        organization's own people reviewing canvassing activity, and stopping a recording is operating the
+        canvass. **Silent, not false:** it doesn't say location stamps may automatically pause a canvasser's
+        recording pending a person's review (decision 19).
+      - `:94` (location only when an action is recorded; never continuous or in the background) — true: the
+        rule reads only the stamps taken at recorded actions. A 10-second trail was considered and dropped for
+        this sentence's sake; `replaced.history` keeps more of the same action-time stamps and adds none.
+      - `:101` (published reports exclude canvasser identities and action timestamps) — untouched: nothing of a
+        pause reaches a report.
+      - `:105` (available within your organization by role; never to other customer organizations) — true:
+        every lookup filters `organizationId`, and leads are walled per campaign (d).
+      - `:106` (service providers; Resend receives the recipient's name and email address) — true (f).
+      - `:112` (staff open customer data only under a grant) — true: the routes sit behind `orgContext`, and the
+        console replay prints counts only.
+      - `:122` (organization deletion removes canvassing records) — `PacePause` is in `ORG_SCOPED`.
+      - `:127` (email, phone and password removed at account deletion) — `PacePause` holds none of them.
+      - `:128` (field records stay with the organization; the name for 180 days; "Administrative records
+        reflecting actions you took in a supervisory role … are likewise retained") — a pause about a person
+        stays like their door records and `FlagReview`; the unpausing admin's or lead's `resolvedBy` is a
+        supervisory action record, covered by the last sentence. **Silent, not false:** it doesn't mention that a
+        review of a person's work, such as a pause record, stays (decision 19).
+      - `:133` (rights requests) and `:137` (decline location and you can't record canvass actions) — unchanged;
+        a paused canvasser can't record either, which `:137` doesn't list and doesn't deny.
+      - `:143` (material changes communicated) — the Policy doesn't change.
+      - delete-account.html `:100`–`101` and the in-app deletion sheet's summary (`retained.summary`,
+        `GET /auth/account/deletion-check` in `routes/auth.js`) — the same reading as `:128`.
+      - terms.html `:98` (the customer gives its workers any legally required notice about location collection)
+        — still the customer's duty; Doorline's own in-app telling (h) adds to it. §13 (suspension and
+        termination of the Service) isn't engaged — a pause stops one canvasser's recording, not the Service —
+        and §15 (changes to the Terms) has nothing to do.
+      - DPA §2 — on by default rests on the customer's "use and configuration of the Service's features" (the
+        Off switch on the Users page is that configuration) plus the owner's notice to both customers; §6 — no
+        new subprocessor (i); §7 — a pause sits in the organization's records like its door rows, reachable by
+        the same deletion paths (the campaign, the organization; an admin's delete of a resolved one); §9 —
+        retention follows the campaign and the organization, and the account-deletion name window applies.
+    - **(k) Owner ruling (decision 19, 2026-10-24): no wording change.** On file with its reasons: on the two
+      points marked *silent, not false* above, the published text is silent rather than false — the pause is a
+      use of location stamps under "to operate the canvass" (`:90`) and the customer's "use and configuration of
+      the Service's features" (DPA §2), and a pause record staying after account deletion is the same silence
+      `FlagReview` has today (H16(c)). This work touches none of privacy.html, terms.html, delete-account.html
+      or DPA.md.
+    - **Pinned by** `server/test/paceRule.test.js` (25), `pacePause.int.test.js` (18),
+      `replayPacePause.int.test.js` (2) and `resolveOpenPacePauses.int.test.js` (2); on the clients
+      `client/src/lib/pacePause.test.js` (2), `pacePauseRender.smoke.test.js` (5), `mobile/lib/pace.test.js` (7)
+      and `mobile/lib/pacePauseText.test.js` (2).
+    - **Watchlist:** the 2026-10-24 automatic-pause bullet in *New policy sentences to keep true*.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -3332,6 +3867,8 @@ Deletion is reachable from exactly two code paths and no others (`deleteAccount(
 
 *[v4 2026-07-29: **SUPERSEDED — there are now THREE.** A break-glass super-admin can delete an account from the web console: `DELETE /super-admin/users/:userId` (`routes/superAdmin/users.js`), which calls the identical `deleteAccount()` service with `reason: 'super_admin'`. It requires the target's email typed back (`confirmEmail`, the analogue of the org-delete `confirmSlug`, and the same string the CLI takes), enforces **every** existing blocker with no force flag, and is preceded by a `GET /:userId/deletion-check` preflight. Support-tier staff are refused (`BREAK_GLASS_REQUIRED`). Unlike the two paths below, this one is **attributable**: `DeletedUserRecord` now carries `reason` and `deletedBy`, which the 180-day purge deliberately does not scrub because they describe the ACTOR, not the subject.]*
 
+*[v6 2026-10-24: **now FOUR — item 37.** An org's own admin can delete a member who belongs to no other organization: `DELETE /admin/memberships/:userId/account`, after the `GET …/deletion-check` review. All four doors now run one model: one deletion at a time per account (the pending `DeletedUserRecord` is the lock), memberships switched off then a recount of LIVE admins and billing admins, the same 14-field scrub as one conditional write, an idempotent finish, and a sweep every 15 minutes for a crash on either side. The blocker list below still applies, counted over live accounts only; the org door adds its own checks (item 37).]*
+
 1. **In-app, mobile only, password re-authenticated.** `DELETE /auth/account` (`server/src/routes/auth.js:235`) requires the caller's current password (schema `auth.js:37-39`; bcrypt-verified via `server/src/models/User.js:62-64`; 401 on mismatch). The only UI entry point is mobile Profile → Delete account (`mobile/app/(app)/profile.jsx:316` → `mobile/components/DeleteAccountSheet.jsx:80`). **Note:** the HTTP route itself is gated only by `requireAuth`, so the *interface* is mobile-only, not the *endpoint*.
 2. **Operator CLI**, for people who have uninstalled the app and email in: `npm run delete:account <email> --apply` (`server/src/utils/deleteAccountByEmail.js:86`). It calls the identical service. **It performs no identity verification in code** — it takes an email and a flag. "VERIFY THE REQUEST FIRST" (`deleteAccountByEmail.js:24`) is a comment instructing a human, not an enforced control.
 
@@ -3378,6 +3915,7 @@ The operator CLI has **no override** ("Deliberately no `--force`", `deleteAccoun
 - The snapshot is stamped `retentionUntil = deletion time + DELETED_IDENTITY_RETENTION_DAYS` — **default 180 days, environment-configurable** (`deleteAccount.js:25`, `:190`). The 180-day figure is disclosed to the user in the deletion sheet (`server/src/routes/auth.js:219`).
 - **`retentionUntil` is inert data.** Nothing fires at that timestamp. Erasure happens only when a daily BullMQ cron job runs on the worker dyno: `RETENTION_CRON`, default `'17 3 * * *'` (`server/src/services/retention/scheduler.js:16`), registered at `server/src/worker.js:46` and consumed at `:57`. The Procfile declares a `worker` process.
 - **The purge blanks four fields; it does not delete the row.** `DeletedUserRecord.updateMany({retentionUntil: {$lte: now}, purgedAt: null}, {$set: {firstName:'', lastName:'', email:'', phone:null, purgedAt}})` (`server/src/services/retention/purgeDeletedIdentities.js:29`, `:34-37`). Surviving after the purge: `userId`, `organizationIds[]`, `deletedAt`, `retentionUntil`, `purgedAt`, `createdAt`, `updatedAt` (`server/src/models/DeletedUserRecord.js:22-48`). *[v4 2026-07-29: **two fields added to that survivor list** — `reason` (`'self' | 'operator' | 'super_admin'`) and `deletedBy` (the acting staff user, null for a self-deletion). They are deliberately NOT scrubbed by the purge: they describe **who ordered the deletion**, not the person deleted, so a staff-initiated destruction stays answerable after the subject's name is gone. Retaining "an operator did this on this date" is the opposite of a privacy problem — the alternative was an irreversible deletion of a customer's account with nothing whatsoever on record. Note this makes the adjacent `reason` claim real: it was a parameter of `deleteAccount()` that was destructured and then never referenced, so both callers passed a value into a void.]*
+  *[v6 2026-10-24: `reason` gains `'org_admin'` (item 37). The record also carries the deletion lock — `pendingAt`, `pendingToken`, `unusedOrgId`, `touchedMemberships`, removed when the deletion finishes — and `finishedAt`. The purge now runs the deletion sweep first and skips, and counts, any record whose account is not deleted, so it can never de-pair a live account's FbTime.]*
 - **No TTL index exists anywhere in the codebase.** I grepped `expireAfterSeconds` / `expires:` across all of `server/src`: **zero hits.** There is no database-level expiry on any collection. *[v3: one TTL index now exists — GeocodeCache's 18-month disuse expiry (F7). Still none on any identity or ledger collection; this section's conclusion stands for `DeletedUserRecord`.]*
 
 **CAVEAT I could not close:** I verified the code and the Procfile. I **could not determine from code** that the worker dyno is scaled up in production. Repo memory records a prior incident in which deploying the wrong branch scaled the worker to 0. The codebase's own health text contemplates the job having **"NEVER run"** and says, in terms, *"we are promising a retention limit we are not enforcing"* (`purgeDeletedIdentities.js:85-89`). A health check exists (`retentionHealth`, `:67-91`, red after 48h) but it is a dashboard reading, not an enforcement mechanism.
@@ -3424,8 +3962,11 @@ Nothing in the deletion path or the purge path ever nulls, removes, or re-keys `
 Router gate: `requireOrgRole('admin', 'lead')` (`reports.js:37`) — team leads see it too.
 **Phone is NOT re-surfaced** in reports (`canvasserIdentity.js:72` reads the live `User` row, which deletion nulls) — though it *is* stored in `DeletedUserRecord`.
 Restoration is **org-scoped and membership-scoped**: only orgs where the person's membership was `isActive` at deletion time are in the snapshot (`deleteAccount.js:104`, `:305`).
+*[v6 2026-10-24: **WIDER — item 37.** The record now lists every membership in any status plus every org holding the person's own doors or surveys (desk marks excluded), on every deletion path, self-deletion included. Still org-scoped: a name is restored only to an org on the record, and `hydrateCanvassers` now restores nothing at all when handed no org.]*
 
 **Not every surface restores it.** At least six identity-rendering paths bypass the hydrator and show the tombstone even during the window — including, ironically, the GPS/quality audit that `DeletedUserRecord`'s own model comment names as its reason for existing (`server/src/services/audit/flagDetection.js:72`; also `reports.js:1474`, `:1903`, `:2010`, `:2350`, `:3507`).
+*[v6 2026-10-24: **narrowed — item 37.** The GPS audit (`flagDetection.js`) and seven report lookups now restore the name for the window, org-scoped: the leaderboard's and Timeline's team labels, the team breakdown and tag-team totals, the per-canvasser summary and responses, the Survey Results voters-by-answer CSV, and the canvasser CSV's crew stamp. About 45 other surfaces still show "Deleted user" at once (a follow-up).]*
+*[v6 2026-10-24 — item 39: one more record about a deleted person persists, beside `FlagReview`: a `PacePause` about them (ids, times, seconds, meters, verdicts, the alert's counts; no coordinate, address or email). The review screens name them for the window through `hydrateCanvassers` (org-scoped), to the organization's admins and that campaign's leads, and `deleteAccount.js` puts every organization holding one on the record. Deleted with the campaign and the organization, or by an org admin once resolved.]*
 
 **Exportable.** An org admin **or a team lead** can download that restored name and email in a CSV file that then lives outside the application entirely (`GET /admin/reports/canvassers.csv`, `reports.js:2267`). Once downloaded, it is beyond the reach of any purge. *(The phone column is always blank for a deleted user — the CSV requests `phone` but the hydrator never reads the snapshot's phone field.)*
 
@@ -3838,7 +4379,7 @@ Two of your own findings conflict here and I am telling you which is right.
 **Server-side retention — VERIFIED: NO age-based expiry of location data exists anywhere.**
 The retention subsystem never deletes, ages out, or coarsens GPS. `purgeDeletedIdentities` writes only to `DeletedUserRecord`. **There is no TTL index on any coordinate-bearing collection** (no `expireAfterSeconds` anywhere in `server/src`). For an active customer, canvasser GPS is **retained indefinitely**.
 
-Coordinates are removed only by: (i) hard deletion of the whole organization (which cascades over `CanvassActivity`/`SurveyResponse`/`Household`); (ii) a canvasser overwriting their own prior action at the same door in the same round (`routes/mobile/canvass.js:139-144`, `:470-475` — replace-in-place, the earlier fix is destroyed); (iii) an admin discarding a round with "clear knocks" (`admin/turfs.js:342-344`); (iv) an admin undoing a bulk restrict (`admin/turfs.js:812`). **None of these is automatic or time-based.** *[v6 2026-08-21: (iv) is now **two routes** — `POST …/turfs/unrestrict-bulk` (every desk mark on a book's current doors for that round) and `POST …/turfs/unrestrict-doors` (one home's desk mark) — both `removeDeskRestrict` in `services/canvass/deskRestrict.js`, deleting only `{ actionType:'restricted', via:'bulk' }` rows; a field-recorded coordinate is never touched by either. Plus one adjacent path: `DELETE /admin/campaigns/:id/passes/:id` (draft round) now sweeps that round's desk rows. Still admin-initiated, never automatic or time-based.]* *[v6 2026-08-26: path (v) added — an admin **unknocking** entries from Door Outcomes (`POST /admin/campaigns/:id/unknock-entries`, `services/canvass/unknock.js`) hard-deletes the selected `CanvassActivity` rows, field coordinates included — but freezes each row verbatim on `UnknockRunChunk` for the life of the campaign, so the coordinate is *relocated*, not destroyed, until tenant deletion or a revert restores it. Admin-initiated, never automatic or time-based. See item 14 of "What changed".]*
+Coordinates are removed only by: (i) hard deletion of the whole organization (which cascades over `CanvassActivity`/`SurveyResponse`/`Household`); (ii) a canvasser overwriting their own prior action at the same door in the same round (`routes/mobile/canvass.js:139-144`, `:470-475` — replace-in-place, the earlier fix is destroyed); (iii) an admin discarding a round with "clear knocks" (`admin/turfs.js:342-344`); (iv) an admin undoing a bulk restrict (`admin/turfs.js:812`). **None of these is automatic or time-based.** *[v6 2026-08-21: (iv) is now **two routes** — `POST …/turfs/unrestrict-bulk` (every desk mark on a book's current doors for that round) and `POST …/turfs/unrestrict-doors` (one home's desk mark) — both `removeDeskRestrict` in `services/canvass/deskRestrict.js`, deleting only `{ actionType:'restricted', via:'bulk' }` rows; a field-recorded coordinate is never touched by either. Plus one adjacent path: `DELETE /admin/campaigns/:id/passes/:id` (draft round) now sweeps that round's desk rows. Still admin-initiated, never automatic or time-based.]* *[v6 2026-08-26: path (v) added — an admin **unknocking** entries from Door Outcomes (`POST /admin/campaigns/:id/unknock-entries`, `services/canvass/unknock.js`) hard-deletes the selected `CanvassActivity` rows, field coordinates included — but freezes each row verbatim on `UnknockRunChunk` for the life of the campaign, so the coordinate is *relocated*, not destroyed, until tenant deletion or a revert restores it. Admin-initiated, never automatic or time-based. See item 14 of "What changed".]* *[v6 2026-10-24 — item 39: (ii) no longer destroys the earlier fixes. The new row's `replaced` snapshot already kept the last one (AUDIT.md §B.5); its `replaced.history` now keeps up to 20 earlier saves' stamps (lat, lng, accuracy, time, result, receive time, offline flag), server-built from the pre-delete row, on the same row with the same readers and retention. More of the same action-time stamps kept, none new captured.]*
 **Note:** `GeocodeCache` coordinates (address→point) are **never** deleted, including by organization deletion (B5, Exception 1).
 
 **Purpose — VERIFIED, and it is broader than fraud detection.** Confirmed consumers of a canvasser's stored GPS:
@@ -3849,6 +4390,7 @@ Coordinates are removed only by: (i) hard deletion of the whole organization (wh
 4. **A per-canvasser quality report** — average distance, far-door counts, distance histogram (`reports.js:3050+`).
 5. **An activity feed** returning the full location object per action (`reports.js:2689`, `:2733`; `admin/activities.js:51-52`).
 6. **A distance-walked metric** shown to the canvasser themselves (`routes/mobile/me.js:100-106`, `:381-389`).
+7. *[v6 2026-10-24 — item 39]* **Automatic pause** — a new **enforcement** use: the time and distance between a canvasser's consecutive stamps decide whether their recording pauses for review (`services/audit/paceRule.js`, read by `runPaceCheck`). The stored `PacePause` keeps the derived seconds and meters, never a coordinate; its preview (org admins) re-reads the ledger and shows addresses, not coordinates.
 
 Access gate on all of these: `requireOrgRole('admin', 'lead')` (`reports.js:37`) — org admins **and campaign-scoped team leads**.
 
@@ -3882,6 +4424,18 @@ door. Within `privacy.html:101`'s "door statuses" sentence either way.]*
 switch is off, and a question hidden from the report's charts still reaches the points and the map
 filters unless it is also unticked there. Verified; not fixed yet. See gap 34.]*
 
+*[v6 2026-10-24, the client reports upgrade (items 34 and 38; deploy pending): the stored point is the
+same five things, now tagged with its build's snapshot and a position (`snapshotId`, `seq`), with answers
+only for the map questions the report may serve; nothing is stored or served on a map-off report (gap 34
+(a)). What is served changed shape. `GET /share/:token/reports/:id/map` returns an address-free payload
+(columnar coordinates rounded to six decimal places, about 4 in, a status index and answer indices per
+position; no ids, no `canvassers` field at all), from the report's live snapshot only. A tapped door's
+street line, city, state and answers come from `GET …/map/doors`, at most 200 positions per request (a
+per-door list endpoint, which the 2026-08-08 note below says was not built): so a link holder can still
+page through every address of a report, as the old full point list allowed, and nothing can be enumerated
+across reports. An **area-view** report stores and serves no address or door coordinate at all (item
+38(a)).]*
+
 The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReportMapPoint.js:33`). **That is not an accurate description of its precision.** What it excludes is the unit/apartment line (`addressLine2`) and the ZIP.
 
 > **[v4 2026-08-08 — building grouping on the client report map: RE-VERIFIED, nothing new is exposed.]**
@@ -3897,6 +4451,12 @@ The model's own comment calls `addressLine1` a *"coarse address"* (`ClientReport
 > One inference does change shape: a glyph now makes the *number* of canvassed doors at one coordinate
 > legible at a glance, where before it was N coincident icons. That is the same disclosure ("this
 > household was canvassed") already recorded below, rendered honestly rather than hidden under itself.
+> *[v6 2026-10-24: a tapped spot with several doors now also lists **each door's** status and answers
+> (the client reports upgrade's `ClientReportMap`, paged 200 at a time through `…/map/doors`), still
+> **without any unit line**: the street line shows only when the spot's doors differ in it, and no
+> `addressLine2` was added to the snapshot. Each door's status and answers were already in the point list
+> the old map endpoint served whole; the list shows them, it adds no field. The unit-line exclusion
+> holds.]*
 
 > **[v6 2026-10-05 — homes placed by address at import (item 28): more accurate, nothing new exposed.]**
 > A report published after the import's map-pin pass placed a home shows that home at its own spot rather
@@ -3977,20 +4537,20 @@ No voter name, no canvasser name or user id, no timestamps, no party, no phone, 
 | Control | Status |
 |---|---|
 | **Token entropy** | **VERIFIED STRONG.** 24 bytes from Node's CSPRNG, base64url → 32 chars = **192 bits** (`routes/admin/clientReports.js:151-153`). Not brute-forceable. *(Exception: the demo-org seeder uses `SEED_DEMO_SHARE_TOKEN` verbatim if set — `utils/seedDemoOrg.js:525` — in which case entropy is whatever an operator chose.)* |
-| **Password on NEW links** | **VERIFIED.** Every link created through the admin API gets a bcrypt-hashed password; if the operator supplies none, a 12-char random one is generated and returned once (`clientReports.js:180-184`, `:231`, `:240`, `:247`). |
-| **Expiry on NEW links** | **VERIFIED.** `expiresAt = now + SHARE_LINK_DEFAULT_DAYS` (default **90**, `clientReports.js:173`, `:241`). Expired links return **410** before any report data (`share.js:35-40`). Expiry cannot be extended or cleared via the API. |
+| **Password on NEW links** | **VERIFIED.** Every link created through the admin API gets a bcrypt-hashed password; if the operator supplies none, a 12-char random one is generated and returned once (`clientReports.js:180-184`, `:231`, `:240`, `:247`). *[v6 2026-10-24: the link routes moved to `routes/admin/clientReportShares.js` and the generator to `services/reports/shareLinks.js`; an operator-set password must now be 12 or more characters too, on create and on change (`SHARE_PASSWORD_TOO_SHORT`), and an older short one is flagged after its next successful unlock (`passwordMeetsRule`, item 38(e)).]* |
+| **Expiry on NEW links** | **VERIFIED.** `expiresAt = now + SHARE_LINK_DEFAULT_DAYS` (default **90**, `clientReports.js:173`, `:241`). Expired links return **410** before any report data (`share.js:35-40`). Expiry cannot be extended or cleared via the API. *[v6 2026-10-24: superseded — expiry is now chosen (30, 90, 180 or 365 days; default still 90) and can be **extended**, never past one year from the link's lifetime start (`lifetimeStartAt ?? createdAt`, compared inside the write, so it never shortens either); an **expired** link can't be extended (`SHARE_NEEDS_RENEW`) but is **renewed**: a new URL token, a new one-year life, the credential version bumped, so a URL forwarded long ago stays dead. Extend also gives a legacy never-expiring link its first expiry. Expiry still can't be cleared. `routes/admin/clientReportShares.js`.]* |
 | **LEGACY links** | **VERIFIED OPEN.** Links created **before this release** have `passwordHash: null` and `expiresAt: null` and **remain fully live**. `share.js:57` waves through any link with a null password hash; `share.js:35` treats a null `expiresAt` as unexpired. **No migration remediates them** — I listed all 24 files in `server/src/migrations/` and grepped for `ShareLink`/`passwordHash`: **zero hits.** The code comments at `share.js:33` and `models/ReportShareLink.js:35` refer to "the migration" **as if it exists. It does not.** *[v3: still no migration, and the phantom comments are still in the code — but an operator bulk kill switch now exists (`POST /admin/client-reports/shares/revoke-legacy`, dry-run unless `confirm:true`, deliberately not automatic), and the policy now discloses the pre-July-15 links honestly. Legacy links stay live until an operator flips it.]* |
-| **Search-engine indexing** | **VERIFIED: NO PROTECTION.** *[v3: protection added — `robots.txt:7` now has `Disallow: /r/`, and `PublicReportLayout.jsx` injects `<meta name="robots" content="noindex, nofollow">` on every `/r/` page. Precision: the noindex is client-JS-injected only (no `X-Robots-Tag` header, no server-rendered meta), so robots.txt is the load-bearing control against non-JS crawlers.]* No `noindex` meta tag, no `X-Robots-Tag` header, no noindex directive anywhere in the client or server (grep: zero hits). `client/public/robots.txt` is `User-agent: * / Allow: / / Disallow: /api` — **`/r/` is not disallowed.** *Mitigating: the URL is unguessable, and the page is client-rendered with its data fetched from `/api/share/...`, which robots.txt does disallow — so a compliant crawler like Googlebot would likely index the URL and shell but be blocked from the report content. **robots.txt is advisory only.** It does not bind scrapers, archivers, or link-preview/unfurl bots, none of which are prevented from retrieving the full report JSON from an open legacy link.* |
-| **Revocation** | **PARTIAL.** Deactivate / delete / rotate work on the next request (`share.js:28`). A **bulk** revoke exists but targets **only** the legacy/open subset and is a **dry run unless `confirm: true`** (`clientReports.js:261-286`). It is **not automatic**. It also skips the per-campaign authorization check every other route in the file performs, so a team lead can revoke legacy links across campaigns they do not manage. |
-| **Password change ≠ revocation** | **VERIFIED.** The unlock JWT carries only `{shareId, campaignId}` with a 24h TTL (`services/auth/tokens.js:22-30`) and is never re-checked against the password (`share.js:63-68`). An already-unlocked viewer retains access for up to 24 hours after a password change. *(Link **revocation**, by contrast, does take effect immediately, because `loadShare` re-queries `isActive` on every request.)* |
+| **Search-engine indexing** | **VERIFIED: NO PROTECTION.** *[v6 2026-10-24: the control is now the `X-Robots-Tag: noindex, nofollow` header, on every `/r/` HTML response (the SPA fallback in `app.js`) and every `/api/share` response; robots.txt **no longer disallows `/r/`**, because a crawler it keeps out never sees a noindex and can still list a forwarded link's bare URL. Pinned in `staticPages.int.test.js`. The v3 stamp that follows is history.]* *[v3: protection added — `robots.txt:7` now has `Disallow: /r/`, and `PublicReportLayout.jsx` injects `<meta name="robots" content="noindex, nofollow">` on every `/r/` page. Precision: the noindex is client-JS-injected only (no `X-Robots-Tag` header, no server-rendered meta), so robots.txt is the load-bearing control against non-JS crawlers.]* No `noindex` meta tag, no `X-Robots-Tag` header, no noindex directive anywhere in the client or server (grep: zero hits). `client/public/robots.txt` is `User-agent: * / Allow: / / Disallow: /api` — **`/r/` is not disallowed.** *Mitigating: the URL is unguessable, and the page is client-rendered with its data fetched from `/api/share/...`, which robots.txt does disallow — so a compliant crawler like Googlebot would likely index the URL and shell but be blocked from the report content. **robots.txt is advisory only.** It does not bind scrapers, archivers, or link-preview/unfurl bots, none of which are prevented from retrieving the full report JSON from an open legacy link.* |
+| **Revocation** | **PARTIAL.** Deactivate / delete / rotate work on the next request (`share.js:28`). A **bulk** revoke exists but targets **only** the legacy/open subset and is a **dry run unless `confirm: true`** (`clientReports.js:261-286`). It is **not automatic**. It also skips the per-campaign authorization check every other route in the file performs, so a team lead can revoke legacy links across campaigns they do not manage. *[v6 2026-10-24: the sweep has been admin-only since 2026-08-07 (item 10 of *What changed since v2*), lives in `routes/admin/clientReportShares.js`, and now bumps each swept link's credential version; disable, rotate, renew and a password change likewise end every open session at once (the `cv` stamp on the row below). Take down hides a single report from every link without touching the link.]* |
+| **Password change ≠ revocation** | **VERIFIED.** The unlock JWT carries only `{shareId, campaignId}` with a 24h TTL (`services/auth/tokens.js:22-30`) and is never re-checked against the password (`share.js:63-68`). An already-unlocked viewer retains access for up to 24 hours after a password change. *(Link **revocation**, by contrast, does take effect immediately, because `loadShare` re-queries `isActive` on every request.)* *[v6 2026-10-24: fixed — the share token now carries the link's credential version (`cv`), bumped in the same write by a password change, rotate, renew, disable and the revoke-legacy sweep, and `requireShareAccess` refuses a token whose `cv` doesn't match, so every device is signed out at once (`routes/public/share.js`, `services/auth/tokens.js`; pinned in `shareLinks.int.test.js`). Tokens last 24 hours, or 30 days with Keep me signed in (item 38(f)).]* |
 | **Password can be REMOVED from any link, today** | **VERIFIED.** `shareUpdateSchema` accepts `password: null` (`clientReports.js:197`), and `:310-312` sets `passwordHash` back to `null`. Passwordless links are **not** a closed legacy set. *[v3: fixed — a falsy password now 400s with `SHARE_PASSWORD_REQUIRED` ("replace it, or rotate the link"); removal is unsupported, which is what lets the policy say new links are password-protected as a class.]* |
-| **Metadata is never gated** | **VERIFIED.** `GET /share/:token` (campaign name, organization name, link label) has **no** `requireShareAccess` (`share.js:84`). |
+| **Metadata is never gated** | **VERIFIED.** `GET /share/:token` (campaign name, organization name, link label) has **no** `requireShareAccess` (`share.js:84`). *[v6 2026-10-24: fixed — `GET /share/:token` now returns only `{ requiresPassword }`; the campaign and organization names and whether there is a logo ride `GET /share/:token/reports`, behind access, and the link's label is never sent. "Last opened" is stamped only when access is granted, never by the password screen or a wrong guess.]* |
 
 > **Do NOT write:** *"Report links are password-protected and expire."* **False** as a statement about links as a class.
 > **Write:** *"Report links created since [date] are protected by a password and expire after 90 days by default. Links created before that date may remain accessible without a password and do not expire until an administrator revokes them."*
 > **COULD NOT DETERMINE:** how many open legacy links exist in production. That requires a database query. **Ask engineering before this sentence ships.**
 
-**One thing an unguessable token is not:** it is a **capability**, not access control. It survives forwarding, it does not expire on a legacy link, and there is no rate limit or logging preventing its reuse by anyone who obtains it. The only rate limit on this surface throttles failed **password** attempts, not token access (`share.js:106-114`).
+**One thing an unguessable token is not:** it is a **capability**, not access control. It survives forwarding, it does not expire on a legacy link, and there is no rate limit or logging preventing its reuse by anyone who obtains it. The only rate limit on this surface throttles failed **password** attempts, not token access (`share.js:106-114`). *[v6 2026-10-24: password guessing is now also budgeted **per link**: a slot is reserved before bcrypt runs, so no link checks more than 50 wrong passwords in any 24 hours however many addresses the guesses come from, and the 50th locks it for new sign-ins (never ending a session already open) until the oldest of the 50 is a day old, Unlock now or a rotate (`reserveUnlockSlot`, `services/reports/shareLinks.js`; 300 concurrent guesses meet exactly 50 compares in `shareLinks.int.test.js`). The per-IP limiter stays. Logging: every link change, each UTC day's 10th wrong password and every lock write a History row (no IP or user agent, item 38(g)), and the report counts its opens per link (item 38(c)). The capability point stands: a valid link and password, or a session already open, are neither limited nor logged by who uses them.]*
 
 ---
 
@@ -4080,6 +4640,8 @@ which orgs need a session, computed from membership + `isInternal` + the caller'
 > missing sub as `'internal'` only for a flagged org. **Net: the free-forever + retention-exempt state
 > that `'internal'` confers is now reachable only through break-glass org creation, never through a
 > billing edit on an existing customer org.**
+
+*[v6 2026-10-24 — item 39: one new staff-facing output, and no new way in. `npm run replay:pace-pause` (the Heroku Run console) prints automatic pause's would-be pauses as **counts per customer organization only** — no name, id, address or coordinate, and a count under 3 as *fewer than 3*, since staff can see an organization's member list. The per-person preview stays in the product for the organization's own admins (`GET /admin/pace-pauses/preview`), and the pause review screens sit behind `orgContext` like every org page, so staff reach them only under a support grant.]*
 
 ### Three things you must NOT imply
 
@@ -4301,6 +4863,7 @@ One human has **one** `User` row (name, email, phone, password hash) with a **gl
   and the rationale is recorded at `memberships.js:423-432`, which cites this document. Closing it
   properly needs per-org credentials or self-serve email reset.]* Once the Membership exists, org A's admin can **reset that user's password** — `PATCH /admin/memberships/:userId/password` is gated **only** on "a Membership for this user exists in my active org" (`memberships.js:385-420`), which org A just minted. That password logs in, and the login response returns `memberships` **for every org the user belongs to** (`routes/auth.js:110-111`). `mustChangePassword` does not block `/auth`, so `POST /auth/change-password` clears the flag and yields a full cross-org session. **INFERRED FROM CODE PATHS, not executed.** It is destructive and detectable (it burns the victim's real password), but it is not prevented. **Escalate to engineering.** *[v4 2026-07-18: narrowed — the victim can now recover WITHOUT any admin via the emailed self-serve reset, and completing it REVOKES the attacker's minted session (`SESSION_REVOKED`); the attack itself (open by owner decision, item 14) is unchanged.]*
 - **`isMultiOrg` is disclosed to customers.** An org admin is told, for each of their own members, a boolean indicating that person **also belongs to at least one other organization on the platform** — computed from an **unscoped** aggregate over all Memberships (`memberships.js:109-114`, `:145`). Only a boolean; never the name, id or count of the other orgs. Minor, but it is a genuine cross-tenant inference **shown to customers**.
+  *[v6 2026-10-24: one more bit, by owner decision (item 37): the deletion review tells an org's admin when the person also holds a membership elsewhere in ANY status, switched off included (`OTHER_ORGANIZATION`), which `isMultiOrg` (active memberships only) does not. Nothing else crosses: no name, id or count.]*
 
 ### EXCEPTION 4 — Cross-org Person merge is possible via staff tooling. **VERIFIED.**
 
@@ -4473,6 +5036,15 @@ The fraud/quality audit makes **four machine-generated assertions about named wo
 - **What they ARE told, in-app:** the OS permission string — *"Doorline needs your location to log when you knock on a door, so admins can verify field activity"* (`mobile/app.json:15`). And a canvasser-visible Help Center FAQ (`audience: all`, so it reaches them — `server/src/content/help/faq/delete-my-account.md:4`, `:25-28`) states: *"Canvassing records include the location where each door was logged, and an organization has to be able to check that work against a real person."*
 - **What they are NOT told, anywhere in-app:** that the GPS trail is **algorithmically analyzed for canvassing-fraud flags**, that an adverse reviewer decision about them is **persisted**, or that their movements can be **replayed as a map and exported as a raw-coordinate CSV**. The Help Center articles explaining the audit are tagged `audience: lead` (`content/help/guides/audit.md:4`; `pages/page-audit.md:4`), and the role→audience map gives a canvasser only `['all','canvasser']` (`services/help/loadHelp.js:19-24`). **They cannot see them.**
 - **There is no notification, no contest path, and no appeal path in the code.** There cannot be — the server has no notification capability of any kind.
+  *[v6 2026-10-24 — item 39: narrowed in disclosure, widened in kind. **Disclosure:** canvassers are now told,
+  in their Help Center (`faq/why-is-recording-paused.md`, audience canvasser) and on the phone's banner and
+  alert, that their doors are checked for pace and that only a person on their team can lift a pause. **Kind:**
+  a stored automated finding about a named worker (`PacePause`) that stops their recording until a person
+  reviews it — no door removed, no number changed — kept like `FlagReview`, surviving account deletion.
+  The "no notification capability" line is stale: the server has sent email since 2026-07-18, and a pause emails
+  the organization's chosen admins and leads (never the canvasser). Still no contest or appeal path in the code:
+  a person on the team reviews and unpauses. The far, rapid, one-spot and weak-GPS flags are still explained
+  only to leads and admins.]*
 - **A lead or admin who knocks doors is flagged too**, sees their own flags (the reports router admits `lead`), and — because `POST /flags/review` has **no self-review guard** (`reports.js:3340`) — **can dismiss a flag on their own knock.**
 
 This is an **employee-monitoring / worker-privacy** exposure, not just a consumer-privacy one, and it needs its own treatment in the ToS and in whatever notice canvassers receive at onboarding.
@@ -4497,6 +5069,8 @@ The currently-published policy states *"Voters do not interact with the Services
 `requireAuth` **loads the user from MongoDB on every single request** and 401s on `!user.isActive || user.deletedAt` (`middleware/auth.js:13-20` — the comment says it outright: *"refusing here IS the revocation"*). `orgContext` re-queries `Membership.isActive` on every `/admin` and `/mobile` request (`:58-62`). The JWT payload carries only `{sub, email, isSuperAdmin}` and **no authorization decision reads it.**
 
 **Therefore: deactivation, deletion, role change, demotion and removal-from-org ALL take effect on the next request.** The published sentence *"the ability for administrators to disable access promptly"* **is true. Keep it.**
+
+*[v6 2026-10-24: "disable access promptly" now also holds in a paused (read-only) org: Deactivate, Remove and delete are carved out of the billing gate (item 37). And no write can land on a deleted account any more — the login and last-seen stamps, the profile and password self-service writes, and an emailed reset or invite token are all conditional on the account being live.]*
 
 **What actually fails to revoke is narrower and specific:**
 - **Logout is a server-side no-op** (`routes/auth.js:193-195`). No denylist, no token version, no session store.

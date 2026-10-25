@@ -23,6 +23,8 @@ Admins can also add people org-wide from the **Users** page — same idea, and y
 
 > **Read the confirmation.** When an address already has an account, that existing person is added and anything you typed — the name, a temporary password — is ignored, because it isn't ours to change. If the name in the confirmation isn't who you meant, you mistyped the address: remove them from the campaign and try again.
 
+**Created a brand-new account with a mistyped email?** You can fix the address on their profile and resend the invite. Or an **org admin** can delete the account (it's on the person's profile, behind **More options**), and you add them again with the right address. Only ever delete an account that was just created by mistake. **Never delete someone who was linked** because their address already had an account: that's a real person's login. Take them off the campaign instead, and if they were added to your organization by mistake, an admin can use **Remove from org**.
+
 **"Their account is switched off."** That's a colleague whose Door Line account has been deactivated. They can't be added until an **org admin** switches it back on, because that switch affects every campaign in the organization, not just yours.
 
 Once the account exists, assign them a book so they can start knocking. See [Assigning canvassers](assigning-canvassers).

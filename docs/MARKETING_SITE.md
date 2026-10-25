@@ -205,8 +205,12 @@ See the watchlist entry in [`PRIVACY_VERIFICATION.md`](PRIVACY_VERIFICATION.md).
   starting price. It must track the published number: it is one of the three places that move
   together when `DEFAULT_RATE_CENTS` changes (the other two are `Hero.jsx` and `Faq.jsx`).
 - New public URL → add it to `client/public/sitemap.xml`.
-- `client/public/robots.txt` allows everything except `/api` and `/r/` (share links must stay
-  unindexed).
+- `client/public/robots.txt` allows everything except `/api`. Share links (`/r/…`) must stay
+  unindexed, but **not** through robots.txt: a crawler that robots.txt keeps out never fetches the
+  page, so it never sees a noindex, and can still list a forwarded link's bare URL. Every `/r/` page is
+  served with `X-Robots-Tag: noindex, nofollow` instead (the SPA fallback in
+  [server/src/app.js](../server/src/app.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) §K). Don't add
+  `Disallow: /r/` back.
 - Verify a static page against a **real build**, since the static/SPA logic only runs under
   `isProd`:
 

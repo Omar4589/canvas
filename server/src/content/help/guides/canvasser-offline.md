@@ -39,6 +39,8 @@ If a refresh fails — say you tap **Refresh** in a dead zone — the houses you
 
 A **red storage notice** ("Couldn't save map data to this phone") means your phone is running out of space, so the app can't keep your houses saved for offline use. Free up some storage — otherwise, next time you open the app in a dead zone you may see older houses than you expect.
 
+A red notice saying **"Recording is paused for review. Call your team lead."** is something else: your recording is paused until someone on your team reviews your doors ([Why is my recording paused?](why-is-recording-paused)). Doors you saved before the pause still upload as usual, including any counted in the pending badge. The notice's **Check again** needs signal — in a dead zone it says *"Can't check right now — move to where you have signal and tap Check again."*
+
 One more thing that happens quietly: if you tap a door button and pocket your phone before the app can get a GPS fix, the "couldn't get your location" message **waits until you unlock the phone** to appear. If you see it, that door did **not** record — tap the button again.
 
 > Tip: Before heading into an area you know has poor coverage, open your book once while you still have signal so your doors are loaded. After that, you're good to knock offline.

@@ -62,6 +62,9 @@ export default function BottomNav() {
     (c) => String(c._id) === String(campaignId)
   );
   const openMockFlags = currentCampaign?.openMockFlags || 0;
+  // Automatic pause: paused canvassers outrank mock-GPS flags on the same red Audit badge.
+  const openPacePauses = currentCampaign?.openPacePauses || 0;
+  const auditBadge = openPacePauses || openMockFlags;
   // Pins awaiting a fix/confirm (approximate geocodes and homes with no exact map spot) — the
   // amber pill on the Pin Fixes sheet item (same rollup field the desktop sidebar badge reads).
   const pinsToFix = currentCampaign?.pinsToFix || 0;
@@ -116,8 +119,8 @@ export default function BottomNav() {
         >
           <span className="relative">
             <IconMore />
-            {/* One dot only: red (open mock flags) outranks amber (pins to fix). */}
-            {openMockFlags > 0 ? (
+            {/* One dot only: red (paused canvassers or open mock flags) outranks amber (pins to fix). */}
+            {auditBadge > 0 ? (
               <span className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />
             ) : pinsToFix > 0 ? (
               <span className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-warning" />
@@ -157,11 +160,11 @@ export default function BottomNav() {
             {(() => {
               const sheetItem = (it) => (
                 <NavLink key={it.key} to={it.to} end={it.end} className={sheetLinkClass} onClick={close}>
-                  {it.key === 'audit' && openMockFlags > 0 ? (
-                    <span className="flex items-center">
+                  {it.key === 'audit' && auditBadge > 0 ? (
+                    <span className="flex items-center" title={openPacePauses ? `${openPacePauses} canvasser${openPacePauses === 1 ? '' : 's'} paused` : undefined}>
                       {it.label}
                       <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/60">
-                        {openMockFlags}
+                        {auditBadge}
                       </span>
                     </span>
                   ) : it.key === 'pin-fixes' && pinsToFix > 0 ? (

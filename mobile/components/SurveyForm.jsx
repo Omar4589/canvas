@@ -248,7 +248,8 @@ const QuestionCard = ({ q, number, large, value, onChange, otherText, onOtherTex
 // At Door tag, 'practice' the info-tinted Practice tag, never green or amber (green means at a
 // door, amber means read aloud). `saveLabel` names the Save button; `isSubmitting` holds it
 // disabled with a spinner. `onSave({ answers, note })` receives the POST rows and the trimmed note
-// (or null), and only once every visible required question is answered.
+// (or null), and only once every visible required question is answered. `banner` sits under the Back
+// row (the door's paused-for-review notice; null for none).
 const SurveyForm = ({
   survey,
   canvasserFirstName,
@@ -258,6 +259,7 @@ const SurveyForm = ({
   saveLabel = 'Save Response',
   isSubmitting = false,
   onSave,
+  banner = null,
 }) => {
   const router = useRouter();
   const { colors } = useTheme();
@@ -541,6 +543,7 @@ const SurveyForm = ({
           <Text style={styles.back}>‹ Back</Text>
         </Pressable>
       </View>
+      {banner}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -749,9 +752,10 @@ const SurveyForm = ({
 export default SurveyForm;
 
 // A full-screen message with a Back button, for when there is no form to show: the door's
-// do-not-contact wall (with its red title) and not-found screen, and a practice survey that is no
-// longer on the phone.
-export const SurveyWall = ({ title = null, message }) => {
+// do-not-contact wall (with its red title) and not-found screen, its paused-for-review wall (whose
+// `children`, under the message, is the paused banner with Check again), and a practice survey that
+// is no longer on the phone.
+export const SurveyWall = ({ title = null, message, children = null }) => {
   const router = useRouter();
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
@@ -761,6 +765,7 @@ export const SurveyWall = ({ title = null, message }) => {
       <Text style={title ? [type.body, { marginTop: spacing.sm, textAlign: 'center' }] : type.body}>
         {message}
       </Text>
+      {children}
       <Pressable onPress={() => router.back()} style={styles.primaryButton}>
         <Text style={styles.primaryButtonText}>Back</Text>
       </Pressable>

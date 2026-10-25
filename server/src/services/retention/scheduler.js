@@ -2,12 +2,14 @@ import { Queue } from 'bullmq';
 import { getSharedRedis } from '../../queues/connection.js';
 import { QUEUE_NAMES } from '../../queues/index.js';
 import { purgeDeletedIdentities, JOB_NAME } from './purgeDeletedIdentities.js';
+import { sweepDeletionLocks } from '../users/deleteAccount.js';
 import { runRetentionTriggers, TRIGGER_JOB } from './triggers.js';
 import { recomputeLive, recomputeDaily, STATS_JOB } from '../platform/platformStats.js';
 import { reconcileAllCampaignStats, CAMPAIGN_STATS_JOB } from '../reports/campaignCounters.js';
 import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExports.js';
 import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
 import { sweepOrphanSnapshots, SNAPSHOT_SWEEP_JOB } from '../turf/snapshotRetention.js';
+import { sweepClientReportRows, CLIENT_REPORT_SWEEP_JOB } from '../reports/clientReportSweep.js';
 import {
   runFbtimeSync,
   syncOneConnection,
@@ -70,6 +72,19 @@ export const IMPORT_SWEEP_CRON = process.env.IMPORT_SWEEP_CRON || '53 5 * * *';
 // the export sweep (05:23) and the import sweep (05:53).
 export const SNAPSHOT_SWEEP_CRON = process.env.SNAPSHOT_SWEEP_CRON || '37 5 * * *';
 
+// Nightly client-report row sweep (services/reports/clientReportSweep.js): map rows of deleted
+// reports, of reports whose map is off, of dead or superseded builds. 05:31 sits between the export
+// sweep (05:23) and the snapshot sweep (05:37).
+export const CLIENT_REPORT_SWEEP_CRON = process.env.CLIENT_REPORT_SWEEP_CRON || '31 5 * * *';
+
+// Every 15 minutes: settle an account deletion a crash left half-done — finish one that died after
+// its gate, switch back on the memberships of one that died before it (docs/PROPOSAL_ADMIN_ACCOUNT_
+// DELETION.md §C1). Waiting for 03:17 would leave a person switched off for most of a day. Off the
+// quarter-hour on purpose. The nightly purge runs the same sweep first and records its counts and
+// failures on its RetentionRun; this job writes no run of its own (96 rows a day would bury the record).
+export const DELETION_SWEEP_JOB = 'deletion-lock-sweep';
+export const DELETION_SWEEP_CRON = process.env.DELETION_SWEEP_CRON || '7,22,37,52 * * * *';
+
 // The `label` is not decoration: the health surface reports on every job in this list, and when one
 // goes quiet the operator needs to be told WHICH promise stopped being kept.
 export const REPEATABLE_JOBS = [
@@ -101,6 +116,10 @@ export const MAINTENANCE_JOBS = [
   { name: IMPORT_SWEEP_JOB, cron: IMPORT_SWEEP_CRON, label: 'The nightly stale-import sweep' },
   // Hygiene too: what it deletes nothing could reach any more.
   { name: SNAPSHOT_SWEEP_JOB, cron: SNAPSHOT_SWEEP_CRON, label: 'The nightly deleted-round snapshot sweep' },
+  // Hygiene too: client-report map rows no live report, build or review still needs (05:31).
+  { name: CLIENT_REPORT_SWEEP_JOB, cron: CLIENT_REPORT_SWEEP_CRON, label: 'The nightly client-report row sweep' },
+  // Here, NOT in REPEATABLE_JOBS: the nightly purge runs the same sweep and is what health watches.
+  { name: DELETION_SWEEP_JOB, cron: DELETION_SWEEP_CRON, label: 'The 15-minute account-deletion sweep' },
   // FbTime measured-hours sync (opt-in per org; a no-op sweep when nobody has
   // connected, and fully dormant without CREDENTIAL_SEAL_KEY). Off the
   // quarter-hour on purpose — :00/:15/:30/:45 is where the world's crons pile
@@ -136,6 +155,17 @@ export async function registerMaintenanceJobs() {
 
 /** Consumer side: what the worker actually runs. */
 export async function processMaintenanceJob(job) {
+  if (job.name === DELETION_SWEEP_JOB) {
+    const res = await sweepDeletionLocks({ apply: true });
+    // Quiet when there was nothing to settle, which is almost always.
+    if (res.finished || res.released || res.liveRecordsDeleted || res.legacyFinished || res.failed) {
+      console.log(
+        `[maintenance] ${DELETION_SWEEP_JOB}: finished ${res.finished}, released ${res.released}, ` +
+          `live records deleted ${res.liveRecordsDeleted}, legacy finished ${res.legacyFinished}, failed ${res.failed}`
+      );
+    }
+    return res;
+  }
   if (job.name === JOB_NAME) {
     const res = await purgeDeletedIdentities({ apply: true });
     console.log(`[maintenance] ${JOB_NAME}: scanned ${res.scanned}, purged ${res.purged}, failed ${res.failed}, names off run lines ${res.namesScrubbed}`);
@@ -188,6 +218,13 @@ export async function processMaintenanceJob(job) {
     const res = await sweepExpiredExports();
     console.log(
       `[maintenance] ${EXPORT_SWEEP_JOB}: expired ${res.expired}, failed-job leftovers ${res.failedCleaned}, orphan file(s) ${res.orphans}`
+    );
+    return res;
+  }
+  if (job.name === CLIENT_REPORT_SWEEP_JOB) {
+    const res = await sweepClientReportRows();
+    console.log(
+      `[maintenance] ${CLIENT_REPORT_SWEEP_JOB}: ${res.orphans} orphan, ${res.mapOff} map-off, ${res.legacy} legacy, ${res.stale} stale row(s) over ${res.reports} report(s)`
     );
     return res;
   }

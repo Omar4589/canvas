@@ -31,6 +31,7 @@ import {
 import { sendMail } from '../../services/mail/mailer.js';
 import { inviteSetPassword, addedToOrg, addedToCampaign } from '../../services/mail/templates.js';
 import { issuePasswordResetToken, INVITE_TOKEN_HOURS } from '../../services/auth/passwordReset.js';
+import { convergeIfDeleted } from '../../services/users/deleteAccount.js';
 
 // A team lead's crew surface, scoped to ONE campaign they manage (requireCampaignManager
 // gates the mount): list org members to add, create a brand-new canvasser (or link a
@@ -304,6 +305,11 @@ router.post('/', async (req, res, next) => {
       },
       { upsert: true }
     );
+    // An account deleted while this add ran (its inline reactivation or roster row landing after the
+    // deletion released everything) is put back the way the deletion left it. After the LAST write.
+    if (await convergeIfDeleted({ userId: user._id, organizationId: orgId, campaignId: campaign._id })) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
 
     // EXACTLY ONE email per add — best-effort, never awaited (a mail hiccup must not fail the add).
     // A new account gets a set-password invite naming BOTH the org and this campaign; an account
@@ -319,7 +325,8 @@ router.post('/', async (req, res, next) => {
       }
     } else {
       const { url } = await issuePasswordResetToken(user._id, { hours: INVITE_TOKEN_HOURS });
-      sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, setPasswordUrl: url, role: 'canvasser' }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
+      // A url only comes back null for an account deleted in the meantime; there is nobody to invite.
+      if (url) sendMail({ to: user.email, ...inviteSetPassword({ firstName: user.firstName, orgName: req.activeOrg.name, campaignName: campaign.name, setPasswordUrl: url, role: 'canvasser' }), kind: 'inviteSetPassword', meta: { organizationId: req.activeOrg._id, organizationName: req.activeOrg.name, userId: user._id } });
     }
 
     // `outcome` tells the client which sentence to say. `attached` is the one that matters: it means
@@ -560,6 +567,10 @@ router.patch('/:userId/reactivate', async (req, res, next) => {
     );
     if (!membership) {
       return res.status(403).json({ error: 'Only a canvasser can be reactivated from a campaign.' });
+    }
+    // loadStatusTarget refused a deleted account; this catches one deleted in between.
+    if (await convergeIfDeleted({ userId: req.params.userId, organizationId: orgId, membershipId: membership._id })) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
     }
 
     res.json({

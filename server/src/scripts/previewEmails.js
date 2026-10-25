@@ -92,6 +92,11 @@ const SAMPLES = [
     teamSize: '20–50 canvassers',
     message: 'We run three state races this cycle.\nCan you walk us through turf cutting?',
   })],
+  // Automatic pause: names no one on purpose (docs/PROPOSAL_PACE_PAUSE.md §F.2); the ampersand checks esc().
+  ['pacePauseAlert', 'A canvasser was paused for review', () => t.pacePauseAlert({
+    orgName: 'Smith & Sons Consulting', campaignName: 'Florida - HD54 Randy Maggard',
+    when: 'on Oct 22 at 1:10 PM PDT', reviewUrl: `${ORIGIN}/pause/aaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccc`,
+  })],
 ];
 
 function esc(s) {

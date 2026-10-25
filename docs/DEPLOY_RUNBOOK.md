@@ -365,7 +365,12 @@ npm run migrate:deletion-snapshots        # then: npm run migrate:deletion-snaps
   cached-address sentence is false without it.*
 - **`scrub-map-points`** rewrites already-published client-report map points so canvasser-typed
   "Other: ___" text can no longer appear on a public page — same rule the publish path now applies
-  (canonical choice labels kept, anything typed → `Other`, unverifiable rows dropped).
+  (canonical choice labels kept, anything typed → `Other`, unverifiable rows dropped). *(Since the
+  client reports upgrade, 2026-10-24, that rule runs in the snapshot build on the worker — a draft's
+  Recompute or a published report's Refresh numbers — and Publish freezes what was built;
+  [CLIENT_PORTAL.md](CLIENT_PORTAL.md). Since its code review round 1 the web dyno also keeps each
+  ready-made client map in memory and serves a copy for up to 15 minutes, so a scrub run from the Run
+  console reaches a map a client already opened within 15 minutes, not instantly.)*
 - **`deletion-snapshots`** strips email/phone off pre-name-only `DeletedUserRecord` rows, making the
   deletion promise ("contact details are removed immediately") true for the whole corpus.
 
@@ -516,7 +521,7 @@ at a maintenance page.*
 | `migrate:persons-org-scope` | **NO. ONE-WAY.** Drops indexes, deletes orphan Persons, deletes pending edit proposals. **The Atlas snapshot (1d) is your only rollback.** |
 | `migrate:build-indexes` | **Yes.** Additive. Safe to re-run. |
 | `migrate:geocode-lastused` | **Yes.** Stamps a date field. Safe to re-run. |
-| `migrate:scrub-map-points` | **One-way for the scrubbed text** (that's the point — it removes typed write-ins from public points), but idempotent and rebuildable: republishing a report regenerates its points from the ledger. |
+| `migrate:scrub-map-points` | **One-way for the scrubbed text** (that's the point — it removes typed write-ins from public points), but idempotent and rebuildable: a report's points are regenerated from the ledger by its next build (a draft's Recompute; on a published report, Refresh numbers then Apply, since the 2026-10-24 client reports upgrade ended republishing). |
 | `migrate:deletion-snapshots` | **One-way** ($unsets email/phone off deletion snapshots) — deliberately: retaining them is what the policy forbids. |
 | `migrate:fbtime-deletion-gaps` *(later release)* | **One-way** for what it removes (emails on deleted accounts' FbTime links and in `link-created` history; an already-purged account's FbTime pairing) — deliberately: retaining them is what the policy forbids. Idempotent. The cleared fields were already optional (a link's email defaults to empty; nothing reads the event's), so a code rollback needs nothing undone. |
 

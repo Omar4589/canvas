@@ -86,5 +86,5 @@ Two things worth knowing:
   once — when the door is recorded. Correcting the pin now drops such an entry to **low** severity and
   shows both distances. It only ever *lowers* a flag, and it won't help if the person who moved the pin
   is the same person who recorded the door. See [The GPS audit](audit).
-- **A published report keeps the map it was frozen with.** Republish it to pick up corrections made
-  afterwards.
+- **A published client report keeps the map it was frozen with.** Open it and press **Refresh
+  numbers**, then **Apply**, to pick up corrections made afterwards.

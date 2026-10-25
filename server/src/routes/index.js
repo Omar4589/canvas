@@ -10,6 +10,7 @@ import adminCampaignHouseholdsRouter from './admin/campaignHouseholds.js';
 import adminImportsRouter from './admin/imports.js';
 import adminExportsRouter from './admin/exports.js';
 import adminReportsRouter from './admin/reports.js';
+import adminPacePausesRouter from './admin/pacePauses.js';
 import adminSurveysRouter from './admin/surveys.js';
 import adminTagsRouter from './admin/tags.js';
 import adminConfigRouter from './admin/config.js';
@@ -47,6 +48,8 @@ import mobileCanvassRouter from './mobile/canvass.js';
 import mobileMeRouter from './mobile/me.js';
 import mobileVotersRouter from './mobile/voters.js';
 import adminClientReportsRouter from './admin/clientReports.js';
+import adminClientReportSharesRouter from './admin/clientReportShares.js';
+import adminBrandingRouter from './admin/branding.js';
 import shareRouter from './public/share.js';
 import buildStatusRouter from './public/buildStatus.js';
 import demoRequestRouter from './public/demoRequest.js';
@@ -118,6 +121,8 @@ router.use('/admin/imports', adminImportsRouter);
 // there) and AFTER accessLog — mounting earlier would open an unlogged path into voter data.
 router.use('/admin/exports', adminExportsRouter);
 router.use('/admin/reports', adminReportsRouter);
+// Automatic pause: review, unpause, preview and settings (docs/PROPOSAL_PACE_PAUSE.md §G).
+router.use('/admin/pace-pauses', adminPacePausesRouter);
 router.use('/admin/surveys', adminSurveysRouter);
 router.use('/admin/tags', adminTagsRouter);
 router.use('/admin/config', adminConfigRouter);
@@ -148,7 +153,12 @@ router.use('/admin/campaigns/:campaignId/turfs', adminTurfsRouter);
 // Printable walk packets — read-only, and after accessLog like every other voter-data path.
 router.use('/admin/campaigns/:campaignId/packets', adminPacketsRouter);
 router.use('/admin/activities', adminActivitiesRouter);
+// Client links. Must stay ABOVE '/admin/client-reports' below: that router's `/:id` routes would
+// otherwise read `shares` as a report id.
+router.use('/admin/client-reports/shares', adminClientReportSharesRouter);
 router.use('/admin/client-reports', adminClientReportsRouter);
+// Report branding (the organization's logo on its clients' reports): admins write, leads read.
+router.use('/admin/branding', adminBrandingRouter);
 router.use('/admin/queues', adminQueuesRouter);
 
 router.use('/mobile', mobileBootstrapRouter);

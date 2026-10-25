@@ -9,7 +9,7 @@ import { useTheme } from '../lib/ThemeContext';
 // via onQuick, so it inherits the optimistic + offline behavior.
 //
 // entries: [{ kind:'single', key, household, distanceM } | { kind:'building', key, building, distanceM }]
-export default function DoorList({ entries, campaignType, votersByHousehold, onOpen, onQuick, onOpenBuilding }) {
+export default function DoorList({ entries, campaignType, votersByHousehold, onOpen, onQuick, quickDisabled = false, onOpenBuilding }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets(); // last row must clear the Android nav bar
   return (
@@ -23,6 +23,7 @@ export default function DoorList({ entries, campaignType, votersByHousehold, onO
           voters={item.kind === 'single' ? votersByHousehold?.get(String(item.household._id)) : null}
           onOpen={onOpen}
           onQuick={onQuick}
+          quickDisabled={quickDisabled}
           onOpenBuilding={onOpenBuilding}
         />
       )}

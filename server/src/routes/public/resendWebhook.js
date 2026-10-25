@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { EmailLog } from '../../models/EmailLog.js';
 
+// The account-deletion tombstone's domain (services/users/deleteAccount.js tombstoneEmail).
+const TOMBSTONE_DOMAIN = '@deleted.doorline.invalid';
+
 // Resend delivery webhook — upgrades EmailLog rows from "Resend accepted it" to what actually
 // happened at the inbox: delivered · bounced · complained · delayed. Public by necessity
 // (Resend calls it), so AUTH IS THE SIGNATURE: every request must carry a valid Svix signature
@@ -103,11 +106,19 @@ router.post('/', async (req, res, next) => {
     const query = TERMINAL.includes(status)
       ? { resendId }
       : { resendId, deliveryStatus: { $nin: TERMINAL } };
+    // A row the account-deletion scrub already emptied (its recipient is a deleted+…@deleted.doorline.
+    // invalid tombstone) never takes bounce text: a bounce message usually quotes the very address
+    // that was erased. Checked before the write, and again after it for a scrub that lands in between.
+    const isScrubbed = (row) => (row?.to || []).some((a) => String(a).endsWith(TOMBSTONE_DOMAIN));
+    const scrubbed = isScrubbed(await EmailLog.findOne(query).select('to').lean());
     const updated = await EmailLog.findOneAndUpdate(
       query,
-      { $set: { deliveryStatus: status, deliveryAt: at, deliveryDetail: detail } },
+      { $set: { deliveryStatus: status, deliveryAt: at, deliveryDetail: scrubbed ? null : detail } },
       { new: true }
     );
+    if (updated && updated.deliveryDetail && isScrubbed(updated)) {
+      await EmailLog.updateOne({ _id: updated._id }, { $set: { deliveryDetail: null } });
+    }
     if (!updated) {
       console.log(`[resend-webhook] ${event.type} for unknown/terminal resendId ${resendId} — ignored.`);
     }

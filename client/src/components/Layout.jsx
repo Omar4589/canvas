@@ -105,6 +105,9 @@ export default function Layout() {
   // Mock-GPS nudge: open mock-location flags for this campaign (61-day window, server-
   // computed). Drives the red badge on the Audit nav item below.
   const openMockFlags = currentCampaign?.openMockFlags || 0;
+  // Automatic pause: canvassers paused on this campaign right now (campaignSummaries.openPacePauses).
+  // Shown on the same Audit badge, ahead of mock-GPS flags — a pause is someone who can't work.
+  const openPacePauses = currentCampaign?.openPacePauses || 0;
   // Pins still awaiting a fix or confirm — approximate geocodes plus homes with no exact map
   // spot (campaignSummaries.pinsToFix, the same predicates the Pin Fixes page lists). Drives the
   // amber badge on the Pin Fixes item.
@@ -134,16 +137,19 @@ export default function Layout() {
     const Icon = navIcon(n.icon);
     const to = `/campaigns/${campaignId}${n.slug ? '/' + n.slug : ''}`;
     // Mock-GPS nudge on the Audit item: expanded = red count pill, collapsed = red dot.
-    const mockBadge = n.slug === 'audit' && openMockFlags > 0;
+    const pauseBadge = n.slug === 'audit' && openPacePauses > 0;
+    const mockBadge = n.slug === 'audit' && !pauseBadge && openMockFlags > 0;
     // Pin Fixes workload: same pill/dot mechanism, amber — a to-do count, not an alarm.
     const pinBadge = n.slug === 'pin-fixes' && pinsToFix > 0;
-    const flagNote = mockBadge
+    const flagNote = pauseBadge
+      ? `${openPacePauses} canvasser${openPacePauses === 1 ? '' : 's'} paused`
+      : mockBadge
       ? `${openMockFlags} open mock-GPS flag${openMockFlags === 1 ? '' : 's'}`
       : pinBadge
         ? `${pinsToFix} pin${pinsToFix === 1 ? '' : 's'} to fix`
         : '';
-    const badgeCount = mockBadge ? openMockFlags : pinBadge ? pinsToFix : 0;
-    const hasBadge = mockBadge || pinBadge;
+    const badgeCount = pauseBadge ? openPacePauses : mockBadge ? openMockFlags : pinBadge ? pinsToFix : 0;
+    const hasBadge = pauseBadge || mockBadge || pinBadge;
     return (
       <RailTip
         key={n.slug || 'home'}
@@ -166,13 +172,13 @@ export default function Layout() {
               aria-label={flagNote}
               // Amber pill = tint + warning-fg, the repo's small-amber-text pair (white on solid
               // bg-warning fails WCAG AA at this size); the red danger pill keeps its precedent.
-              className={`ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ring-1 ring-white/60 ${mockBadge ? 'bg-danger text-white' : 'bg-warning-tint text-warning-fg'}`}
+              className={`ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ring-1 ring-white/60 ${pauseBadge || mockBadge ? 'bg-danger text-white' : 'bg-warning-tint text-warning-fg'}`}
             >
               {badgeCount}
             </span>
           )}
           {hasBadge && collapsed && (
-            <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${mockBadge ? 'bg-danger' : 'bg-warning'}`} />
+            <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${pauseBadge || mockBadge ? 'bg-danger' : 'bg-warning'}`} />
           )}
         </NavLink>
       </RailTip>

@@ -36,6 +36,7 @@ import InsetGroup, {
 import LiveStatus from '../../../components/LiveStatus';
 import FlaggedEntryCard from '../../../components/FlaggedEntryCard';
 import FlagLegendHint from '../../../components/FlagLegendHint';
+import PausedCanvassersSection from '../../../components/PausedCanvassersSection';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../../../lib/bulkReview';
 
 const AUDIT_MAX_DAYS = 62;
@@ -386,6 +387,9 @@ export default function AdminAudit() {
           <FlagLegendHint />
         </View>
       </View>
+      {/* Canvassers paused for review, across every campaign the viewer manages — above the campaign chip,
+          which filters only the flags below it. Nothing renders when nobody is paused. */}
+      <PausedCanvassersSection live={live} />
       <View style={styles.chipWrap}>
         <CampaignChip value={campaign} onChange={setCampaign} />
       </View>

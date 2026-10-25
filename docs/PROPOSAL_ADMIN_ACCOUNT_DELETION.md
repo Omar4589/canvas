@@ -1,7 +1,63 @@
 # Proposal: Delete a member's account — for org admins and super admins
 
-> **Status: PLAN, revision 7 (2026-10-24), after review round 4. The deletion feature itself is not
-> built.**
+> **Status: BUILT 2026-10-24 (uncommitted), from revision 7 of this plan. Not yet deployed.** The server,
+> the web profile, the phone's admin profile, the eight name lookups, the email-log scrub and its backfill,
+> the 15-minute sweep, docs, Help Center and PRIVACY_VERIFICATION item 37 are in the working tree. §E2 (the
+> phone clean-up of a deleted account's unsent doors) is not built and ships after Election Day. Release
+> steps: §I2.
+>
+> **As built, where it differs from the text below:**
+> - Desk marks (`via: 'bulk'`) are left out of the ledger orgs that widen the name record (step 6) and out
+>   of `fieldRecordsHere`, the same rule as `orgCarriesUser`: their `userId` is whoever pressed the button.
+> - The sweep also stamps a pre-lock record of a deleted account as finished, which makes it unclaimable
+>   for good, and it reads recent deletions for the email re-scrub from the name records, not by scanning users.
+> - A gate write that errors but landed finishes the deletion at once instead of leaving it to the sweep.
+> - The 15-minute job writes no `RetentionRun` of its own; the nightly purge runs the same sweep first and
+>   records its counts and failures on its run.
+> - `hydrateCanvassers` restores no name at all when handed no org (fail closed).
+> - The leak fix and the staff-roster fix (§I1) were committed in `aa01027`.
+> - **Web Escape:** the profile's Escape listener sits on `document` in the capture phase. The passive-
+>   cleanup ref alone (§D) failed in React 18: React clears it before a bubbling `window` listener runs,
+>   so Escape in the dialog closed the profile too (reproduced in Chrome). The ref and pending guards stay.
+> - **Phone success:** `InteractionManager.runAfterInteractions` is a stub in React Native 0.81, so the
+>   queries are invalidated right after `router.back()`; the frozen member ref is what keeps the screen
+>   from drawing "User not found" mid-pop.
+> - **A refusal at the final delete** (`BLOCKED` or `USAGE_CHANGED`) sends both clients back to a
+>   reloaded review, which then lists any reasons with only Close.
+> - **The no-work review of a USED account** (signed in, or a crew coordinator who never knocked) says
+>   "Their email, phone and password are erased … Doorline keeps their name privately for 180 days." The
+>   mockup's "Their name, email, phone and password are erased" is kept for an unused account only,
+>   which is the one whose name really goes. The sync-first line shows for any used account (§D), not an
+>   unused one, which has no phone to ask about.
+> - Web and phone build the review from `client/src/lib/memberDeletion.js` and
+>   `mobile/lib/memberDeletion.js`; `client/src/lib/memberDeletion.parity.test.js` holds them word for word.
+> - **Code review (2026-10-24), every finding fixed and pinned by a test that fails on the code before it:**
+>   - a gate write that landed but errored, followed by a failed re-read, released the lock and stranded a
+>     half-finished deletion: the undo now re-reads FIRST and finishes a dead account instead;
+>   - the sweep could act on a stale snapshot of a lock a fresh attempt had since claimed (re-activating a
+>     deleted account's membership, or stranding an org): it now takes the lock by token before acting;
+>   - a takeover of a crashed attempt reset its list of switched-off memberships before restoring them: the
+>     list now stays on the record until they are back on;
+>   - the org door's recount could add another org's LAST_ADMIN beside OTHER_ORGANIZATION: the cross-org
+>     refusal now comes alone, before any recount;
+>   - a record with no userId would have scrubbed every evidence row with no userId: the scrub and the
+>     sweep refuse anything without a valid id;
+>   - one malformed record failed the whole nightly purge: ids are filtered and the sweep is wrapped;
+>   - Remove from org, a demotion or Deactivate racing a deletion could still reach zero admins: all three
+>     re-count LIVE admins after their write (`LAST_ADMIN`), like the billing backstop;
+>   - the late-mail re-scrub now reads only rows sent from an hour before the deletion (the sentAt index).
+> - **Client review (2026-10-24), fixed the same way:** the web's first "Delete account…" could hang on
+>   "Checking…" (react-query re-rendered the profile only for result props it had read; the dialog now owns
+>   its stats subscription); a double click or Enter-plus-click could send two DELETEs or close mid-delete
+>   (a synchronous ref on both); a lost answer left a live-looking row (ALREADY_DELETED and NOT_A_MEMBER now
+>   close as after a success; no answer reloads the review); a BLOCKED whose cause had cleared came back
+>   unexplained (its reasons are the note); the phone notice re-cased names and its search matched deleted
+>   rows on "Deleted user".
+> - **Remove from org on the phone (owner request, 2026-10-24):** the phone's profile now has it under
+>   Deactivate, on the web's rule and words (`mayOfferRemove`, `removeConfirm`), so the review's "Usually you
+>   want Remove from org instead" points at something the phone has. A deleted row offers it too, as on the web.
+>
+> **Earlier status (revision 7, 2026-10-24), before the build:**
 >
 > - **The cross-organization leak this review found is FIXED** (owner decision 2026-10-24). It is
 >   uncommitted and ready to ship on its own (§I1), recorded as PRIVACY_VERIFICATION item 35. Round 4
@@ -1062,18 +1118,24 @@ files.
 
 **The staging recipe (the delete sheet only; §E2's phone clean-up is not in this build).** Staging
 talks to production, so this is a real deletion: never delete the review or background canvassers
-(if one is deleted, re-run `npm run seed:demo`).
+(if one is deleted, re-run `npm run seed:demo -- --apply`).
 
 1. As a break-glass super admin in the internal demo org, add a throwaway canvasser to a demo
    campaign. Don't sign in as it on any phone.
 2. On a staging phone, as a demo-org admin who isn't a review login (they get `REVIEW_LOGIN`):
    Users → the throwaway (from a campaign list: Manage profile) → Account → More options → Delete
    account.
-3. The review names the person, shows the sync-first line, and reads "no work here".
+3. The review names the person and reads "no work here". An account nobody used shows no sync-first
+   line (there is no phone to ask about); it says the person disappears from the Users list.
 4. Continue, type a wrong email (Delete permanently stays grey), go Back (the field clears), then type
    it right and delete.
-5. The row is gone on the phone and the web. A second delete of the same id answers
-   `ALREADY_DELETED`.
+5. The row is gone on the phone and the web. A second delete of the same id answers 404 (the unused
+   account's row went with it); a used account's second delete answers `ALREADY_DELETED`.
+6. On BOTH an iPhone and an Android staging phone: after the delete, the profile closes and the Users list
+   comes back without flashing "User not found", and the list shows the deleted notice. (The sheet closes
+   and the screen pops in the same tick; review couldn't check that on a device.)
+7. Remove from org on the phone: a second throwaway's profile → Account → Remove from org → Remove. The
+   profile closes, the list says they're no longer in the organization, and a double tap asks only once.
 
 The leftover-doors behaviour belongs to the post-Election queue plan's own recipe. Don't reproduce it
 here: in production it would put a door under the wrong account.

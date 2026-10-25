@@ -9,7 +9,7 @@ import { useTheme } from '../lib/ThemeContext';
 // distance + inline quick-action), a building (address + "N units · M done"), a spot of
 // different homes with no exact map spot ("N homes at one map spot", no distance — it
 // would be measured to the shared spot), or a section header (lib/listEntries.js).
-function DoorListRowBase({ item, campaignType, voters, onOpen, onQuick, onOpenBuilding }) {
+function DoorListRowBase({ item, campaignType, voters, onOpen, onQuick, quickDisabled = false, onOpenBuilding }) {
   const { colors } = useTheme();
 
   if (item.kind === 'section') {
@@ -84,10 +84,12 @@ function DoorListRowBase({ item, campaignType, voters, onOpen, onQuick, onOpenBu
       </Pressable>
       <Pressable
         onPress={() => onQuick(h._id, quickAction)}
+        // Greyed while recording is off for this canvasser (billing pause, paused for review — map.jsx).
+        disabled={quickDisabled}
         hitSlop={4}
         style={({ pressed }) => [
           styles.quickBtn,
-          { backgroundColor: colors.status[quickAction] || colors.textMuted, opacity: pressed ? 0.85 : 1 },
+          { backgroundColor: colors.status[quickAction] || colors.textMuted, opacity: quickDisabled ? 0.4 : pressed ? 0.85 : 1 },
         ]}
       >
         <Text style={styles.quickText}>{quickLabel}</Text>

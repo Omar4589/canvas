@@ -149,6 +149,11 @@ export function createApp() {
     app.get(/^(?!\/api).*/, (req, res, next) => {
       const segment = (req.path.split('/')[1] || '').toLowerCase();
       const known = WEB_SEGMENTS.has(segment);
+      // A client's report link (/r/:token…) is for its recipient, never a search index. This is the
+      // ONLY place that HTML is served, so the noindex lives here (the /api/share JSON says it too).
+      // robots.txt no longer blocks /r/: a crawler kept out by robots.txt never sees a noindex, and
+      // can still list a forwarded link's bare URL.
+      if (segment === 'r') res.set('X-Robots-Tag', 'noindex, nofollow');
       res
         .status(known ? 200 : 404)
         .sendFile(known ? path.join(CLIENT_DIST, 'index.html') : NOT_FOUND_DOC, (err) =>

@@ -5,6 +5,8 @@ import { CampaignManager } from '../../models/CampaignManager.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
+import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
+import { ClientReportSeries } from '../../models/ClientReportSeries.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { CampaignChange } from '../../models/CampaignChange.js';
 import { DncPendingId } from '../../models/DncPendingId.js';
@@ -18,6 +20,7 @@ import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
+import { PacePause } from '../../models/PacePause.js';
 import { ConversionStrike } from '../../models/ConversionStrike.js';
 import { waitForDoorOutcomesToStop } from '../canvass/answerEditRuns.js';
 import { LATE_WRITE_MODELS } from './lateWriteSweep.js';
@@ -40,6 +43,7 @@ import { Person } from '../../models/Person.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
 import { PersonMergeLog } from '../../models/PersonMergeLog.js';
+import { OrgBranding } from '../../models/OrgBranding.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { Statement } from '../../models/Statement.js';
@@ -69,15 +73,15 @@ const CHUNK = Number(process.env.ORG_DELETE_CHUNK) || 5000;
 // test can seed a stub row in every one and prove the sweep is exhaustive.
 export const ORG_SCOPED = [
   Campaign, CampaignAssignment, CampaignChange, CampaignManager, CanvassActivity, ClientReport,
-  ClientReportMapPoint, CoordinatorChange, DncPendingId, DncUpload, DoNotKnockAddress,
+  ClientReportMapPoint, ClientReportAreaCell, ClientReportSeries, CoordinatorChange, DncPendingId, DncUpload, DoNotKnockAddress,
   Effort, EffortMember,
   ExportJob, FbTimeConnection, FbTimePersonLink, FbTimeShift,
   FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
-  Membership, Pass,
+  Membership, OrgBranding, Pass,
   ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk,
   AnswerEditRun, AnswerEditRunChunk,
   SurveyResponse, SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,
-  VotedUpload, VotedVoter, Voter, VoterNote,
+  VotedUpload, VotedVoter, Voter, VoterNote, PacePause,
 ];
 
 // HARD-delete an organization and everything scoped to it. Irreversible — the

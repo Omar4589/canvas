@@ -22,6 +22,26 @@ const locationSchema = new mongoose.Schema(
 // (min effective distance among the prior row's own stamp and its replaced.nearest), so
 // a second correction from afar can't lose the proof the first one preserved. The GPS
 // audit downgrades an honest correction's "far" flag using `nearest` (flagDetection.js).
+//
+// `history` is every earlier save this canvasser made at this door in this round, oldest first, capped at
+// 20 (services/audit/paceRule.js historyFor): the snapshot fields above keep only the immediate prior, so
+// without it a door saved again could erase a visit from automatic pause (docs/PROPOSAL_PACE_PAUSE.md §B.2).
+// `actionType` there is the result as recorded (reclassified.from when an admin later converted it).
+// `default: undefined` on purpose: absent means a row written before history existed, and the rule then
+// reads the one-level snapshot instead.
+const historyEntrySchema = new mongoose.Schema(
+  {
+    at: { type: Date, default: null },
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    actionType: { type: String, default: null },
+    createdAt: { type: Date, default: null }, // when the server received that save
+    offline: { type: Boolean, default: null }, // whether it arrived as an offline replay
+  },
+  { _id: false }
+);
+
 const replacedSchema = new mongoose.Schema(
   {
     actionType: { type: String, default: null },
@@ -33,6 +53,7 @@ const replacedSchema = new mongoose.Schema(
       accuracy: { type: Number, default: null },
       timestamp: { type: Date, default: null },
     },
+    history: { type: [historyEntrySchema], default: undefined },
   },
   { _id: false }
 );

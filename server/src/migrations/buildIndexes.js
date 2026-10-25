@@ -38,6 +38,7 @@ async function main() {
   console.log(`${names.length} models · mode: ${mode}\n`);
 
   let totalMissing = 0;
+  const failed = [];
   for (const name of names) {
     const Model = mongoose.models[name];
     const declared = Model.schema.indexes(); // [[keys, options], ...] — includes field-level index:true
@@ -61,13 +62,24 @@ async function main() {
     }
 
     if (APPLY) {
-      if (SYNC) await Model.syncIndexes();
-      else await Model.createIndexes();
+      // Per model: one model's failure (a unique index over existing duplicates, say) is reported
+      // and the run goes on to the next, instead of leaving every later model's indexes unbuilt.
+      try {
+        if (SYNC) await Model.syncIndexes();
+        else await Model.createIndexes();
+      } catch (err) {
+        failed.push(name);
+        console.error(`   ✗ ${name}: ${err?.message || err}`);
+      }
     }
   }
 
+  if (failed.length) {
+    console.error(`\n${failed.length} model(s) failed to build: ${failed.join(', ')} — fix and re-run; the rest were built.`);
+    process.exitCode = 1;
+  }
   if (APPLY) {
-    console.log(`\nDone — ${SYNC ? 'synced' : 'built missing'} indexes across ${names.length} models.`);
+    console.log(`\nDone — ${SYNC ? 'synced' : 'built missing'} indexes across ${names.length - failed.length} of ${names.length} models.`);
   } else {
     console.log(
       totalMissing

@@ -155,6 +155,12 @@ A canvasser mid-shift when an org is paused is treated fairly: **work recorded w
 entitled always uploads**, even from the offline queue — only *new* dispositions are blocked (the
 buttons disable, with a notice).
 
+**Read-only still lets an org end access.** Besides exporting, a suspended, canceled or expired-trial
+org's admins can still switch people off — **Deactivate** (on the Users page or a campaign's crew),
+**Remove from org** — and **delete an account** (since 2026-10-24, the owner's ruling that deletion stays
+possible while billing is paused, read as covering switching access off too). Nothing that turns access
+back **on** — Reactivate, a role or billing change — works until billing is sorted.
+
 ## Who manages this, and where
 
 Account managers are **super admins**, and they work from two screens: the **Organizations desk**
@@ -516,12 +522,25 @@ indexed `Subscription.findOne` per request. Rules, in order:
    `canceled` is read-only like `suspended` (the 60-day wind-down is a real export window;
    it has NOT blocked reads since the Change-1 rewrite).
 3. Writes pass when `canWrite`.
-4. **The export carve-outs**: `POST /admin/exports` (creating an Export Center job — see
-   [EXPORTS.md](EXPORTS.md)) and `POST /admin/exports/estimate` (its count-only preview — a
-   read wearing POST) pass for every read-only status. They are the TWO writes a
-   suspended/expired-trial/canceled org may perform, method-and-path exact ×2, because the
-   published wind-down promise ("may export its Customer Data during that period") is
-   meaningless if queueing an export 402s. Guard-tested in `test/billing.int.test.js`.
+4. **The read-only carve-outs** — six writes a suspended/expired-trial/canceled org may still
+   perform, method-and-path exact; this widens entitlement only, never authorization, so every route
+   still runs its own role and billing guards:
+   - **The two exports**: `POST /admin/exports` (creating an Export Center job — see
+     [EXPORTS.md](EXPORTS.md)) and `POST /admin/exports/estimate` (its count-only preview — a
+     read wearing POST), because the published wind-down promise ("may export its Customer Data
+     during that period") is meaningless if queueing an export 402s. Guard-tested in
+     `test/billing.int.test.js` and `test/exports.int.test.js`.
+   - **The four writes that END access** (`ACCESS_ENDING_WRITES`, since 2026-10-24 — the owner's
+     ruling that deletion stays possible while billing is paused, read as covering switching access
+     off too): `DELETE /api/admin/memberships/<id>/account` (delete an account),
+     `DELETE /api/admin/memberships/<id>` (Remove from org),
+     `PATCH /api/admin/memberships/<id>/deactivate`, and
+     `PATCH /api/admin/campaigns/<id>/crew/<id>/deactivate` — each regex anchored at both ends, ids
+     24-hex only. Nothing that turns access back on rides through (both `/reactivate`s,
+     `PATCH /admin/memberships/:userId`, role or billing changes), and no `/mobile` lookalike does.
+     Guard-tested in `test/orgAccountDeletion.int.test.js` ("a paused org: exactly the four writes
+     that END access pass"). Stamped in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md), whose
+     export-only passages this amends; see [USERS.md](USERS.md) → *Deleting a member's account*.
 5. **Sync-boundary grace**: a `/mobile` write whose `body.timestamp` predates
    `statusChangedAt` passes — a canvasser's offline queue recorded while entitled always
    flushes. Mobile-only, so an admin write can't smuggle an old timestamp.
@@ -761,7 +780,17 @@ never invoiced.)
   doors refuse on the last one: toggling billing access off, demoting the role, deactivating the
   membership (either route), removing them from the org, and (pre-existing) deleting their own
   account. Hand billing access to another admin first, then proceed. Guard + test:
-  `routes/admin/memberships.js` `isLastBillingAdmin`, `test/billingAccess.int.test.js`.
+  `routes/admin/memberships.js` `isLastBillingAdmin`, `test/billingAccess.int.test.js`. An org admin
+  deleting a member's account (2026-10-24) is a sixth door with the same refusal (`LAST_BILLING_ADMIN`,
+  asked in the review and again by a live recount after the memberships go off), and every count is of
+  live accounts only, so a deleted account's tombstone row never counts as a billing admin.
+- **Billing access also protects its holder** (2026-10-24). Only a caller who has billing access (or
+  staff) may **delete** someone who has it (`BILLING_TARGET`, a blocker in the deletion review) or
+  **remove them from the org** (`403 BILLING_ACCESS_REQUIRED` on `DELETE /admin/memberships/:userId`) —
+  otherwise a non-billing admin could clear a billing admin's flag by Remove followed by re-adding the
+  email. A deleted account's row is exempt (anyone may tidy a tombstone; deletion now clears its
+  `billingAccess` anyway). The web hides both options from a viewer without billing access; the phone
+  hides Delete. See [USERS.md](USERS.md) → *The org door*.
 - **Provisioning** ([routes/superAdmin/organizations.js](../server/src/routes/superAdmin/organizations.js))
   reuses `createOrgMember` ([services/memberships/createMember.js](../server/src/services/memberships/createMember.js),
   now taking `mustChangePassword` + `billingAccess`) to seat the first admin atomically with the

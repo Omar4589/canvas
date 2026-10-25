@@ -1,7 +1,7 @@
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Household } from '../../models/Household.js';
-import { User } from '../../models/User.js';
 import { FlagReview } from '../../models/FlagReview.js';
+import { hydrateCanvassers } from '../reports/canvasserIdentity.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { FLAG_THRESHOLDS, COMPLEX_FAR_M, maxSeverity } from './flagThresholds.js';
 
@@ -70,14 +70,13 @@ export async function detectFlags(match, { organizationId, thresholds = FLAG_THR
     : [];
   const reviewMap = new Map(reviews.map((rv) => [String(rv.actionId), rv]));
 
-  // Resolve canvasser + reviewer names in one query.
+  // Resolve canvasser + reviewer names in one pass. hydrateCanvassers, not a bare User.find: a
+  // deleted canvasser's name comes back from the name record for the retention window — the reason
+  // that record exists (models/DeletedUserRecord.js) — and only for this org.
   const userIds = new Set();
   for (const { row } of acc.values()) userIds.add(String(row.userId));
   for (const rv of reviews) if (rv.reviewedBy) userIds.add(String(rv.reviewedBy));
-  const users = userIds.size
-    ? await User.find({ _id: { $in: [...userIds] } }, 'firstName lastName email').lean()
-    : [];
-  const uMap = new Map(users.map((u) => [String(u._id), u]));
+  const uMap = await hydrateCanvassers([...userIds], organizationId);
   const nameOf = (id) => {
     const u = uMap.get(String(id));
     return u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : '';

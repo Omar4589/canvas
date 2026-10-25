@@ -19,14 +19,14 @@ which can be undone at any time.
 
 The doors you knocked and the survey answers you recorded **stay with the campaign**. Those are the
 organization's records of work performed — not your personal content — so deleting your account never
-changes a campaign's numbers. On reports and on the map you'll simply appear as **"Deleted user"** from
-then on.
+changes a campaign's numbers. Some screens, like the map, show you as **"Deleted user"** straight away.
 
 Your name is also kept alongside those records for **180 days**, so your organization can still verify who
-did which field work, and then it's removed for good — the records stay with the campaign, but they no
-longer directly identify you. Canvassing records include the location where each door was logged, and an
-organization has to be able to check that work against a real person. You'll see this explained in the app
-before you confirm.
+did which field work: it stays on its canvasser reports, team labels, GPS audit and exports — and the same
+goes for any organization you used to canvass for. Then it's removed for good — the records stay with the
+campaign, but they no longer directly identify you. Canvassing records include the location where each
+door was logged, and an organization has to be able to check that work against a real person. You'll see
+this explained in the app before you confirm.
 
 ## Things that will stop the deletion
 

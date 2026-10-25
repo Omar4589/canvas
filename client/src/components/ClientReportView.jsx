@@ -2,7 +2,7 @@ import StatCard from './StatCard.jsx';
 import ReportBreakdown from './ReportBreakdown.jsx';
 import ReportTagList from './ReportTagList.jsx';
 import Card from './ui/Card.jsx';
-import { deriveReportSections, formatCount } from '../lib/reportDerive.js';
+import { deriveReportSections, formatCount, reportHeading } from '../lib/reportDerive.js';
 
 // Presentational render of a shaped client report (shapeReportForClient output). Used by BOTH the
 // admin builder Preview and the client portal detail page so they're guaranteed identical. Every
@@ -10,6 +10,8 @@ import { deriveReportSections, formatCount } from '../lib/reportDerive.js';
 // same source the PDF export consumes — so the on-screen report and the downloaded PDF never drift.
 // Section order: Activity at a glance → Voter contact breakdown → headline Support → other survey
 // questions → Canvasser observations. The map is rendered separately by the parent (own data fetch).
+// Every weekly string goes through the report's period (periodPhrase): "+412 this week", "+812 in
+// these 14 days", "+40 that day".
 
 function SectionHeading({ children }) {
   return (
@@ -18,31 +20,60 @@ function SectionHeading({ children }) {
 }
 
 // Map a derived KPI to StatCard props: a positive period delta becomes an "up" pill, the rate card
-// shows its static hint, and a zero-delta week shows the terse "no change" hint.
+// shows its static hint, and a zero-delta period shows the terse "no change" hint.
 function kpiProps(k) {
   if (k.delta === null) return { hint: k.hint };
-  if (k.delta > 0) return { delta: `+${formatCount(k.delta)} this week`, deltaTone: 'up' };
+  if (k.delta > 0) return { delta: k.deltaText, deltaTone: 'up' };
   return { hint: k.deltaZeroText };
 }
 
+/**
+ * The report's heading as the client reads it (§H3): its title or dates, the scope ("Team: Paid
+ * team"), and "Published Oct 20 · Edited Oct 21" — dates, never times. `nav` sits above the title
+ * (the client's All reports / Older · Newer), `actions` beside it (the PDF button).
+ */
+export function ClientReportHeading({ report, nav = null, actions = null }) {
+  const h = reportHeading(report);
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        {nav}
+        <h1 className="mt-1 text-2xl font-semibold text-fg">{h.title}</h1>
+        <div className="text-sm text-fg-muted">{[h.range, h.scope].filter(Boolean).join(' · ')}</div>
+        {h.dates.length > 0 && <div className="mt-1 text-xs text-fg-muted">{h.dates.join(' · ')}</div>}
+      </div>
+      {actions}
+    </div>
+  );
+}
+
 export default function ClientReportView({ report }) {
-  const { kpis, goal, contact, support, tags, others, isQuietWeek } = deriveReportSections(report);
+  const { kpis, goal, contact, support, tags, others, isQuietWeek, quietText, numbersAsOf, earlierTotals, teamNote } =
+    deriveReportSections(report);
 
   return (
     <div className="space-y-8">
-      <section>
+      <section className="[container-type:inline-size]">
         <SectionHeading>Activity at a glance</SectionHeading>
-        {isQuietWeek && (
-          <Card className="mb-3 bg-info-tint p-3 text-sm text-info-fg">
-            A quieter week — no new doors were knocked in this period. The numbers below are cumulative
-            totals to date.
-          </Card>
-        )}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* The numbers stopped before the period ended — say so before anyone reads them. */}
+        {numbersAsOf && <Card className="mb-3 bg-info-tint p-3 text-sm text-info-fg">{numbersAsOf}</Card>}
+        {isQuietWeek && <Card className="mb-3 bg-info-tint p-3 text-sm text-info-fg">{quietText}</Card>}
+        {/* Four cards a row on a wide screen only when the report itself is wide too: the builder's
+            preview pane at 1280 px is about 490 px, where four cards cut off their (i). The client's
+            page is that wide whenever the screen is, so it reads exactly as before. */}
+        <div className="grid grid-cols-2 gap-3 lg:[@container(min-width:720px)]:grid-cols-4">
           {kpis.map((k) => (
             <StatCard key={k.key} label={k.label} value={k.value} accent={k.accent} help={k.help} prominent {...kpiProps(k)} />
           ))}
         </div>
+        {/* One neutral line when earlier reports' totals moved after they were sent (owner ruling
+            10-24), and the team rule on a team report. Never reasons, never a canvasser. */}
+        {(earlierTotals || teamNote) && (
+          <div className="mt-3 space-y-1 text-sm text-fg-muted">
+            {earlierTotals && <p>{earlierTotals}</p>}
+            {teamNote && <p>{teamNote}</p>}
+          </div>
+        )}
       </section>
 
       {/* Door goal, when the operator opted in. Right under the headline numbers because it

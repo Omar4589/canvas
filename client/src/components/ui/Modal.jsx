@@ -14,21 +14,25 @@ import { IconX } from './icons.jsx';
 // `bodyRef` reaches that scroll box. A modal that swaps its own content in place (the door-by-door
 // walkthrough advancing to the next address) reuses this node, so its scrollTop carries over into
 // content it does not belong to; such a caller resets it here.
-export default function Modal({ onClose, title, subtitle, footer, size = 'xl', className = '', bodyRef, children }) {
+//
+// `closable={false}` holds the dialog open: no close button, and the scrim and Escape do nothing.
+// For the moment an answer has to land on this dialog — a permanent delete in flight, say.
+export default function Modal({ onClose, title, subtitle, footer, size = 'xl', className = '', bodyRef, closable = true, children }) {
   const maxW = { md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl' }[size] || 'max-w-xl';
+  const close = closable ? onClose : undefined;
   return (
-    <Overlay onClose={onClose} align="center" className={`my-8 w-full ${maxW} px-4`}>
+    <Overlay onClose={close} align="center" className={`my-8 w-full ${maxW} px-4`}>
       <div
         className={`animate-pop-in flex max-h-[calc(100vh-4rem)] flex-col rounded-card border border-border bg-card shadow-overlay ${className}`}
       >
-        {(title || onClose) && (
+        {(title || close) && (
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
             <div>
               {title && <h2 className="text-lg font-semibold text-fg">{title}</h2>}
               {subtitle && <p className="mt-0.5 text-sm text-fg-muted">{subtitle}</p>}
             </div>
-            {onClose && (
-              <IconButton label="Close" onClick={onClose} className="-mr-1">
+            {close && (
+              <IconButton label="Close" onClick={close} className="-mr-1">
                 <IconX size={20} />
               </IconButton>
             )}

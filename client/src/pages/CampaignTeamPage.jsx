@@ -762,6 +762,8 @@ function TeamMemberPanel({ member, campaignId, campaignType, notTargetInUse = fa
               busy={setCoordMut.isPending}
               onCancel={cancelCoordinatorChange}
               onConfirm={() => setCoordMut.mutate({ cid: pendingCoordinatorId })}
+              campaignId={campaignId}
+              subjectId={member.userId}
             />
           ) : (
             <p className="mt-1 text-xs text-fg-muted">

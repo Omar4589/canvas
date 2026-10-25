@@ -87,6 +87,7 @@ import { ExportJob } from '../../models/ExportJob.js';
 import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import/sweepStaleImports.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
+import { restoreHistoryRow, eraseHistory, HistoryError } from '../../services/reports/clientReportHistory.js';
 
 const router = Router();
 // Team leads reach this router too, but scoped: the list returns only campaigns
@@ -346,6 +347,100 @@ router.get('/', async (req, res, next) => {
 // carrying a cross-collection cursor. `truncated` says plainly when a cap was hit.
 const HISTORY_CAP = 200;
 
+// The Client Reports tab's History: its rows only, newest first, with the report they concern and
+// the period they name. An edit row carries the EARLIER text (fromValue) until an admin erases it —
+// leads read this on their campaigns, so it is customer-facing (§F9, §O8).
+async function clientReportHistory(req, res, campaign, orgId) {
+  const rows = await CampaignChange.find({ campaignId: campaign._id, organizationId: orgId, source: 'client_report' })
+    .sort({ createdAt: -1 })
+    .limit(HISTORY_CAP)
+    .lean();
+  const people = await hydrateCanvassers(
+    rows.flatMap((r) => [r.byUserId, r.erasedBy]).filter(Boolean),
+    orgId
+  );
+  const who = (id) => {
+    if (!id) return null;
+    const p = people.get(String(id));
+    if (!p) return { id: String(id), name: 'Unknown user', status: 'deleted' };
+    return { id: String(id), name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user', status: p.status };
+  };
+  res.json({
+    items: rows.map((r) => ({
+      id: String(r._id),
+      kind: 'client_report',
+      at: r.createdAt,
+      by: who(r.byUserId),
+      field: r.field,
+      fromValue: r.fromValue ?? null,
+      toValue: r.toValue ?? null,
+      clientReportId: r.clientReportId ? String(r.clientReportId) : null,
+      seriesId: r.seriesId ? String(r.seriesId) : null,
+      shareLinkId: r.shareLinkId ? String(r.shareLinkId) : null,
+      periodLabel: r.periodLabel || null,
+      erasedAt: r.erasedAt || null,
+      erasedBy: who(r.erasedBy),
+    })),
+    truncated: rows.length >= HISTORY_CAP,
+  });
+}
+
+// Restore an edit's earlier text as a normal edit (§F9, §O8) — by row id, refused once erased (409),
+// and refused when an Erase lands mid-restore (the report's eraseEpoch CAS). Leads may: it is an edit.
+router.post('/:campaignId/history/:rowId/restore', async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    if (!mongoose.isValidObjectId(req.params.campaignId)) return res.status(400).json({ error: 'Invalid campaign id' });
+    if (!(await canManageCampaign(req, req.params.campaignId))) return res.status(403).json({ error: 'Forbidden' });
+    const report = await restoreHistoryRow({
+      campaignId: new mongoose.Types.ObjectId(req.params.campaignId),
+      organizationId: orgId,
+      rowId: req.params.rowId,
+      by: req.user._id,
+    });
+    res.json({ report });
+  } catch (err) {
+    if (err instanceof HistoryError) return res.status(err.status).json({ error: err.message, code: err.code });
+    next(err);
+  }
+});
+
+// Erase (ADMINS ONLY): clear an edit row's earlier text — `/history/:rowId/erase` — or every edit row
+// of one report, beyond the drawer's page and after the report is deleted — `/history/erase` with
+// { clientReportId }. `alsoDrafts` removes the same text from later drafts Next copied it into;
+// `dryRun` returns the counts the confirm names without writing.
+const eraseBody = z.object({
+  clientReportId: z.string().optional(),
+  alsoDrafts: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+});
+const eraseRoute = (byRow) => async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.campaignId)) return res.status(400).json({ error: 'Invalid campaign id' });
+    if (!(await canManageCampaign(req, req.params.campaignId))) return res.status(403).json({ error: 'Forbidden' });
+    const data = eraseBody.parse(req.body || {});
+    if (!byRow && !data.clientReportId) return res.status(400).json({ error: 'clientReportId required' });
+    const out = await eraseHistory({
+      campaignId: new mongoose.Types.ObjectId(req.params.campaignId),
+      organizationId: activeOrgId(req),
+      rowId: byRow ? req.params.rowId : null,
+      clientReportId: byRow ? null : data.clientReportId,
+      by: req.user._id,
+      alsoDrafts: !!data.alsoDrafts,
+      dryRun: !!data.dryRun,
+    });
+    res.json(out);
+  } catch (err) {
+    if (err?.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err instanceof HistoryError) return res.status(err.status).json({ error: err.message, code: err.code });
+    next(err);
+  }
+};
+router.post('/:campaignId/history/erase', requireOrgRole('admin'), eraseRoute(false));
+router.post('/:campaignId/history/:rowId/erase', requireOrgRole('admin'), eraseRoute(true));
+
 router.get('/:campaignId/history', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -361,8 +456,14 @@ router.get('/:campaignId/history', async (req, res, next) => {
     ).lean();
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
+    // The Client Reports tab's own History (source 'client_report') is kept OUT of this feed by a
+    // filter in the query, so the web History and the phone — which calls this unfiltered — see
+    // exactly what they did before, 200-row cap included. The tab asks with ?include=client_reports
+    // (a fixed value) and gets ONLY those rows (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F9).
+    if (req.query.include === 'client_reports') return clientReportHistory(req, res, campaign, orgId);
+
     const [configRows, teamRows] = await Promise.all([
-      CampaignChange.find({ campaignId: campaign._id, organizationId: orgId })
+      CampaignChange.find({ campaignId: campaign._id, organizationId: orgId, source: { $ne: 'client_report' } })
         .sort({ createdAt: -1 })
         .limit(HISTORY_CAP)
         .lean(),

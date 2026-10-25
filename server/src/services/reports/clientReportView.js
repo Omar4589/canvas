@@ -1,46 +1,98 @@
-// Shape a ClientReport (and its frozen map points) for public viewing. Used by BOTH the public
-// share endpoints (/share/:token/reports) and the admin preview (/admin/client-reports/:id/preview)
-// so the operator sees byte-for-byte what recipients will. Applies the visibility whitelist and
-// drops admin-only internals.
+// Shape a ClientReport for public viewing. Used by BOTH the public share endpoints
+// (/share/:token/reports) and the admin preview (/admin/client-reports/:id/preview) so the
+// operator sees byte-for-byte what recipients will. Applies the visibility whitelist and drops
+// admin-only internals.
+//
+// What reaches the wire is ENFORCED here, not on screen (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md
+// §F1): visible questions are visibleKeysFor (empty = none), map questions are servedMapKeys (a
+// follow-up only with its parents, and only what both the report's settings and its live snapshot
+// allow), `supportQuestionKey` only when that question is visible, no `coverage`, no
+// `visibility.mapAnswerKeys`, and NO INSTANTS: dates are civil dates in the report's own zone
+// (§F0). The map's version is the snapshot's opaque key, never an ObjectId.
 
 import { normalizeTag } from '../surveys/tags.js';
+import { zonedDayStr } from '../../utils/timezone.js';
+import { visibleKeysFor, servedMapKeys, mapServed, numbersCutOff, scopeOf, seriesKeyOf } from './reportVisibility.js';
+import { mapVersionOf } from './clientReportMap.js';
 
-function shapeWindow(w = {}, { visibleQuestionKeys = [], visibleTags = [] } = {}) {
-  const breakdowns = w.surveyBreakdowns || [];
-  const filtered = visibleQuestionKeys.length
-    ? breakdowns.filter((b) => visibleQuestionKeys.includes(b.questionKey))
-    : breakdowns;
-  // OPT-IN, the OPPOSITE of visibleQuestionKeys: empty = show NONE. Tag names are
-  // operator-authored strings on an unauthenticated page, so each is an affirmative tick.
-  // Case-insensitive match (normalizeTag) so a palette re-casing between compute and tick
-  // can never silently hide a chosen tag.
+function shapeWindow(w = {}, { visibleKeys = [], visibleTags = [] } = {}) {
+  // Empty means NONE (it used to mean all, so unticking every question showed all of them — B3).
+  const keys = new Set(visibleKeys);
+  const surveyBreakdowns = (w.surveyBreakdowns || [])
+    .filter((b) => keys.has(b.questionKey))
+    .map((b) => ({
+      questionKey: b.questionKey,
+      questionLabel: b.questionLabel,
+      type: b.type,
+      options: (b.options || []).map((o) => ({ option: o.option, count: o.count, percent: o.percent })),
+    }));
+  // OPT-IN, like visible questions: empty = show NONE. Tag names are operator-authored strings on
+  // an unauthenticated page, so each is an affirmative tick. Case-insensitive match (normalizeTag)
+  // so a palette re-casing between compute and tick can never silently hide a chosen tag.
   const tagSet = new Set(visibleTags.map(normalizeTag));
   const tagBreakdowns = tagSet.size
-    ? (w.tagBreakdowns || []).filter((b) => tagSet.has(normalizeTag(b.tag)))
+    ? (w.tagBreakdowns || [])
+        .filter((b) => tagSet.has(normalizeTag(b.tag)))
+        .map((b) => ({ tag: b.tag, identifiedVoters: b.identifiedVoters, currentVoters: b.currentVoters }))
     : [];
   return {
     totals: w.totals || {},
     contactBreakdown: w.contactBreakdown || {},
-    coverage: w.coverage || {},
-    surveyBreakdowns: filtered,
+    surveyBreakdowns,
     tagBreakdowns,
   };
 }
 
-// Compact row for the report hub list (newest-first): headline KPIs + week label, no breakdowns.
-export function shapeReportListRow(r) {
+const plain = (report) => (typeof report?.toObject === 'function' ? report.toObject() : report);
+const dayOf = (instant, tz) => {
+  if (!instant) return null;
+  try {
+    return zonedDayStr(instant, tz || 'America/New_York');
+  } catch {
+    return new Date(instant).toISOString().slice(0, 10);
+  }
+};
+
+/**
+ * The report's dates as the client reads them: published, edited, numbers refreshed — and
+ * numbersThrough only when the numbers were taken before the period ended. Civil dates only.
+ */
+export const reportDates = (r) => {
+  const cut = numbersCutOff(r);
+  return {
+    publishedOn: dayOf(r.publishedAt, r.timeZone),
+    editedOn: dayOf(r.contentEditedAt, r.timeZone),
+    refreshedOn: dayOf(r.numbersRefreshedAt, r.timeZone),
+    numbersThrough: cut && r.rangeEndUtc && new Date(cut) < new Date(r.rangeEndUtc) ? dayOf(cut, r.timeZone) : null,
+  };
+};
+
+const scopeFor = (r, seriesLabel = null) => {
+  const s = scopeOf(r);
+  return { kind: s.kind, label: s.label, seriesKey: seriesKeyOf(r), seriesLabel: seriesLabel || s.label };
+};
+
+// Compact row for the report hub list (newest-first): headline KPIs + the period, no breakdowns.
+// No campaignId and no instants (§O9).
+export function shapeReportListRow(report, { inputs, seriesLabel = null } = {}) {
+  const r = plain(report);
+  const served = inputs ? mapServed(r, inputs) : r.visibility?.showMap !== false;
   return {
     id: String(r._id),
-    campaignId: String(r.campaignId),
+    // Frozen with the numbers, as on the report itself: the hub's second figure is lit dropped or
+    // surveys by it, never guessed from the totals. null on a report from before the field.
+    campaignType: r.campaignType || null,
     title: r.title || '',
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
-    // Scope label only (never the id): two same-week reports — one scoped, one campaign-wide —
+    // Scope label only (never an id): two same-week reports — one scoped, one campaign-wide —
     // must be distinguishable on the share link's list, not just after opening each.
     effortName: r.effortName || null,
-    publishedAt: r.publishedAt || null,
-    mapPointCount: r.mapPointCount || 0,
-    showMap: r.visibility?.showMap !== false,
+    scope: scopeFor(r, seriesLabel),
+    ...reportDates(r),
+    mapMode: served ? inputs?.mapMode || 'pins' : null,
+    mapPointCount: served ? r.mapPointCount || 0 : 0,
+    showMap: served,
     headline: {
       cumulative: r.stats?.cumulative?.totals || {},
       period: r.stats?.period?.totals || {},
@@ -48,24 +100,33 @@ export function shapeReportListRow(r) {
   };
 }
 
-export function shapeReportForClient(report) {
-  const r = typeof report.toObject === 'function' ? report.toObject() : report;
-  const vis = {
-    visibleQuestionKeys: r.visibility?.visibleQuestionKeys || [],
-    visibleTags: r.visibility?.visibleTags || [],
-  };
+/**
+ * The client's report. `inputs` is the live snapshot's (liveInputs); `earlierTotals` the line
+ * computed at read time (earlierTotalsLine); `nav` the older/newer report in the same series.
+ * `mapSource` is the report the map endpoints read when it isn't `report` itself — the admin
+ * preview shapes the on-screen overlay, but its map (and so its map version) is the saved report's.
+ */
+export function shapeReportForClient(report, { inputs, earlierTotals = null, nav = null, seriesLabel = null, mapSource = null } = {}) {
+  const r = plain(report);
+  const visibleKeys = visibleKeysFor(r);
+  const served = inputs ? mapServed(r, inputs) : false;
+  const support = r.supportQuestionKey && visibleKeys.includes(r.supportQuestionKey) ? r.supportQuestionKey : null;
+  const vis = { visibleKeys, visibleTags: r.visibility?.visibleTags || [] };
   return {
     id: String(r._id),
-    campaignId: String(r.campaignId),
     campaignType: r.campaignType || null,
     title: r.title || '',
     effortName: r.effortName || null, // walk-list scope label (frozen at creation); null = whole campaign
+    scope: scopeFor(r, seriesLabel),
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
     timeZone: r.timeZone,
     status: r.status,
+    ...reportDates(r),
     observations: (r.observations || []).map((s) => ({ heading: s.heading, body: s.body })),
-    supportQuestionKey: r.supportQuestionKey || null,
+    // The headline question only when it is itself visible — a hidden question's key is a slug of
+    // its wording and must never reach a link holder (B8).
+    supportQuestionKey: support,
     stats: {
       cumulative: shapeWindow(r.stats?.cumulative, vis),
       period: shapeWindow(r.stats?.period, vis),
@@ -83,40 +144,49 @@ export function shapeReportForClient(report) {
             percent: r.goalSnapshot.percent || 0,
           }
         : null,
-    // visibleTags itself is deliberately NOT emitted — the filtered rows already encode it,
-    // and the unticked tag names have no business on the wire (least exposure).
+    // The map's switches only — never the map-answer keys (B8). What the map carries is the map
+    // endpoint's business, read from the live snapshot.
     visibility: {
-      mapAnswerKeys: r.visibility?.mapAnswerKeys || [],
-      showMap: r.visibility?.showMap !== false,
+      showMap: served,
+      mapMode: served ? inputs?.mapMode || 'pins' : null,
+      areaSize: served && inputs?.mapMode === 'area' ? inputs.areaSize || 'small' : null,
+      // Opaque (contract C7): changes whenever what the map endpoints serve does.
+      mapVersion: served ? mapVersionOf(plain(mapSource) || r, inputs) : null,
     },
-    mapPointCount: r.mapPointCount || 0,
-    publishedAt: r.publishedAt || null,
+    mapPointCount: served ? r.mapPointCount || 0 : 0,
+    areaCellCount: served ? r.areaCellCount || 0 : 0,
+    earlierTotals,
+    nav,
   };
 }
 
-// Mirror the /admin/households/map household shape so the client map can reuse
-// householdsToGeoJSON() unchanged. NO canvasser identity — answers only carry the
-// operator-whitelisted survey responses for client-side filtering.
-export function shapeMapPoints(points) {
+// The pins endpoints' door shape for the ADMIN builder's legacy list view — never the public wire
+// (that is the compact payload in clientReportMap.js). Answers stripped to `keys`.
+export function shapeMapPoints(points, keys = null) {
+  const allowed = keys ? new Set(keys) : null;
   return points.map((p) => ({
-    id: String(p._id || p.householdId || ''),
+    id: String(p.seq ?? p._id ?? ''),
     addressLine1: p.addressLine1 || '',
     city: p.city || '',
     state: p.state || '',
     location: { lng: p.lng, lat: p.lat },
     status: p.status,
-    answers: (p.answers || []).map((a) => ({ questionKey: a.questionKey, answer: a.answer })),
+    answers: (p.answers || [])
+      .filter((a) => !allowed || allowed.has(a.questionKey))
+      .map((a) => ({ questionKey: a.questionKey, answer: a.answer })),
   }));
 }
 
-// Build the MapFilters `survey` prop (questions with options+counts) from a report's
-// cumulative survey breakdowns, restricted to the operator's whitelisted map-answer keys.
-export function mapFilterSurvey(report) {
-  const r = typeof report.toObject === 'function' ? report.toObject() : report;
-  const keys = r.visibility?.mapAnswerKeys || [];
-  const breakdowns = r.stats?.cumulative?.surveyBreakdowns || [];
-  const questions = breakdowns
-    .filter((b) => (keys.length ? keys.includes(b.questionKey) : true))
+/**
+ * The MapFilters `survey` prop (questions with options + counts) from the report's cumulative
+ * breakdowns — the SERVED map questions only (servedMapKeys), never the operator's raw list.
+ */
+export function mapFilterSurvey(report, inputs) {
+  const r = plain(report);
+  const keys = inputs ? servedMapKeys(r, inputs) : [];
+  const wanted = new Set(keys);
+  const questions = (r.stats?.cumulative?.surveyBreakdowns || [])
+    .filter((b) => wanted.has(b.questionKey))
     .map((b) => ({
       key: b.questionKey,
       label: b.questionLabel,

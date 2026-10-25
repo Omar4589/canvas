@@ -297,21 +297,28 @@ async function leadIdsForScope(scope) {
 // the identical fold, and an audit that can be wrong in the same way as the thing it audits is
 // worth nothing.
 
+// Coordinator (team) ids → Map<id, 'First Last'>, '' for an id with no account. Through
+// hydrateCanvassers, never a bare User.find, so a deleted coordinator's team keeps its name for the
+// retention window: restored from the name record for THIS org only (team labels are lead-visible,
+// and a lead can be the paying client). The export builders name a team the same way. Shared by
+// every team label below and the canvasser CSV's crew stamp.
+const teamNamesOf = async (teamIds, orgId) => {
+  const people = await hydrateCanvassers(teamIds, orgId);
+  return new Map([...people].map(([id, p]) => [id, `${p.firstName} ${p.lastName}`.trim()]));
+};
+
 // The Coordinator label for a canvasser row, resolved from the LEDGER's stamped team ids — never
 // from the campaign roster, whose join blanked the column (and dropped the person from their team's
 // totals) the moment somebody was taken off a campaign. Takes Map<userId, Set<teamId|null>>, returns
 // Map<userId, {coordinatorId, coordinatorName}>. Someone who knocked for two teams in the window
 // reads 'Multiple' rather than a silently-picked winner — the by-team breakdown splits their doors
 // correctly either way. Shared by /canvasser-timeline and /canvassers so the Timeline and the Home
-// leaderboard can never disagree about the same person again.
-async function ledgerCoordinatorLabels(coordSetsByUser) {
+// leaderboard can never disagree about the same person again. `orgId` scopes the names (teamNamesOf).
+const ledgerCoordinatorLabels = async (coordSetsByUser, orgId) => {
   const teamIds = [
     ...new Set([...coordSetsByUser.values()].flatMap((s) => [...s]).filter(Boolean)),
   ];
-  const teamUsers = teamIds.length
-    ? await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean()
-    : [];
-  const nameById = new Map(teamUsers.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
+  const nameById = await teamNamesOf(teamIds, orgId);
   const out = new Map();
   for (const [uid, set] of coordSetsByUser) {
     const teams = [...set].filter(Boolean);
@@ -322,7 +329,7 @@ async function ledgerCoordinatorLabels(coordSetsByUser) {
     });
   }
   return out;
-}
+};
 
 // Resolve ?coordinatorId into a match object, or {} when no team scope was requested.
 async function crewFilter(req) {
@@ -346,6 +353,10 @@ async function crewFilter(req) {
 // a coordinator stamped on the doors in this export's scope (a departed crew lead who never knocked
 // here themselves still prints as a person). Anyone else reads as an unknown coordinator. The stamp
 // check runs last because it scans the scope's rows.
+//
+// The name is the team label's (teamNamesOf), so a deleted coordinator prints as themselves for the
+// retention window, from this org's record only. The id goes in canonical (lowercase hex): the map is
+// keyed by it, and the client's string need not be.
 const crewStampLabel = async (raw, req) => {
   if (!raw) return '';
   if (raw === 'none') return 'Crew: no coordinator';
@@ -355,8 +366,8 @@ const crewStampLabel = async (raw, req) => {
     (await scopeCarriesUser(req, raw)) ||
     (await CanvassActivity.exists({ ...scope, coordinatorId: raw })) ||
     (await SurveyResponse.exists({ ...scope, coordinatorId: raw }));
-  const u = carried ? await User.findById(raw, 'firstName lastName').lean() : null;
-  const name = u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() : '';
+  const id = String(new mongoose.Types.ObjectId(raw));
+  const name = carried ? (await teamNamesOf([id], activeOrgId(req))).get(id) : '';
   return `Crew: ${name || 'unknown coordinator'}`;
 };
 
@@ -911,6 +922,8 @@ router.get('/campaign-rollup', async (req, res, next) => {
           stepsTotal: setup.stepsTotal,
           nextStepKey: setup.nextStepKey,
           openMockFlags: setup.openMockFlags || 0,
+          // Automatic pause: canvassers paused on this campaign right now (the campaign home's banner).
+          openPacePauses: setup.openPacePauses || 0,
           households: c.households,
           homesKnocked: c.homesKnocked,
           knockedPct: c.households > 0 ? Math.round((c.homesKnocked / c.households) * 100) : 0,
@@ -1167,7 +1180,7 @@ router.get('/canvassers', async (req, res, next) => {
       // Same ledger-sourced Coordinator label the Timeline shows, so the Home leaderboard and the
       // Timeline can never disagree about the same person (the leaderboard used to join the roster,
       // which reads '—' for anyone taken off the campaign — the very people this work recovers).
-      ledgerCoordinatorLabels(coordSetsByUser),
+      ledgerCoordinatorLabels(coordSetsByUser, activeOrgId(req)),
     ]);
 
     const rows = Array.from(byUser.values())
@@ -1691,12 +1704,19 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
       .limit(EXPORT_CAP)
       .populate('voterId', 'fullName party doNotContact.flagged')
       .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
-      .populate('userId', 'firstName lastName')
       // The ROUND each response was taken in. Without it, a voter surveyed in two passes produces
       // two rows distinguishable only by date — and the whole point of a second pass is comparing
       // the rounds. `roundNumber` restarts per walk list, so the effort name goes in the column too.
       .populate({ path: 'passId', select: 'roundNumber name effortId' })
       .lean();
+
+    // Canvasser names through hydrateCanvassers, not a populate, the way the export builders name
+    // them: a deleted canvasser's rows keep their name for the retention window, restored from this
+    // org's record only.
+    const people = await hydrateCanvassers(
+      responses.map((r) => r.userId).filter(Boolean),
+      activeOrgId(req)
+    );
 
     // Walk-list names for the Round column, looked up by the effortIds actually present in THESE
     // rows. Scoping to the returned set rather than to `filter.campaignId` matters because this
@@ -1755,6 +1775,7 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
     const rows = responses.map((r) => {
       const matched = (r.answers || []).filter(answerMatches);
       const h = r.householdId;
+      const who = people.get(String(r.userId));
       return [
         r.submittedAt ? new Date(r.submittedAt).toISOString() : '',
         r.submittedAt ? dateFmt.format(new Date(r.submittedAt)) : '',
@@ -1768,8 +1789,8 @@ router.get('/voters-by-answer.csv', async (req, res, next) => {
         h?.city || '',
         h?.state || '',
         h?.zipCode || '',
-        r.userId?.firstName || '',
-        r.userId?.lastName || '',
+        who?.firstName || '',
+        who?.lastName || '',
         effortNameById.get(String(r.passId?.effortId)) || '',
         r.passId ? `Pass ${r.passId.roundNumber}` : 'Legacy / no pass',
         matched.map((a) => a.questionLabel).join(' | '),
@@ -2253,9 +2274,8 @@ router.get('/team-breakdown', async (req, res, next) => {
     ]);
     const votersByTeam = new Map(voterSurveys.map((v) => [String(v._id), v.voters]));
 
-    const teamIds = rows.map((r) => r._id).filter(Boolean);
-    const names = await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean();
-    const nameById = new Map(names.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
+    // teamNamesOf: a deleted coordinator's team keeps its name for the window, from this org's record.
+    const nameById = await teamNamesOf(rows.map((r) => r._id).filter(Boolean), orgId);
 
     const teams = rows
       .map((r) => {
@@ -2403,10 +2423,8 @@ router.get('/tag-teams', async (req, res, next) => {
     buckets.delete(null);
 
     const teamIds = [...buckets.keys()];
-    const names = teamIds.length
-      ? await User.find({ _id: { $in: teamIds } }, 'firstName lastName').lean()
-      : [];
-    const nameById = new Map(names.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
+    // teamNamesOf: a deleted coordinator's team keeps its name for the window, from this org's record.
+    const nameById = await teamNamesOf(teamIds, orgId);
 
     const teams = teamIds
       .map((id) => ({
@@ -2718,7 +2736,8 @@ router.get('/canvasser-timeline', async (req, res, next) => {
 
     const userIds = [...byUser.keys()];
     const coordLabels = await ledgerCoordinatorLabels(
-      new Map(userIds.map((uid) => [uid, byUser.get(uid).coordinatorIds]))
+      new Map(userIds.map((uid) => [uid, byUser.get(uid).coordinatorIds])),
+      orgId
     );
 
     const uMap = await hydrateCanvassers(userIds, orgId);
@@ -3141,8 +3160,11 @@ router.get('/canvassers/:userId/responses', async (req, res, next) => {
       await crewFilter(req)
     );
 
-    const [user, total, responses] = await Promise.all([
-      User.findById(userId, 'firstName lastName email').lean(),
+    const [account, people, total, responses] = await Promise.all([
+      User.exists({ _id: userId }),
+      // The name the leaderboard row shows (hydrateCanvassers): a deleted canvasser reads as
+      // themselves for the retention window, from this org's record only, and never with an email.
+      hydrateCanvassers([new mongoose.Types.ObjectId(userId)], activeOrgId(req)),
       SurveyResponse.countDocuments(filter),
       SurveyResponse.find(filter)
         .sort({ submittedAt: -1 })
@@ -3154,16 +3176,17 @@ router.get('/canvassers/:userId/responses', async (req, res, next) => {
         .lean(),
     ]);
 
-    if (!user) {
+    if (!account) {
       return res.status(404).json({ error: 'User not found' });
     }
+    const who = people.get(String(account._id));
 
     res.json({
       user: {
-        id: String(user._id),
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
+        id: String(account._id),
+        firstName: who.firstName,
+        lastName: who.lastName,
+        email: who.email,
       },
       total,
       responses: responses.map((r) => ({
@@ -3703,9 +3726,9 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
 
     const knockMatch = { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } };
 
-    const [user, memberships, actionAgg, hourAgg, dowAgg, dailyAgg, surveysCount, qualityAgg, distanceHist, farKpi] =
+    const [user, memberships, actionAgg, hourAgg, dowAgg, dailyAgg, surveysCount, qualityAgg, distanceHist, farKpi, people] =
       await Promise.all([
-        User.findById(userId, 'firstName lastName email phone isActive lastLoginAt').lean(),
+        User.findById(userId, 'isActive lastLoginAt').lean(),
         Membership.find({ userId, organizationId: orgId }, 'role isActive').lean(),
         CanvassActivity.aggregate([
           { $match: activityMatch },
@@ -3773,9 +3796,14 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
         // honest corrections and post-knock pin fixes forgiven. Same activityMatch object as
         // the aggregations above, so the date/campaign window can never drift.
         computeFarKpi(activityMatch, { organizationId: orgId }),
+        // Name, email and phone the way every per-canvasser surface reads them: a deleted canvasser
+        // is themselves for the retention window (this org's record only), with no email or phone,
+        // never the tombstone address the scrubbed account row holds.
+        hydrateCanvassers([userId], orgId, { fields: 'phone' }),
       ]);
 
     if (!user) return res.status(404).json({ error: 'User not found' });
+    const who = people.get(String(userId));
 
     const actions = {
       not_home: 0, wrong_address: 0, refused: 0, survey_submitted: 0, lit_dropped: 0, note_added: 0, restricted: 0,
@@ -3901,10 +3929,10 @@ router.get('/canvassers/:userId/summary', async (req, res, next) => {
     res.json({
       user: {
         id: String(user._id),
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phone: user.phone || null,
+        firstName: who.firstName,
+        lastName: who.lastName,
+        email: who.email,
+        phone: who.phone,
         isActive: user.isActive,
         // Only while they're a member here. Someone this org carries only through old knocks may
         // be signing in for another organization now, and that clock is not this org's to read.

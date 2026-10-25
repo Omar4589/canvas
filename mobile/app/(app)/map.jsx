@@ -36,7 +36,8 @@ import {
 } from '../../lib/cache';
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
-import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction } from '../../lib/recordAction';
+import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction, setPace } from '../../lib/recordAction';
+import { isPaused } from '../../lib/pace';
 import { foldDeltaVoters, foldDeltaHouseholds, changesPath } from '../../lib/deltaFold';
 import { isOutcomeOn } from '../../lib/outcomeToggles';
 import { bootstrapQueryFn, rosterErrorIsFinal, useSeatedRoster } from '../../lib/bootstrapQuery';
@@ -51,6 +52,7 @@ import CanvasserHeader from '../../components/CanvasserHeader';
 import MapContextCard from '../../components/MapContextCard';
 import EntitlementBanner from '../../components/EntitlementBanner';
 import LocationBlockedBanner from '../../components/LocationBlockedBanner';
+import PausedBanner from '../../components/PausedBanner';
 import DataHealthBanner from '../../components/DataHealthBanner';
 import ReauthNotice from '../../components/ReauthNotice';
 import PinIcon from '../../components/PinIcon';
@@ -572,6 +574,9 @@ export default function MapScreen() {
     if (qc.getQueryData(['bootstrap'])?.fromDiskCache) {
       qc.invalidateQueries({ queryKey: ['bootstrap'] });
     }
+    // Automatic pause (lib/pace.js), folded on every delta and so outside the guard below: an unpause
+    // arrives on an otherwise empty one.
+    setPace(qc, result.pace);
     const { households = [], voters = [], serverTime } = result;
     if (households.length || voters.length) {
       qc.setQueryData(['bootstrap'], (prev) => {
@@ -772,6 +777,10 @@ export default function MapScreen() {
     [router]
   );
   const onListQuick = useCallback((id, action) => recordHouseholdAction(qc, id, action), [qc]);
+  // The list's one-tap Not home greys like the door screen's buttons: while the org's canvassing is paused
+  // for billing (a missing entitlement fails open), or while this canvasser is paused for review.
+  const paused = isPaused(data);
+  const canRecord = (data?.entitlement ? data.entitlement.canCanvass !== false : true) && !paused;
 
   async function onLogout() {
     qc.clear();
@@ -1085,6 +1094,7 @@ export default function MapScreen() {
             votersByHousehold={votersByHousehold}
             onOpen={onListOpen}
             onQuick={onListQuick}
+            quickDisabled={!canRecord}
             onOpenBuilding={onListOpenBuilding}
           />
         </View>
@@ -1116,6 +1126,9 @@ export default function MapScreen() {
 
         {/* Billing entitlement notice (trial ending / paused) — map + list mode. */}
         <EntitlementBanner entitlement={data?.entitlement} />
+
+        {/* Paused for review (automatic pause) — map + list mode. The hard block is in recordAction.js. */}
+        <PausedBanner paused={paused} />
 
         {/* Location-gate notice (permission/services/precise off) — map + list mode.
             Advisory; the hard block is the tap-time gate in recordAction.js. */}

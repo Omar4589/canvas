@@ -4,8 +4,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { groupBuildings, homesInOrder } from '../../lib/buildings';
 import { recordHouseholdAction } from '../../lib/recordAction';
+import { isPaused } from '../../lib/pace';
 import DirectionsButton from '../../components/DirectionsButton';
 import ReauthNotice from '../../components/ReauthNotice';
+import PausedBanner from '../../components/PausedBanner';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -24,6 +26,10 @@ export default function BuildingScreen() {
   const campaignType = bootstrap?.campaign?.type || 'survey';
   const { buildings } = groupBuildings(bootstrap?.households || []);
   const building = buildings.find((b) => b.key === bkey) || null;
+  // The unit quick buttons grey like the door screen's: while the org's canvassing is paused for billing (a
+  // missing entitlement fails open), or while this canvasser is paused for review (lib/pace.js).
+  const paused = isPaused(bootstrap);
+  const canRecord = (bootstrap?.entitlement ? bootstrap.entitlement.canCanvass !== false : true) && !paused;
 
   if (!building) {
     return (
@@ -67,10 +73,11 @@ export default function BuildingScreen() {
         </Pressable>
         <Pressable
           onPress={() => onQuick(u)}
+          disabled={!canRecord}
           style={({ pressed }) => [
             styles.quickBtn,
             campaignType === 'lit_drop' ? styles.quickLit : styles.quickNotHome,
-            { opacity: pressed ? 0.85 : 1 },
+            { opacity: !canRecord ? 0.4 : pressed ? 0.85 : 1 },
           ]}
         >
           <Text style={styles.quickBtnText}>{quickLabel}</Text>
@@ -85,6 +92,7 @@ export default function BuildingScreen() {
   // Optimistic-first: the unit's status dot (and the building's done/aggregate)
   // recolor this frame; the GPS stamp + network write run in the background.
   function onQuick(unit) {
+    if (!canRecord) return; // the button is disabled; belt & braces
     recordHouseholdAction(qc, unit._id, quickAction);
   }
 
@@ -97,6 +105,7 @@ export default function BuildingScreen() {
       </View>
       {/* After "Later" on the password screen: work is waiting and the team can't see it yet. */}
       <ReauthNotice />
+      <PausedBanner paused={paused} />
 
       <View style={styles.addressCard}>
         {homes ? (

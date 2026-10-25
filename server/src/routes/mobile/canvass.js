@@ -31,6 +31,8 @@ import { effectivePinSuspect, knockPinOf } from '../../services/households/pinSt
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 import { struckByUnknock } from '../../services/canvass/unknock.js';
+import { historyFor, JUDGED_RESULTS } from '../../services/audit/paceRule.js';
+import { PACE_PAUSED, paceBlocks, paceStateOf, runPaceCheck } from '../../services/audit/pacePause.js';
 import { toWireVoter, stampPerRoundSurvey, MOBILE_VOTER_PROJECTION } from './bootstrap.js';
 import { surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js';
 import { nameSchema, phoneSchema, voterEmailSchema } from '../../utils/validators.js';
@@ -197,6 +199,7 @@ const ADD_VOTER_RESTRICTED = {
 function sendRouteError(res, error) {
   const body = { error: error.message };
   if (error.code) body.code = error.code;
+  if (error.pace) body.pace = error.pace;
   return res.status(error.status).json(body);
 }
 
@@ -250,8 +253,39 @@ const buildReplacedSnapshot = (mineRows) => {
     location: prior.location ? { ...prior.location, accuracy: usableAccuracy(prior.location.accuracy) } : null,
     distanceFromHouseMeters: prior.distanceFromHouseMeters ?? null,
     nearest: candidates.length ? candidates.reduce((a, b) => (effective(b) < effective(a) ? b : a)) : null,
+    // Every earlier save at this door this round, so a re-save can't erase a visit from automatic pause
+    // (services/audit/paceRule.js historyFor; docs/PROPOSAL_PACE_PAUSE.md §B.2). Needs `createdAt` and
+    // `wasOfflineSubmission` in the pairRows projection.
+    history: historyFor(prior),
   };
 };
+
+// Automatic pause (docs/PROPOSAL_PACE_PAUSE.md §C). A FRESH write while the canvasser is blocked is refused
+// with PACE_PAUSED — before any write, after the access checks. A replay never is: the phone's queue deletes
+// whatever a 4xx answers (mobile/lib/offlineQueue.js), which would destroy an honest canvasser's work and a
+// cheat's evidence alike. Same client-asserted trust posture as OUTCOME_DISABLED: policy, not security. The
+// refusal carries the pace state too, stamped by the server's clock, so the phone orders it against every
+// other answer on one clock (mobile/lib/pace.js newerPace).
+const paceRefusal = async (req, body) =>
+  body?.wasOfflineSubmission !== true && (await paceBlocks(req.activeOrg, req.activeMembership))
+    ? { ...PACE_PAUSED, pace: { paused: true, at: new Date().toISOString() } }
+    : null;
+
+// After a write: a judged result runs the live check — awaited, but never allowed to fail the write, which has
+// already committed — and every recording response carries the phone's pace state ({ paused, at }, plus
+// `tipped` on the write that created the pause, which is the one the phone alerts on).
+const paceAfterWrite = async (req, { campaign, ts, actionType }) => {
+  if (JUDGED_RESULTS.has(actionType)) {
+    try {
+      const pause = await runPaceCheck({ org: req.activeOrg, membership: req.activeMembership, campaign, ts });
+      if (pause) return { paused: true, tipped: true, at: new Date().toISOString() };
+    } catch (err) {
+      console.error('[pace] check failed:', err?.message || err);
+    }
+  }
+  return paceAnswer(req);
+};
+const paceAnswer = (req) => paceStateOf(req.activeOrg, req.activeMembership).catch(() => undefined);
 
 // Has a QUEUED REPLAY arrived after the door already moved on?
 //
@@ -400,6 +434,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     if (!replay || !outcomeEverEnabled(campaign, actionType)) return { error: outcomeDisabled(actionType) };
   }
 
+  const paceRefused = await paceRefusal(req, body);
+  if (paceRefused) return { error: paceRefused };
+
   if (missingLocation(body)) return { error: LOCATION_REQUIRED };
   const data = baseActionSchema.parse(body);
   const ts = data.timestamp ? new Date(data.timestamp) : new Date();
@@ -418,7 +455,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // look like field work.
   const pairRows = await CanvassActivity.find(
     { householdId, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-    'actionType via userId voterId timestamp location distanceFromHouseMeters replaced reclassified'
+    'actionType via userId voterId timestamp createdAt location distanceFromHouseMeters replaced reclassified wasOfflineSubmission'
   ).lean();
   const mineRows = pairRows.filter((r) => String(r.userId) === String(userId));
 
@@ -430,7 +467,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   const superseding = supersededByNewer(data, mineRows, ts, actionType);
   if (superseding) {
     if (superseding.sameDelivery) await healDuplicateDelivery(household, campaign.type, ts, userId);
-    return { household: await toWireHousehold(household, passId, campaign.type), superseded: true };
+    return { household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) };
   }
 
   // The unknock tombstone — supersededByNewer's blind spot. That guard compares a replay against
@@ -449,7 +486,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
       ts,
     });
     if (struck) {
-      return { household: await toWireHousehold(household, passId, campaign.type), superseded: true };
+      return { household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) };
     }
   }
 
@@ -525,7 +562,10 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
 
   // Runs AFTER the activity create, so the per-round aggregate reflects the action
   // just recorded. `activity` is deliberately not on the wire — nothing reads it.
-  return { household: await toWireHousehold(household, passId, campaign.type) };
+  return {
+    household: await toWireHousehold(household, passId, campaign.type),
+    pace: await paceAfterWrite(req, { campaign, ts, actionType }),
+  };
 }
 
 // Shown VERBATIM to the user by the mobile alert (lib/recordAction.js renders `data.error`),
@@ -813,6 +853,10 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // submission leaves zero trace.
     if (voter.doNotContact?.flagged) return sendRouteError(res, DO_NOT_CONTACT);
 
+    // Automatic pause: a fresh survey while blocked is refused here, before any write (paceRefusal).
+    const paceRefused = await paceRefusal(req, req.body);
+    if (paceRefused) return sendRouteError(res, paceRefused);
+
     const campaign = await Campaign.findById(household.campaignId).lean();
     // A mid-delete campaign reads as gone (services/campaigns/deletionState.js).
     if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found' });
@@ -849,7 +893,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // there): the pair's replaceable rows give before/after knock state + deleted counts.
     const pairRows = await CanvassActivity.find(
       { householdId: household._id, passId, actionType: { $in: REPLACEABLE_ACTIONS } },
-      'actionType via userId voterId timestamp location distanceFromHouseMeters replaced reclassified'
+      'actionType via userId voterId timestamp createdAt location distanceFromHouseMeters replaced reclassified wasOfflineSubmission'
     ).lean();
     const mineRows = pairRows.filter((r) => String(r.userId) === String(req.user._id));
 
@@ -865,7 +909,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       }
       return res
         .status(200)
-        .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true });
+        .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) });
     }
 
     // The unknock tombstone, before the upsert for the same reason as the guard above it — a
@@ -881,7 +925,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       if (struck) {
         return res
           .status(200)
-          .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true });
+          .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) });
       }
     }
 
@@ -1071,7 +1115,10 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // toWireVoter privacy shaping the bootstrap enforces ("the strongest protection
     // for a field is not sending it"). No shipped client ever read voter /
     // surveyResponse / activity from this response.
-    res.status(201).json({ household: await toWireHousehold(household, passId, campaign.type) });
+    res.status(201).json({
+      household: await toWireHousehold(household, passId, campaign.type),
+      pace: await paceAfterWrite(req, { campaign, ts, actionType: 'survey_submitted' }),
+    });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
@@ -1144,6 +1191,11 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
       return sendRouteError(res, ADD_VOTER_RESTRICTED);
     }
 
+    // Automatic pause: a fresh add while blocked is refused before any write. Adding a person writes no
+    // door row, so there is nothing for the after-write check to judge.
+    const paceRefused = await paceRefusal(req, data);
+    if (paceRefused) return sendRouteError(res, paceRefused);
+
     // The router.param voterId tag can't fire here (the path param is householdId) — tag
     // explicitly so a staff-under-grant add is auditable like any single-record access.
     addAuditSubjects(res, 'voter', voterId);
@@ -1180,6 +1232,7 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
       return res.status(200).json({
         voter: await wireVoter(),
         household: await toWireHousehold(household, passId, campaign.type),
+        pace: await paceAnswer(req),
       });
     }
 
@@ -1212,6 +1265,7 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
         return res.status(200).json({
           voter: await wireVoter(),
           household: await toWireHousehold(household, passId, campaign.type),
+          pace: await paceAnswer(req),
         });
       }
       return res.status(409).json({ error: 'That id is already in use.', code: 'VOTER_ID_CONFLICT' });
@@ -1229,6 +1283,7 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
     res.status(201).json({
       voter: await wireVoter(),
       household: await toWireHousehold(household, passId, campaign.type),
+      pace: await paceAnswer(req),
     });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });

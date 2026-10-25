@@ -143,8 +143,9 @@ Three things worth knowing about how the numbers behave:
   those existed briefly and were removed in August 2026, server side included.
 
 **Canvassers never see the goal** — not on the campaign picker, not in Books, nowhere in the
-canvasser app. It's a management number. It *can* be shown to a client on a published weekly
-report, but only as an explicit per-report tick (see [CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
+canvasser app. It's a management number. It *can* be shown to a client on a published client
+report, but only as an explicit per-report tick, and never on a team or walk-list report (see
+[CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
 
 ## Change history — who edited this campaign (added 2026-08)
 
@@ -210,7 +211,8 @@ the expanded sidebar shows the group labels (the same treatment the super-admin 
 already used), and the mobile-web More sheet mirrors the same groups. A
 **"‹ Campaigns"** link exits (with the sidebar collapsed to icons, it's the first icon, "All
 campaigns"), and a **campaign switcher** dropdown hops to another campaign without leaving the page
-you're on. When there's no other campaign to jump to — one active campaign, the usual case for a team
+you're on (one exception: from inside a client report, which belongs to one campaign, it lands on the
+other campaign's **Client Reports** list; [CLIENT_PORTAL.md](CLIENT_PORTAL.md)). When there's no other campaign to jump to — one active campaign, the usual case for a team
 lead — the switcher is just the campaign's name as plain text; while the list is loading it's a grey
 placeholder bar. (Passes aren't a top-level tab — they live inside each walk
 list; see [PASSES.md](PASSES.md).) The **URL is the active campaign**: `/campaigns/:id` is its Home (dashboard), and each tab is
@@ -621,8 +623,9 @@ deletes the selected entries outright, so:
 
 Three honest edges, all named in the confirm: an **issued** past statement stays frozen and will
 show a drift warning on its next read (void-vs-reissue stays an account-manager call); a
-**published client report** keeps its frozen numbers with no warning at all; and answers a later
-*real* survey has since replaced stay archived on Undo rather than clobbering the newer work —
+**published client report** keeps its frozen numbers until someone presses **Refresh numbers** on it
+(the series' next report, built afterwards, says in one neutral line that earlier totals were updated,
+and its builder says by how much); and answers a later *real* survey has since replaced stay archived on Undo rather than clobbering the newer work —
 the run row counts anything Undo couldn't put back, entries and answers alike, because a door
 re-knocked since the cleanup keeps its new, real entry. The struck answers stay on the voter's
 profile as a **Removed** card, and its Restore is off while the visit stays unknocked (or was
@@ -729,7 +732,8 @@ review are simply not included.
 
 **Copies made before the change don't update.** Saved searches, walk lists and rounds already cut
 from these answers keep the people they had; a file already exported keeps the old answers; a
-published client report keeps its numbers until you unpublish it and publish it again. The review
+published client report keeps its numbers until you open it and press **Refresh numbers**
+([CLIENT_PORTAL.md](CLIENT_PORTAL.md)). The review
 says so above the confirm button. The Survey Explorer's per-answer **Export CSV** is how you tell
 whoever holds such a list who to drop.
 
@@ -880,7 +884,10 @@ arrays, default `[]`**, both element-enum'd to `OPT_IN_OUTCOMES` — the ALLOW-l
 start off, and the server-maintained record of every one the campaign has ever had on; see
 §Off-by-default outcomes below), and `doorAddPolicy` (`'all'` | `'leads'`, default `'all'` — who may
 add a walk-up voter at a door; lead-editable and audited like `disabledOutcomes`, backstopped by
-`ADD_VOTER_RESTRICTED` with the same offline-replay tolerance; [VOTERS.md](VOTERS.md)). ISO date
+`ADD_VOTER_RESTRICTED` with the same offline-replay tolerance; [VOTERS.md](VOTERS.md)). One more
+recording-time refusal is not a campaign setting but rides the same posture: a fresh write from a canvasser
+**paused for review** is `403 { code: 'PACE_PAUSED' }` on every door result, the survey route and the
+walk-up add, and a replay is accepted (automatic pause, an organization setting — [AUDIT.md](AUDIT.md) §G). ISO date
 strings order chronologically as plain strings, so all window checks are lexicographic — no `Date`
 parsing. A `pre('validate')` hook nulls `surveyTemplateId` on a `lit_drop` campaign; a `survey`
 campaign may exist without one, but a round can't be activated until it has one
@@ -1524,7 +1531,8 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   `deleteMany({ campaignId })` over **every** campaignId-scoped collection (Household, Effort,
   EffortMember, Pass, Turf, TurfAssignment, TurfSnapshot, SavedSearch, VotedUpload, VotedVoter,
   VotedPendingId, CampaignAssignment, CampaignManager, **CoordinatorChange** (added 2026-08 — was
-  the documented orphan class), ClientReport, ClientReportMapPoint, ReportShareLink,
+  the documented orphan class), ClientReport, ClientReportMapPoint, ClientReportAreaCell and
+  ClientReportSeries (added with the client reports upgrade, 2026-10-24), ReportShareLink,
   CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
   ExportJob — raw GridFS import files + export artifacts deleted first), then the campaign. The
   platform-stats capture banks only people whose **last** row dies (shared people keep counting

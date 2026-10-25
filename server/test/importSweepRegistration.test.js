@@ -11,6 +11,7 @@ import { MAINTENANCE_JOBS, REPEATABLE_JOBS } from '../src/services/retention/sch
 import { IMPORT_SWEEP_JOB } from '../src/services/import/sweepStaleImports.js';
 import { FBTIME_RECENT_JOB, FBTIME_DEEP_JOB } from '../src/services/fbtime/sync.js';
 import { SNAPSHOT_SWEEP_JOB } from '../src/services/turf/snapshotRetention.js';
+import { CLIENT_REPORT_SWEEP_JOB } from '../src/services/reports/clientReportSweep.js';
 
 test('stale-import sweep is registered as maintenance, never as retention', () => {
   assert.ok(
@@ -28,6 +29,13 @@ test('stale-import sweep is registered as maintenance, never as retention', () =
 test('deleted-round snapshot sweep is registered as maintenance, never as retention', () => {
   assert.ok(MAINTENANCE_JOBS.some((j) => j.name === SNAPSHOT_SWEEP_JOB), 'SNAPSHOT_SWEEP_JOB must be in MAINTENANCE_JOBS');
   assert.ok(!REPEATABLE_JOBS.some((j) => j.name === SNAPSHOT_SWEEP_JOB), 'SNAPSHOT_SWEEP_JOB must never be in the pinned retention list');
+});
+
+// The client-report row sweep (map rows no live report, build or review needs) is hygiene too —
+// scheduled, and never on the retention banner.
+test('client-report row sweep is registered as maintenance, never as retention', () => {
+  assert.ok(MAINTENANCE_JOBS.some((j) => j.name === CLIENT_REPORT_SWEEP_JOB), 'CLIENT_REPORT_SWEEP_JOB must be in MAINTENANCE_JOBS');
+  assert.ok(!REPEATABLE_JOBS.some((j) => j.name === CLIENT_REPORT_SWEEP_JOB), 'CLIENT_REPORT_SWEEP_JOB must never be in the pinned retention list');
 });
 
 test('every maintenance job has a cron and a label for the health surface', () => {

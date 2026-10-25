@@ -23,6 +23,8 @@ The map stays in sync with your book automatically. Small changes an admin makes
 
 If a **red notice** appears at the top of the map saying location is required, your phone's location is off (or Doorline doesn't have permission). Tap the notice to fix it — recording doors is paused until location is back on, because every door needs a GPS stamp. See [Why does Doorline need my location?](why-location-required).
 
+A different **red notice** — **"Recording is paused for review. Call your team lead."** — means your doors came in faster than anyone could knock them, and your recording is paused until someone on your team reviews them. The door buttons grey out, but your map, books and stats still work. Call your team lead; once they unpause you, tap **Check again** on the notice (the app also notices by itself after a short while). **What happened?** on the notice opens [Why is my recording paused?](why-is-recording-paused).
+
 **About the blue dot.** It's your phone's own position, drawn on your phone to help you navigate. Next to houses — under a porch roof, against a wall, under big trees — it can sit a few yards from where you stand, usually toward the street, and for a few seconds after you unlock the phone it shows where you *were*. That's normal GPS: it never blocks a door, and your recorded doors are judged with the phone's own accuracy allowance built in. If the dot is on you and the house marker is across the street, the marker is the one that's off. Details, and the phone settings that help: [Why is my blue dot across the street?](blue-dot-not-where-i-am).
 
 > Tip: If your supervisor tells you they moved some houses to you, tap **Refresh** (↻) so your map picks them up.

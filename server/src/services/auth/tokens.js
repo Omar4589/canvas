@@ -64,7 +64,7 @@ export const legacySessionId = (token) => {
   return `legacy:${crypto.createHash('sha256').update(signature).digest('hex').slice(0, 32)}`;
 };
 
-// requireAuth's verifier. Never used for share tokens (verifyToken below keeps their 24h expiry).
+// requireAuth's verifier. Never used for share tokens (verifyToken below keeps their own expiry).
 // Expiry is checked by requireAuth itself, after the user lookup, so a deleted account reads
 // "deleted" rather than "expired". Returns null for anything that isn't a readable, correctly signed
 // token; throws only for a server fault (no secret), which the caller answers as 503.
@@ -107,13 +107,38 @@ export const verifyToken = (token) => {
   return jwt.verify(token, secret);
 };
 
-// Short-lived access token issued after a correct share-link password, authorizing the public
-// report reads for that one link. `kind: 'share'` distinguishes it from a user token.
-export const signShareToken = ({ shareId, campaignId }) => {
+// Access token issued after a correct share-link password, authorizing the public report reads for
+// that one link. `kind: 'share'` distinguishes it from a user token. `cv` is the link's
+// credentialVersion when it was issued: requireShareAccess (routes/public/share.js) refuses it once a
+// password change, rotate, renew or disable has bumped the link's. 24 hours, or 30 days when the
+// client ticked "Keep me signed in on this device" (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6).
+//
+// A JWT's payload is readable by whoever holds it, so the token names its link by an HMAC of the link's
+// id under the server's secret (`link`), never by the id itself (PRIV-2): two ObjectIds used to ride it,
+// each carrying a creation time. No campaign id either — a link belongs to one campaign for life, so
+// the link already ties it. (`campaignId` is still accepted from older callers and ignored.)
+export const SHARE_TOKEN_TTL = '24h';
+export const SHARE_TOKEN_REMEMBER_TTL = '30d';
+export const shareLinkKey = (shareId) =>
+  crypto.createHmac('sha256', secretOrThrow()).update(`share-link:${String(shareId)}`).digest('base64url');
+export const signShareToken = ({ shareId, cv = 0, remember = false }) => {
   const secret = secretOrThrow();
   return jwt.sign(
-    { kind: 'share', shareId: String(shareId), campaignId: String(campaignId) },
+    { kind: 'share', link: shareLinkKey(shareId), cv: Number(cv) || 0 },
     secret,
-    { expiresIn: '24h' }
+    { expiresIn: remember ? SHARE_TOKEN_REMEMBER_TTL : SHARE_TOKEN_TTL }
   );
+};
+
+/**
+ * Whether a verified share token's payload names this link. A token issued before PRIV-2 names the link
+ * and its campaign by id ({ shareId, campaignId }); it is honoured, on exactly the old check, until it
+ * expires — 30 days at most — so nobody signed in is signed out by the deploy. A token that carries
+ * `link` is judged by it alone. The caller still compares `cv`.
+ */
+export const shareTokenNamesLink = (payload, link) => {
+  if (!payload || payload.kind !== 'share' || !link?._id) return false;
+  if (payload.link !== undefined) return typeof payload.link === 'string' && payload.link === shareLinkKey(link._id);
+  if (payload.shareId === undefined) return false;
+  return String(payload.shareId) === String(link._id) && String(payload.campaignId) === String(link.campaignId);
 };

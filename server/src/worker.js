@@ -10,6 +10,9 @@ import { processCampaignDeleteJob } from './services/campaigns/deleteCampaignPro
 import { processOrgDeleteJob } from './services/platform/deleteOrgProcessor.js';
 import { processConversionJob, reconcileFailedConversionJob } from './services/canvass/conversionProcessor.js';
 import { processAnswerEditJob, reconcileFailedAnswerEditJob } from './services/canvass/answerEditRuns.js';
+import { processClientReportJob, reconcileFailedClientReportJob } from './services/reports/clientReportBuilds.js';
+import { syncClientReportIndexes } from './services/reports/clientReportIndexes.js';
+import { syncPacePauseIndexes } from './services/audit/pacePause.js';
 import { registerMaintenanceJobs, processMaintenanceJob } from './services/retention/scheduler.js';
 import { GeocodeCache } from './models/GeocodeCache.js';
 import { ExportJob } from './models/ExportJob.js';
@@ -37,6 +40,10 @@ const OUTCOME_CONVERT_CONCURRENCY = Number(process.env.OUTCOME_CONVERT_JOB_CONCU
 // Answer edits: 1. Two jobs of one run must never race their own chunks (the writer survives it,
 // but the counts would drift), and a run per campaign is enforced on the web side anyway.
 const ANSWER_EDIT_CONCURRENCY = Number(process.env.ANSWER_EDIT_JOB_CONCURRENCY || 1);
+// Client-report builds: 2. Each build's memory is bounded by its batch (CLIENT_REPORT_BATCH
+// households), whatever the campaign's size, and a build waiting on another change parks in the
+// delayed set rather than holding a slot.
+const CLIENT_REPORT_CONCURRENCY = Number(process.env.CLIENT_REPORT_JOB_CONCURRENCY || 2);
 
 // A long-lived worker must survive transient Redis/Mongo faults instead of
 // exiting. Without these, a stray unhandled rejection — or a Worker 'error'
@@ -79,6 +86,11 @@ async function main() {
   await AnswerEditRunChunk.syncIndexes().catch((e) =>
     console.error('[worker] AnswerEditRunChunk.syncIndexes failed', e?.message || e)
   );
+  // And the client-report collections new with the report upgrade (series, area cells), which this
+  // dyno writes on every build — the web dyno builds them at boot too.
+  await syncClientReportIndexes('worker');
+  // And automatic pause's (the web dyno builds it too; whichever boots first wins, syncIndexes is idempotent).
+  await syncPacePauseIndexes('worker');
 
   // Bound the boot probe: against an unreachable Redis, ioredis
   // (maxRetriesPerRequest: null) queues the CONFIG GET forever and this await
@@ -169,6 +181,14 @@ async function main() {
       concurrency: ANSWER_EDIT_CONCURRENCY,
       // A stall redelivery reuses the job id and is welcome: a done chunk is skipped, and the
       // writer classifies what a dead attempt left by the landing marks (answerEditWriter.js).
+      maxStalledCount: 2,
+    }),
+    new Worker(QUEUE_NAMES.CLIENT_REPORT, processClientReportJob, {
+      connection: getSharedRedis(),
+      concurrency: CLIENT_REPORT_CONCURRENCY,
+      // Jobs are added with attempts: 1 (a failure is marked on the report and the operator
+      // retries). One stall redelivery is welcome: every attempt writes under its OWN snapshot and
+      // hands the dead attempt's rows to the discard helper (services/reports/clientReportBuilds.js).
       maxStalledCount: 2,
     }),
   ];
@@ -282,6 +302,18 @@ async function main() {
       await reconcileFailedAnswerEditJob(job, err);
     } catch (e) {
       console.error('[worker] answer-edit reconcile error:', e?.message || e);
+    }
+  });
+
+  // And for client-report builds: a build that threw (or stalled out) reads Failed with a Retry,
+  // never "Building" forever. The CAS covers only a build still queued, waiting or running under
+  // this job — never a `ready` one, so a throw after a refresh reached ready doesn't lose the review.
+  const clientReportWorker = workers.find((w) => w.name === QUEUE_NAMES.CLIENT_REPORT);
+  clientReportWorker.on('failed', async (job, err) => {
+    try {
+      await reconcileFailedClientReportJob(job, err);
+    } catch (e) {
+      console.error('[worker] client-report reconcile error:', e?.message || e);
     }
   });
 

@@ -366,6 +366,8 @@ export default function DashboardPage() {
     selectedCampaign?.datesNote
   );
   const openMockFlags = rollupRow?.openMockFlags ?? current?.openMockFlags ?? 0;
+  // Automatic pause: canvassers paused on this campaign right now (rides the rollup's 30-second poll).
+  const openPacePauses = rollupRow?.openPacePauses ?? current?.openPacePauses ?? 0;
 
   // Billing hint for the header: setup is free until the first knock. Derived from
   // metrics already loaded — the campaign-level "ever canvassed" flag, backstopped by
@@ -549,6 +551,17 @@ export default function DashboardPage() {
           action={{ label: 'Import voters', to: `/campaigns/${campaignId}/import` }}
         >
           Start with the checklist below — first up, import your voter file.
+        </NextStepBanner>
+      )}
+      {openPacePauses > 0 && (
+        <NextStepBanner
+          tone="danger"
+          title={openPacePauses === 1 ? 'A canvasser is paused for review.' : `${openPacePauses} canvassers are paused for review.`}
+          className="mb-6"
+          action={{ label: 'Review in Audit', to: `/campaigns/${campaignId}/audit` }}
+        >
+          Their doors came in faster than anyone could knock them. They can&apos;t record until someone on your team
+          unpauses them; nothing they saved has been removed.
         </NextStepBanner>
       )}
       {openMockFlags > 0 && (

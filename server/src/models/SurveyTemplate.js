@@ -88,6 +88,16 @@ const questionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One "ever depended on" edge: question `q` has at some point been shown only on some answers to
+// question `on`. Edges, not a map keyed by question: a key need not be a valid field name.
+const depEdgeSchema = new mongoose.Schema(
+  {
+    q: { type: String, required: true },
+    on: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const surveyTemplateSchema = new mongoose.Schema(
   {
     organizationId: {
@@ -113,6 +123,20 @@ const surveyTemplateSchema = new mongoose.Schema(
     // Pure presentation — both walk the same evaluator-visible list, so answers can't differ.
     presentation: { type: String, enum: ['scroll', 'steps'], default: 'scroll' },
     tags: { type: [String], default: [] }, // Phase 3 tag palette (display casing; matching is case-insensitive)
+    // Every question → question dependency this survey has EVER had (a monotone record: create,
+    // PATCH and duplicate union into it and never remove), so a condition edited away mid-campaign
+    // still keeps its follow-up off a client's map unless the parent is on it too. A rule that
+    // accepts every option of its parent carries nothing about the answer and isn't one
+    // (services/reports/reportVisibility.js). No default: absent = not seeded yet, and readers then
+    // fall back to today's visibleIf (migrate:client-report-visibility seeds it).
+    depsEver: { type: [depEdgeSchema], default: undefined },
+    // The oldest survey version depsEver is complete for: answers given under this version or a later
+    // one carry no condition the record misses; an answer from an OLDER version may (its conditions
+    // were never stored), so the builder warns when such an answer could reach a client's map (C3,
+    // code review LEGACY-1). Set on create (1), on the first questions PATCH that finds it missing
+    // (the version that PATCH replaces — its edges are unioned in), on duplicate (the copy's 1), and by
+    // migrate:client-report-visibility (the version it seeds from). null = unknown: readers use version.
+    depsEverFromVersion: { type: Number, default: null },
     // Soft-archive: hidden from the default library list & from pickers (unless
     // currently selected). Null = active. Existing docs default to null — no migration.
     archivedAt: { type: Date, default: null, index: true },

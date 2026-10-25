@@ -1,11 +1,12 @@
 import { Alert, AppState, Linking, Platform } from 'react-native';
 import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './location';
 import { submitOrQueue, flushQueue, getPending } from './offlineQueue';
-import { saveBootstrap } from './cache';
+import { saveBootstrap, loadActiveOrgId } from './cache';
 import { changePrompt, ownSurveysHere, buildChangePrompt, clearOwnSurveysAtDoor, ownSurveyedIds, restoreOwnSurveys } from './doorChange';
 import { ACTION_PATHS, addVoterPath, addVoterBody } from './doorPaths';
 import { reconcileLocationResponse } from './deltaFold';
 import { lightColors } from './theme';
+import { blocksRecording, flushAnswerApplies, withPace, PACE_MESSAGE, PACE_TIPPED_MESSAGE, PACE_TITLE } from './pace';
 
 // Patch the ['bootstrap'] cache and persist it. The React Query update is
 // synchronous, so every screen reading ['bootstrap'] (the map's pins, the
@@ -19,6 +20,18 @@ function writeBootstrap(qc, updater) {
     return next;
   });
 }
+
+// The one writer of the phone's automatic-pause state (docs/PROPOSAL_PACE_PAUSE.md §E.2; the rules are in
+// lib/pace.js). Every answer lands here — a recording reply or refusal (optimisticSubmit), the /changes
+// fold (map.jsx), the banner's poll (PausedBanner), the offline queue (applyFlushedPace) — and only a newer
+// one changes anything. The roster fetch keeps the newer answer itself (lib/bootstrapQuery.js).
+export const setPace = (qc, pace) => writeBootstrap(qc, (prev) => withPace(prev, pace));
+
+// A write the offline queue uploaded answers about the org it was recorded under (lib/pace.js
+// flushAnswerApplies); kept only when that is the org this phone is in now. Registered in app/_layout.jsx.
+export const applyFlushedPace = async (qc, pace, item) => {
+  if (flushAnswerApplies(item, await loadActiveOrgId())) setPace(qc, pace);
+};
 
 // restrictedFrom is set too, never inherited through the spread: the server sends it only while a
 // round reads restricted, so a stale 'desk' would otherwise outlive the mark and let the change
@@ -276,6 +289,7 @@ function locationBlockedAlert(err, { onCancel, onRetry }) {
 
 // Gate-then-optimistic submit.
 //
+//   0. A canvasser paused for review (lib/pace.js) records nothing — before every other step.
 //   1. HARD GATE (requireFix, the default): acquire a fresh GPS stamp via
 //      getCanvassLocation BEFORE anything visible happens. No location = no knock —
 //      a blocked tap shows a typed alert (with retry) and records NOTHING: no
@@ -342,6 +356,15 @@ export function optimisticSubmit(qc, opts) {
   };
 
   const submitPromise = (async () => {
+    // First — automatic pause (docs/PROPOSAL_PACE_PAUSE.md §E.3): a paused canvasser records nothing, and
+    // hears so before any "Change result?" prompt rather than after it. Nothing is recolored, queued or
+    // sent. No network recheck: the buttons are already greyed, the banner's poll and Check again clear a
+    // stale state, and the server refuses a fresh tap regardless. Pin fixes (requireFix: false) pass.
+    if (blocksRecording(qc.getQueryData(['bootstrap']), { requireFix })) {
+      release();
+      alertWhenActive(() => Alert.alert(PACE_TITLE, PACE_MESSAGE));
+      return { ok: false, queued: false, blocked: 'PACE_PAUSED' };
+    }
     // Step 0 — the optional confirmation. Inside the lock, so hasInFlightActions() also covers the
     // open alert and the OTA restart prompt can't reload the app mid-decision.
     if (confirm && !(await confirm())) {
@@ -394,7 +417,11 @@ export function optimisticSubmit(qc, opts) {
       timestamp: new Date().toISOString(),
     });
     if (result.ok) {
-      if (reconcile) writeBootstrap(qc, (prev) => reconcile(prev, result.response));
+      // The server's result and its pause answer in one cache write (setPace's rules, lib/pace.js).
+      const pace = result.response?.pace;
+      writeBootstrap(qc, (prev) => withPace(reconcile ? reconcile(prev, result.response) : prev, pace));
+      // The write that created a pause was saved; say so once, and that the next one won't be.
+      if (pace?.tipped === true) alertWhenActive(() => Alert.alert(PACE_TITLE, PACE_TIPPED_MESSAGE));
       // Server has now COMMITTED the action — refetch anything derived from it (the
       // canvasser's daily counts). Only on confirmed writes: a queued/offline write hasn't
       // been counted yet, so refetching would show the pre-knock number.
@@ -435,6 +462,11 @@ export function optimisticSubmit(qc, opts) {
           'Outcome turned off',
           result.error?.message || 'This outcome is turned off for this campaign, so nothing was recorded.'
         );
+      } else if (result.error?.data?.code === 'PACE_PAUSED') {
+        // Paused on the server since this phone last heard (an older bootstrap, a missed delta): hold the
+        // refusal's state, so the buttons grey and the banner shows, and say so in the server's words.
+        setPace(qc, result.error.data.pace);
+        Alert.alert(PACE_TITLE, result.error?.message || PACE_MESSAGE);
       } else if (result.error?.data?.code === 'ADD_VOTER_RESTRICTED') {
         // The campaign restricted adding people to leads/admins after this phone's
         // bootstrap — the invalidate above pulls canAddVoters:false down, so the button

@@ -53,7 +53,7 @@ async function main() {
     return;
   }
 
-  const { blockers } = await checkDeletionBlockers(user._id);
+  const { blockers } = await checkDeletionBlockers(user._id, { subject: 'other' });
 
   console.log(`\n${user.firstName} ${user.lastName} <${user.email}>`);
   console.log(`mode: ${APPLY ? 'APPLY — this is permanent' : 'DRY RUN'}`);

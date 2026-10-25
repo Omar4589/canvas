@@ -19,6 +19,7 @@ import {
 import { fillScript, hasPlaceholderSyntax, unknownPlaceholders } from '../../services/surveys/scriptText.js';
 import { canonicalizeTags } from '../../services/surveys/tags.js';
 import { ensureTags } from '../../services/surveys/tagOps.js';
+import { depEdgesOf, unionDepEdges } from '../../services/reports/reportVisibility.js';
 import {
   canManageSurvey,
   isOrgAdmin,
@@ -663,6 +664,12 @@ router.post('/', async (req, res, next) => {
       ...data,
       questions: finalQuestions,
       tags,
+      // Every follow-up dependency this survey has ever had, starting with its first version — the
+      // record that keeps a follow-up off a client's map without its parent (docs/PROPOSAL_CLIENT_
+      // REPORTS_UPGRADE.md §O6).
+      depsEver: depEdgesOf(finalQuestions),
+      // …complete from this first version on (C3).
+      depsEverFromVersion: 1,
       organizationId: activeOrgId(req),
       createdBy: req.user._id,
       version: 1,
@@ -725,6 +732,7 @@ router.patch('/:surveyId', async (req, res, next) => {
     }
 
     const priorQuestions = existing.questions;
+    const priorVersion = existing.version || 1;
     Object.assign(existing, data);
     if (data.questions) {
       const reconciled = reconcileQuestions(priorQuestions, data.questions);
@@ -745,6 +753,20 @@ router.patch('/:surveyId', async (req, res, next) => {
       existing.version = (existing.version || 1) + 1;
     }
     await existing.save();
+    if (data.questions) {
+      // depsEver is a MONOTONE record (§O6): this save unions in the dependencies of the version it
+      // replaced and of the one it stores, and never removes — so a condition edited away
+      // mid-campaign still keeps its follow-up off a client's map without its parent. An atomic
+      // $addToSet, so two saves can't drop each other's edges; the prior version's edges cover a
+      // survey the migration has not seeded yet.
+      const edges = unionDepEdges(depEdgesOf(priorQuestions), depEdgesOf(existing.questions));
+      if (edges.length) {
+        await SurveyTemplate.updateOne({ _id: existing._id }, { $addToSet: { depsEver: { $each: edges } } });
+      }
+      // A survey the record doesn't cover from its start yet (made before depsEver, not yet migrated):
+      // it is complete from the version this save replaced, whose edges were just unioned in (C3).
+      await SurveyTemplate.updateOne({ _id: existing._id, depsEverFromVersion: null }, { $set: { depsEverFromVersion: priorVersion } });
+    }
     await ensureTags(activeOrgId(req), existing.tags, req.user._id);
 
     res.json({ survey: existing });
@@ -798,6 +820,10 @@ router.post('/:surveyId/duplicate', async (req, res, next) => {
       flow: original.flow || 'list',
       presentation: original.presentation || 'scroll',
       tags: original.tags || [],
+      // The original's record of dependencies travels with its questions (§O6): never fewer. Every
+      // answer the copy will ever get is under its own versions, so the record covers it from its 1.
+      depsEver: unionDepEdges(original.depsEver, depEdgesOf(original.questions || [])),
+      depsEverFromVersion: 1,
       createdBy: req.user._id,
     });
     res.status(201).json({ survey: copy });

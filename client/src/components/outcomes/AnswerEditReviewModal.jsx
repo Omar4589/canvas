@@ -181,8 +181,8 @@ const AnswerEditReviewModal = ({ preview, tz, busy, onBack, onConfirm }) => {
 
       <p className="mt-4 text-xs text-fg-muted">
         Copies made before this change don&rsquo;t update: saved searches, walk lists and rounds already cut
-        from these answers, files already exported, and a published client report until you publish it
-        again. Each changed survey reads &ldquo;Edited by you&rdquo;. Undo puts every answer back, except on a
+        from these answers, files already exported, and a published client report until you refresh its
+        numbers. Each changed survey reads &ldquo;Edited by you&rdquo;. Undo puts every answer back, except on a
         survey someone changes afterwards; those are named.
       </p>
     </Modal>

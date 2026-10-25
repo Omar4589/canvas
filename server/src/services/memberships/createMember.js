@@ -7,6 +7,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { restampLedgerCoordinator } from './restampCoordinator.js';
+import { convergeIfDeleted } from '../users/deleteAccount.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
 
 // Shared member-creation + validation used by the org Users admin (memberships.js)
@@ -148,6 +149,7 @@ export async function createOrgMember({
         'EMAIL_NOT_FOUND'
       );
     }
+    if (user.deletedAt) throw new MemberError(409, 'This account was deleted.', 'ACCOUNT_DELETED');
   } else if (user) {
     throw new MemberError(
       409,
@@ -187,6 +189,11 @@ export async function createOrgMember({
     addedBy,
     billingAccess: !!billingAccess,
   });
+  // A link that raced a deletion of this account: the account is dead, so the new membership is left
+  // the way the deletion leaves every other one (off, no billing) and the add is refused.
+  if (await convergeIfDeleted({ userId: user._id, organizationId: orgId, membershipId: membership._id })) {
+    throw new MemberError(409, 'This account was deleted.', 'ACCOUNT_DELETED');
+  }
 
   // NOT a no-op for a brand-new member, and this is the easy thing to miss. Removal from the ORG
   // hard-deletes the Membership while the CanvassActivity/SurveyResponse rows survive, so

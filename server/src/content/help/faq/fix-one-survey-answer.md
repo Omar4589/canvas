@@ -26,6 +26,6 @@ The usual case: question 3 of your survey is *Could you help us by taking a yard
 
 **Changed your mind?** **Undo** on its row puts every survey back. A survey someone re-surveyed or edited since keeps the newer answers: the row names it, and the answers your change replaced stay on that voter's profile under **Earlier answers**, where you can restore them.
 
-**Lists made before the change don't update.** Saved searches, walk lists and rounds already cut, files already exported, and a published client report (until you publish it again) keep what they had. The CSVs from step 1 are how you tell whoever holds those lists who to drop.
+**Lists made before the change don't update.** Saved searches, walk lists and rounds already cut, files already exported, and a published client report (until you open it and press **Refresh numbers**) keep what they had. The CSVs from step 1 are how you tell whoever holds those lists who to drop.
 
 If the surveys themselves were fake, not just one answer, see [A canvasser faked surveys — how do I get those doors back into play?](faked-surveys-cleanup)

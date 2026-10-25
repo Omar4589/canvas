@@ -23,6 +23,10 @@ import mongoose from 'mongoose';
 //   · `mapAnswerKeys` accepted ANY question key with no validation, so an operator could pin a
 //     FREE-TEXT answer — whatever a canvasser typed — to somebody's home address, in public.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-report-security';
+// Redis points at a dead port: a report's build parks as "Couldn't start", and buildNow drives the
+// real processor (the answerEdit.int.test.js pattern).
+process.env.REDIS_URL = 'redis://127.0.0.1:1';
+process.env.CLIENT_REPORT_QUEUE_TIMEOUT_MS = '300';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -42,6 +46,7 @@ const { Voter } = await import('../src/models/Voter.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { FlagReview } = await import('../src/models/FlagReview.js');
+const { processClientReportJob } = await import('../src/services/reports/clientReportBuilds.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -63,6 +68,26 @@ async function call(method, path, { token, orgId, body } = {}) {
   let json = null;
   try { json = await res.json(); } catch { /* empty */ }
   return { status: res.status, json };
+}
+
+// A report's numbers build on the worker now: claim a recompute through the real route (it parks
+// without a queue), then run the real processor with a fresh job id, as a Retry would.
+async function buildNow(reportId) {
+  const res = await call('POST', `/admin/client-reports/${reportId}/recompute`, { ...ctx.admin });
+  assert.strictEqual(res.status, 202, JSON.stringify(res.json));
+  const jobId = new mongoose.Types.ObjectId().toHexString();
+  await ClientReport.updateOne({ _id: reportId }, { $set: { 'build.status': 'queued', 'build.jobId': jobId, 'build.startedAt': new Date() } });
+  const out = await processClientReportJob({ id: jobId, data: { reportId: String(reportId) } }, 'token');
+  assert.ok(out?.committed, `the build committed: ${JSON.stringify(out)}`);
+  return ClientReport.findById(reportId).lean();
+}
+// Publish what was previewed: the live snapshot and edit version.
+async function publishBuilt(reportId) {
+  const r = await ClientReport.findById(reportId).lean();
+  return call('POST', `/admin/client-reports/${reportId}/publish`, {
+    ...ctx.admin,
+    body: { snapshotId: String(r.snapshotId), editVersion: r.editVersion ?? 0 },
+  });
 }
 
 before(async () => {
@@ -127,7 +152,7 @@ test('a free-text question CANNOT be pinned to a street address in a published r
     title: 'Week 1', status: 'draft',
     weekStart: '2026-07-06', weekEnd: '2026-07-12', timeZone: 'America/Chicago',
     rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
-    visibility: { visibleQuestionKeys: [], mapAnswerKeys: [], showMap: true },
+    visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: [], showMap: true },
   });
 
   // 'notes' is a free-text question. A canvasser can type anything into it.
@@ -280,7 +305,8 @@ test('publish path: canvasser-typed Other text NEVER reaches the public map poin
     rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
     visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: ['support'], showMap: true },
   });
-  const pub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  await buildNow(draft._id);
+  const pub = await publishBuilt(draft._id);
   assert.strictEqual(pub.status, 200, JSON.stringify(pub.json));
 
   const byHh = new Map(
@@ -400,7 +426,8 @@ test('publish gate: openMockFlags warns, stamps at publish, tracks reviews, neve
   assert.strictEqual(get1.status, 200);
   assert.strictEqual(get1.json.openMockFlags, 1, 'the field-recorded mocked knock counts; the bulk row does not');
 
-  const pub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  await buildNow(draft._id);
+  const pub = await publishBuilt(draft._id);
   assert.strictEqual(pub.status, 200, 'publish is never blocked by open flags');
   const frozen = await ClientReport.findById(draft._id).lean();
   assert.strictEqual(frozen.openMockFlagsAtPublish, 1, 'the count is stamped at freeze time');
@@ -418,11 +445,20 @@ test('publish gate: openMockFlags warns, stamps at publish, tracks reviews, neve
   });
   const get2 = await call('GET', `/admin/client-reports/${draft._id}`, { ...ctx.admin });
   assert.strictEqual(get2.json.openMockFlags, 0, 'reviewing clears the warning');
-  await call('POST', `/admin/client-reports/${draft._id}/unpublish`, { ...ctx.admin });
-  const repub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  // A published report is never re-frozen (B6); the NEXT report published over the same window
+  // stamps the reviewed count.
+  const again = await ClientReport.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id,
+    title: 'Week 3b', status: 'draft',
+    weekStart: '2026-07-06', weekEnd: '2026-07-12', timeZone: 'America/Chicago',
+    rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
+    visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: [], showMap: true },
+  });
+  await buildNow(again._id);
+  const repub = await publishBuilt(again._id);
   assert.strictEqual(repub.status, 200);
-  const refrozen = await ClientReport.findById(draft._id).lean();
-  assert.strictEqual(refrozen.openMockFlagsAtPublish, 0, 'the republish stamp reflects the review');
+  const refrozen = await ClientReport.findById(again._id).lean();
+  assert.strictEqual(refrozen.openMockFlagsAtPublish, 0, 'the later stamp reflects the review');
 });
 
 // ── Walk-list scope. A report created with an effortId freezes only that effort's numbers;
@@ -469,20 +505,21 @@ test('a walk-list-scoped report freezes only that effort\'s numbers; campaign-wi
   assert.strictEqual(scoped.status, 201, JSON.stringify(scoped.json));
   assert.strictEqual(String(scoped.json.report.effortId), String(effortA._id));
   assert.strictEqual(scoped.json.report.effortName, 'North Side', 'the name is frozen at creation');
-  assert.strictEqual(scoped.json.report.stats.cumulative.totals.doorsKnocked, 2, 'only effort-A knocks count');
-  assert.strictEqual(scoped.json.report.stats.period.totals.doorsKnocked, 2);
+  assert.strictEqual(scoped.json.report.scope.kind, 'walk_list');
+  const scopedBuilt = await buildNow(scoped.json.report._id);
+  assert.strictEqual(scopedBuilt.stats.cumulative.totals.doorsKnocked, 2, 'only effort-A knocks count');
+  assert.strictEqual(scopedBuilt.stats.period.totals.doorsKnocked, 2);
 
   const wide = await call('POST', '/admin/client-reports', { ...ctx.admin, body });
   assert.strictEqual(wide.status, 201, JSON.stringify(wide.json));
   assert.strictEqual(wide.json.report.effortId, null);
-  const wideKnocks = wide.json.report.stats.cumulative.totals.doorsKnocked;
+  const wideKnocks = (await buildNow(wide.json.report._id)).stats.cumulative.totals.doorsKnocked;
   assert.ok(wideKnocks >= 5, `campaign-wide counts both efforts' knocks (got ${wideKnocks})`);
 
   // Recompute re-reads report.effortId, so a scoped report STAYS scoped; and the client-facing
   // shape carries the frozen label — never the id.
-  const re = await call('POST', `/admin/client-reports/${scoped.json.report._id}/recompute`, { ...ctx.admin });
-  assert.strictEqual(re.status, 200);
-  assert.strictEqual(re.json.report.stats.cumulative.totals.doorsKnocked, 2, 'recompute stays scoped');
+  const re = await buildNow(scoped.json.report._id);
+  assert.strictEqual(re.stats.cumulative.totals.doorsKnocked, 2, 'recompute stays scoped');
   const preview = await call('GET', `/admin/client-reports/${scoped.json.report._id}/preview`, { ...ctx.admin });
   assert.strictEqual(preview.status, 200);
   assert.strictEqual(preview.json.report.effortName, 'North Side', 'the public shape carries the label');
@@ -562,7 +599,8 @@ test('a Not a target voter door publishes its status — never the canvasser not
     rangeStartUtc: new Date('2026-07-13T05:00:00Z'), rangeEndUtc: new Date('2026-07-20T05:00:00Z'),
     visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: ['support'], showMap: true },
   });
-  const pub = await call('POST', `/admin/client-reports/${draft._id}/publish`, { ...ctx.admin });
+  await buildNow(draft._id);
+  const pub = await publishBuilt(draft._id);
   assert.strictEqual(pub.status, 200, JSON.stringify(pub.json));
 
   const point = await ClientReportMapPoint.findOne({ clientReportId: draft._id, householdId: hh._id }).lean();
@@ -573,4 +611,208 @@ test('a Not a target voter door publishes its status — never the canvasser not
 
   const published = await ClientReport.findById(draft._id).lean();
   assert.ok(!JSON.stringify(published.stats).includes('Sam Q.'), 'nor in the frozen stats');
+});
+
+// ── The verified defects B1-B3, B6, B8, B9 (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §B), each
+// asserting the FIX. Their own campaign, survey (made through the real survey route, so its
+// dependency record is the route's), doors and link.
+
+const RECALL = 'would_you_back_recall_of_mayor_smith';
+const B_LINK = 'b-series-token';
+const B_PASSWORD = 'b-series-password-ok';
+
+async function bShare(path) {
+  if (!ctx.bAccess) {
+    const unlock = await call('POST', `/share/${B_LINK}/unlock`, { body: { password: B_PASSWORD } });
+    assert.strictEqual(unlock.status, 200);
+    ctx.bAccess = unlock.json.accessToken;
+  }
+  const res = await fetch(`${base}/api/share/${B_LINK}${path}`, { headers: { 'X-Share-Token': ctx.bAccess } });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+async function bReport(visibility = null) {
+  const created = await call('POST', '/admin/client-reports', {
+    ...ctx.admin, body: { campaignId: String(ctx.bCamp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12' },
+  });
+  assert.strictEqual(created.status, 201, JSON.stringify(created.json));
+  const id = created.json.report._id;
+  if (visibility) {
+    const p = await call('PATCH', `/admin/client-reports/${id}`, { ...ctx.admin, body: { visibility } });
+    assert.strictEqual(p.status, 200, JSON.stringify(p.json));
+  }
+  await buildNow(id);
+  return id;
+}
+
+test('B-series fixture: a scripted survey made through the real route', { skip }, async () => {
+  const survey = await call('POST', '/admin/surveys', {
+    ...ctx.admin,
+    body: {
+      name: 'Recall survey',
+      questions: [
+        { key: 'support', label: 'Support?', type: 'single_choice', options: [{ id: 'sy', text: 'Yes' }, { id: 'sn', text: 'No' }] },
+        { key: 'bond', label: 'Bond measure?', type: 'single_choice', options: [{ id: 'bf', text: 'For' }, { id: 'ba', text: 'Against' }] },
+        { key: RECALL, label: 'Back the recall?', type: 'single_choice', options: [{ id: 'ry', text: 'Yes' }, { id: 'rn', text: 'No' }] },
+        {
+          key: 'sign', label: 'Yard sign?', type: 'single_choice', options: [{ id: 'gy', text: 'Yes' }, { id: 'gn', text: 'No' }],
+          visibleIf: { logic: 'all', rules: [{ questionKey: RECALL, op: 'is', optionIds: ['ry'] }] },
+        },
+      ],
+    },
+  });
+  assert.strictEqual(survey.status, 201, JSON.stringify(survey.json));
+  const template = await SurveyTemplate.findById(survey.json.survey._id).lean();
+  assert.deepStrictEqual(template.depsEver, [{ q: 'sign', on: RECALL }], 'create records the dependency');
+  const camp = await Campaign.create({
+    organizationId: ctx.org._id, name: 'Recall', type: 'survey', state: 'FL', isActive: true,
+    surveyTemplateId: template._id, timeZone: 'America/Chicago',
+  });
+  const admin = await User.findOne({ email: 'ada@t.co' });
+  const answer = (questionKey, optionIds, a) => ({ questionKey, questionLabel: questionKey, optionIds, answer: a });
+  const doors = [
+    [answer('support', ['sy'], 'Yes'), answer('bond', ['bf'], 'For'), answer(RECALL, ['ry'], 'Yes'), answer('sign', ['gy'], 'Yes')],
+    [answer('support', ['sn'], 'No'), answer('bond', ['ba'], 'Against'), answer(RECALL, ['ry'], 'Yes'), answer('sign', ['gn'], 'No')],
+    [answer('support', ['sy'], 'Yes'), answer('bond', ['ba'], 'Against'), answer(RECALL, ['rn'], 'No')],
+  ];
+  for (const [i, answers] of doors.entries()) {
+    const hh = await Household.create({
+      organizationId: ctx.org._id, campaignId: camp._id, isActive: true,
+      addressLine1: `${i + 1} Recall Rd`, city: 'Tampa', state: 'FL', zipCode: '33601',
+      normalizedAddress: `${i + 1} RECALL RD|TAMPA|FL|33601`, location: { type: 'Point', coordinates: [-82.3 + i / 1e4, 27.8] },
+    });
+    const v = await Voter.create({ organizationId: ctx.org._id, campaignId: camp._id, householdId: hh._id, stateVoterId: `RC${i}`, firstName: 'R', lastName: `C${i}`, fullName: `R C${i}` });
+    const when = new Date('2026-07-08T18:00:00Z');
+    await CanvassActivity.create({ organizationId: ctx.org._id, campaignId: camp._id, householdId: hh._id, userId: admin._id, actionType: 'survey_submitted', location: { lat: 27.8, lng: -82.3 }, timestamp: when });
+    await SurveyResponse.create({ organizationId: ctx.org._id, campaignId: camp._id, householdId: hh._id, voterId: v._id, userId: admin._id, surveyTemplateId: template._id, surveyTemplateVersion: 1, location: { lat: 27.8, lng: -82.3 }, submittedAt: when, answers });
+  }
+  const bcrypt = (await import('bcryptjs')).default;
+  await ReportShareLink.create({
+    organizationId: ctx.org._id, campaignId: camp._id, token: B_LINK,
+    passwordHash: await bcrypt.hash(B_PASSWORD, 4), expiresAt: new Date(Date.now() + 86400000), isActive: true,
+  });
+  Object.assign(ctx, { bCamp: camp, bTemplate: template });
+});
+
+test('B1 fixed: map off means NO map — not served, not stored', { skip }, async () => {
+  const id = await bReport({ showMap: false });
+  assert.strictEqual(await ClientReportMapPoint.countDocuments({ clientReportId: id }), 0, 'a map-off build stores no rows');
+  assert.strictEqual((await publishBuilt(id)).status, 200);
+  const map = await bShare(`/reports/${id}/map`);
+  assert.strictEqual(map.status, 404);
+  assert.strictEqual(map.json.code, 'MAP_NOT_SHARED');
+  const one = await bShare(`/reports/${id}`);
+  assert.strictEqual(one.json.report.visibility.showMap, false);
+  assert.deepStrictEqual(one.json.survey.questions, []);
+});
+
+test('B2 fixed: a hidden question rides nothing — no chart, no map filter, no door answer', { skip }, async () => {
+  const id = await bReport({ visibleQuestionKeys: ['support', RECALL, 'sign'] });
+  assert.strictEqual((await publishBuilt(id)).status, 200);
+  const one = await bShare(`/reports/${id}`);
+  assert.ok(!one.json.report.stats.cumulative.surveyBreakdowns.some((b) => b.questionKey === 'bond'), 'no bond chart');
+  assert.ok(!one.json.survey.questions.some((q) => q.key === 'bond'), 'no bond map filter');
+  const map = await bShare(`/reports/${id}/map`);
+  assert.strictEqual(map.status, 200);
+  assert.ok(!('bond' in map.json.answers) && !map.json.questions.some((q) => q.key === 'bond'), 'no bond answers on the pins');
+  const doors = await bShare(`/reports/${id}/map/doors?snapshotKey=${encodeURIComponent(map.json.snapshotKey)}&rows=0,1,2`);
+  assert.ok(!JSON.stringify(doors.json).includes('Bond'), 'no bond answer on any door');
+  assert.strictEqual(await ClientReportMapPoint.countDocuments({ clientReportId: id, 'answers.questionKey': 'bond' }), 0, 'not even stored');
+});
+
+test('B3 fixed: unticking every question shows NONE', { skip }, async () => {
+  const id = await bReport({ visibleQuestionKeys: [] });
+  const preview = await call('GET', `/admin/client-reports/${id}/preview`, { ...ctx.admin });
+  assert.strictEqual(preview.status, 200);
+  assert.deepStrictEqual(preview.json.report.stats.cumulative.surveyBreakdowns, []);
+  assert.deepStrictEqual(preview.json.survey.questions, []);
+});
+
+test('B6 fixed: a published report is never re-frozen with newer data', { skip }, async () => {
+  const id = await bReport();
+  assert.strictEqual((await publishBuilt(id)).status, 200);
+  const frozen = await ClientReport.findById(id).lean();
+  const admin = await User.findOne({ email: 'ada@t.co' });
+  const hh = await Household.findOne({ campaignId: ctx.bCamp._id }).lean();
+  await CanvassActivity.create({ organizationId: ctx.org._id, campaignId: ctx.bCamp._id, householdId: hh._id, userId: admin._id, actionType: 'not_home', passId: new mongoose.Types.ObjectId(), location: { lat: 27.8, lng: -82.3 }, timestamp: new Date('2026-07-09T18:00:00Z') });
+  const again = await call('POST', `/admin/client-reports/${id}/publish`, { ...ctx.admin });
+  assert.strictEqual(again.status, 409);
+  assert.strictEqual(again.json.code, 'ALREADY_PUBLISHED');
+  const after = await ClientReport.findById(id).lean();
+  assert.strictEqual(after.stats.cumulative.totals.doorsKnocked, frozen.stats.cumulative.totals.doorsKnocked);
+  assert.strictEqual(String(after.publishedAt), String(frozen.publishedAt), 'publishedAt did not move');
+});
+
+test("B8 fixed: a hidden question's key never reaches a link holder — not as the headline, not as a map key", { skip }, async () => {
+  const id = await bReport({ visibleQuestionKeys: ['support', 'bond'], mapAnswerKeys: ['support', 'bond'] });
+  await call('PATCH', `/admin/client-reports/${id}`, { ...ctx.admin, body: { supportQuestionKey: RECALL } });
+  assert.strictEqual((await publishBuilt(id)).status, 200);
+  const one = await bShare(`/reports/${id}`);
+  const map = await bShare(`/reports/${id}/map`);
+  const dump = JSON.stringify(one.json) + JSON.stringify(map.json);
+  assert.ok(!dump.includes(RECALL), 'the slug of the hidden wording appears nowhere');
+  assert.strictEqual(one.json.report.supportQuestionKey, null);
+  assert.strictEqual(one.json.report.visibility.mapAnswerKeys, undefined);
+});
+
+test('B9 fixed: a follow-up never reaches the map without its parent — even after its condition is edited away', { skip }, async () => {
+  // Recall hidden, "Yard sign?" (asked only after Yes to it) ticked for the map: it can't go on.
+  const id = await bReport({ visibleQuestionKeys: ['support', 'sign'], mapAnswerKeys: ['support', 'sign'] });
+  const doc = await ClientReport.findById(id).lean();
+  assert.deepStrictEqual(doc.visibility.mapAnswerKeys, ['support'], 'the follow-up leaves the map list');
+  assert.deepStrictEqual(doc.snapshotInputs.mapKeys, ['support']);
+  assert.strictEqual((await publishBuilt(id)).status, 200);
+  const one = await bShare(`/reports/${id}`);
+  assert.ok(!one.json.survey.questions.some((q) => q.key === 'sign'), 'no follow-up filter');
+  const map = await bShare(`/reports/${id}/map`);
+  assert.ok(!('sign' in map.json.answers), 'no follow-up answer on any door');
+  assert.strictEqual(await ClientReportMapPoint.countDocuments({ clientReportId: id, 'answers.questionKey': 'sign' }), 0);
+
+  // With its parent on the map too, it may go on.
+  const withParent = await bReport({ visibleQuestionKeys: ['support', RECALL, 'sign'], mapAnswerKeys: ['support', RECALL, 'sign'] });
+  assert.deepStrictEqual([...(await ClientReport.findById(withParent).lean()).snapshotInputs.mapKeys].sort(), [RECALL, 'sign', 'support'].sort());
+
+  // The condition edited away mid-campaign: depsEver remembers, so the follow-up still can't go on alone.
+  const edited = await call('PATCH', `/admin/surveys/${ctx.bTemplate._id}`, {
+    ...ctx.admin,
+    body: {
+      questions: ctx.bTemplate.questions.map((q) => (q.key === 'sign' ? { ...q, visibleIf: null } : q)),
+    },
+  });
+  assert.strictEqual(edited.status, 200, JSON.stringify(edited.json));
+  const tpl = await SurveyTemplate.findById(ctx.bTemplate._id).lean();
+  assert.ok(tpl.depsEver.some((e) => e.q === 'sign' && e.on === RECALL), 'the record is monotone');
+  const later = await bReport({ visibleQuestionKeys: ['support', 'sign'], mapAnswerKeys: ['support', 'sign'] });
+  assert.deepStrictEqual((await ClientReport.findById(later).lean()).snapshotInputs.mapKeys, ['support']);
+});
+
+// SEC-1 (code review round 1): the team picker authorized with manages() alone, and canManageCampaign
+// says yes to ANY org admin for ANY campaign id ("org ownership is verified separately") — so an admin
+// of one organization, passing another organization's campaign id, read its crew leads' names, crew
+// sizes and no-crew count. Every route that takes a campaign id now loads it in the active org first,
+// and the picker's own reads carry the organization too.
+test('SEC-1: the series picker never reads another organization’s campaign', { skip }, async () => {
+  const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
+  const { seriesPicker } = await import('../src/services/reports/clientReportSeries.js');
+  const orgB = await Organization.create({ name: 'Bravo', slug: 'bravo-sec1', isActive: true, teamAttributionReadyAt: new Date() });
+  await Subscription.create({ organizationId: orgB._id, status: 'active' });
+  const campB = await Campaign.create({ organizationId: orgB._id, name: 'Bravo camp', type: 'survey', state: 'TX', isActive: true });
+  const coordB = await User.create({ firstName: 'Carla', lastName: 'Secretcoordinator', email: 'carla@bravo.t.co', passwordHash: 'x', isActive: true });
+  await Membership.create({ userId: coordB._id, organizationId: orgB._id, role: 'canvasser', isActive: true });
+  for (let i = 0; i < 3; i += 1) {
+    const k = await User.create({ firstName: `Krew${i}`, lastName: 'Bravo', email: `krew${i}@bravo.t.co`, passwordHash: 'x', isActive: true });
+    await CampaignAssignment.create({ campaignId: campB._id, userId: k._id, organizationId: orgB._id, coordinatorId: coordB._id });
+  }
+  await Effort.create({ organizationId: orgB._id, campaignId: campB._id, name: 'Bravo Secret Precinct' });
+
+  const picker = await call('GET', `/admin/client-reports/series?campaignId=${campB._id}`, ctx.admin);
+  assert.strictEqual(picker.status, 404, JSON.stringify(picker.json));
+  assert.ok(!JSON.stringify(picker.json).includes('Secretcoordinator'), 'no crew lead’s name');
+  const affected = await call('GET', `/admin/client-reports/series/affected?campaignId=${campB._id}&coordinatorIds=${coordB._id}`, ctx.admin);
+  assert.strictEqual(affected.status, 404, JSON.stringify(affected.json));
+  // The admin's own campaign still answers.
+  assert.strictEqual((await call('GET', `/admin/client-reports/series?campaignId=${ctx.camp._id}`, ctx.admin)).status, 200);
+  // Defense in depth: even called with a mismatched organization, the picker's reads find nothing.
+  const direct = await seriesPicker({ organizationId: ctx.org._id, campaignId: campB._id });
+  assert.deepStrictEqual([direct.crews, direct.formerCrews, direct.noCrewCanvassers, direct.series], [[], [], 0, []]);
 });

@@ -7,8 +7,10 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { FlagReview } from '../../models/FlagReview.js';
 import { deriveSetupSteps } from './setupSteps.js';
+import { crewsMatch, withTeam } from './aggregations.js';
 import { AUDIT_WINDOW_MAX_DAYS } from '../audit/flagThresholds.js';
 import { NEEDS_PIN_FIX, UNPLACED_PIN, COMPLEX_TO_REVIEW } from '../households/confirmHouseholdLocation.js';
+import { openPausesByCampaign } from '../audit/pacePause.js';
 
 // One round-trip of cheap grouped counts for a set of campaigns, turned into the
 // per-campaign setup-progress + management state used by the campaigns list, the
@@ -24,7 +26,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
   if (!ids.length) return out;
 
   const group = { $group: { _id: '$campaignId', n: { $sum: 1 } } };
-  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix, unplacedPins, complexPins] =
+  const [households, owned, passes, publishedTurfs, assignments, activePasses, statDocs, mockRows, pinsToFix, unplacedPins, complexPins, pausesBy] =
     await Promise.all([
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true } }, group]),
       Household.aggregate([{ $match: { organizationId, campaignId: { $in: ids }, isActive: true, effortId: { $ne: null } } }, group]),
@@ -72,6 +74,8 @@ export async function campaignSummaries({ organizationId, campaigns }) {
         { $group: { _id: { c: '$campaignId', k: '$pinComplexKey' } } },
         { $group: { _id: '$_id.c', n: { $sum: 1 } } },
       ]),
+      // Automatic pause: canvassers paused on each campaign right now (services/audit/pacePause.js).
+      openPausesByCampaign(organizationId, ids),
     ]);
 
   const canvassedByStats = new Map(); // idStr → boolean, trusted stats only
@@ -153,6 +157,7 @@ export async function campaignSummaries({ organizationId, campaigns }) {
       deletable: !hasCanvassed,
       canEditType: !hasCanvassed,
       openMockFlags: openMockBy.get(k) || 0,
+      openPacePauses: pausesBy.get(k) || 0,
       pinsToFix: pinsToFixBy.get(k) || 0,
       complexCount: complexBy.get(k) || 0,
     });
@@ -169,11 +174,19 @@ export async function campaignSummaries({ organizationId, campaigns }) {
 // counts the FULL window while the Audit deep link can only seed 62 days — a >62-day-old
 // unreviewed mock flag is counted here but won't show on the linked page (it was nudged
 // in prior weeks); bound the $gte here if that ever bites.
-export async function countOpenMockFlags({ organizationId, campaignId, timestamp }) {
-  const rows = await CanvassActivity.find(
-    { campaignId, 'location.mocked': true, via: { $ne: 'bulk' }, ...(timestamp ? { timestamp } : {}) },
-    '_id'
-  ).lean();
+//
+// The count follows the REPORT'S scope (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F4): a walk-list
+// report counts its walk list's flags (`effortId`), a team report its crews' (`coordinatorIds`,
+// through the same crewsMatch clause its numbers use). Omitted = the whole campaign, as before.
+export async function countOpenMockFlags({ organizationId, campaignId, timestamp, effortId = null, coordinatorIds = null }) {
+  const base = {
+    campaignId,
+    'location.mocked': true,
+    via: { $ne: 'bulk' },
+    ...(timestamp ? { timestamp } : {}),
+    ...(effortId ? { effortId } : {}),
+  };
+  const rows = await CanvassActivity.find(coordinatorIds ? withTeam(base, crewsMatch(coordinatorIds)) : base, '_id').lean();
   if (!rows.length) return 0;
   const reviews = await FlagReview.find(
     { organizationId, actionModel: 'CanvassActivity', actionId: { $in: rows.map((r) => r._id) } },

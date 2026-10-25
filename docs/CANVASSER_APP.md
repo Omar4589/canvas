@@ -286,6 +286,29 @@ queue, so a shift walked with Precise off records nothing rather than syncing la
 re-checked at every door, not once when you sign in, so turning it off mid-shift stops you at the
 next house.
 
+### Paused for review (automatic pause)
+
+If your organization uses **automatic pause**, Doorline checks that each door you save comes a
+believable time after the last house you saved — enough to get there and knock. When too many in a row
+come in faster than anyone could knock them (doors saved from a moving car, or several saved at once from
+one spot), **recording pauses** until someone on your team reviews it:
+
+- The door that tipped it **is saved**, and one alert says *"That door was saved. Recording is now paused
+  for review. Call your team lead."*
+- A **red banner** on the map, the door, building and survey screens says *"Recording is paused for
+  review. Call your team lead."*, with **Check again** and **What happened?** (the Help article). The
+  outcome buttons and the door list's one-tap **Not home** are greyed out, and **Add person** is hidden.
+- A survey opened while paused shows a wall instead of the form. A survey you were already typing when the
+  pause arrived keeps its answers on screen, and Save says recording is paused; the same goes for an Add
+  person form that was already open.
+- You can still open the map, your books, your stats and the Help Center. **Nothing you saved is removed**,
+  and doors waiting to upload from a dead zone still upload.
+- Once your lead unpauses you, **Check again** picks it up at once; otherwise the phone notices within
+  30 seconds. It needs signal to hear about it — with none, Check again says it can't check right now.
+
+Admins and team leads are never paused. The way to stay clear of it is the way you already canvass: save
+each door at the door, right after knocking.
+
 ### Refused (someone answered, but said no)
 
 **Refused** is for when a person comes to the door but declines to participate — different from **Not
@@ -1556,6 +1579,50 @@ is the audit: a fix worse than 100 m flags `weak_gps` at medium and worse than 2
 ([AUDIT.md](AUDIT.md)), so a coarse stamp from a bypassed client surfaces for review rather than
 passing silently.
 
+### Automatic pause on the phone
+
+The server's side is [AUDIT.md](AUDIT.md) §G; the design record is
+[PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md) §E. The phone keeps `pace: { paused, at }` inside the
+cached bootstrap (file-backed, so it survives restarts and dead zones):
+
+- **One writer, newest wins.** `setPace(qc, pace)` ([recordAction.js](../mobile/lib/recordAction.js)) runs
+  every answer through `withPace` / `newerPace` ([lib/pace.js](../mobile/lib/pace.js), pure, with
+  `pace.test.js`): the newer answer by **server time** wins, so a slow reply can't undo a newer one, and a
+  no-op answer returns the same object (no re-render, no disk write). Its inputs: the roster fetch
+  (`bootstrapQuery.js` keeps the newer of the held and the fetched answer), the `/changes` fold in
+  `map.jsx` (**outside** the `households.length || voters.length` guard — an unpause arrives on an
+  otherwise empty delta), every recording reply (folded into the same cache write as `reconcile`), a
+  `PACE_PAUSED` refusal (its body carries `pace` stamped by the server), the banner's poll, and the
+  offline queue (`setFlushPaceSink` in `offlineQueue.js`, registered in `app/_layout.jsx` with
+  `applyFlushedPace`, which keeps an answer only when the item was recorded under the active org —
+  `flushAnswerApplies`).
+- **The local block** is the first thing inside `optimisticSubmit`'s in-flight lock, **before** the
+  door-change `confirm` — so a paused canvasser never sees "Change result?" and then "Paused" — and before
+  the GPS gate: it alerts the message and returns `{ ok: false, queued: false, blocked: 'PACE_PAUSED' }`,
+  leaving no trace. No network recheck: the buttons are already greyed, the banner's poll clears a stale
+  state, and the server refuses a fresh tap regardless. Door results, surveys and the walk-up add ride
+  it; pin fixes (`requireFix: false`) pass (`blocksRecording`).
+- **The tipping alert**: a reply with `pace.tipped === true` shows one alert through `alertWhenActive`, so
+  it isn't lost if the phone was pocketed. A `PACE_PAUSED` refusal holds the state and alerts the server's
+  words. One-button alerts only.
+- **`PausedBanner`** (`components/PausedBanner.jsx`, the danger tokens) takes the screen's `paused` and
+  polls `GET /mobile/pace` itself — `useQuery(['mobile','pace'], { enabled: paused, refetchInterval:
+  30_000, ...useFocusedPoll() })`, calling `setPace` from inside its `queryFn` — because the map's
+  `/changes` poll stops whenever the map is covered (it stays mounted under the door and survey
+  screens). **Check again** refetches; a failed check says `PACE_CHECK_FAILED`. Its Help link opens
+  `PACE_HELP_SLUG` (`why-is-recording-paused`).
+- **Screens:** `canRecord = canCanvass && !paused` greys the door screen's buttons, the door list's quick
+  button (`DoorList` / `DoorListRow` `quickDisabled`, from `map.jsx`) and the building screen's unit quick
+  buttons — the last two also follow the billing pause now, which they didn't before. Add person's links
+  hide while paused, but the modal's mount gate deliberately leaves `paused` out: unmounting an open
+  modal would lose the typed name, so its Save is refused by the local block instead. The survey screen
+  latches its wall at mount (`pauseWall`), so a pause that lands mid-form never replaces the form, and the
+  wall, once lifted, never comes back on that screen; its mount-time prompts skip a paused canvasser.
+  `SurveyForm` takes a `banner`, and `SurveyWall` a body, for the banner.
+- **Older apps** ignore `pace`: an online tap gets the server's refusal in the caller's own alert ("Action
+  not saved", "Survey not saved", "Person not added") and the pin turns back; offline taps queue and are
+  accepted as replays. OTA only: no native module, no `app.json` change.
+
 ## The at-door survey
 
 Two files since 2026-10-06 ([PROPOSAL_SURVEY_PRACTICE.md](PROPOSAL_SURVEY_PRACTICE.md)):
@@ -1818,6 +1885,12 @@ clients ignore it. The ids match the bootstrap's effort list, so a choice scopes
   `.test.js`), `lib/appRestart.js`, `lib/stagingCrash.js`, `lib/nativeProps.test.js`,
   `components/ErrorNotice.jsx`, `components/CrashCard.jsx`, `components/CrashRestart.jsx`,
   `components/ErrorRecoveryTests.jsx`, `components/RestartCover.jsx` (error recovery).
+- New (automatic pause): `lib/pace.js` (+ `pace.test.js`), `components/PausedBanner.jsx`.
+- Changed (automatic pause): `lib/recordAction.js` (`setPace`, `applyFlushedPace`, the local block, the
+  tipping alert, the `PACE_PAUSED` refusal), `lib/offlineQueue.js` (`setFlushPaceSink`),
+  `lib/bootstrapQuery.js`, `app/_layout.jsx`, `app/(app)/map.jsx`, `components/DoorList.jsx`,
+  `components/DoorListRow.jsx`, `app/(app)/household/[id].jsx`, `app/(app)/building.jsx`,
+  `app/(app)/voter/[id]/survey.jsx`, `components/SurveyForm.jsx` (`banner`, and `SurveyWall`'s body).
 - Changed (error recovery): `app/_layout.jsx`, `components/RootErrorBoundary.jsx`,
   `components/OtaUpdatePrompt.jsx`, `components/UpdateGate.jsx`, `components/SessionGate.jsx`,
   `lib/authState.js`, `lib/cache.js`, `lib/datetime.js`, `lib/dateRanges.js`, `lib/mapCamera.js`,

@@ -17,6 +17,10 @@ import mongoose from 'mongoose';
 // here add up exactly: Σ(teams) + noTeam === totals. This file also covers the previously
 // untested tags[] rollup on /survey-results, and the frozen client-report tagBreakdowns.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-tagunits';
+// Redis points at a dead port: a client report's build parks as "Couldn't start" and runBuild drives
+// the real processor (the answerEdit.int.test.js pattern).
+process.env.REDIS_URL = 'redis://127.0.0.1:1';
+process.env.CLIENT_REPORT_QUEUE_TIMEOUT_MS = '300';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -34,6 +38,15 @@ const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { SurveyTemplate } = await import('../src/models/SurveyTemplate.js');
 const { ClientReport } = await import('../src/models/ClientReport.js');
 const { ClientReportMapPoint } = await import('../src/models/ClientReportMapPoint.js');
+const { processClientReportJob } = await import('../src/services/reports/clientReportBuilds.js');
+
+// Client-report numbers build on the worker now (services/reports/clientReportBuilds.js). The queue
+// is down here, so drive the real processor with a fresh job id, as a Retry that reached it would.
+const runBuild = async (reportId) => {
+  const jobId = new mongoose.Types.ObjectId().toHexString();
+  await ClientReport.updateOne({ _id: reportId }, { $set: { 'build.status': 'queued', 'build.jobId': jobId, 'build.startedAt': new Date() } });
+  return processClientReportJob({ id: jobId, data: { reportId: String(reportId) } }, 'token');
+};
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -424,6 +437,7 @@ test('client report: tagBreakdowns computed for both windows with window-local s
   });
   assert.equal(created.status, 201);
   ctx.reportId = created.json.report._id;
+  assert.ok((await runBuild(ctx.reportId)).committed, 'the numbers built');
 
   const doc = await ClientReport.findById(ctx.reportId).lean();
   const cumSup = doc.stats.cumulative.tagBreakdowns.find((t) => t.tag === 'Supporter');
@@ -474,17 +488,22 @@ test('client report: ticking a tag reveals exactly that tag, both windows', { sk
   assert.equal(preview.json.report.visibility.visibleTags, undefined);
 });
 
-test('client report: published = frozen; republish recomputes', { skip }, async () => {
+test('client report: published = frozen; Refresh numbers re-freezes on current data', { skip }, async () => {
   const { campaign, org, effort, template, canvA, leadL } = ctx;
-  const published = await call(`/admin/client-reports/${ctx.reportId}/publish`, { method: 'POST' });
+  const draft = await ClientReport.findById(ctx.reportId).lean();
+  const published = await call(`/admin/client-reports/${ctx.reportId}/publish`, {
+    method: 'POST',
+    body: { snapshotId: String(draft.snapshotId), editVersion: draft.editVersion },
+  });
   assert.equal(published.status, 200);
 
-  // The draft gate now refuses edits...
+  // What the client SEES can still be edited on a published report (the tags are shown or not);
+  // the numbers can't.
   const patched = await call(`/admin/client-reports/${ctx.reportId}`, {
     method: 'PATCH',
-    body: { visibility: { visibleTags: [] } },
+    body: { visibility: { visibleTags: ['Supporter'] } },
   });
-  assert.equal(patched.status, 400, 'published reports are not editable');
+  assert.equal(patched.status, 200, 'an edit keeps the numbers frozen');
 
   // ...and new in-window data does NOT move the stored numbers.
   const zedHome = await Household.create({
@@ -512,16 +531,22 @@ test('client report: published = frozen; republish recomputes', { skip }, async 
   let sup = doc.stats.cumulative.tagBreakdowns.find((t) => t.tag === 'Supporter');
   assert.equal(sup.identifiedVoters, 8, 'frozen: Zed does not appear');
 
-  // Unpublish + republish is the ONE sanctioned road back — a full re-freeze on current data.
-  await call(`/admin/client-reports/${ctx.reportId}/unpublish`, { method: 'POST' });
-  const re = await call(`/admin/client-reports/${ctx.reportId}/publish`, { method: 'POST' });
-  assert.equal(re.status, 200);
+  // Refresh numbers is the ONE sanctioned road back — a rebuild on current data the operator
+  // reviews, then applies.
+  const refresh = await call(`/admin/client-reports/${ctx.reportId}/refresh`, { method: 'POST', body: {} });
+  assert.equal(refresh.status, 202);
+  assert.ok((await runBuild(ctx.reportId)).committed);
+  doc = await ClientReport.findById(ctx.reportId).lean();
+  sup = doc.stats.cumulative.tagBreakdowns.find((t) => t.tag === 'Supporter');
+  assert.equal(sup.identifiedVoters, 8, 'still frozen until Apply');
+  const applied = await call(`/admin/client-reports/${ctx.reportId}/refresh/apply`, { method: 'POST', body: {} });
+  assert.equal(applied.status, 200);
   doc = await ClientReport.findById(ctx.reportId).lean();
   sup = doc.stats.cumulative.tagBreakdowns.find((t) => t.tag === 'Supporter');
   assert.deepEqual(
     { i: sup.identifiedVoters, c: sup.currentVoters },
     { i: 9, c: 8 },
-    'republish re-freezes with Zed counted'
+    'the applied refresh counts Zed'
   );
 });
 

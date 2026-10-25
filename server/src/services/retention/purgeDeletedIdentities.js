@@ -1,9 +1,10 @@
+import mongoose from 'mongoose';
 import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
 import { RetentionRun } from '../../models/RetentionRun.js';
 import { depairFbtimeAccount } from '../fbtime/purgePairing.js';
 import { scrubFrozenNames } from './scrubFrozenNames.js';
 import { User } from '../../models/User.js';
-import { RETENTION_DAYS } from '../users/deleteAccount.js';
+import { RETENTION_DAYS, sweepDeletionLocks } from '../users/deleteAccount.js';
 
 // The 180-day identity purge, as a function the app can call — not a script a human must remember.
 //
@@ -45,15 +46,41 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
   const run = apply ? await RetentionRun.create({ job: JOB_NAME, startedAt }) : null;
 
   try {
+    // First, settle any deletion a crash left half-done (it also runs every 15 minutes on its own):
+    // a record must be finished before its window can be purged, and a lock on a live account must
+    // never reach the purge below. A sweep that throws is a failure of this run, never a reason to
+    // skip the purge (the guard below stands on its own).
+    let sweep = { finished: 0, released: 0, liveRecordsDeleted: 0, legacyFinished: 0, rescrubbed: 0, failed: 0 };
+    try {
+      sweep = await sweepDeletionLocks({ apply, now: startedAt });
+    } catch (err) {
+      sweep.failed = 1;
+      console.error(`[retention] deletion sweep failed: ${err?.message || err}`);
+    }
+
     const filter = { retentionUntil: { $lte: startedAt }, purgedAt: null };
     const due = await DeletedUserRecord.find(filter).select('_id userId deletedAt').lean();
     const scanned = due.length;
 
     let purged = 0;
-    let failed = 0;
+    let failed = sweep.failed;
     let namesScrubbed = 0;
+    let skippedLive = 0;
     const fbtime = { links: 0, shiftsKept: 0, shiftsReassigned: 0, events: 0 };
+    // THE GUARD: purge only a record whose account is deleted ("deleted" = deletedAt set, or no User
+    // document at all — older fixtures and some org cascades leave a record with no user). The
+    // FbTime de-pairing below deletes links and de-persons shifts, and must never run for a live account.
+    // Only valid ids go into the $in: one malformed record must not cast-fail the read for everyone.
+    const dueIds = due.map((r) => r.userId).filter((id) => id && mongoose.isValidObjectId(id));
+    const dueUsers = dueIds.length
+      ? new Map((await User.find({ _id: { $in: dueIds } }).select('deletedAt').lean()).map((u) => [String(u._id), u]))
+      : new Map();
     for (const rec of due) {
+      const owner = dueUsers.get(String(rec.userId));
+      if (owner && !owner.deletedAt) {
+        skippedLive += 1;
+        continue;
+      }
       try {
         const c = await depairFbtimeAccount({ userId: rec.userId, deletedAt: rec.deletedAt, apply });
         for (const k of Object.keys(fbtime)) fbtime[k] += c[k] || 0;
@@ -88,7 +115,15 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
     }
 
     const ok = failed === 0;
-    if (!run) return { ok, scanned, purged, failed, fbtime, namesScrubbed };
+    const sweepCounts = {
+      deletionsFinished: sweep.finished,
+      deletionsReleased: sweep.released,
+      liveRecordsDeleted: sweep.liveRecordsDeleted,
+      legacyRecordsFinished: sweep.legacyFinished,
+      emailRowsRescrubbed: sweep.rescrubbed,
+      skippedLive,
+    };
+    if (!run) return { ok, scanned, purged, failed, fbtime, namesScrubbed, ...sweepCounts };
     await RetentionRun.updateOne(
       { _id: run._id },
       {
@@ -98,11 +133,12 @@ export async function purgeDeletedIdentities({ apply = true } = {}) {
           purged,
           scanned,
           failed,
+          ...sweepCounts,
           ...(ok ? {} : { error: `${failed} record(s) failed and stay due for the next run` }),
         },
       }
     );
-    return { ok, scanned, purged, failed, fbtime, namesScrubbed };
+    return { ok, scanned, purged, failed, fbtime, namesScrubbed, ...sweepCounts };
   } catch (err) {
     // Record the failure. A job that throws and leaves no trace is the thing we are fixing.
     if (!run) throw err;

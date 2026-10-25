@@ -1,530 +1,1995 @@
 # Client reports & shareable links
 
-How you deliver the weekly report you used to assemble by hand and email — an "Activity at a glance"
-KPI strip, a support breakdown, survey and voter-contact breakdowns, your written observations, and an
-interactive map of where the team has been. You build a report, review it, and publish it; recipients
-open a **public link** (always password-protected — set your own or the app mints one) and see the
-campaign's published reports — **latest plus the full weekly history** — with no login. Reports are **frozen snapshots**: once
-published, a report never changes, and next week's report just appears at the same link.
+How you send a client the report you used to put together by hand: headline numbers, a voter-contact
+breakdown, survey and support breakdowns, your written observations, and a map of where the team has
+been. You build a report for a period, check the preview, and publish it. Your client opens a link,
+types the password you gave them, and reads every report you've put up for that campaign, newest
+first, with no account to create. **A published report is frozen: its numbers change only when you
+press Refresh numbers, and the report then says so.**
 
-- **Part 1 — For everyone** is plain language: what a recipient sees, how you build and publish a
-  weekly report, and how to share it.
-- **Part 2 — Technical reference** is for developers (and Claude): the models, the build/publish
-  (freeze) flow, the dual-window numbers, the as-of-date map snapshot, the public + admin endpoints,
-  and the share-link security model.
+- **Part 1 — For everyone** is plain language: what your client sees, building and publishing a
+  report, changing one after it's published, team reports, the area view, client links, branding and
+  History.
+- **Part 2 — Technical reference** is for developers (and Claude): the models, the snapshot build on
+  the worker and its state machine, the visibility rules, series and team reports, the share-link
+  security model, opens, branding, History, the endpoints and error codes, and the migration and
+  deploy steps.
 
-Related: [METRICS.md](METRICS.md) (the numbers a report freezes), [SURVEYS.md](SURVEYS.md) (where the
-support/survey breakdowns come from + the per-question percentage rule), [MAPS.md](MAPS.md) (the shared
-map rendering), [USERS.md](USERS.md) (admin/lead/canvasser roles), [TIMEZONES.md](TIMEZONES.md) and
-[DATE_FILTERS.md](DATE_FILTERS.md) (how the report week is anchored),
-[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (the opt-in Not a target voter
-outcome behind the breakdown's conditional row).
+Related: [PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md) (the October 2026
+upgrade: audit, owner rulings, review log, and its "As built" section), [METRICS.md](METRICS.md) (how
+every number is counted), [SURVEYS.md](SURVEYS.md) (where the survey and support breakdowns come from,
+follow-up questions, tags), [MAPS.md](MAPS.md) (the shared map rendering), [EFFORTS.md](EFFORTS.md)
+(walk lists), [USERS.md](USERS.md) and [ROLES.md](ROLES.md) (crews, coordinators and team leads),
+[TIMEZONES.md](TIMEZONES.md) (how a report's days are anchored), [OPERATIONS.md](OPERATIONS.md) (the
+build queue, the nightly sweep, the migration), [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)
+(D11; item 34, the audit's findings, closed in code; item 38, what this upgrade stores, shows and
+keeps), [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md)
+(the breakdown's conditional Not a target voter row).
 
 ---
 
 # Part 1 — For everyone
 
-## What a recipient sees
+## What your client sees
 
-You share a link like `https://doorline.app/r/<token>`. Anyone with it (the candidate, a consultant,
-the campaign manager, your boss, the state director — one person or many) opens a clean **report hub**:
-the **weekly reports for that campaign, newest first**, with no admin tools and no account to create.
-The link has a password (every link does — you hand it over with the URL); they're asked for it once
-(it's remembered for that browser tab).
+You send your client two things, separately: a link like `https://doorline.app/r/<token>` and its
+password. Anyone you give both to (the candidate, a consultant, the campaign manager) can open it.
+There is no account to create.
 
-A report reads top to bottom as a document, in this order:
+**The password screen** says only "A report has been shared with you" until the password is right.
+It doesn't show the campaign, your organization or the link's label. Under the password box is
+**Keep me signed in on this device**: ticked, that browser stays signed in for up to 30 days (some
+phones clear it sooner); unticked, only until the tab closes. Once signed in, every page has
+**Sign out on this device** (just **Sign out** on a phone's narrow screen).
 
-- **Activity at a glance** — headline cards (doors knocked, surveys taken, voters surveyed, connection
-  rate). Each card shows the **cumulative total** as the big number and a **"+N this week"** pill. A
-  quiet week (no new doors) says so plainly above the cards.
-- **Door goal** *(only if the operator ticked it)* — progress toward the campaign's door target:
-  *3,412 of 10,000 doors · 34%*, with a bar and the doors remaining, measured **as of this report's
-  week**, not today. **Progress only** — never a pace, an "on track" verdict, or a projected finish
-  date. Those are live management numbers; frozen onto a document a client reads weeks later they
-  would keep asserting something that had stopped being true.
-- **Voter contact breakdown** — outcomes across the doors (surveyed, *declined to participate*,
-  *didn't answer*, *no-soliciting sign*, wrong address, lit dropped), shown as one stacked bar with a
-  legend. This reads **first**, right after the numbers. On survey campaigns, **Declined to
-  participate** is the door where someone answered but wouldn't take the survey — a real contact, not
-  a survey — shown in amber. A campaign that uses the **Not a target voter** door button (it stays off
-  until an org admin turns it on) also gets a fuchsia **Not a target voter** row right after it, whose
-  "(i)" — and the PDF's definitions — read: "Doors where someone answered, but it wasn't one of the
-  voters on our list for that address and they didn't share their details. We reached a person there,
-  just not a voter we could survey." It is there so a low connection rate has a visible reason: the
-  crew was talking to people, just not to the voters on the list. It appears **only when the report
-  has at least one such door**, so campaigns that never use the button, and every report already
-  sent, look exactly as before. Every door still lands in exactly one row, so the breakdown still
-  adds up to Doors knocked; the Connection rate card is unchanged, and no new cards are added.
-- **Support breakdown** — the question you designate as "support" (e.g. *1,394 Support · 404 Likely
-  Support · 889 Undecided · 50 Opposed*), emphasized as the headline.
-- **Voter groups** — the survey **tags** you explicitly chose to show (see below), one row each:
-  *Supporter — 400 identified · 380 still current*. These are **counts of people, once each** —
-  "identified" is everyone who ever gave a tagged answer; "still current" is how many kept one at
-  their most recent answer — deliberately shown without percentages (they're overlapping groups,
-  not slices of a whole). Reports published before this feature simply don't have the section.
-- **Survey breakdowns** — per-question option counts and percentages for the questions you choose to
-  show. Percentages total exactly 100% per question (see [SURVEYS.md](SURVEYS.md)).
-- **Canvasser observations** — your written, sectioned narrative (e.g. *Voter Intent*, *Opponent
-  Activity*).
-- **A coverage map** — an interactive, read-only map of where the team has been: only the doors we
-  actually reached (unknocked doors are hidden), colored by outcome, with filters by status and survey
-  answer. It shows **no canvasser names or locations** — only the doors and their outcomes. A **Not a
-  target voter** status filter is offered only when a door on that report's map shows that outcome.
-  The map shows each door once, as it stood at the end of the report's week, while the breakdown
-  counts the door's result in every round — so a door marked Not a target voter in an earlier round
-  and knocked again since shows its newer result on the map, and a report can show the breakdown row
-  without the filter. A map already shared gains no new filter, and those doors are drawn in fuchsia
-  like any other door we reached, carrying their outcome and never the canvasser's note.
+**The report hub** comes next: your organization's logo at the top if you've added one, the campaign
+and organization names, and the reports. When the campaign has more than one kind of report, tabs
+separate them: **Whole campaign**, each team, and each walk list (a dropdown on a phone). Each tab
+shows its latest report with its headline numbers, a small chart of the doors knocked in each report,
+and every report newest first. With nothing up, it says "No reports are available on this link right
+now."
 
-The header shows the campaign, a human week range (e.g. *May 31 – Jun 13, 2026*), and a **Download PDF**
-button — a one-click, paginated PDF of the numbers, breakdowns, and observations (the map is left out).
-A report scoped to one **walk list** (see below) says so wherever its numbers appear — *Walk list:
-North* on the report hub's list, under the report's title, and in the PDF header — so scoped numbers
-can never be mistaken for campaign totals.
+**A report** reads top to bottom as a document:
 
-The numbers and the map are **frozen at publish time** — a published report never changes, even as the
-team keeps knocking. Next week's report picks up the new activity and appears at the same link.
+- **Activity at a glance**: the headline cards (Doors knocked, Surveys taken, Voters surveyed and
+  Connection rate; on a lit-drop campaign, Doors knocked, Lit dropped and Homes knocked). The big
+  number is the running total. The pill under it is the report's own period: "+412 this week" on a
+  seven-day report, "+812 in these 14 days" on a two-week one, "that day" on a one-day one. A period
+  with no new doors says so plainly above the cards. The weekly figures don't add up to the running
+  total (a door knocked twice in one pass across two weeks appears in both weeks), and each card's
+  "(i)" says so. The cards sit two across, and four across only when the report itself is wide enough
+  (a wide screen, with the report at least 720 px wide), so the builder's narrower preview shows two
+  and no card's "(i)" is cut off.
+- **Door goal** (only if you ticked it): progress toward the campaign's door target, *3,412 of 10,000
+  doors · 34%*, measured as of the end of the report's period, not today. **Progress only**: never a
+  pace, an "on track" verdict or a projected finish date. Those are live management numbers; frozen
+  onto a document a client reads weeks later, they would keep asserting something that had stopped
+  being true.
+- **Voter contact breakdown**: every door knocked lands in exactly one outcome (surveyed, *declined
+  to participate*, *didn't answer*, *no-soliciting sign*, wrong address, lit dropped), so the bar adds
+  up to Doors knocked. **Declined to participate** is a door where someone answered but wouldn't take
+  the survey: a real contact, not a survey. A campaign that uses the **Not a target voter** door
+  button (off until an org admin turns it on) also gets a **Not a target voter** row right after it,
+  explained as "Doors where someone answered, but it wasn't one of the voters on our list for that
+  address and they didn't share their details. We reached a person there, just not a voter we could
+  survey." That row appears only when the report has at least one such door, so a low connection
+  rate has a visible reason without changing any report that never used the button.
+- **Support breakdown**: the question you made the headline, emphasized. Its subtitle counts that
+  question's own answers ("1,394 answers", or "selections" on a pick-several question).
+- **Voter groups**: the survey tags you ticked, one row each: *Supporter — 400 identified · 380 still
+  current*. These count people, once each, and deliberately show no percentages (the groups overlap).
+- **Survey breakdowns**: option counts and percentages for the questions you chose to show. Each
+  question's percentages total exactly 100% (see [SURVEYS.md](SURVEYS.md)).
+- **Canvasser observations**: your written sections (*Voter Intent*, *Opponent Activity*, …).
+- **Where we've been**: the map (below).
 
-## Building and publishing a weekly report
+The heading names the period, the scope ("Team: Paid team", "Walk list: North") and the dates the
+report was published and last changed ("Published Oct 20 · Edited Oct 21", "Numbers refreshed Oct
+28"), always as dates, never times. Three notes appear only when they apply:
 
-On the admin side, drill into the campaign and open its **Client Reports** tab, then click **Create
-draft** for a week (a start and end date). The system pre-computes all the numbers for two windows —
-everything through the week's end (cumulative) and just the week itself (the delta).
+- "**Numbers as of Oct 24 — the period was still running.**" when the numbers were taken before the
+  period ended.
+- "**Earlier totals were updated by −120 doors since the Oct 13 – Oct 19 report.**" when the totals of
+  the previous report in the same tab changed after it was sent: a knock that arrived late, an answer
+  edited or unknocked, a canvasser moved between teams. It names the cards that moved and never says
+  why. If you later refresh that earlier report's numbers (or switch its map to areas), the line
+  disappears, since the two no longer compare like for like, until this report's numbers are built
+  again.
+- "**A home both teams visited counts in each team's report.**" on a team report.
 
-The create form also has a **Walk list** select. The default — **Whole campaign** — is exactly what
-every report was before. Pick a walk list instead and the entire report covers only that walk list's
-doors and activity: both stat windows, every breakdown, and the frozen coverage map. The scope is
-fixed at creation (create a second report for a different walk list — two same-week reports, one per
-walk list, is the intended pattern), and the builder header plus the **"What the client sees"** recap
-both name it. One thing to know before you pick: **the walk-list name appears on the public report
-pages and the PDF**, readable by anyone with the share link — it's operator-authored labeling, the
-same exposure class as the report title, so name walk lists accordingly.
+**Older** and **Newer** step through the reports in the same tab, in the hub's order (two reports
+that start the same day each point to the other), and **Download PDF** saves the report as a PDF: your
+logo at the top, the same notes, Doorline's red for Doors knocked, the door-goal bar and any bar without
+its own colour, "Powered by Doorline" at the foot, and no map. Long names and headings
+wrap onto the next line.
 
-In the builder you:
+### The map
 
-- Write the **Canvasser observations** as sections (a heading + a paragraph each; add, reorder, remove).
-- Choose the **headline support question** and which **survey questions** the recipient may see. A
-  **"What the client sees"** recap (Support / N of M questions shown / Tags / Map on-off) updates
-  live, and a warning flags if your support question isn't in the visible set (the client wouldn't
-  see its bars).
-- Tick **Show door-goal progress to the client** if you want the campaign's door target on the
-  report. **Off by default**, same reasoning as the tag list below: the share page is
-  unauthenticated, so a contracted number goes on it only by an affirmative tick. The checkbox is
-  disabled — with the reason spelled out beneath it — when there is nothing to show: the campaign
-  has no door goal, or this report is scoped to a walk list (goals are campaign-wide, so measuring
-  one walk list's doors against the whole campaign's target would understate it badly).
-- Tick which **tags** the recipient may see (the **Visible tags** checklist). **Tags are hidden
-  until ticked** — the opposite default from the question list, on purpose: tag names are internal
-  labels ("Hostile", "Needs follow-up") that would otherwise land on an unauthenticated page, and a
-  tag you create months from now must not auto-appear on the next publish. A ticked tag's name is
-  operator-authored text readable by anyone with the link — the same exposure class as the report
-  title and walk-list name, so name tags accordingly.
-- Choose whether to show the **map**, and which survey answers become map filters.
-- **Recompute** at any time while it's a draft. The header shows an **Unsaved changes / All changes
-  saved** indicator, and **Preview** (instant — it's prefetched) shows exactly what the recipient will
-  see, including a **Download PDF** button.
-- Read the **internal notes** above the preview. They are never shown to the client — not on the
-  share page, not in the PDF. One says how many of the survey responses behind the figures an admin
-  **entered on Door Outcomes** instead of a canvasser collecting them at a door. The other (since
-  October 2026) says how many an admin **edited after they were recorded**, on a voter's profile or
-  with Door Outcomes → **Edit answers…**: *K of these N responses were edited by an admin after they
-  were recorded (M of them in this report's own week). The figures use the answers as they stand
-  now.* Both kinds count like any other answer; the notes are there so you know before you send it.
-  A draft's figures and notes are as of its last compute, so press **Recompute** after an answer
-  edit; a published report keeps its frozen numbers until you unpublish it and publish again.
-  (Until 2026-10-19 neither note ever appeared — the saved report dropped the counts they read; see
-  Part 2. A draft computed before the fix shows them after its next **Recompute**.)
-- **Publish** — a confirm dialog spells out the freeze (numbers + map snapshot locked, link goes live);
-  confirming freezes the report. If **unreviewed mock-location flags** fall inside the report's window,
-  the builder shows a red warning with a link to review them in the Audit page, and the confirm dialog
-  repeats it — publish is **never blocked** (a mock flag can be a false alarm), but the count at the
-  moment of freeze is stamped on the report as `openMockFlagsAtPublish` (operator-visible only, never
-  in the public shapers).
+Pins colored by how each door went, showing only the doors we reached (an unknocked door never
+appears) and **no canvasser names or locations**. Your client can filter by status and by the survey
+questions you put on the map, and "N of M doors" counts exactly. On a phone the map runs full width,
+pans with two fingers so the page still scrolls, keeps its filters in a drawer, and shows a tapped
+door's details below it, with the questions in their real wording. A door's street address is fetched
+only when it is tapped. A spot holding several doors (an apartment building, or homes sharing one map
+spot) shows a tally of their results and then each door's result and answers, never an apartment
+number. A tap that catches several neighbouring spots at once (easy when the map is zoomed out) lists
+them as "12 doors near here — zoom in to pick one", rather than calling them one building.
 
-A published report is locked; click **Unpublish to edit** to make changes, then republish. The header
-also shows whether the client has opened it yet (**Viewed N× · last …**). You can delete a draft or a
-published report.
+The map keeps up with the report: when the page reads the report again (coming back to the tab, or
+opening it again after a minute) and its numbers were refreshed, its map switched between doors and
+areas, or a map question was added or taken off, the map reloads with it, and a filter that no longer
+exists is cleared.
 
-## Sharing a report
+**From the keyboard**, with no mouse or finger: Tab to the map, move it with the arrow keys and zoom
+with + and −. While the map has keyboard focus (not after a click), a red ring marks its centre.
+**Enter** opens the door or doors inside the ring (several spots read "doors near here", as a tap
+does) or, on an area report, the area under it; **Escape** closes the open card, from the map or from
+inside the card, and puts the focus back on the map. A screen reader hears how: "Use the arrow keys to
+move the map, and plus or minus to zoom. Press Enter to show the doors at the centre of the map, and
+Escape to close them." (on an area report, "…the area at the centre of the map, and Escape to close
+it."), then what happened: "Showing 3 doors at the centre of the map. Press Escape to close.",
+"Showing the area at the centre of the map: 64 doors reached. Press Escape to close it.", "No doors at
+the centre of the map. Move the map with the arrow keys, then press Enter.", or "Closed." The same
+works in the builder's preview.
 
-On the campaign's **Client Reports** tab, use the **Share link** panel:
+A **Not a target voter** filter is offered only when a door on that report's map shows that outcome.
+The map shows each door once, as it stood at the end of the report's period, while the breakdown
+counts the door's result in every round. So a door marked Not a target voter in an earlier round and
+knocked again since shows its newer result on the map, and a report can show the breakdown row
+without the filter.
 
-- **+ New link** creates a public link to this campaign's published reports — **and a password with it**:
-  every new link is password-protected, and when the operator doesn't supply a password the server mints
-  a strong one and returns it **once**, in the create response. The panel shows it in a one-time callout
-  ("shown once and never again") with a copy button — it's bcrypt-hashed at rest and can never be
-  displayed again. **Copy** the URL and send both to the client — they don't need an account. Give each
-  link a **label** (e.g. *Candidate*, *Internal*) inline.
-- **Set / Change password** is an **inline field** (no browser prompt). A password can be **replaced
-  but never removed** — the server refuses removal (`SHARE_PASSWORD_REQUIRED`) so a protected link
-  can't quietly become an open one; if a password is lost, **Set password** replaces it. (A legacy open
-  link can still have a password *added* — that's the one permitted direction.)
-- **Rotate** issues a fresh URL and **instantly kills the old one** (use it if a link leaked). The
-  password carries over — rotate changes the URL, not the password.
-- **Disable / Enable** turns a link off without deleting it; **Delete** removes it for good. Each row
-  shows when the link was **last opened** and when it **expires** — every new link expires
-  (`SHARE_LINK_DEFAULT_DAYS`, default 90; an expired row is badged **expired**). Past expiry, the
-  operator creates a fresh link.
-- You can keep **more than one link per campaign** (e.g. one for the candidate and one for internal
-  staff), each with its own password and each revocable on its own.
-- A link from before passwords+expiry became required keeps working (`isLegacyOpen`) and is badged
-  **open link — add a password** in the panel; the admin-only **revoke-legacy** sweep kills all of
-  them at once, deliberately never automatically.
+### Area view
 
-A link always shows the **latest report plus every prior week** for that campaign, and new reports you
-publish appear automatically — so you share it once. Recipients only ever see **published** reports for
-**that one campaign** — never drafts, never other campaigns, never live data.
+You can give any report an **area view** instead of exact doors (see *Exact doors or areas* below).
+Your client then sees shaded hexagons, fixed in size, each with how many doors were reached there and
+how they went. The hexagons are see-through, so the streets show under them, and each legend swatch is
+the colour exactly as it looks on the map, over that map style's ground. **Area view never shows an
+address.** A single-choice question shows its answers area
+by area only when every area has at least five answers to it; otherwise that report shows only the
+question's overall chart, and its areas read "No answers to show". How each door went shows for every
+area, even one with a single home. Two things are worth knowing: where every home that answered in an
+area gave the same answer, that tells you how each of them answered; and other reports on the same link
+(other weeks, teams or walk lists, or an exact-doors report) can narrow things down.
+
+### When something has changed
+
+The page says what happened instead of going blank or claiming nothing was published:
+
+| What happened | What your client reads |
+|---|---|
+| You changed the password | The password screen again: "This link needs its password. If it no longer works, ask the person who sent it — it may have changed." |
+| You rotated, renewed, disabled or deleted the link (on its old address) | "This link isn't available. It may have been replaced or switched off — ask the person who sent it." |
+| The link expired | "This report link has expired. Ask your campaign contact for a new one." |
+| 50 wrong passwords in a day | "This link is locked after too many wrong passwords. Try again later, or ask the person who sent it." |
+| Too many tries from one connection | "Too many tries from this connection — wait 15 minutes." |
+| You took the report down, or deleted it | "This report was taken down or removed", with a way back to all reports. Your client stays signed in. |
+| The report's map changed while the page was open, and a door was tapped before the page read the report again | "This report was just updated — reload." |
+
+If your organization's access to Doorline is suspended or canceled, every link stops opening ("This
+report is no longer available"); see [BILLING.md](BILLING.md).
+
+## Building a report
+
+Open the campaign, go to its **Client Reports** tab, and press **New report**:
+
+- **Covers:** **Whole campaign**, or **A team** (pick one, or make one with **+ New team**; see *Team
+  reports*), and optionally **Only one walk list**. A walk list's name appears on your client's report,
+  so name walk lists accordingly.
+- **Period:** any run of days. It suggests the day after the last report of the same kind, for that
+  report's length, ending no later than yesterday; with no earlier report, the seven days ending
+  yesterday. After a long gap (when even the next period would still leave a whole report's length
+  unreported before yesterday) it suggests the same length ending yesterday instead, and says what's
+  uncovered: "Your last Paid team report ended Sep 13. No report covers Sep 14 – Oct 16 — change the
+  dates to cover it." A period that isn't over yet can be built now and refreshed later.
+- **Title** (optional).
+
+**Create draft** starts the numbers building in the background ("Building the first numbers…"). You
+can leave the page; the build keeps going on Doorline's worker and the report's row shows its state:
+**Queued (2 ahead)**, **Waiting**, **Building 40%**, **Stalled** or **Failed** (each with **Retry**),
+and, on team reports, **Team changed** (see below). **Cancel** stops a build that is queued, waiting
+or running.
+
+If someone is editing answers, unknocking, converting surveys or re-cutting a round on the campaign,
+the build **waits** for them ("Waiting for the answer edit on this campaign to finish") and carries on
+once they're done. After 30 minutes of waiting it stops and says why; an open **One person at a time**
+answer edit counts as running until someone presses Stop on Door Outcomes. A change that finishes
+while the numbers are building makes the build start again once, by itself. Knocks the phones send
+while it builds aren't counted, and the builder says so: "3 knocks arrived while these numbers were
+being built — Recompute to include them."
+
+**The builder.** The left side holds the settings; the right side is the **Preview, exactly what your
+client sees**, drawn from what's on screen. A draft saves itself about a second after you stop
+typing. The header shows **Numbers as of 9:14 AM** and **Recompute**, which builds the numbers again
+from today's records. Opening a report shows a moment's placeholder until a fresh copy arrives, so the
+screen always matches what's saved, including a change you made just before leaving.
+
+- **Title** and **Canvasser observations**: sections with a heading and a paragraph each (a section
+  without a heading isn't saved).
+- **Survey questions**: one row per question, with **Chart**, **Map** and **Headline**. **Show: All ·
+  None**, and *None really means none*. A question whose chart you don't show can't go on the map or be
+  the headline.
+- **Follow-up questions** can only go on the map together with the question they depend on. If
+  "Could we put a yard sign up?" is asked only after a Yes to "Back the recall?", showing the yard-sign
+  answers on the map shows exactly which homes said Yes to the recall, even with "Back the recall?"
+  hidden. So the builder keeps it off the map unless "Back the recall?" is on the map too, and says
+  why: "Asked only on some paths through 'Back the recall?' — mapping it shows who took that path."
+  Usually the right call is to leave the follow-up off the map. Its chart stays your choice, and
+  *Before you publish* warns when a shown follow-up chart hints at a hidden question. A question asked
+  only after a written answer can never go on the map.
+- **Voter groups**: hidden until you tick them, so an internal tag like "Hostile" can never reach a
+  client's page by accident, and a tag you create next month won't appear on its own.
+- **Door goal**: **Show door-goal progress to the client**, off by default (anyone with the link can
+  read it). It can't be shown on a walk-list or team report: goals are campaign-wide, and measuring
+  part of the campaign against the whole target would undersell you badly. If you set the campaign's
+  goal after this report's numbers were built, the builder says so: "Your door goal was set after
+  these numbers were built. Recompute them to show it" (on a published report, **Refresh numbers**).
+- **Map**: **Show the map**, then **Exact doors** or **Areas** (**Small**, about 1,100–1,400 ft
+  across, or **Large**, about 0.55–0.7 mi across). Exact doors show your client each home's street
+  address and result; areas never show an address.
+
+A map change after the numbers were built (the map turned on, a new map question, switching between
+exact doors and areas, a new area size) needs a **Recompute** before you can publish; the builder says
+"Map preview is from 9:14 AM, before your map changes — Recompute". Taking something *off* the map
+never needs one.
+
+**Before you publish** collects what's worth a look before a report goes out. Nothing here blocks
+publishing:
+
+- unreviewed mock-GPS flags in this report's numbers, with **Review** (they count only the report's
+  own walk list or team);
+- knocks that arrived during the build, or numbers more than an hour old, with **Recompute**;
+- a period that isn't over yet;
+- a shown follow-up chart whose parent question is hidden ("its total shows how many took that
+  path"), or a shown voter group that counts answers to a hidden question;
+- on an area report, a question that shows no answers by area ("Large areas usually fix it" — said
+  only when the numbers were built in small areas), and other reports on the same link that could
+  narrow down what its areas keep hidden;
+- answers given under an earlier version of your survey, from before Doorline kept a record of its
+  follow-up questions, when a chart is hidden and the map is on: "If a map question used to be a
+  follow-up of a question you hide, its answers could hint at the hidden one — check your map
+  questions";
+- no link your client could open, and the fix ("No link yet — create one", "Your only link expired —
+  renew it", …);
+- notes copied by **Next report** that you haven't reviewed, with **I've reviewed the copied notes**
+  (the reminder pointing here shows on drafts only — Publish warns about unreviewed notes, and once
+  a report is out there's nothing left to tick);
+- an earlier report whose totals changed since you sent it: what it sent, what it reads now, and why
+  ("records changed after it was sent", or on a team report "the team's crews changed" or "canvassers
+  changed teams"); your client's report carries only the one neutral line. If that earlier report's
+  numbers were refreshed after these were built, it says the line is hidden instead, with
+  **Recompute** to compare again;
+- on a team report, **Door visits this period**: a row for each team ("Paid team (this report)" first,
+  matching this report's own period doors, then the others, and "Together" when there are two or
+  more), then "1,204 door visits in the whole campaign this period" (or the walk list), how many of
+  those more than one team made (counted in each team's report), and how many no team made
+  (canvassers with no crew in a team, or doors entered in bulk); and how many canvassers knocked for
+  this team (with a warning when it's one: the report then shows one person's work);
+- how many of the surveys behind the numbers an admin **edited** after they were recorded, or
+  **entered on Door Outcomes** instead of a canvasser collecting them at a door. Both count like any
+  other answer.
+
+None of this reaches your client.
+
+**Worth a look**, on a published report. Before you publish is for drafts; once a report is out, a
+short **Worth a look** box keeps the three checks that can still matter, and only when they apply:
+
+- on an area report, a map question that shows no answers by area (after a Refresh or a switch to
+  areas too): "“Yard sign?” shows no answers by area: some area has fewer than five answers to it, so
+  your client sees only its overall chart. Large areas (with Refresh numbers) usually fix it." (on a
+  report already in large areas the sentence ends at "…only its overall chart.");
+- answers from survey versions older than Doorline's record of follow-up questions, in the same words
+  as above;
+- an earlier report refreshed after these numbers were built: "The Oct 13 – Oct 19 report's numbers
+  were refreshed after these were built, so this report's “earlier totals” line is hidden. Refresh
+  numbers to compare again.", with **Refresh numbers**.
+
+## Publishing
+
+**Publish…** opens a confirm that repeats what matters (a period not over, numbers over an hour old
+with **Recompute first**, knocks that arrived during the build, mock-GPS flags, copied notes), then
+"Your client sees exactly the preview" and which links will show it: "It shows on 2 links: Candidate,
+Consultant", or why none can.
+
+**Publishing is instant and freezes exactly what your screen shows.** Pressing **Publish…** while
+you're still typing waits until your last change is saved. If a recompute is still queued or running,
+the confirm says so, and publishing the numbers you looked at cancels it. If the report changed
+somewhere else since your screen last read it, nothing is published; the page and the preview update
+and say why: "This report changed since the preview — it now shows the latest version. Look it over,
+then publish", or "Your numbers were just rebuilt — the preview now shows them. Look it over, then
+publish." Press Publish again once you've looked; no reload needed. If your settings add to what the
+numbers were built with (see the map change above, or a team whose crews changed), it asks for a
+recompute first.
+
+**When someone else works on the same report.** Every save says which version of the report your
+screen was built on. If the report changed somewhere else since (another editor's save, an earlier
+text restored from History, new numbers applied, a switch to areas finishing), the save is refused, so
+nothing of yours overwrites theirs, and the builder merges the two and sends only what is still
+yours. It does the same each time it reads the report again (coming back to the tab, after a save):
+
+- with nothing of yours unsaved, the screen simply updates: "Picked up changes made elsewhere. The title
+  changed. This screen now shows the latest saved version";
+- with your own unsaved changes in other places, both are kept, and only your changes are sent again:
+  "…The observations changed there; your changes are kept on top". If one of yours couldn't survive
+  the merge, the notice says which instead of claiming everything was kept: "…your changes are kept on
+  top, except that "Yard sign?" came off the map — it can go there only with the question it follows"
+  (or "…its chart was hidden there", or "your new order of the sections couldn't be kept"), and the
+  question table notes it under that question ("Taken off the map — its chart was hidden somewhere
+  else.");
+- your own switch to areas finishing while you edit isn't news from elsewhere: "Your switch to areas is
+  ready. Your edit is still open, as you left it.";
+- when you both changed the same thing, a yellow banner names only that and asks you to choose: "This
+  report was changed somewhere else while you were editing. You both changed the title, and nothing
+  more is saved until you choose: **Keep mine** (it replaces their title "Week 3 final") or **Use
+  theirs**. Anything else either of you changed is kept." (In an open edit of a published report,
+  nothing is sent until you press Update anyway, so the banner leaves out "and nothing more is saved
+  until you choose".) Until then the settings are read-only,
+  Publish… and Update are off, and leaving a draft asks first: "This report was changed somewhere
+  else while you were editing, so your change isn't saved yet. Leave anyway? It stays on this device —
+  you can restore it when you come back." (Leaving an open edit of a published report asks "Leave
+  without updating the report? Your edit stays on this device — you can restore it when you come
+  back.")
+
+What counts as "the same thing": the title, the headline question, the door goal tick, the map turned
+on or off, the map view (exact doors, small or large areas), the copied-notes tick, and an observation
+section. **Lists of choices never clash**: which charts, map questions and voter groups show are merged
+one by one, so a chart someone else hid stays hidden unless you tick that very chart again, and a
+question you ticked is added to theirs. **Observation sections** are matched by their content (a section
+moved is still the same section; one whose text was edited keeps its heading; one renamed keeps its
+text): a section either of you added is kept (when you both add one in the same place, yours comes
+first), one you deleted that they didn't touch goes, and only a section you both changed, or one of you
+deleted while the other edited it, is asked about. Keep mine then says exactly what it replaces:
+"their version of "North side"", "their deletion of "North side" (yours comes back)", or "their edited
+"North side" (it stays deleted)".
+
+If someone publishes the draft you're editing, your change is never sent to the published report. It
+is merged the same way and opens as an unsent edit, kept on this device: "Someone published this
+report while you were editing. Your change hasn't gone to the client — review it, then press Update
+to send it." With nothing unsaved, the page just says "Published elsewhere". New numbers that someone
+else already applied or discarded say so too, and a report deleted elsewhere reads "Report not found —
+It may have been deleted." If you switch campaigns in the sidebar while a report is open, you land on
+that campaign's Client Reports list.
+
+**Leaving the page.** A change you type in the second before you leave is still sent on the way out,
+and a copy is kept on this device first. If that last send doesn't land (someone changed the report
+in that same moment, or published it), it comes back the next time you open the report: on a draft,
+"A change you made didn't save before you left. From 9:14 AM, kept on this device. Restore it or
+discard it." (Restore waits while a change is saving); on a report published meanwhile, as an unsent
+edit with **Restore your unsent edit** (see *Changing a published report*). Restoring merges it with
+whatever the report holds by then, as above. A copy whose change did land is deleted as soon as the
+server confirms it, so a later change by someone else is never offered back to you as yours. One limit remains: closing the tab, or going Back
+out of Doorline, with a change still waiting to save only makes the browser ask first; it doesn't save
+it.
+
+Once it's up, the builder says "Published. Your client can see it now." When no link can open it
+yet, it says "Published — create a link so your client can open it." instead, with a button to the
+**Client links** panel. With a link, it offers **Copy the message for your client**: a message to
+paste into your own email or text, naming the report, its dates and its headline numbers, with a link straight to the
+report. It never contains the password. For example: *"The Volunteer team report for Oct 13 – Oct 19
+is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). Open it here:
+https://doorline.app/r/…/reports/… — use the password I sent you."* The report's row has **Copy
+message** too, while a link can open it.
+
+## Changing a published report
+
+A published report never goes back to being a draft. It changes in exactly these ways, each with its
+own confirm:
+
+- **Edit**: the title, the observations, which charts and voter groups show, the headline question
+  and the goal tick, and taking questions off the map. **Update report** sends only what you changed
+  since you pressed Edit (anything someone else changed meanwhile stays); your client sees the change
+  at once, marked "Edited Oct 21", and **the numbers stay as they were**. The earlier text is
+  kept in History, where team leads on the campaign can read it (an admin can erase it there). Turning
+  the map off **deletes the frozen map**, but the report remembers which map questions you had picked
+  (see Refresh numbers below); turning it back on means refreshing the numbers. On a report that's
+  taken down, your client sees the edit when you put it back up. If the report changed elsewhere while
+  your edit was open, Update merges first and says so: "Picked up changes made elsewhere. The title
+  changed there first; your update went on top, so both are kept", or, when your change was already
+  there, "Your change had already been made there, so there was nothing more to update."
+- **Your edit is kept on this device** as soon as it has a change, until you press Update report or
+  **Cancel edit**, discard it, or undo every change yourself. Leave with it unsent and the report
+  offers **Restore your unsent edit** next time ("From 9:14 AM, kept on this device." with **Discard
+  it**); **Edit** itself opens it too, never wiping it: "Your unsent edit is open. From 9:14 AM, kept on
+  this device. Update report sends it; Cancel edit throws it away." Cancel edit with changes asks first:
+  "Throw away your edit? Nothing you changed reaches your client, and the copy kept on this device is
+  deleted." Only your own changes go back on top of whatever the report holds by then.
+- **Switch to areas** (inside Edit): the areas build in the background, your client keeps seeing exact
+  doors until they're ready, and then sees "Edited". Going back to exact doors, or changing the area
+  size, means refreshing the numbers. The confirm names any single-choice map question that may show no
+  answers by area: "“Support Smith?” and “Yard sign?” show answers area by area only when every area
+  has at least five answers to them — otherwise your client sees just their charts. Once the areas are
+  ready, this page says which ones don't." An Update that only switches to areas doesn't claim your
+  client sees it "right away"; on a taken-down report it says "The report is taken down, so your
+  client sees the areas when you put it back up."
+- **Refresh numbers**: rebuilds the report's numbers from today's records, for the same period, and
+  changes nothing until you press **Apply**. The dialog compares **Now** and **After** for every
+  headline card, what moved **In the period**, the doors (or areas) on the map, and, folded away, the
+  contact breakdown, support split, voter groups and door goal. **Discard** throws the new numbers
+  away; **Rebuild** builds them again. It's also how you **add** to the map: turn it on, add map
+  questions, go back to exact doors, or change the area size. Choosing exact doors warns that "Exact
+  doors put street addresses back in front of your client". **Turning the map back on** offers the map
+  questions the report had picked before its map went off, already ticked: "Map questions — the ones
+  this report had picked are ticked; untick any you don't want on the map:". Exactly what is ticked
+  goes on your client's map, and the review names it before you apply: "The map comes back on with
+  “A” and “B”." (or "…with how each door went — no map questions."); on a map that's already on, "Map
+  questions after you apply: … (new: …)." On an area report it also names any single-choice question
+  that would show no answers by area. The expanded rows use your client's words for each outcome
+  (Declined to participate, Didn't answer, No-soliciting sign). A refresh that leaves the map off keeps
+  those picks for later. Your client sees "Numbers refreshed Oct 28". New numbers waiting for review
+  must be applied or discarded before another build can start.
+- **Take down** hides the report from your client but keeps it exactly as it was (numbers, map and
+  publish date), and cancels any build or new numbers waiting for review. **Put back up** shows it
+  again, unchanged, with its original publish date. A taken-down report still changes only through
+  Edit or Refresh numbers.
+- **Delete** (from the row's menu) removes it for good. On a report your client can see, the warning
+  names the links it shows on and suggests Take down instead. An admin can tick **Also erase its
+  earlier text from History** in the same step.
+
+**Example: fixing answers after the report went out.** A canvasser picked *Volunteer Request*
+whenever a voter turned down a yard sign, and last week's report already went to the client. An org
+admin fixes the answers on Door Outcomes with **Edit answers…** (see
+[CAMPAIGNS.md](CAMPAIGNS.md) → *Editing survey answers*). The published report keeps the old picks
+until someone opens it and presses **Refresh numbers**. The dialog shows the headline cards unchanged
+(an answer edit keeps every voter surveyed); **Apply** puts the corrected answer counts in front of
+the client, marked "Numbers refreshed".
+
+## Next report
+
+On the latest report of each tab, **Next report** makes the next draft in one click: the same number
+of days, starting the day after the last one ended (a whole calendar month rolls to the next month).
+It copies the observations, marked "Copied from Oct 6 – Oct 12" until you tick **I've reviewed the
+copied notes**, and the questions, map settings, voter groups, goal tick and headline. The title
+starts blank, and the numbers start building at once. Pressing it twice still makes one draft. If the
+new period hasn't started yet, the builder says so.
+
+## Team reports
+
+A campaign can have a volunteer team and a paid team, and your client may want a report for each.
+**A team is a name your client sees plus one or more crews** (a crew is a coordinator and the
+canvassers who report to them on this campaign). "Paid team" can cover Sam's crew and Dee's crew;
+"Volunteer team" can be Maria's crew alone. A crew belongs to one team at a time. Canvassers with no
+coordinator belong to no team's report.
+
+- **Names never contain a canvasser's name.** A team name with a coordinator's or crew member's first
+  or last name in it (as a whole word of three or more letters) is refused: "Team names can't include
+  a canvasser's name — “Dee” matches someone on this campaign." A walk list whose name happens to match
+  one ("Marco Island" on a campaign with a canvasser named Marco) gets a warning, "The walk list's name
+  matches a canvasser on this campaign (“Marco”). Your client reads this name.", that you can confirm
+  with **This is a place, not a person**, or you can type the name your client sees instead. The
+  matched name is shown as it's written on the person's record ("McDonald", "José").
+- **The numbers are each team's own work.** A home or voter both teams reached counts in both
+  reports, and each team report says so, so **team reports don't add up to the whole campaign**.
+  Doors marked at the office on Door Outcomes don't count toward any team's doors. Team reports never
+  show a door goal. The team's map shows the doors the team knocked, each with the team's own latest result and
+  answers.
+- **Edit team** on a team's tab renames it, changes its crews, or ends it. Ending keeps its published
+  reports exactly as they were sent and offers to delete its open drafts (only reports that are still
+  drafts go, each recorded in History). Walk-list tabs get **Rename**.
+- **An ended team's tab shows Continue this team** instead of Edit team: "It takes new reports again.
+  Pick the crews it covers from now on — its published reports stay exactly as they were sent." A crew
+  you leave unticked leaves the team (a crew now in another team can't stay), and a departed lead's
+  past doors are kept or removed first. Picking an ended team in **New report** offers **Continue the
+  team** before it creates the draft; after Continue, New report reopens on that team with your dates
+  and title kept. Reusing an ended team's name offers to continue it rather than start a second team
+  under the same name.
+- **"A team" is greyed out** on an organization that doesn't have team attribution yet.
+
+**When a crew lead leaves.** Removing a coordinator leaves her crew's past doors stamped with her. The
+next time a draft of that team is built, it stops with a **Team changed** card instead of a Retry:
+"Dee no longer runs a crew on this campaign", what became of her canvassers ("3 of 5 have no crew now;
+2 joined Sam's crew"), and the choices:
+
+- **Keep the crew's past doors in Paid team** (the default): they keep counting while those
+  canvassers have no crew. Moving one of them into another crew moves their past doors too (the
+  current coordinator owns all history), and on the web the confirm that moves them names the
+  client-report team whose numbers change ("This also changes the numbers in the Paid team client
+  report"; the phone's member sheet doesn't show that line yet).
+- **Remove them**, with what that takes out ("the team's totals drop by 1,400 doors"): the team's
+  doors with her crew minus without it, up to the end of the report the card is about, so a door
+  another of the team's crews also knocked that round stays, and a knock after the period never
+  counted.
+- **Change crews**, or **End this team** (an ended team's card offers no End; Change crews opens
+  Continue).
+
+**Continue** applies the choice and builds again. If a past crew lead runs a crew again, the card
+offers to make her crew current in the team or remove her past doors. **Reports you've already
+published stay as they were sent**, and a Refresh rebuilds a published team report with the crews it
+was built with, so a report already sent never quietly starts covering another crew.
+
+## Exact doors or areas
+
+**Exact doors** is the default: pins at each home, with its street address when tapped. **Areas** is
+for a client who shouldn't see addresses, or a campaign where door-level answers feel too exact: the
+report shows hexagons instead (see *Area view* above). Only single-choice questions can show answers
+by area; a pick-several question stays a pins-only filter and shows as a chart. If a question shows no
+answers by area because one area has fewer than five, **Large areas** usually fixes it. The builder
+says which questions that is: *Before you publish* on a draft; on a published report, the switch's
+confirm warns ahead, the Refresh review names them before you apply, and **Worth a look** names them
+once the areas are up. On a draft, the choice takes effect at the next Recompute. On a published
+report, **Switch to areas** is an edit, and going back is a Refresh.
+
+## Client links
+
+The **Client links** panel on the tab holds the campaign's links: "Each link opens every report
+you've put up. Send the link and its password separately." A campaign can have several (one for the
+candidate, one for a consultant), each with its own password, expiry and counts.
+
+- **+ New link**: a **Label** (only you see it), **Expires** after 30, 90, 180 or 365 days (90 by
+  default; "You can extend it later, up to a year from today"), and a **Password**: **Generate a strong
+  one (shown once)** (12 characters, without look-alike letters) or **Set my own** (12 or more
+  characters). **Link ready** then shows the link and the password once, with **Copy message** for the
+  link; the password is stored scrambled and can't be shown again (lost it? **Change password**).
+- **Extend** offers only later dates, each shown as a date, up to a year from when the link was made.
+  An **expired** link offers only **Renew** (no Rotate, Unlock now or lock warnings): it gets a **new
+  address** and a new year, keeps its password, and you send your client the new link. The old address,
+  and every copy of it ever forwarded, stays dead. Renewing a disabled link keeps it disabled until you
+  enable it.
+- **Change password** (12 or more characters), **Rotate** (a new address, same password), **Renew**
+  and **Disable** all **sign everyone out**. The confirms say what stays: Rotate's "It gets a new
+  address, and everyone using the old one is signed out. The password stays the same. It still expires
+  Jan 21" (adding "It also lifts the lock" on a locked link, and on a disabled link that the new address
+  stays closed until you enable it); Disable's "Nobody can open it until you enable it again. Everyone
+  using it now is signed out — once you enable it, they need the password again." Adding a password to a
+  link that never expired also gives it an expiry, which you can extend. **Enable** turns a disabled
+  link back on; **Delete** removes it for good. A password can be replaced but never removed.
+- **Last opened** is the last time someone signed in to the link opened it. Reaching the password
+  screen, or guessing wrong, doesn't count.
+
+**Wrong passwords.** The row shows a link's wrong passwords whenever there are any, on a locked or
+expired link too, counting only what's above zero: "12 wrong passwords since Oct 24, 9:12 AM EDT · 30
+this week · 41 in total", "3 wrong passwords this week · 41 in total", or "41 wrong passwords in
+total". The amber **Wrong passwords** badge is only for the last 24 hours (and not on a locked or
+expired link, which has its own). **No link accepts more than 50 wrong passwords in any 24 hours.** At 50 it locks ("Locked until Oct 25, 9:12 AM after 50 wrong passwords. Devices
+already signed in still work"), and since 50 wrong passwords is never your client, it says "Someone
+else has this link" and suggests **Rotate**. **Unlock now** lets the right password in again at once.
+Rotating also clears the week's count; the lifetime total stays.
+
+**Older links.** A link whose password turns out to be shorter than 12 characters is flagged **Short
+password** the next time it's used. A link from before mid-July 2026 may carry **No password** ("Add a
+password") or **Never expires** ("Set an expiry"); adding a password also gives it an expiry, and
+Extend gives a never-expiring link its first one. An admin can switch off every remaining open link in
+the organization at once (the revoke-legacy switch; Part 2).
+
+**Who opened what.** Each published report's row says how often it was opened: "Opened via Candidate:
+about 2 visits". The page counts a visit once per browser, per report, per day, so it's an estimate.
+Visits by people signed in to your organization, and by Doorline staff, are listed apart ("your
+organization: 3 visits"), so checking your own work doesn't inflate your client's number. A report
+published before these counts existed also shows "N views before per-link counts": the old total,
+which no longer changes.
+
+## Report branding
+
+The **Report branding** card puts your organization's logo at the top of your clients' report pages
+and PDFs, with a small "Powered by Doorline". It's organization-wide, so only admins change it:
+**Upload** takes any image your browser can draw (PNG, JPEG, SVG); the browser turns it into a PNG no
+larger than 800 × 320 pixels and 256 KB, and Doorline checks it and keeps its own clean copy, so
+nothing else hidden in the file goes along. **Remove** takes the logo off every campaign's reports.
+Team leads see the logo, "Set by an admin.", or "No logo yet."
+
+## History
+
+**History** on the tab opens the client-report history: drafts created, publishes, edits, refreshes,
+take-downs, deletes, team changes and every link change (including a day with 10 or more wrong
+passwords, and each lock), newest first, each with who did it and when.
+A report's row names its period and its tab, so four tabs' reports for one week read apart: "Oct 12 –
+Oct 18, 2026 · Paid team report · Published", "Oct 12 – Oct 18, 2026 · Whole campaign report ·
+Published" (a row from before tabs reads by its period alone). Team rows name the team: "Volunteer
+team · Team ended", "Volunteer team · Team continued" (with how many crews it continues with), "Paid
+team · Crews changed" ("1 crew → 2 crews"). A row carries the name the team had at the time; an older
+"Team ended" or "Crews changed" row uses the team's current name, or "A team". It shows the latest
+200. These rows never appear in the campaign's general History or in the phone
+app, and a link row never holds the link's address or password.
+
+**Team leads on the campaign can read it, including the earlier text of every edit.** Anyone who can
+edit the report can **Restore** an earlier text, as a new edit. The confirm says when your client sees
+it: right away, marked "Edited", on a published report; when you put it back up, on one that's taken
+down. Ending a team with its open drafts writes a "Deleted" row for each draft that went. An admin can
+**Erase** an earlier text, or **Erase all earlier text for this report** (its confirm names it: "Erase
+all earlier text for the Oct 12 – Oct 18, 2026 · Paid team report?"), beyond the latest 200 too, and
+even after the report is deleted. Erased text can't be restored, and
+if **Next report** copied it into a later draft, the confirm offers to remove it there too.
+
+## Who can do what
+
+Org admins, and team leads on campaigns they run, can do everything on this tab (owner ruling
+2026-10-23: full control), with three exceptions that are admins only: the report logo, Erase in
+History, and switching off every legacy open link in the organization at once.
+
+## What this doesn't change
+
+How every number is counted ([METRICS.md](METRICS.md)); tags hidden until ticked; door-goal progress
+only; and the phone app, which shows nothing from this tab. No new company receives any data.
 
 ---
 
 # Part 2 — Technical reference
 
-## Data model
+## A. Where things live
 
-**[ClientReport](../server/src/models/ClientReport.js)** — one frozen weekly report. Small doc
-(numbers + observations); the map points live in a companion collection.
+| Concern | Files |
+|---|---|
+| Admin routes | [routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js) (reports, series, builds, preview), [routes/admin/clientReportShares.js](../server/src/routes/admin/clientReportShares.js) (links, mounted at `/admin/client-reports/shares` **ahead of** the reports router in [routes/index.js](../server/src/routes/index.js) so `/:id` never reads `shares`), [routes/admin/branding.js](../server/src/routes/admin/branding.js), History in [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js) |
+| Public routes | [routes/public/share.js](../server/src/routes/public/share.js), mounted at `/share` before the `requireAuth` gate |
+| Visibility | [services/reports/reportVisibility.js](../server/src/services/reports/reportVisibility.js) |
+| The build | [services/reports/clientReportBuilds.js](../server/src/services/reports/clientReportBuilds.js) (claim, liveness, worker attempt, commit, publish, apply, discard, take down), [services/reports/buildReportSnapshot.js](../server/src/services/reports/buildReportSnapshot.js) (the numbers and the map rows) |
+| Area view | [services/reports/areaCells.js](../server/src/services/reports/areaCells.js) |
+| Series and teams | [services/reports/clientReportSeries.js](../server/src/services/reports/clientReportSeries.js) |
+| Readers and shapers | [services/reports/clientReportMap.js](../server/src/services/reports/clientReportMap.js) (map payloads and their in-process cache, the map version, `mapContextFor` and `legacyTemplatesFor`), [services/reports/clientReportView.js](../server/src/services/reports/clientReportView.js) (the client payload), [services/reports/clientReportRead.js](../server/src/services/reports/clientReportRead.js) (earlier totals, older/newer, current series labels) |
+| Before you publish | [services/reports/clientReportChecks.js](../server/src/services/reports/clientReportChecks.js) |
+| History | [services/reports/clientReportHistory.js](../server/src/services/reports/clientReportHistory.js) |
+| Links | [services/reports/shareLinks.js](../server/src/services/reports/shareLinks.js), [services/auth/tokens.js](../server/src/services/auth/tokens.js) (`signShareToken`) |
+| Opens | [services/reports/reportOpens.js](../server/src/services/reports/reportOpens.js), [services/auth/resolveSessionUser.js](../server/src/services/auth/resolveSessionUser.js) |
+| Branding | [services/branding/png.js](../server/src/services/branding/png.js), [services/branding/orgLogo.js](../server/src/services/branding/orgLogo.js) |
+| Sweep, indexes | [services/reports/clientReportSweep.js](../server/src/services/reports/clientReportSweep.js), [services/reports/clientReportIndexes.js](../server/src/services/reports/clientReportIndexes.js) |
+| Migration | [migrations/clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js) |
+| Test oracles | [services/reports/computeReport.js](../server/src/services/reports/computeReport.js): `computeWindowStats` and `buildFrozenMapPoints` are no longer called by any route; they stay as the parity oracles the build is pinned against. `computeSurveyBreakdowns`, `computeTagBreakdowns` and `publicPointAnswer` are still the live implementations. |
 
-- Scope/window: `organizationId`, `campaignId`, `weekStart`/`weekEnd` (`YYYY-MM-DD` in the campaign
-  tz), `timeZone`, and the frozen `rangeStartUtc`/`rangeEndUtc` instants (from `zonedDayRange`).
-- Optional walk-list scope: `effortId` + `effortName` — `null` = the whole campaign (every
-  pre-existing report, and the default). `effortName` is **frozen at creation** on purpose: the
-  public share page renders the label without an admin API lookup, and it survives the walk list
-  being renamed or deleted later. Create-time only — `updateSchema` doesn't accept it, so a draft's
-  scope can't drift from its computed stats.
-- `status`: `draft | published | archived`.
-- `observations`: `[{ heading, body }]`.
-- `stats`: **dual-window** — `cumulative` and `period`, each `{ totals, contactBreakdown, coverage,
-  surveyBreakdowns[], tagBreakdowns[] }`. The KPI cards read `cumulative.totals.X` as the big number
-  and `period.totals.X` as the "+N this week" delta. Breakdowns render from `cumulative`.
-  `tagBreakdowns` rows are `{ tag, identifiedVoters, currentVoters }` — frozen VOTER counts (see
-  [SURVEYS.md](SURVEYS.md) §I for the two units); computed for **all** tags at compute time,
-  filtered to the ticked ones at shaping. Absent on pre-feature reports → the section doesn't
-  render; no migration (the `viewCount` absent-field pattern).
-- `supportQuestionKey`, `campaignType`, and `visibility: { visibleQuestionKeys[], mapAnswerKeys[],
-  showMap, visibleTags[], showGoal }`. ⚠️ **`visibleTags` empty = show NONE** — the deliberate
-  OPPOSITE of `visibleQuestionKeys`' empty = all. Tag names are operator-authored strings bound for
-  an unauthenticated page, so each is an affirmative per-tag opt-in, and every report created before
-  the field shows no tags by default. Two whitelists, two empty-defaults, on one card — flagged
-  here so the next reader doesn't "unify" them. **`showGoal` follows `visibleTags`, not
-  `visibleQuestionKeys`: default `false`**, for the same unauthenticated-page reason.
-- `goalSnapshot: { target, deadline, done, remaining, percent, asOf }` — frozen door-goal progress,
-  written by `snapshotGoal()` inside `computeBothWindows` (so it refreshes on every recompute and at
-  publish). **Progress only** — no pace, verdict or projection is ever frozen; see the Part 1 note
-  for why. Two deliberate choices: `done` is the report's OWN `cumulative.totals.doorsKnocked`, not
-  the live all-time figure, so a June report published in July doesn't count July's doors and the
-  goal bar counts exactly the doors the "Doors knocked" card above it counts (that is `knocks`, so
-  on a campaign that bills restricted doors it runs slightly under the console's billable-door
-  basis — a client-facing document agreeing with itself beats agreeing with an internal screen);
-  and an **effort-scoped report never gets a snapshot at all**, because a campaign-wide target
-  measured against one walk list's doors understates progress. `PATCH …/visibility.showGoal: true`
-  with no snapshot is a **400 `NO_GOAL_SNAPSHOT`** rather than a silent no-op.
-- `mapPointCount`, `publishedAt`, `publishedBy`, `createdBy`.
-- `openMockFlagsAtPublish` — unreviewed mock-GPS flags inside the cumulative window at freeze time
-  (the soft publish gate's audit trail; `null` on pre-feature reports, operator-only).
-- `viewCount`, `lastViewedAt` — a best-effort per-report counter of genuine client opens (defaults
-  `0`/`null`; missing on old reports, so no migration — `$inc` treats absent as 0). Surfaced to admins
-  only, never in the public shapers.
+The phone app calls no client-report, share or branding endpoint. It does call `GET
+/admin/campaigns/:campaignId/history`, whose default response excludes client-report rows (§M), so
+nothing here needs an OTA or a client-version bump.
 
-**[ClientReportMapPoint](../server/src/models/ClientReportMapPoint.js)** — one frozen household point
-per published report (its own collection so a large campaign can't blow the 16 MB BSON limit). Stores
-`lng/lat`, coarse address, the door's `status` **as of the report's end**, and the whitelisted survey
-`answers`. **No canvasser identity, no voter name, no timestamps** are ever stored here — and no note:
-a door marked with the opt-in **Not a target voter** outcome reaches the share page as its `not_target`
-status alone, never the canvasser's optional door note.
+## B. Models
 
-**[ReportShareLink](../server/src/models/ReportShareLink.js)** — a public, revocable link to **one
-campaign's** published reports. `{ organizationId, campaignId, token (unique), label, passwordHash |
-null, isActive, createdBy, lastAccessedAt }`. The `token` is `crypto.randomBytes(24).toString('base64url')`
-— an unguessable capability string that appears in the URL. A campaign may have several links. A
-password link exchanges the password for a short-lived share JWT via `POST /share/:token/unlock`; that
-endpoint is **rate-limited** — 10 attempts / 15 min per **IP + token**, counting only failed guesses —
-so a link's password can't be brute-forced ([share.js](../server/src/routes/public/share.js)).
+**[ClientReport](../server/src/models/ClientReport.js)**, one report. Old documents lack every field
+added in October 2026, and JavaScript never trusts a Mongoose default for them: each is read through a
+helper with an explicit fallback (`liveInputs`, `numbersCutOff`, `seriesKeyOf`, `scopeOf` in
+reportVisibility.js).
 
-## The numbers (dual window)
+| Field | Meaning |
+|---|---|
+| `organizationId`, `campaignId` | Tenant. |
+| `title`, `campaignType` | Optional label; the campaign type, denormalized so the client hides lit-drop or survey rows without a live lookup. |
+| `effortId`, `effortName` | Walk-list scope (`null` = not a walk-list report). `effortName` is frozen at creation. |
+| `weekStart`, `weekEnd`, `timeZone`, `rangeStartUtc`, `rangeEndUtc` | The period: civil days in the campaign's zone, and the half-open UTC range the build reads (`zonedDayRange`). Any run of days, despite the names. |
+| `status` | `draft` or `published` (`archived` is in the enum and unused). |
+| `observations` | `[{ heading, body }]`. |
+| `stats.cumulative`, `stats.period` | Each `{ totals, contactBreakdown, coverage, surveyBreakdowns, tagBreakdowns, provenance }` (§D). `coverage` is `{}` on everything built since October 2026. |
+| `supportQuestionKey`, `goalSnapshot` | The headline question; frozen goal progress (§D). |
+| `visibility` | `{ visibleQuestionKeys, mapAnswerKeys, showMap, mapMode: pins \| area, areaSize: small \| large, visibleTags, showGoal }`: the operator's current settings (§C). |
+| `mapPointCount`, `areaCellCount`, `extent` | The live snapshot's row counts, and its bounding box `{ minLng, minLat, maxLng, maxLat }`. |
+| `snapshotId`, `snapshotKey` | The live snapshot (§E). `null` on a report built before snapshots, whose rows carry no `snapshotId`; `snapshotKey` is its opaque random twin, the only version the client sees (`'legacy'` when null). |
+| `snapshotInputs` | What the live snapshot was built with: `{ showMap, mapMode, areaSize, mapKeys, questionDeps, coordinatorIds }`. No default on purpose: a missing one must stay missing. |
+| `statsComputedAt` | The live snapshot's cut-off (the build's fence). Read through `numbersCutOff` (`statsComputedAt ?? publishedAt`). |
+| `editVersion` | Incremented by every write that changes what the builder edits: every PATCH, Restore, and (since code review round 2, contract C8) a refresh's Apply and a remap's commit. Publish compares it; a PATCH sent with `ifEditVersion` is pinned to it (§C). A missing one reads as 0. |
+| `earlierTotals`, `comparedReportId`, `comparedSnapshotId`, `arrivedDuringBuild` | §I (the compared report and its live snapshot when this build recounted it); knocks that arrived after the fence. |
+| `build` | The build in flight or its result (§E). Mixed, and always replaced whole by a claim, cancel or reset. |
+| `seriesId`, `scope` | The series and the frozen `{ kind: campaign \| walk_list \| team \| team_walk_list, label }`. |
+| `takenDownAt/By`, `contentEditedAt/By`, `numbersRefreshedAt/By` | Take down; an accepted edit or a remap ("Edited"); an applied refresh ("Numbers refreshed"). |
+| `copiedFrom`, `copiedNotesReviewed`, `nextReportId` | Next report: `{ reportId, weekStart, weekEnd }` of the copied notes, the review tick (`null` when nothing was copied), and the draft Next made from this report. |
+| `eraseEpoch` | Bumped by every Erase; Restore's CAS requires it unchanged (§M). |
+| `views` | `{ byLink: Map<shareId, { opens, firstOpenedAt, lastOpenedAt }>, members: { admins, leads, others, staff } }` (§L). A Map of a declared subschema, because a plain nested object would be stripped. |
+| `viewCount`, `lastViewedAt` | The pre-upgrade per-report counter, **frozen**: no open moves it since per-link counts began (code review ADMINUX-12), so the panel's "N views before per-link counts" is exactly that. |
+| `createdBy`, `publishedAt`, `publishedBy`, `openMockFlagsAtPublish` | `openMockFlagsAtPublish` is the open mock-GPS flags in the report's scope at the moment of publish: operator-only, never shaped. |
 
-[services/reports/computeReport.js](../server/src/services/reports/computeReport.js) computes each
-window from **activity/survey rows within a UTC date range** — never from live `Household.status` — so
-a snapshot is reproducible and can't drift. It reuses the shared knock primitives in
-[services/reports/aggregations.js](../server/src/services/reports/aggregations.js) (`knocksPipeline`,
-`connectionRate`, `KNOCK_ACTIONS`) — the same code the admin dashboards use (see [METRICS.md](METRICS.md)).
+**[ClientReportMapPoint](../server/src/models/ClientReportMapPoint.js)**, one reached door of a pins
+snapshot: `clientReportId`, `organizationId`, `campaignId`, `householdId` (never sent), `lng`, `lat`
+(the household's coordinates), `addressLine1`, `city`, `state` (no unit line, no ZIP), `status` (as of
+the period's end), `answers: [{ questionKey, answer }]` (choice answers only, through
+`publicPointAnswer`), `snapshotId` (no default: a legacy row must never hydrate as another snapshot's)
+and `seq`, the row's position in the client's payload. **No voter name, no canvasser, no timestamps,
+no note.** Index `{ clientReportId, snapshotId, seq }`, added to an existing collection, so production
+builds it with `migrate:build-indexes`.
 
-- **cumulative** = `{ $lt: rangeEndUtc }` (everything through the week's end).
-- **period** = `{ $gte: rangeStartUtc, $lt: rangeEndUtc }` (just the week).
+**[ClientReportAreaCell](../server/src/models/ClientReportAreaCell.js)** (new), one hexagon of an area
+snapshot: `organizationId`, `campaignId`, `clientReportId`, `snapshotId`, `h3`, `doors`, `byStatus`,
+`answers: [{ questionKey, n, options: [{ option, count }] }]` (`n` = homes there that answered). Never
+an address or a door's coordinate. Unique `{ snapshotId, h3 }`; `{ clientReportId, snapshotId }`.
 
-`computeWindowStats` also takes an optional `effortId`, and `computeBothWindows` reads it **off the
-report itself** — so create, recompute, and the publish-time recompute all stay scoped without any
-caller passing it. `effortId` is denormalized onto the activity/response rows
-([EFFORTS.md](EFFORTS.md) §E), so the one filter scopes knocks, surveys, and breakdowns together.
+**[ClientReportSeries](../server/src/models/ClientReportSeries.js)** (new), one run of reports:
+`organizationId`, `campaignId`, `kind` (`campaign`, `walk_list`, `team`, `team_walk_list`), `label`,
+`labelKey` (lowercased, trimmed; the campaign series' is the fixed `'whole campaign'`), `effortId`,
+`teamSeriesId` (a team on one walk list reads its name, crews and ended state from this parent),
+`coordinatorIds`, `pastCoordinatorIds`, `crewKeys` (their union, stored for the index), `endedAt/By`,
+`createdBy`. Five named partial-unique indexes (§H).
 
-**Tag breakdowns are window-local.** `computeTagBreakdowns` (same file) freezes both tag units per
-window via the shared `currentVoterSetsByTag` (the ONE owner of "latest answer wins" —
-[SURVEYS.md](SURVEYS.md) §I). Cumulative reads as-of the week's end. **Period is the same math
-confined to the week**: identified-this-week = voters with a tag-carrying response IN the week;
-current-this-week = of those, whose latest answer WITHIN the week still carries it. A voter who
-flipped this week against a tag earned last week appears in **neither** period column — the
-cumulative window is where the flip lands. Pinned by
-[surveyTagUnits.int.test.js](../server/test/surveyTagUnits.int.test.js).
+**[ReportShareLink](../server/src/models/ReportShareLink.js)**: `token` (unique, 24 random bytes,
+base64url), `label`, `passwordHash` (bcrypt; `null` only on legacy open links), `expiresAt`,
+`isActive`, `createdBy`, `lastAccessedAt`, plus, since October 2026, `credentialVersion`,
+`passwordMeetsRule` (no default: `null` means unknown), `failedUnlockAt: [{ at, id }]` (the rolling
+budget), `failedUnlocksTotal`, `failedByDay: [{ day, n }]` (UTC days, last 7), `lockedUntil`,
+`lastLockedAt` (the latest lock, for the record) and `lifetimeStartAt`. Old links lack all of them
+until the migration; every reader goes through shareLinks.js.
 
-**Voter-contact breakdown is a DOOR-OUTCOME breakdown, not a raw-event count.** `contactBreakdown`
-collapses each `(household, pass)` to its single resolved outcome via
-`resolveStatus(campaignType, acts)` ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)) —
-the same per-door-per-round unit as `knocksPipeline`. So the bar **sums exactly to
-`totals.doorsKnocked`**, and `contactBreakdown.surveyed === totals.surveyedKnocks` (the connection-rate
-numerator). A door knocked by two canvassers in the same round (an "overlap") is **one** knock with
-**one** outcome here, even though it has two `CanvassActivity` rows — matching how Doors knocked counts
-it (see [METRICS.md](METRICS.md) §overlaps). This is why the breakdown's **"Surveyed" (doors)** can be
-below the **"Surveys taken"** KPI: a home with two voters surveyed in one visit is **1 surveyed door
-but 2 surveys**. (Before this fix the breakdown counted raw activity events, so overlaps made it
-over-count and the bar didn't tie to Doors knocked.) The client labels are local to
-[reportDerive.js](../client/src/lib/reportDerive.js) (`CONTACT_LABELS`: "Surveyed" / "Declined to
-participate" / "Didn't answer" / "No-soliciting sign" / "Wrong address" / "Not a target voter" /
-"Lit dropped"), separate from the admin coverage bar's `STATUS_LABELS`. The `refused` row is the
-**"Declined to participate"** bucket — a door where a voter answered but declined the survey: a
-billable knock and a contact, but **not** a survey, so it's separate from "Surveyed".
-`contactOrderFor('survey')` slots it right after `surveyed`; `computeReport` keeps it in
-`contactBreakdown.events` so the bar still sums exactly to `totals.doorsKnocked`. (It's the
-client-facing reflection of the door-level **Refused** disposition — see [METRICS.md](METRICS.md) /
-[SURVEYS.md](SURVEYS.md).) Each KPI and breakdown row carries a plain-language `help` string surfaced
-as an on-screen "(i)" tooltip (`InfoHint`) and a "What these numbers mean" section in the PDF.
+**[OrgBranding](../server/src/models/OrgBranding.js)** (new): `organizationId` (unique), `logo` (the
+re-encoded PNG, §N), `width`, `height`, `bytes`, `updatedBy`. Its own collection because `orgContext`
+loads the whole `Organization` on every request.
 
-**The `not_target` row ("Not a target voter", 2026-10-02).** The opt-in door outcome — someone answered
-who isn't on the list and won't give a name; off on every campaign until an org admin turns it on — is,
-like `refused`, a knock and a contact but never a survey, and it reaches the breakdown in three steps:
+**[CampaignChange](../server/src/models/CampaignChange.js)**: `source` gains `'client_report'`; new
+declared fields `clientReportId`, `seriesId`, `shareLinkId`, `periodLabel`, `erasedAt`, `erasedBy`
+(declared because strictQuery drops undeclared filter keys); new index `{ campaignId, clientReportId }`
+(existing collection: `migrate:build-indexes`).
 
-- **Counted.** `computeWindowStats`' `events` literal seeds `not_target: 0`. The `status in events`
-  guard silently drops any knock outcome missing from that literal, so without the key those doors
-  would fall out of the bar, the bar would stop summing to Doors knocked, and `percentsTo100` would
-  inflate every other row.
-- **Ordered.** `contactOrderFor('survey')` and the null-type list (old reports) slot it right after
-  `refused`; the lit-drop list leaves it out, since the outcome exists on survey campaigns only.
-- **Hidden at zero.** `deriveReportSections` drops the `not_target` item whenever its cumulative count
-  is 0. Frozen reports from before the outcome lack the key entirely, so they — and every campaign that
-  never turns it on — render exactly as before, and the PDF, built from the same derivation, follows.
-  Pinned by [reportDerive.test.js](../client/src/lib/reportDerive.test.js) (every knock status has a
-  row, label and help; the rows sum to Doors knocked; the row is absent at 0 and on a legacy report).
+**[SurveyTemplate](../server/src/models/SurveyTemplate.js)** `depsEver: [{ q, on }]`: every
+question-to-question dependency the survey has ever had (§C). No default: absent means not seeded.
+`depsEverFromVersion` (new in code review round 1, LEGACY-1): the oldest survey version that record
+is complete for. Answers given under that version or a later one carry no condition the record
+misses; an answer from an older version may, because nobody stored its conditions. Set to 1 on create
+and on Duplicate; set by the first questions PATCH that finds it missing, to the version that PATCH
+replaces (whose edges it unions in); set by the migration to the version it seeds from. `null` means
+unknown, and readers use `version` instead. It drives the `conditionsUnknown` check (§C).
 
-**Two units, as with refused.** The breakdown resolves ONE status per (door, round) — latest wins among
-non-completion outcomes, and a survey by anyone makes the door Surveyed — while `totals.notTargetKnocks`
-(frozen beside `refusedKnocks`) is `knocksPipeline`'s per-(door, round) `$max` flag. In an overlap they
-differ: a door where one canvasser recorded Not a target voter and a teammate later recorded Not home
-counts in the flag but resolves to "Didn't answer". Only the breakdown partitions Doors knocked.
+**Cascades.** The campaign cascade ([deleteCampaign.js](../server/src/services/campaigns/deleteCampaign.js))
+deletes `ClientReport`, `ClientReportMapPoint`, `ClientReportAreaCell`, `ClientReportSeries`,
+`ReportShareLink` and `CampaignChange` by `campaignId`; the organization cascade's `ORG_SCOPED`
+([deleteOrganization.js](../server/src/services/platform/deleteOrganization.js)) adds `OrgBranding`.
+`LATE_WRITE_MODELS` ([lateWriteSweep.js](../server/src/services/platform/lateWriteSweep.js)) gains
+`ClientReportMapPoint` and `ClientReportAreaCell`. `OrgBranding` is deliberately not in it: it has no
+`campaignId`, so a campaign-scoped sweep's filter would be stripped and the delete would match every
+organization's logo.
 
-`totals.refusedKnocks`, `totals.notTargetKnocks` and `totals.contactRate` are frozen into each window,
-but no client renderer shows them (`shapeWindow` passes `totals` through whole, so they do ride the
-public payload). `contactRate` is now doors where someone answered — `CONTACT_ACTIONS`: a survey, a
-refusal or Not a target voter — counted **once** per (door, round) by `knocksPipeline`'s `hasContact`
-fold, ÷ knocks (see [METRICS.md](METRICS.md)). The old `(surveyed + refused) / knocks` counted a door
-twice when one canvasser surveyed and another recorded Refused in the same round; a frozen report keeps
-the value it was computed with.
+**Indexes at boot.** autoIndex is off in production. `syncClientReportIndexes` syncs the three new
+collections (`ClientReportAreaCell`, `ClientReportSeries`, `OrgBranding`) when the web dyno boots
+(awaited before it listens, because it writes series) and when the worker boots; the migration runs
+it too. Their definitions are final: once the collections hold data, a changed partial filter would
+make the boot-time sync drop and rebuild a unique index on a live collection.
 
-Survey/support breakdowns use the **per-question** denominator (each option's percent = count ÷ that
-question's own answer total), and `ReportBreakdown` rounds them to total exactly 100% — see
-[SURVEYS.md](SURVEYS.md).
+## C. Visibility, enforced on the server
 
-**Provenance rides the internal response only.** Each window also freezes `provenance: {
-deskEnteredResponses, editedResponses, totalResponses }` — `countDocuments` over the window's own
-survey scope with `deskEntry: { $exists: true }`, with `editedAt: { $ne: null }` (added 2026-10-19:
-an admin changed the answers after they were recorded — the profile's Edit or Door Outcomes → Edit
-answers…, [SURVEYS.md](SURVEYS.md) §N), and with neither. `GET /:id/preview` ships it as
-`provenance.cumulative` / `provenance.period` beside the shaped report, and it **cannot** reach the
-published page: `shapeReportForClient` → `shapeWindow` are strict field whitelists. The asymmetry is
-deliberate — a desk-entered or edited answer is the answer of record and counts identically, so
-annotating the client's figures would misrepresent them the other way, while the operator signing
-off should not learn afterwards how some of them came to be. `editedAt` is set by any profile edit
-made before 2026-10-19 too (a save then stamped it even for a note-only change), so the count can
-include those.
+Before October 2026 every visibility switch only hid things in the browser (PRIVACY_VERIFICATION item
+34). [reportVisibility.js](../server/src/services/reports/reportVisibility.js) owns the rules; every
+writer and reader goes through it.
 
-> **Fixed 2026-10-19 (it had never worked).** `windowStatsSchema` in
-> [ClientReport.js](../server/src/models/ClientReport.js) declared `totals`, `contactBreakdown`,
-> `coverage`, `surveyBreakdowns` and `tagBreakdowns` but not `provenance`, so Mongoose's strict mode
-> dropped it the moment `computeBothWindows` assigned `report.stats`: the stored report never had it,
-> `GET /:id/preview` shipped `provenance: { cumulative: null, period: null }`, and **neither builder
-> note rendered** — the desk-entered one since it shipped, nor the edited one. `computeWindowStats`
-> itself returned the counts (`surveyConversion.int.test.js` calls it directly, which is why no test
-> caught it). `provenance` is now declared (`Mixed`, default `null`), and
-> [answerEdit.int.test.js](../server/test/answerEdit.int.test.js) pins the whole path — create,
-> save, preview, recompute — and that the client-shaped report never carries the counts. No
-> migration: a draft gains them on its next recompute; a published report keeps what it froze.
+- **Empty means none**, for `visibleQuestionKeys` and `mapAnswerKeys`, on every report. Create, Next
+  and the builder always write explicit keys. A new draft gets every choice question's chart and, on
+  the map, every choice question whose dependencies are also on it (`defaultVisibility`), the map on,
+  pins, small areas, no tags and no goal.
+- **`visibleKeysFor(report)`** = `visibleQuestionKeys` ∩ the frozen breakdown keys.
+- **`mapKeysFor(report, questionDeps)`** = `mapAnswerKeys` ∩ `visibleKeysFor`, closed under the
+  dependencies (`closeUnderDeps`, to a fixpoint, so a follow-up of a follow-up drops with its middle
+  question); `[]` when `visibility.showMap` is false. Turning the map off keeps the map-question picks
+  in `mapAnswerKeys`; the switch gates them. On a published report they stay through any edit while the
+  map is off (the PATCH narrows only while the map is served, code review VERIFY-1) and through a
+  refresh that leaves the map off (Apply keeps `visibility.mapAnswerKeys` unless the build turned the
+  map on); Refresh numbers turning the map on offers them ticked and builds exactly the ticked list
+  (§F).
+- **Readers serve the intersection** of the current settings and the live snapshot: the map is served
+  only when `visibility.showMap && liveInputs(report).showMap` (`mapServed`), and its questions are
+  `mapKeysFor(report, inputs.questionDeps) ∩ inputs.mapKeys` (`servedMapKeys`). Neither side alone can
+  put something on the client's page.
+- **`liveInputs(report)`**: `snapshotInputs` when it is an object. Without one, the **legacy fallback
+  rule** (`isLegacyPublished`, code review LEGACY-1): only a report **published** before snapshots
+  (taken down included) reads the old way. Its current settings stand in, because its rows were built
+  from them: pins mode, small, no coordinators, the map on unless switched off, and `mapKeysFor` with
+  the dependencies of **every survey its answers can have come from** (`legacyTemplatesFor`: every
+  survey with a response in the campaign, plus its current one, united by `questionDepsOf`). It fails
+  closed: a map question that is no question of any of those surveys has unknowable dependencies and is
+  never served, the result is closed under the dependencies again so a follow-up never outlives a parent
+  dropped there, and with no survey at all no map question is. A report read without its `status` field
+  (a caller's narrow projection) takes the same fallback, so a check scanning other reports can never
+  miss one's served map. **Any other report without `snapshotInputs` has nothing live**: a draft whose
+  first build hasn't committed, or a draft from before the upgrade, gets `showMap: false` and no map
+  keys, so its preview map answers `404 MAP_NOT_SHARED` and its old rows, if any, are never served.
+- **`mapContextFor(report)`** ([clientReportMap.js](../server/src/services/reports/clientReportMap.js))
+  is how routes read it: `{ inputs, served, keys }`, loading `legacyTemplatesFor` only for a legacy
+  published report. The survey ids are memoized per campaign for 5 minutes (at most 500 campaigns):
+  those reports' periods are over, so a survey first answered since can't have given their answers.
+  The admin `GET /:id`, PATCH, Refresh, the preview and the public routes all go through it.
 
-## Publish = freeze
+**Follow-up dependencies.** `ruleIsDependency(rule, parent)`: a `visibleIf` rule makes its question
+depend on the parent unless it accepts **every** pick the parent can record (its live options, plus
+Other when on), which carries nothing about the answer; this keeps script-flow surveys, whose later
+blocks formally depend on every branch, mappable. A text parent always counts, so a follow-up of a
+written question can never be mapped; an unknown parent counts (fail closed). `questionDepsOf(template)`
+is the transitive closure of today's `visibleIf` united with `depsEver`, frozen into each build's
+`inputs.questionDeps` as `[[key, [deps…]], …]`. `depsEver` is a monotone edge list: survey create
+writes today's edges, every questions PATCH `$addToSet`s the edges of the version it replaces and of
+the one it stores, and Duplicate copies the union
+([routes/admin/surveys.js](../server/src/routes/admin/surveys.js)), so a condition edited away
+mid-campaign still keeps its follow-up off a client's map. Given several surveys (the legacy fallback
+above), `questionDepsOf` unites each survey's own edges. Map and cell answers built since the upgrade
+come only from responses to the campaign's own survey (`surveyTemplateId`), so a duplicated or swapped
+survey can't bring old answers onto the map.
 
-`POST /admin/client-reports/:id/publish` ([routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js)):
+**What the record can't know.** `depsEver` starts at `depsEverFromVersion` (§B). A survey edited
+before the upgrade may have had a condition nobody stored: if that condition was removed before the
+deploy and answers were given under the older version, a map question that was then a follow-up of a
+hidden question could hint at the hidden answer. That case can't be closed in code. The migration
+lists every survey with answers older than its record (§R), and *Before you publish* warns with
+`checks.conditionsUnknown` (`conditionsUnknownFor` in clientReportChecks.js): true when the map is
+served, at least one frozen breakdown question is hidden, and a response in the campaign submitted
+before the report's end has a `surveyTemplateVersion` below `depsEverFromVersion ?? version ?? 1` of
+its survey. The surveys checked are the campaign's current one for a report with `snapshotInputs`, and
+`legacyTemplatesFor` otherwise (or when the campaign has no survey now). It is computed for every
+report and replaces `multipleSurveyVersions`, which missed a single old version and was never computed
+for a report without a snapshot (code review contract C3). It is campaign-wide (any response in the
+campaign before the report's end, not only the report's walk list or team), which can over-warn, the
+safe direction. *Before you publish* shows it on a draft with numbers (before that it says "These
+checks appear once the numbers are built"), and since code review round 2 (P-2) a published report's
+builder shows it too, in **Worth a look** (`PublishedChecks`, §Q), so a report published before the
+upgrade gets the warning on screen as well as in the migration's step-0 list.
 
-1. Recompute both windows one last time.
-2. Build the frozen map points with `buildFrozenMapPoints`: every in-scope household with coordinates,
-   its status **as of `rangeEndUtc`** via `resolveStatus(campaign.type, activities-before-end)` — the
-   same precedence the live app uses ([statusPrecedence.js](../server/src/utils/statusPrecedence.js)),
-   but point-in-time — plus the operator-whitelisted survey answers (latest response per household).
-   Canvasser identity is stripped. A walk-list scope narrows the **household set only**
-   (`Household.effortId` is the ownership source of truth); the activity/response scans stay
-   campaign-wide and household-keyed, so a door's as-of status still reflects knocks stamped before
-   it joined the walk list, and only in-scope households are ever looked up from those maps.
-3. Replace the report's points (`deleteMany` + `insertMany`), stash the cumulative `coverage` tally,
-   set `status='published'`, `publishedAt/By`, `mapPointCount`.
+**The one removal path** (PATCH, drafts and published reports alike). Removals are turning the map
+off, dropping a map question, hiding a chart, and dropping a question a mapped follow-up depends on.
+The PATCH computes the allowed map keys (the visible keys ∩ the question universe, closed under the
+snapshot's frozen dependencies united with the survey's current ones; the universe is the frozen
+breakdowns on a published report, and any choice question plus the frozen breakdowns on a draft),
+writes them to `mapAnswerKeys` (when the request sent no map keys, by filtering out only what it
+prunes, below), and in the same request prunes `snapshotInputs` and any live or ready
+`build.inputs` (`showMap` and `mapKeys`, as a pipeline update) and the stored rows of every snapshot of
+the report: all rows deleted when the map goes off, otherwise `$pull` of answers outside the allowed
+keys. A build that is running when the map goes off keeps going and commits without a map (its commit
+re-reads the pruned inputs, §E). The live inputs come from `mapContextFor`, so a legacy published
+report is pruned against every survey its answers can have come from. Refinements from code review
+rounds 1 and 2:
 
-Drafts can be edited/recomputed; publishing is idempotent (rebuilds points); unpublish returns it to
-draft.
+- **Stale keys** (LEGACY-2, narrowed by VERIFY-1): on a published report whose map is **served**
+  (`live.showMap` and the report's own switch), a map question the stored `mapAnswerKeys` names that
+  the live snapshot doesn't serve (hidden when an old report was frozen, or no question of its
+  surveys) is treated as already gone: narrowed silently, as the migration's step 4 does, and never
+  read as an addition, so it can't trip `NEEDS_REFRESH`. While the map is off nothing is narrowed: the
+  live snapshot serves no question then, and the stored list is the operator's picks for when the map
+  comes back (round 1's version wiped them on any unrelated edit). Sent map keys on a map-off
+  published report may include those kept picks, which reach no map until Refresh numbers checks
+  them.
+- **Only the keys sent** (CONCUR-3): the write sets only the `visibility` keys the request sent, never
+  all seven from its own read, so a key written back from a stale read can't undo a write that landed
+  since (another editor's tick, an Apply turning the map on, a remap's commit). Map questions are
+  written as sent (closed under their dependencies) when sent; otherwise only what this edit's
+  pruning takes out (a hidden chart takes its map question with it) is removed, with a `$filter` over
+  the list as it stands at the write, so a question added there meanwhile stays.
+- **A pending Refresh's additions are not removals** (STATE-2): map questions a ready or running
+  Refresh would add stay on its `build.inputs` and in its snapshot's rows unless the edit hides their
+  chart or drops a question they depend on. The build's inputs and rows are pruned by a drop list
+  (every key removed or hidden, everything depending on one, to a fixpoint) rather than a keep list,
+  and `build.inputs.showMap` goes false only on a real map-off, so an unrelated edit that leaves the
+  map off while a Refresh turns it on keeps that Refresh's map.
+- **One status per edit** (contract C5, ADMINUX-2): the body may carry `ifStatus` (`draft` or
+  `published`), the status the builder edited. A mismatch answers `409 STATUS_CHANGED { error, code,
+  status, takenDown }`, and the update's filter always pins the status the request read, so the check
+  is atomic with the write: a draft's auto-save arriving after someone published it can never put
+  half-written text in front of the client.
+- **One version per edit** (contract C8, code review round 2: PRIV-1, CONCUR-1, VERIFY-UI-1): the body
+  may carry `ifEditVersion`, the `editVersion` the builder's screen was built on. It is checked after
+  the status (`409 STATUS_CHANGED` first) and before anything is claimed, then pinned in the same
+  `findOneAndUpdate` filter as the status (`{ $in: [0, null] }` for 0, so a report from before the
+  field matches). A mismatch answers `409 CHANGED_ELSEWHERE { error: "This report was changed
+  somewhere else — this page now shows the latest version.", code, editVersion, report }`, with the
+  report as `GET /:id` returns it, and nothing is written. Before this, a save from a page that hadn't
+  re-read wrote its lists and sections whole: a chart one editor hid came back when another ticked
+  something else and pressed Update, and a deleted observation section came back with it. If a write
+  that lost this race had claimed a switch to areas, that remap is parked as a failed build
+  (`ENQUEUE_FAILED`, "Couldn't start — try again."), so Retry stays on offer and nothing starts. A
+  request without `ifEditVersion` is still accepted (lead decision: the builder is the only caller and
+  always sends it, and a builder page opened before the deploy keeps working as it did); its lost race
+  answers `STATUS_CHANGED` as before.
 
-## Endpoints
+Free-text questions can never be map keys (`400 MAP_ANSWER_KEYS_NOT_CHOICE`), and every point answer
+passes through `publicPointAnswer` (a write-in is the word "Other", never the typed text).
 
-**Admin builder** — server routes are mounted at `/admin/client-reports` (unchanged), gated
-`requireOrgRole('admin', 'lead')` with every handler authorizing the specific campaign via
-`manages()` (`canManageCampaign` — an admin passes everywhere, a lead only on granted campaigns) and
-filtered by `campaignId` in query/body. The admin **UI** for these lives
-inside the campaign drill-in — list at `/campaigns/:campaignId/reports`
-([ClientReportsPage](../client/src/pages/ClientReportsPage.jsx)), builder at
-`/campaigns/:campaignId/reports/:id` ([ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx)),
-both reading `campaignId` from `useParams` (the old "Client Reports" launchpad + campaign dropdown are
-gone; the legacy `/admin/client-reports[/:id]` client routes redirect to `/campaigns` — see
-[App.jsx](../client/src/App.jsx)). Server endpoints:
-`POST /` (create draft; optional `effortId` — must name an `Effort` of **this** campaign, 400
-otherwise, and is frozen onto the report with its `name`) ·
-`GET /?campaignId=` (list; rows carry `viewCount`/`lastViewedAt`/`timeZone`/`effortName`) ·
-`GET /:id` (also returns `campaignName`/`orgName` so the builder's PDF header matches the client's) ·
-`PATCH /:id` (drafts only) · `POST /:id/recompute` · `GET /:id/preview` · `GET /:id/preview/map` ·
-`POST /:id/publish` · `POST /:id/unpublish` · `DELETE /:id`.
+**Charts are the operator's choice**, follow-ups included. *Before you publish* flags a shown chart whose
+parent is hidden (`checks.hiddenParentCharts`: `{ key, label, parents: [{ key, label, type }] }`, labels
+and types read from the frozen breakdowns, else the survey, `type: null` for a question the survey no
+longer has), so the builder can word a written-question parent as "a written answer to “…”" rather than
+show a key; and a shown voter group carried by an option of a hidden question or its follow-up
+(`hiddenTagSources`).
 
-**Admin share management** — same router, same campaign-scoped gate (only
-`POST /shares/revoke-legacy` layers `requireOrgRole('admin')` on top — it sweeps links across all
-campaigns). Declared **before** the `/:id` report routes so Express doesn't match `:id = "shares"`:
-`GET /shares?campaignId=` · `POST /shares` `{campaignId,label?,password?,expiresInDays?}` — always
-creates a **password + expiry**; when `password` is absent the server mints one
-(`generateSharePassword`, ~62^12) and returns it once as `generatedPassword`, and `expiresAt`
-defaults to `SHARE_LINK_DEFAULT_DAYS` (90, max 365) ·
-`PATCH /shares/:id` `{label?, password?(string replaces; null → 400 SHARE_PASSWORD_REQUIRED), isActive?}` ·
-`POST /shares/:id/rotate` (new token, password unchanged) · `DELETE /shares/:id`. Returns the token;
-the SPA builds `${origin}/r/${token}`. Rows carry `hasPassword`/`expiresAt`/`isLegacyOpen` for the
-panel's badges.
+## D. The numbers
 
-**Public read** — `/share`, mounted **before** the `requireAuth` gate in
-[routes/index.js](../server/src/routes/index.js) (no login), implemented in
-[routes/public/share.js](../server/src/routes/public/share.js). `loadShare` resolves `:token` to an
-active `ReportShareLink` (404 otherwise):
-- `GET /share/:token` → `{ campaignName, orgName, requiresPassword }` — drives the brand header + gate.
-- `POST /share/:token/unlock` `{ password }` → bcrypt-checks (or passes for an open link) and returns a
-  short-lived **share JWT** `{ accessToken }`.
-- `requireShareAccess` → an open link passes; a password link requires a valid `X-Share-Token` (the
-  share JWT) for **this** share, else `401 { code: 'password-required' }`.
-- `GET /share/:token/reports` · `/reports/:id` · `/reports/:id/map` · `/mapbox-token` (all
-  `loadShare, requireShareAccess`) — scoped to the link's `campaignId` + org + `status:'published'`,
-  reusing `shapeReportListRow` / `shapeReportForClient` / `mapFilterSurvey` / `shapeMapPoints`
-  ([clientReportView.js](../server/src/services/reports/clientReportView.js)). The same shapers feed the
-  admin preview, so the operator's preview is byte-for-byte what recipients get.
-- The **`/reports/:id` handler** also fires a best-effort `$inc viewCount` + `$set lastViewedAt` (never
-  blocking the read, mirroring `loadShare`'s link stamp). It lives in the handler body — **not** the
-  shared `loadReport`, so `/reports/:id/map` doesn't double-count — and only published reports are
-  reachable here, so admin previews and drafts are excluded.
+`buildReportSnapshot()` replaced `computeBothWindows` and `buildFrozenMapPoints`, which loaded every
+in-scope household, knock and survey into memory inside one web request.
 
-## Scoping & security
+- **The walk.** One aggregation cursor over `CanvassActivity` (`{ organizationId, campaignId,
+  timestamp < rangeEndUtc }` + the fence, `$group` by `householdId`, `$sort`, `allowDiskUse`) yields
+  every household with activity before the period's end, in batches of `CLIENT_REPORT_BATCH` (default
+  2,000). A build's memory is one batch.
+- **Per batch**, indexed finds: the scope's knock rows (`KNOCK_ACTIONS`, the walk list's `effortId`,
+  the team clause plus `NOT_BULK` on a team report), the map's status rows, the households
+  (`isActive`, with coordinates, the walk list's current `effortId`), and the latest map answers.
+- **One fold.** Scope rows are grouped into (household, round) groups keyed on `String(passId)` (a
+  missing and a null round stay apart, as `$group` keeps them), and every window (cumulative, period,
+  and the compared report's cut-off, §I) counts from the same groups: `doorsKnocked` (one per group),
+  the surveyed, lit, refused, not-target and contact flags, one resolved outcome per group via
+  `resolveStatus(campaignType, acts)`, and `homesKnocked` (distinct households; households are unique
+  to a batch, so per-batch counts add up).
+- **The fence.** Every ledger read adds `createdAt: { $not: { $gt: fenceAt } }`, which keeps rows with
+  no `createdAt`.
+- **Invariants** (`assertInvariants`): in each window Σ `contactBreakdown` === `doorsKnocked`, and
+  period doors ≤ cumulative doors. They hold by construction; a failure fails the build loudly with
+  `INVARIANT` and never commits.
+- **Survey numbers** stay server-side aggregations with the fence and the scope: `surveysTaken`
+  (`countDocuments`), `surveyedVoters` (`$match voterId ≠ null` + `$group` + `$count`, never
+  `distinct()`), `computeSurveyBreakdowns` (per-question option counts, each write-in folded into one "Other";
+  options sorted by count descending, ties in the survey's own order with "Other" after them; the
+  client derives percentages that total exactly 100 per question), `computeTagBreakdowns`, and the
+  internal `provenance` (`deskEnteredResponses`, `editedResponses`, `totalResponses`).
 
-- The link `token` is a long random capability string; an **optional per-link password** (bcrypt
-  `passwordHash`) is a second factor. A correct password yields a **24h share JWT**
-  (`signShareToken({shareId, campaignId})`, [tokens.js](../server/src/services/auth/tokens.js)) that
-  authorizes the reads; the SPA keeps it in `sessionStorage` (tab-scoped).
-- Every public read is scoped to the link's single `campaignId` and `status:'published'`, so there is
-  no path to drafts, other campaigns, or live `Household` / `CanvassActivity` / `SurveyResponse` data;
-  map points carry no canvasser/voter identity.
-- The public shapers expose the walk-list **name only** — `effortName` rides both
-  `shapeReportListRow` (so two same-week reports, one scoped and one campaign-wide, are
-  distinguishable on the share list without opening each) and `shapeReportForClient` — **never
-  `effortId`** or any other internal id. The name is operator-authored metadata, the same exposure
-  class as the report title (flagged in Part 1).
-- **The goal block is shaped through the same opt-in gate**: `shapeReportForClient` emits `goal`
-  only when `visibility.showGoal && goalSnapshot.target`. An unticked goal never reaches the wire at
-  all, so nothing downstream can render it by accident — least exposure, same rule as the tags below.
-- **Tag rows are shaped through the opt-in allowlist**: `shapeWindow`
-  ([clientReportView.js](../server/src/services/reports/clientReportView.js)) filters
-  `tagBreakdowns` to `visibility.visibleTags` (case-insensitive via `normalizeTag`, so a palette
-  re-casing between compute and tick can't hide a chosen tag) and **empty = none**. The
-  `visibleTags` array itself is deliberately NOT emitted to clients — the filtered rows already
-  encode it, and unticked tag names have no business on the wire. A ticked tag's name + two
-  integers is the entire exposure (see the privacy note in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)).
-- **Revoke is immediate**: `isActive:false` (Disable) or **Rotate** (new token) makes the old URL 404
-  on the next request; a share JWT can't be re-minted without the password/link.
-- The Mapbox token is the public `pk.` `MAPBOX_PUBLIC_TOKEN`, served at `/share/:token/mapbox-token`
-  (safe to expose — it's already public on the admin map).
+What the cards mean is unchanged ([METRICS.md](METRICS.md)): **cumulative** is everything before
+`rangeEndUtc`, **period** is `[rangeStartUtc, rangeEndUtc)`. The breakdown is a **door-outcome**
+breakdown, one resolved outcome per (household, round), so it sums to Doors knocked, and its
+"Surveyed" can sit below Surveys taken (a home with two voters surveyed in one visit is one surveyed
+door but two surveys). A door two canvassers knocked in one round is one knock with one outcome. The
+`refused` row is "Declined to participate": a knock and a contact, never a survey. The client labels
+live in [reportDerive.js](../client/src/lib/reportDerive.js) (`CONTACT_LABELS`).
 
-## Frontend
+**The `not_target` row.** `emptyEvents()` seeds `not_target: 0`, so those doors stay in the bar (a
+status missing from the literal would drop doors, and the invariant check would catch it).
+`contactOrderFor('survey')` and the null-type list slot it after `refused`; the lit-drop list leaves it
+out. `deriveReportSections` drops it when its cumulative count is 0, so reports without such doors
+render as before. Two units, as with refused: the breakdown resolves one status per (door, round),
+while `totals.notTargetKnocks` is the per-group flag; in an overlap where one canvasser recorded Not a
+target voter and a teammate later recorded Not home, the flag counts it and the breakdown reads
+"Didn't answer". `totals` (including `refusedKnocks`, `notTargetKnocks`, `contactRate`) rides the
+client payload whole; no client renderer shows those three.
 
-- Admin: [ClientReportsPage](../client/src/pages/ClientReportsPage.jsx) (list + create + the **Share
-  link** panel; the create form's **Walk list** select only sends an `effortId` that belongs to the
-  *current* campaign — the page stays mounted across campaign switches, so a stale selection could
-  otherwise leak into the POST — and scoped rows get an `effortName` badge) and
-  [ClientReportBuilderPage](../client/src/pages/ClientReportBuilderPage.jsx) (edit + preview +
-  publish; a scoped report's header line and "What the client sees" recap name the walk list). Its
-  Preview tab renders the two **internal notes** from `provenance` above `ClientReportView`, each only
-  when its cumulative count is above 0: desk-entered responses, and (2026-10-19) edited responses,
-  each with the week's own count in brackets when that is above 0 too (both rendered only since the
-  2026-10-19 fix under *The numbers*).
-  The public list/detail pages append *· Walk list: name* under the week range on scoped reports.
-- Public hub (no login): [PublicReportLayout](../client/src/components/PublicReportLayout.jsx) (brand +
-  password gate; provides `{token, accessToken}` via Outlet context),
-  [PublicReportListPage](../client/src/pages/PublicReportListPage.jsx) (the archive, newest first), and
-  [PublicReportDetailPage](../client/src/pages/PublicReportDetailPage.jsx). Routes `/r/:token` and
-  `/r/:token/reports/:reportId` live **outside** `ProtectedRoute` in [App.jsx](../client/src/App.jsx).
-- The builder's door-goal tick lives beside the map/tag toggles; it is disabled (with the reason)
-  when `report.goalSnapshot.target` is absent, mirroring the server's `NO_GOAL_SNAPSHOT` refusal.
-- Shared derivation: [lib/reportDerive.js](../client/src/lib/reportDerive.js) `deriveReportSections()`
-  returns the report's KPIs, **goal**, contact/support/**tags**/other breakdowns and section
-  **order** as plain
-  data — the single source consumed by **both** the on-screen view and the PDF, so they can't drift.
-  The `tags` section is the one deliberate exception to this module's derive-percents rule: voter
-  counts, no percent, rendered by [ReportTagList](../client/src/components/ReportTagList.jsx) (its
-  own component — `ReportBreakdown` unconditionally derives percents) and the PDF's `tagsBlock`
-  (label/number rows, no track/fill). Old reports: `cum.tagBreakdowns` absent → `tags: null` →
-  neither renderer emits the section, keeping pre-feature reports byte-identical.
-- PDF export: [lib/reportPdf.js](../client/src/lib/reportPdf.js) `generateReportPdf()` lazily imports
-  `jspdf` (its own bundle chunk — never on the report's first paint) and draws the document from
-  `deriveReportSections` (header + KPI grid + labeled bars + observations; **map omitted**). A scoped
-  report's header line appends *· Walk list: name* — scoped numbers under an unlabeled header would
-  read as campaign totals. Mounted on the public detail page and the builder Preview tab.
-- Shared render: [ClientReportView](../client/src/components/ClientReportView.jsx) (KPIs + breakdowns +
-  observations, used by both the public page and the admin preview),
-  [StatCard](../client/src/components/StatCard.jsx) (the report opts into a `prominent` look + a delta
-  pill; the admin dashboards' default look is unchanged),
-  [ReportBreakdown](../client/src/components/ReportBreakdown.jsx) (derives 100%-summing percents from
-  counts; `variant="segmented"` draws a stacked bar + legend for contact/support), and the read-only
-  [ClientReportMap](../client/src/components/ClientReportMap.jsx) — which
-  takes a `requestOpts` prop so its fetches run public (`{ public: true, shareToken }`) on the share
-  page while the admin preview stays authed; it reuses the admin map's pin rendering via
-  [lib/mapRender.js](../client/src/lib/mapRender.js) (`withCanvassers: false`).
-- **The share map's status chips are gated on presence** (2026-10-02). `visibleStatusesFor(campaignType)`
-  includes `not_target` for survey and null-type reports (lit-drop leaves it out), and `reached` filters
-  the points on that full list, so those doors are always drawn. The list handed to `MapFilters` is
-  `chipStatuses` instead, which drops `not_target` unless a loaded point carries it — passed with
-  `notTargetInUse={chipStatuses.includes('not_target')}`, because `MapFilters` applies its own in-use
-  gate to every caller. Presence is the only signal available: the public wire carries no campaign
-  settings, and the share page and the builder preview render the **live** bundle against points fixed
-  as of the report's end (the share page reads the ones frozen at publish; the builder's
-  `/:id/preview/map` builds them live, never persisted). So both inputs come from the loaded points.
-  `chipStatuses` keeps the chip off any report with no such door, reports already sent included.
-  `notTargetInUse` lets it past `MapFilters`' own gate, which defaults to false (no `statusCounts` is
-  passed here) and would otherwise hide the chip even where such doors exist. Presence is **not** the
-  breakdown row's rule: a point carries ONE status per door — `resolveStatus` over every round's
-  activity before `rangeEndUtc` (campaign-wide, even on a walk-list report) — while the row counts one
-  resolved outcome per (door, round) in the report's own scope, so a door marked `not_target` in round
-  1 and `not_home` in round 2 counts in the row but is drawn as Not home, with no chip. The points load once
-  (`households` is `[]` while loading), so the chip can appear but never flicker away. Pinned by
+**Tags** are window-local: `computeTagBreakdowns` freezes identified and current voters per window via
+`currentVoterSetsByTag` ([SURVEYS.md](SURVEYS.md) §I), and the shaper filters them to the ticked tags.
+
+**Goal** (`goalSnapshotFor`): `{ target, deadline, done, remaining, percent, asOf }` from the
+campaign's `doorGoal` and `deadlineFor(campaign)`, with `done` = the report's own cumulative
+`doorsKnocked` (so the bar counts what the card above it counts). A walk-list or team report never
+gets one. Ticking the goal on a report with no frozen goal is `400 NO_GOAL_SNAPSHOT` for a walk-list
+or team report or a campaign without a door goal, and `400 GOAL_AFTER_BUILD` when the campaign has a
+goal but the report's numbers were built before it (it has a snapshot, or is published): "Your door
+goal was set after these numbers were built. Recompute them — or Refresh numbers, on a published
+report — to show it." (code review NUM-5, contract C6). A draft with no numbers yet takes the tick, and
+its first build freezes the goal. Progress only: no pace, verdict or projection is ever stored.
+
+**Provenance** rides the internal preview and *Before you publish* only; `shapeWindow` is a strict
+whitelist, so it can't reach the client.
+
+**Parity.** clientReportBuild.int.test.js pins the build against `computeWindowStats` and
+`buildFrozenMapPoints` at the default batch and at `CLIENT_REPORT_BATCH=2`;
+clientReportTeamParity.int.test.js pins team numbers against the dashboards (§H).
+
+### The map rows
+
+- **Status rows** (the door's status as of the period's end, `resolveStatus` over every status row
+  before `rangeEndUtc`): campaign-wide `STATUS_ROW_MATCH` rows for whole-campaign and walk-list reports,
+  so a door's status reflects knocks stamped before it joined the walk list; on a team report, the
+  team's own rows (`NOT_BULK`) plus every `restricted` row on the door.
+- **Households:** walk-list reports narrow the household set by the household's current `effortId`;
+  team reports keep only doors the team knocked. Doors that resolve to `unknocked` are skipped.
+- **Answers:** the latest response per household carrying a map answer (ascending `submittedAt`, `_id`
+  descending as the tie-break, so the last write wins), from the campaign's survey, before
+  `rangeEndUtc`; on a team report, the team's own responses. Only `build.inputs.mapKeys`, each through
+  `publicPointAnswer`.
+- **Pins** are inserted per batch (`ordered: false`) with a running `seq`; `extent` grows from them.
+  **Cells** accumulate in memory and are written once at the end (§G); `extent` is then the cells'
+  outlines.
+
+## E. Snapshots and the build state machine
+
+A **snapshot** is one build's frozen output: the numbers on the report and the map rows tagged with
+its `snapshotId`. A build never writes over a live snapshot; it writes a new one, and one atomic update
+swaps it in. Builds run on the worker in their own queue, `QUEUE_NAMES.CLIENT_REPORT`
+(`client-report-queue`).
+
+**Kinds.** `recompute` (a draft: Create, Next, Recompute, Retry), `refresh` (a published report: its
+result waits for Apply) and `remap` (a published report switching to areas). **Statuses:** `queued`,
+`waiting`, `running`, `ready` (refresh only), `failed`, `idle`; `buildView` shows a running build whose
+heartbeat is 5 minutes old as `stalled`.
+
+**`build`** holds `{ kind, status, jobId, inputs, snapshotId, snapshotKey, fenceAt, fenceSeen,
+startedAt, beatAt, waitingSince, waitingFor, rebuilds, progress, error: { code, message, … }, result,
+requestedBy, finishedAt, readyAt, cancelledAt/By, discardedAt/By, appliedAt }`. **`build.inputs` is the
+build's target**: `{ showMap, mapMode, areaSize, mapKeys, questionDeps, coordinatorIds }`, frozen at the
+claim by `inputsFromSettings`, pruned by removals while the build is live, and written by the commit or
+Apply as-is (nothing intersects it with the report's other settings).
+
+**Liveness** (`buildIsLive`, one helper for every gate): `queued` and `waiting` are live while the
+queue reports the job `waiting`, `delayed`, `active`, `prioritized` or `waiting-children` and the claim
+is under two hours old; `running` is live while `beatAt` is under 5 minutes old. Anything else is dead,
+and the next claim, Publish or Take down replaces it in its own CAS.
+
+**Claim** (`claimBuild`, web): refused with `409 REVIEW_PENDING` over a `ready` result (apply or
+discard it first) and `409 REPORT_BUSY` over a live build (worded by state); otherwise one
+`findOneAndUpdate` on `{ _id, organizationId, status, 'build.jobId': <the one observed>, 'build.status'
+≠ ready }` sets a fresh `build` with a new hex `jobId`. A status that moved meanwhile is `409
+STATUS_CHANGED`. The pre-image's rows go through the discard helper. **Enqueue** (`enqueueBuild`):
+`attempts: 1`, `removeOnComplete` after 24 hours or 500 jobs, `removeOnFail` after 7 days, under a
+timeout (`CLIENT_REPORT_QUEUE_TIMEOUT_MS`, else `QUEUE_ENQUEUE_TIMEOUT_MS`, else 5 s); if the queue
+can't take it, a CAS on its own `jobId` marks it `failed` with `ENQUEUE_FAILED` ("Couldn't start — try
+again").
+
+**Cancel** (`cancelBuild`) replaces the whole object (`{ status: 'idle', cancelledAt, cancelledBy }`)
+and removes the queued job. Every worker write matches on `build.jobId` and `build.snapshotId`, which
+the replacement removes, so a cancelled build's heartbeat, commit and failure writes all miss.
+
+**The one discard helper** (`discardBuildRows`): Cancel, Take down, Publish's replacement of `build`,
+a dead build's reset and Discard all hand it the pre-image of their write, and it deletes the build's
+rows only when the pre-image's `build.snapshotId` is an ObjectId different from the live `snapshotId`.
+Otherwise it deletes nothing and the nightly sweep handles leftovers, so a legacy report's live rows
+(`snapshotId: null`) can never be deleted by a cancel.
+
+**Each attempt** (`processClientReportJob`, inside `sweptAfter`):
+
+1. **Own the attempt**: a CAS on `{ _id, 'build.jobId', 'build.status' ∈ queued|waiting|running, status:
+   <draft for recompute, published otherwise> }` sets `running` and a **fresh** `snapshotId` and
+   `snapshotKey`, then hands the previous attempt's rows (a stall or a delayed redelivery) to the
+   discard helper.
+2. **Deletion**: a campaign or organization whose deletion was requested stops the build for good
+   (`UnrecoverableError`), checked again before every batch.
+3. **Wait outside the slot** (not for a remap): if `otherChangeRunning(campaignId)` reports an answer
+   edit, survey conversion, unknock or re-cut, the attempt deletes its rows, marks the build `waiting`
+   with `waitingFor` ("for the answer edit on this campaign to finish") and `waitingSince`, moves the
+   job back to the delayed set (`CLIENT_REPORT_WAIT_RETRY_MS`, default 30 s) and throws `DelayedError`,
+   which frees the worker slot and isn't an attempt. After `CLIENT_REPORT_BLOCKED_AFTER_MS` (default 30
+   minutes) of waiting it fails `BLOCKED`, naming what is running (and "press Stop on Door Outcomes"
+   for an answer edit).
+4. **The team check** (team `recompute` only): every coordinator in the team must still run a crew on
+   the campaign and no past one may run one again (`teamChangedFor`), else it fails `TEAM_CHANGED`,
+   carrying `seriesId`, `departed` and `returned`, and the builder shows the team-changed card instead
+   of Retry (§H). Refreshes and remaps skip it.
+5. **Fence**: `fenceAt = now`, written in the same CAS as `fenceSeen` (each change source's rows within
+   60 seconds of the fence, by id and version) and `running`; `waitingSince` is unset.
+6. **Heartbeat**: a 30-second timer (`CLIENT_REPORT_BEAT_MS`), plus a beat per batch, CASes `beatAt`
+   and `progress` on `{ jobId, snapshotId }`. Progress is households done ÷ the households the walk
+   visits, which `buildReportSnapshot` counts with one aggregation before it starts and hands over with
+   each batch (code review STATE-4; the old denominator, the campaign's households, left the bar short
+   of the end), capped at 99 until the commit (a ready Refresh reads 100); a remap counts the live
+   snapshot's pins. A miss means the build was cancelled or replaced, and the next batch stops it, but
+   a miss counts only once a re-read confirms it: the job id changed, or the build's snapshot is neither
+   the one the beat matched on nor the attempt's current one (STATE-1: a beat sent just before a
+   rebuild moved the snapshot used to read as "superseded", which completed the job and left the report
+   reading running for good).
+7. **Build** (§D), or for a remap the cells from the live pins (§G).
+8. **Changed during the build?** A change still in flight sends it back to step 3. Otherwise, any
+   `AnswerEditRun`, `SurveyConversionRun`, `UnknockRun` or `ReclassifyRun`, any knock-clearing
+   `TurfSnapshot` created or restored, or on a team report any `CoordinatorChange`, that is new or
+   changed since `fenceSeen`, or any ledger row of the campaign created before the fence and updated
+   after it, makes it rebuild **once** under a new snapshot and fence (`build.rebuilds`, kept on the
+   document so a redelivery remembers); a second fails `CHANGED_DURING_BUILD`. The attempt follows the
+   move to the new snapshot at once, before the first build's rows are deleted, so a beat during that
+   delete matches the new snapshot (STATE-1).
+9. **Arrivals**: knocks in the report's scope with `createdAt > fenceAt` and `timestamp <
+   rangeEndUtc` become `arrivedDuringBuild`.
+10. **Commit** (`commitBuild`): re-read `build.inputs` after the last row write, prune this snapshot's
+    rows to them (no rows at all when the map is off), then one CAS on `{ _id, 'build.jobId',
+    'build.snapshotId', status, 'build.inputs.showMap', 'build.inputs.mapKeys' (pinned with $all +
+    $size) }`, a pipeline update that reads `$build.inputs` inside the write, retried up to five times
+    if a removal moved the inputs. A `recompute` swaps in the numbers, `snapshotId`, `snapshotKey`,
+    `snapshotInputs`, `statsComputedAt: fenceAt`, then deletes exactly the previous live snapshot's
+    rows; a `refresh` sets `ready` with `build.result` (which also carries `areaWithoutAnswers`: the
+    single-choice map questions an area snapshot shows no answers by area for, `[{ key, label }]`,
+    code review WALK-7); a `remap` is §G. A commit that misses marks the build `failed` with
+    `SUPERSEDED` and deletes its rows only after re-reading that they aren't live.
+
+The worker registers the queue at **concurrency 2** (`CLIENT_REPORT_JOB_CONCURRENCY`) with
+`maxStalledCount: 2`; a stall redelivery writes under its own snapshot. Its `failed` listener
+(`reconcileFailedClientReportJob`) CASes only a build still queued, waiting or running under that job,
+never a `ready` one, to `failed` with `DELETING` or a generic `FAILED`, leaving the rows to the sweep.
+The builder shows "Queued (2 ahead)" from the queue's waiting list (`queuePositionOf`).
+
+**Build error codes** (on `build.error.code`): `ENQUEUE_FAILED`, `BLOCKED`, `TEAM_CHANGED`,
+`CHANGED_DURING_BUILD`, `SUPERSEDED`, `INVARIANT`, `DELETING`, `FAILED`. Retry is offered for all but
+`DELETING` and `TEAM_CHANGED`.
+
+**Known limits.** After a worker crash, BullMQ redelivers the build in about 30 seconds (its default
+lock and stall timers, which the worker doesn't change), and the report reads "running" until the
+redelivered attempt takes over; a build whose heartbeat stops for 5 minutes reads "stalled", with
+Retry. The `BLOCKED` message says "30 minutes" in words, which assumes the default:
+`CLIENT_REPORT_BLOCKED_AFTER_MS`, like `CLIENT_REPORT_WAIT_RETRY_MS` and `CLIENT_REPORT_BEAT_MS`, is a
+test override, not a production setting.
+
+**The nightly sweep** (`client-report-row-sweep`, 05:31 UTC, `CLIENT_REPORT_SWEEP_CRON`, in
+`MAINTENANCE_JOBS`): reads at `sweepStart`, and every delete also requires the row's `snapshotId` to
+have been minted before that instant (`ObjectId.createFromTime` takes seconds) or to be null, so a
+build that starts after the read is never touched. It deletes rows whose report is gone; rows of
+reports whose map is off, which includes any report with nothing live under the legacy fallback rule
+(§C: an old draft, or a draft before its first commit), so old drafts' never-served rows go too
+(sparing a live or ready build's snapshot); legacy rows (`snapshotId: null`) of
+reports that now have a snapshot; and rows whose snapshot is neither the live one nor a live or ready
+build's and was minted more than 24 hours ago. It logs `[maintenance] client-report-row-sweep: N orphan,
+N map-off, N legacy, N stale row(s) over N report(s)`.
+
+## F. Lifecycle
+
+**Create** (`POST /admin/client-reports`) resolves the series (§H), inserts the draft with explicit
+visibility and a `recompute` already claimed, enqueues it and answers `201 { report, build }`. The
+period is any `weekStart ≤ weekEnd`.
+
+**Edit** (`PATCH /:id`) writes only the fields sent (of `visibility`, only the keys sent: §C), with a
+targeted pipeline `$set` and `editVersion + 1`; a build never blocks it. Every removal goes through
+§C's path. On a **published** report (shown
+or taken down) it accepts the title, observations, headline, visible questions and tags, the goal
+tick, `copiedNotesReviewed`, and the removals; it stamps `contentEditedAt/By` and writes an `edited`
+History row from the write's own pre-image. Anything that adds to the map is `400 NEEDS_REFRESH` with
+`reasons` (`map_on`, `map_questions`, `back_to_exact_doors`, `area_size`). On a published report the
+on-screen `mapMode` and `areaSize` always follow the live snapshot; areas on a pins report claims a
+`remap` **before** the write, so a refusal (another build live, a review pending) refuses the whole
+edit. On a draft, mode and size are ordinary settings that take effect at the next Recompute.
+`ifStatus` makes an edit refuse with `409 STATUS_CHANGED` instead of landing on a report whose status
+moved, and the write's filter always pins the status the request read (§C). `ifEditVersion` makes it
+refuse with `409 CHANGED_ELSEWHERE` (and the report as it stands) instead of landing on a version the
+screen never saw (§C, contract C8). The builder sends `ifStatus: 'draft'` with every draft auto-save
+and the unmount keepalive, `'published'` with Update and the remap retry, and `ifEditVersion` with all
+four: a draft's, the version its screen reflects; an open edit's, the version at Edit or at its last
+merge (§Q). A goal tick on numbers built before the campaign's goal is `400 GOAL_AFTER_BUILD` (§D).
+
+**Recompute** (`POST /:id/recompute`, drafts only, else `400 NOT_DRAFT`) claims a `recompute` from the
+on-screen settings and the team's current crew keys: `202 { build }`.
+
+**Publish** (`POST /:id/publish { snapshotId, editVersion }`) is not a build. Refused with `409
+ALREADY_PUBLISHED` on a published report; `409 RECOMPUTE_NEEDED` with `reasons` when there is no
+snapshot (`no_snapshot`) or the on-screen settings add to `snapshotInputs` (`map_on`,
+`map_questions`, `map_mode`, `area_size`, or on a team report `crews` when the team's crew keys
+differ from the snapshot's). Then one CAS on `{ status: draft, snapshotId: <previewed>, editVersion:
+<previewed> ($in [0, null] when 0) }` sets `published`, `publishedAt/By`, `openMockFlagsAtPublish`
+(scoped to the report's walk list or team) and replaces `build` with idle, cancelling any recompute
+still queued or running (its job is removed, its rows discarded). A miss is `409 SNAPSHOT_CHANGED` (a
+recompute landed since the preview) or `409 SAVING` (an edit landed). Without previewed ids it freezes
+whatever is live. The builder always sends them, after flushing pending saves, and the `editVersion` it
+sends is the one its screen reflects (the seed's, then each of its own saves that landed alone), never
+one learned from a later re-read, so Publish can't freeze text or settings the operator never saw (code
+review ADMINUX-1, §Q).
+
+**Refresh** (`POST /:id/refresh { map? }`, published only, else `400 NOT_PUBLISHED`): the base is the
+report's current settings, plus the additions (`showMap: true`, `mapKeys`, `mapMode`, `areaSize`). A
+map key that isn't a choice question whose chart is shown is `400 MAP_KEYS_NOT_ALLOWED`; one whose
+dependencies aren't all on the map is `400 MAP_KEYS_NEED_PARENTS` (with each key's parents). The map
+questions it builds are the **final list** (code review VERIFY-2): on a served map, what the live
+snapshot serves plus the request's keys; turning the map on, exactly the request's keys (the dialog
+offers the picks the report kept while its map was off, ticked, and sends what is still ticked; before
+this they all went on the client's map, unseen and shown unticked); a refresh that leaves the map off
+builds no map and keeps the stored picks. A team report rebuilds with `snapshotInputs.coordinatorIds`,
+its frozen crews. **Apply** (`POST /:id/refresh/apply { snapshotId }`) is a CAS on `{ status:
+published, 'build.status': ready, 'build.snapshotId': <reviewed> }`, a pipeline that swaps in
+`build.result`, `snapshotId`, `snapshotKey`, `snapshotInputs` and `visibility.{showMap, mapMode,
+areaSize}` from `build.inputs`, and `visibility.mapAnswerKeys` from `build.inputs.mapKeys` only when the
+build's map is on (a refresh that leaves the map off keeps the stored picks, VERIFY-1); it bumps
+`editVersion` (contract
+C8: an edit opened before the Apply merges onto it), stamps `numbersRefreshedAt/By`, then deletes the
+previous live rows and writes a History row with the before-and-after doors, surveys, voters and lit
+drops. **Discard** CASes `ready → idle`
+and deletes that result's rows only when the CAS matched. Miss: `409 NOTHING_TO_APPLY` /
+`NOTHING_TO_DISCARD`.
+
+**Remap** (Switch to areas) is §G. **Cancel** (`POST /:id/build/cancel`): `409 NOTHING_TO_CANCEL`
+when nothing is live.
+
+**Take down** (`POST /:id/take-down`; the old `/unpublish` is now an alias of it) sets
+`takenDownAt/By` on a shown published report and replaces `build` with idle (cancelling any live build
+or ready result); already down is a no-op; not published is `409 NOT_PUBLISHED`. **Put back up**
+clears `takenDownAt`, keeps `publishedAt`, and is instant. Every public route filters `takenDownAt:
+null`. There is no path from published back to draft.
+
+**Delete** (`DELETE /:id`) deletes the report, clears any `nextReportId` pointing at it, deletes every
+map row with its id, writes a `deleted` History row, and with `?eraseHistory=1` (admins) erases its
+earlier text (§M). A live build's heartbeat misses and it stops; the sweep catches anything left.
+
+**Next** (`POST /:id/next`): if the source's `nextReportId` still exists, that draft comes back
+(`existing: true`). Otherwise the series is re-validated (ensured for a report from before series,
+`409 SERIES_ENDED` when ended, `400 TEAM_ATTRIBUTION_NOT_READY`); the period is the same number of
+civil days starting the day after `weekEnd` (a source that is exactly one calendar month rolls by
+month), in the source's frozen zone, and must start exactly at the source's `rangeEndUtc` (`409
+NEXT_PERIOD_MISMATCH`); any other report of the series starting at or after the source's end is `409
+NOT_LATEST_REPORT`. The draft is inserted first with a pre-generated `_id` and a claimed recompute, then
+the source is CASed `{ nextReportId: null or a deleted id } → <this _id>`; the loser deletes its own
+draft and returns the winner (`409 NEXT_RACE` if the winner vanished). It copies the observations
+(`copiedFrom`, `copiedNotesReviewed: false`), the visibility, tags, goal tick and headline, not the
+title, and answers `201` with `warnings: ['STARTS_AFTER_TODAY']` when the period starts after today in
+the campaign's zone.
+
+**Dates.** "Period not over" is `now < rangeEndUtc`; numbers are "stale" after an hour
+(`clientReportChecks.js`). `periodPhrase` in reportDerive.js counts civil days (a DST week is 7) and
+routes every formerly weekly string: the KPI pills and help, the quiet-period banner, the map's empty
+line, the hub heading ("Weekly reports", "Daily reports", "Reports"), and the PDF's title, quiet line
+and filename.
+
+## G. Area view
+
+[areaCells.js](../server/src/services/reports/areaCells.js). `visibility.mapMode: 'area'` with
+`areaSize` small or large maps to H3 resolution 9 (about 1,100–1,400 ft across, 23–30 acres) or 8 (about
+0.55–0.7 mi across), via `h3-js` (`latLngToCell`, `cellToBoundary(h, true)`). Fixed hexagons, the same at
+every zoom: not clustering.
+
+- **Cells** bin the build's would-be pins in memory (`createCellBin`): `doors`, `byStatus`, and for
+  each **single-choice** map question `{ n, options }`. A multiple-choice answer never bins. They are
+  inserted once at the end of the build.
+- **The rule, all or nothing per question** (owner ruling 2026-10-24, `areaAnswerKeys`): a candidate
+  shows area answers only when it has an answer somewhere and **every** cell with an answering home has
+  `n ≥ 5` (`MIN_AREA_ANSWERS`). A follow-up shows them only when every question it depends on shows its
+  own, to a fixpoint, so a follow-up of a multiple-choice question never does. The decision reads counts
+  only, never answers. `applyAreaRule` strips every other answer, so a cell where a question isn't shown
+  carries one state: no answers to show. The rule runs when the cells are written and **again when they
+  are read** (`areasPayload`, over the served questions), so a parent dropped after the build takes its
+  follow-ups' area answers with it.
+- `doors` and `byStatus` show for every cell, even a one-home one.
+- **Remap** (Switch to areas on a published pins report): claimed by the PATCH with `build.inputs` =
+  the live inputs with areas and the size (minus that edit's removals). It doesn't wait for other
+  changes, skips the team check and has no fence: it bins the **live snapshot's pins** (their stored
+  answers, single-choice decided from the frozen breakdown types) under a new snapshot, and its commit
+  sets, in one update, `snapshotId`, `snapshotKey`, `snapshotInputs`, `visibility.mapMode`,
+  `visibility.areaSize`, `areaCellCount`, `mapPointCount: 0`, `extent` from the cells,
+  `contentEditedAt/By` and `editVersion + 1` (the map view is a setting the builder edits, so an edit
+  opened before the switch merges onto it instead of writing over it, contract C8), leaving `build` as
+  `{ kind: 'remap', status: 'idle', finishedAt, areaWithoutAnswers }`; then it deletes the pins and
+  writes a `remapped` History row. The numbers don't change. Until it commits the client keeps seeing
+  pins; if it fails or is cancelled, nothing changed.
+- **Which questions show no answers by area** (`areaWithoutAnswers`): *Before you publish* lists them
+  on a draft, and since code review round 2 (WALK-7) a published report learns them too. A refresh's
+  ready result and a finished remap carry them (`areaWithoutAnswersOf` at the commit: on the map the
+  commit pins, chart shown and parents mapped, but not among the questions the area rule let through),
+  `GET /:id/build` returns them top-level, the Refresh review and **Worth a look** name them, and the
+  switch's confirm warns before it starts. *Before you publish* also names, per question, the other
+  shown reports of the campaign that map it (door by door or by area) or chart it for a narrower scope
+  (`areaNarrowedBy`), since every link shows them all.
+
+## H. Series and team reports
+
+**`ensureSeries`** is the one idempotent find-or-create of a `campaign`, `walk_list` or
+`team_walk_list` series: an upsert on the partial index's identity, shared by Create, Next and the
+migration, which also stamps that scope's legacy reports (no `seriesId`) with the series and a frozen
+scope (a walk-list report keeps its own frozen `effortName` as its label). Teams are created by
+`createTeamSeries`.
+
+**The five indexes**, all partial on `endedAt: null`, with fixed names that duplicate-key errors map
+from:
+
+| Name | Keys | Partial filter |
+|---|---|---|
+| `series_label_unique` | `{ campaignId, labelKey }` | `kind ∈ campaign, walk_list, team` |
+| `series_campaign_unique` | `{ campaignId, kind }` | `kind: 'campaign'` |
+| `series_walk_list_unique` | `{ campaignId, effortId }` | `kind: 'walk_list'` |
+| `series_crew_unique` | `{ campaignId, crewKeys }` (multikey) | `kind: 'team'`, `crewKeys.0` exists |
+| `series_team_walk_list_unique` | `{ campaignId, teamSeriesId, effortId }` | `kind: 'team_walk_list'` |
+
+So a crew is in at most one active team, current or past; two teams that both lost every crew coexist;
+a team on a walk list derives its name ("Volunteer team · North") and follows its parent's renames,
+crews and end. Duplicate-key errors become `409 TEAM_LABEL_TAKEN` or `409 CREW_IN_OTHER_TEAM`, naming
+the other series. Repeated walk-list names get " (2)", " (3)" against the campaign's active label keys.
+
+**Labels and the name check.** Operator-typed labels are 1-60 characters (`400 SERIES_LABEL_INVALID`).
+`namesInLabel` finds, as whole words of three or more letters (accents folded), the first or last
+names of the campaign's crew members and coordinators (`CampaignAssignment` rows). A team label that
+contains one is `400 TEAM_LABEL_HAS_NAME`; a new walk-list series label, a combined team-and-walk-list
+label, or a walk-list Rename that matches is `400 WALK_LIST_LABEL_HAS_NAME` with `names` and
+`confirmable: true`, accepted on resend with `confirmLabel`. Next doesn't re-check names. A name
+matching an ended series with published reports is `409 SERIES_NAME_ENDED` (with `canContinue`); the
+campaign and team-on-walk-list labels can't be renamed (`400 SERIES_LABEL_FIXED`).
+
+**Crews.** `runningCrews(campaignId, organizationId)` = coordinators with `CampaignAssignment` rows
+here. A team needs at least one (`400 TEAM_NEEDS_CREW`), each running here (`400
+TEAM_CREW_NOT_RUNNING`). `editSeries` (one CAS on `updatedAt`, else `409 SERIES_CHANGED`) handles
+rename, `coordinatorIds`, `keepPast` (move to past: still counted, exempt from the crew check),
+`removePast`, `makeCurrent` (a past coordinator running a crew again), `end` (with `deleteOpenDrafts`
+from the route) and `continue` on an ended team, which re-validates the crews the way Change crews does:
+the picked crews become the current ones, a current crew left unticked (one now in another team
+included) leaves the team rather than being kept as past, and a past crew picked again leaves the past
+list. The builder sends a departed lead's keep-or-remove choice in a first PATCH, before the continue.
+The route writes History rows for what changed, naming the team as it reads after the change
+(`seriesLabelOf`): `renamed`, `crewsChanged`, `ended`, and since code review round 2 `continued` (§M).
+Team reports need team attribution: an organization without `teamAttributionReadyAt` gets `400
+TEAM_ATTRIBUTION_NOT_READY`.
+
+**Org scoping** (code review SEC-1). `GET /series` and `GET /series/affected` load the campaign in the
+active organization (`loadCampaignInOrg`, `404` otherwise) before anything else: `manages()` alone is
+not org scoping, because `canManageCampaign` says yes to any org admin for any campaign id, and an
+admin of one organization could read another organization's crew names through the picker. Every read
+behind the picker (`runningCrews`, `CampaignAssignment`, `Effort`, the report counts) and behind
+`validateCrews`, `makeCurrent` and the team-changed card carries `organizationId` too.
+
+**Ending a team** with `deleteOpenDrafts` (code review STATE-3) cancels each open draft's build, then
+deletes only what is **still** a draft (`findOneAndDelete` with `status: 'draft'`), so a draft published
+since it was listed keeps its map. For each draft actually deleted, as `DELETE /:id` does, it clears any
+`nextReportId` pointing at it, deletes that report's map rows and writes a `deleted` History row.
+
+**The team-changed card** reads `GET /series/:seriesId/team-changed?reportId=`: each departed
+coordinator's name, crew size (canvassers whose doors carry her stamp), how many now have no crew and
+which crews the rest joined, and `removeDoors`, what "Remove them" takes out of the team's totals: the
+team's door count with her crew minus without it, both counted the way the build counts doors (one per
+household and round, `knocksPipeline` with `NOT_BULK`, the report's walk list) and both up to the
+report's `rangeEndUtc` (code review NUM-4; the old figure counted every door her crew ever knocked,
+including doors another crew of the team knocked that round and knocks after the period). The card
+sends `reportId` (`400` when invalid, `404 REPORT_NOT_FOUND` when it isn't one of the team's reports);
+without it the route reads the team's newest draft whose build stopped on `TEAM_CHANGED`, else its
+newest report. Continue PATCHes the choice and claims a recompute. On an ended team the card offers no
+End, and Change crews opens the Continue dialog.
+
+**Team numbers.** The team clause is `crewsMatch(coordinatorIds ∪ pastCoordinatorIds)` in
+[aggregations.js](../server/src/services/reports/aggregations.js): each coordinator's `teamMatch` (her
+crew's stamped rows plus her own unstamped ones), OR'd; no crews matches nothing. Doors add `NOT_BULK`.
+A home or voter both teams reached counts for both. Pinned by clientReportTeamParity.int.test.js: doors
+match `/team-breakdown` except in a window where only the lead knocked (that route folds a lead's own
+doors only when the crew also knocked); surveys, voters and tags match the crew-filtered
+`/campaign-rollup` and `/survey-results`. Mock-GPS counts follow the scope (`countOpenMockFlags` gains
+`effortId` and `coordinatorIds`).
+
+**Team figures in *Before you publish*** (`checks.team`, `teamPeriodFigures` in clientReportChecks.js,
+code review contract C1; computed once the report has a snapshot): `{ canvassers, teams: [{ seriesId,
+label, doorVisits, isThis }], teamsTotal, scopeDoorVisits, multiTeamDoorVisits, noTeamDoorVisits,
+scopeLabel }`. `teams` is this report's team first (its **frozen** crews, so its figure equals the
+report's own period doors knocked), then every other active team of the campaign by label (its series'
+crews now), each tested on its own rather than as a first match, since a report's frozen crews can still
+name a crew that has since moved to another team. `teamsTotal` is the sum of those rows, so a visit two
+teams made counts twice in it. `scopeDoorVisits` is the period's door visits in the base scope (the
+whole campaign, or this report's walk list; `scopeLabel` names it), every row a whole-campaign or
+walk-list report counts, bulk entries included; `multiTeamDoorVisits` counts those made by two or more
+teams (each team's report counts them, owner ruling 10-24); `noTeamDoorVisits` those no team made
+(canvassers with no crew in a team, or entered in bulk, since bulk rows belong to no team). One
+aggregation, grouped by door and round with the set of teams that made each visit, counted the way
+the build counts doors: knock actions, the period, rows with a household, the report's numbers'
+cut-off (`numbersCutOff`). `canvassers` (the period's canvassers for the team, bulk excluded) is
+unchanged. The old figure counted crews and "No team" rather than teams (code review NUM-2).
+
+## I. Earlier totals
+
+Each build of a report with a comparison report recounts that report's cards up to its cut-off. The
+comparison report (`comparedReportFor`) is the same series' published, shown report with the latest
+`rangeEndUtc` on or before this report's `rangeStartUtc` (tie-break `publishedAt` descending, then
+`_id`); a report from before series matches `seriesId: null` and the same `effortId`. The build freezes
+`earlierTotals` (`doorsKnocked`, `homesKnocked`, `litKnocks`, `surveysTaken`, `surveyedVoters`),
+`comparedReportId` and `comparedSnapshotId` (that report's live `snapshotId` at the build, `null` for
+a report from before snapshots).
+
+**The recount** ([buildReportSnapshot.js](../server/src/services/reports/buildReportSnapshot.js),
+code review NUM-3) mirrors what the earlier report froze: rows timed before its `rangeEndUtc` that it
+had received by its cut-off (`numbersCutOff(prev)`; a row with no `createdAt` counts as received in
+time), plus rows timed before the cut-off that arrived after it (late syncs, the corrections the line
+is for). A row timed and received after the cut-off is left out: it is only the rest of a period whose
+numbers stopped early. Surveys follow the same rule on `submittedAt`. A cut-off at or after the
+period's end changes nothing. (The old rule counted "timed before the cut-off", which read a phone
+clock a few minutes fast as a door taken away.)
+
+**The line is computed when shown** (`earlierTotalsLine`): it compares the frozen recount with what
+that report froze **now**, for the visible cards (survey campaigns: doors knocked, surveys taken,
+voters surveyed; lit drop: doors knocked, lit dropped, homes knocked), keeping only cards that moved.
+If the compared report was deleted or is no longer published, the line is dropped. It is also dropped
+when the compared report's numbers were refreshed after this build recounted them
+(`comparedSnapshotMoved`: its live `snapshotId` is no longer `comparedSnapshotId`; two nulls match, so
+a report from before snapshots keeps its line until a refresh gives it one), because the recount says
+nothing about what it shows now: read against new numbers, a refresh that added a week's doors would
+tell the client totals went down (code review NUM-1). Any new live snapshot of the earlier report,
+a remap included, hides the line, which is the safe direction. If it was taken down, or is no longer
+the series' latest shown report ending on or before this one's start, only the "since …" clause is
+dropped. The builder's version (`earlierTotalsCheck`) adds, per card, what it sent and what it reads
+now, and a reason chosen by cause: on a team report, crews that differ from the compared report's
+frozen crews (`crews_changed`), or a `CoordinatorChange` touching the team's crews between the two
+cut-offs (`canvassers_changed_teams`); otherwise `records_changed`. When the line is hidden because the
+earlier report moved, the check returns `earlierReportRefreshed: { weekStart, weekEnd }` instead, and
+*Before you publish* names that report on a draft, with Recompute; on a published report, **Worth a
+look** names it ("… Refresh numbers to compare again.") with Refresh numbers (code review round 2,
+P-2; round 1 computed it there but never showed it).
+
+## J. The client's payload and the map readers
+
+**Shaping** ([clientReportView.js](../server/src/services/reports/clientReportView.js)), used by the
+public routes and the admin preview alike, so the preview is what the client gets:
+
+- `shapeReportForClient`: `id`, `campaignType`, `title`, `effortName`, `scope: { kind, label,
+  seriesKey, seriesLabel }`, `weekStart`, `weekEnd`, `timeZone`, `status`, the dates (`publishedOn`,
+  `editedOn`, `refreshedOn`, and `numbersThrough` only when the cut-off is before `rangeEndUtc`, all
+  civil dates in the report's zone), `observations`, `supportQuestionKey` (only when that question is
+  visible), `stats.{cumulative, period}` through `shapeWindow` (`totals`, `contactBreakdown`, the
+  visible `surveyBreakdowns`, the ticked `tagBreakdowns`; no `coverage`, no `provenance`), `goal` (only
+  when ticked and frozen), `visibility: { showMap, mapMode, areaSize, mapVersion }` (never
+  `mapAnswerKeys`), `mapPointCount`, `areaCellCount`, `earlierTotals` and `nav: { olderId, newerId }`.
+  **No instants.** The report id is an ObjectId whose time is the draft's creation, not the numbers'
+  cut-off.
+- `mapVersion` (`mapVersionOf`, code review contract C7): an opaque key of the live snapshot's key,
+  the mode, the area size and the served map questions, so it changes whenever what the map endpoints
+  serve changes, a question taken off included (a removal keeps the snapshot key); `null` when the map
+  isn't served. The page keys its map data and door lookups on it, so a re-read report re-reads its map
+  at once. The admin preview shapes the on-screen overlay but passes `mapSource: report`, so its version
+  is the saved report's, which is what its map endpoints read.
+- `nav` (`seriesNav`, clientReportRead.js): the older and newer shown report of the same series,
+  ordered the way the hub lists them (`rangeStartUtc`, then `publishedAt`, then `_id`) and compared on
+  that whole tuple, so two reports starting the same day each get an arrow to the other (code review
+  PUBUX-6; a comparison on the start alone gave both none). A draft in the preview reads as published
+  now, where it will sit once published.
+- `shapeReportListRow` (the hub): id, title, period, `campaignType` (null on a report from before that
+  field; when no report in a tab has one, the hub judges lit drop from the totals, `hubShowsLit`),
+  `effortName`, scope, the dates, map mode and count, and the headline totals. No `campaignId`, no
+  breakdowns.
+- `mapFilterSurvey`: the served map questions with their options and counts (the filter legend).
+
+**The map readers** ([clientReportMap.js](../server/src/services/reports/clientReportMap.js)) read the
+live snapshot only, `{ clientReportId, snapshotId: report.snapshotId ?? null }`, so an unapplied
+refresh, a remap's leftover pins or a dead attempt's rows are never served. `checkMapRequest` runs, in
+order: map served (else `404 MAP_NOT_SHARED`), the requested `snapshotKey` (else `409 MAP_UPDATED`),
+then the live snapshot's mode (a pins request on an area report, or `/areas` on a pins report, is the
+same `409 MAP_UPDATED`: the page is out of date).
+
+- **`GET …/map`** (pins): `{ mode, snapshotKey, count, statusKeys, lng, lat, status, questions,
+  answers: { <key>: [optionIndex | [optionIndex…] | null] }, extent }`, columnar arrays whose positions
+  are the rows' `seq`, coordinates rounded to six decimal places, answers stripped to the served
+  questions. No address, no id of any kind.
+- **`GET …/map/doors?snapshotKey=&rows=`**: at most 200 positions (`400 TOO_MANY_ROWS`,
+  `ROWS_REQUIRED`, `ROWS_INVALID`; `snapshotKey` required, `400 SNAPSHOT_KEY_REQUIRED`), returning each
+  position's `addressLine1`, `city`, `state`, `status` and answers as `{ question: <label>, answer }`.
+  Positions mean nothing outside the live snapshot, so nothing can be enumerated across reports;
+  within a report a link holder can page through every address, as the full point list allowed before.
+- **`GET …/areas`**: every cell with its `boundary`, `doors`, `byStatus` and the answers §G allows, the
+  question legend, `areaSize` and `extent`.
+- **Old reports**: their rows get `seq` (rank by `_id`) and the report its `extent` lazily on the
+  first map read (`backfillLegacyRows`, idempotent, the same order the migration uses).
+
+**Served once, gzipped, cached** (`sendMapPayload`, code review PUBUX-4). The pins rows are streamed
+through a cursor (`batchSize` 2,000, only the fields the payload needs, sorted `seq` then `_id`) into
+the columnar arrays, never loaded whole; the JSON is byte-identical to what loading them all produced.
+One open of a 250,000-door report used to hold every row in memory on the one web dyno every customer
+shares. A snapshot is frozen, so a payload's bytes are fixed by the report, its snapshot key, the
+mode, the area size and the served questions (`mapPayloadKey`); the public link and the admin preview
+build the same bytes from them. The pins and areas payloads are kept gzipped in a small in-process
+LRU held to a byte budget (`CLIENT_REPORT_MAP_CACHE_MB`, default 64; `0` turns it off; an entry larger
+than the budget isn't kept). Concurrent first opens of one payload wait on one build, and an entry is
+served for at most 15 minutes after it was built, so a one-off script that rewrites frozen rows from
+another process is served within that bound. A sweep every minute drops expired entries, asked for
+again or not, so nothing is held much past 16 minutes after it was built (code review P-1: round 1's
+expiry was checked only on a lookup, so an entry nobody asked for again stayed in memory until the
+budget pushed it out or the process restarted). The sweep runs only while the cache holds something
+and is `unref`'d, so it never keeps the process alive. It is never served after a take-down, a
+deletion, a map switched off or a question taken off, because those reads are refused before the
+cache is asked, or ask for a different key. `CLIENT_REPORT_MAP_CACHE_TTL_MS` (15 minutes) and
+`CLIENT_REPORT_MAP_CACHE_SWEEP_MS` (60 seconds) shorten both times for tests. The response carries `Vary: Accept-Encoding`, the ETag Express would have given the
+JSON (and its `304`), and `Content-Encoding: gzip` only when the request accepts it (the compression
+middleware leaves an encoded body alone); otherwise the same JSON is sent decoded. Every header the
+route set stays (`Cache-Control: no-store` and `X-Robots-Tag` on the public routes). Every read still
+passes the link's access middleware (`loadShare`, `requireShareAccess`, `loadReport`) or the admin
+route's org and role checks, then `checkMapRequest`, before the cache is asked, so a cached payload is
+served only after the same checks as a fresh one. The `…/map/doors` lookups are not cached.
+
+The client filters and counts over the arrays in the browser
+([reportMapData.js](../client/src/lib/reportMapData.js)), draws doors as zoom-aware circles (doors at
+one coordinate are one spot, never merged with a neighbour), and pages a spot's doors 200 at a time.
+The admin preview reads the same payload through `/admin/client-reports/:id/preview/map`,
+`/preview/map/doors` and `/preview/areas`.
+
+## K. Share links
+
+**Tokens and passwords.** `newShareToken()` is 24 random bytes, base64url. Every new link gets a bcrypt
+password: the operator's (at least `SHARE_PASSWORD_MIN` = 12 characters on create and PATCH, `400
+SHARE_PASSWORD_TOO_SHORT`) or a generated 12-character one from a 56-character alphabet without
+look-alike glyphs, returned once as `generatedPassword`. A password can't be removed (`400
+SHARE_PASSWORD_REQUIRED`). `passwordMeetsRule` is set true on every compliant or generated password;
+for an older link it stays `null` until the next successful unlock, which records whether the entered
+password's length meets the rule (`notePasswordRule`, a CAS pinned to the hash it was checked against;
+the password is never stored). The panel flags only `false`.
+
+**Credential version.** `credentialVersion` (missing = 0) is bumped in the same atomic write by a
+password change (a legacy open link's first password included), rotate, renew, disable and the
+revoke-legacy sweep. The share JWT ([tokens.js](../server/src/services/auth/tokens.js)) is `{ kind:
+'share', link, cv, iat, exp }`, where `link` is `shareLinkKey(shareId)`, an HMAC-SHA256 of the link's
+id under the server's secret. A JWT's payload is readable by whoever holds it, so since code review
+round 2 (PRIV-2) it carries no ObjectId (each carried a creation time to the second) and no campaign
+id (a link belongs to one campaign for life). `requireShareAccess` checks `shareTokenNamesLink(payload,
+share)` and requires `(payload.cv ?? 0) === credentialVersionOf(share)`, so any of those signs every
+device out at once. A token issued before PRIV-2 (`{ kind: 'share', shareId, campaignId, cv }`) is
+honoured on exactly the old check until it expires (24 hours, or 30 days with Keep me signed in), so
+nobody signed in is signed out by the deploy; for up to 30 days after it a device signed in earlier
+can still hold one.
+
+**The failure budget (rolling).** `failedUnlockAt` holds the last 24 hours' reservations, at most
+`FAILURE_BUDGET` = 50. Every unlock attempt on a password link first **reserves** a slot
+(`reserveUnlockSlot`): one pipeline `findOneAndUpdate` on `{ _id, token, isActive: true }` drops entries
+older than 24 hours and pushes `{ at: now, id: <random> }` only if fewer than 50 remain. No slot → `429
+SHARE_LOCKED` with **no bcrypt compare**, so however many guesses arrive at once, no link checks more
+than 50 wrong passwords in any 24 hours. The password is compared with the post-image's hash, and a
+token is signed with the post-image's `credentialVersion`. A correct password takes back its own entry
+by id. A wrong one (`recordWrongPassword`) increments `failedUnlocksTotal` and today's `failedByDay`
+(UTC days, last 7 kept), writes a `reportLink.wrongPasswords` History row when a day reaches 10, and,
+when it took the 50th slot, stamps `lockedUntil` (the oldest entry + 24 hours) and `lastLockedAt` in a
+CAS on its own entry (so an Unlock now or rotate that landed mid-compare isn't undone) and writes a
+`reportLink.locked` row. Whether a link is locked now is read from the entries (`lockOf`), never from
+the stored stamp. **A lock never ends a session already open**: `requireShareAccess` doesn't read it.
+
+**What clears what.** Unlock now clears the 24-hour budget only (`CLEARED_BUDGET`: the entries and
+`lockedUntil`). Rotate and Renew also clear the week's `failedByDay`, since the advice to rotate is about
+the address that drew the guesses (`CLEARED_FOR_NEW_ADDRESS`). A password change or disable clears
+neither. `failedUnlocksTotal` is never cleared. The panel's `rotateAdvice` is true on a lock or when
+the last 7 days hold 50 or more.
+
+**Expiry and the one-year life.** `expiresAt` may never pass `lifetimeStart(link) + 365 days`
+(`lifetimeStartAt ?? createdAt`). Create takes `expiresInDays` (the picker offers 30, 90, 180 or 365;
+the API accepts 1-365; default `SHARE_LINK_DEFAULT_DAYS`, 90, which must stay 90 while the Privacy Policy
+says "90 days by default"). **Extend** sets `expiresAt = max(current, min(now + days, lifetime end))`
+inside the write, so it never shortens a link or passes its life; on a link that never expires it sets
+the first expiry and starts the life (`lifetimeStartAt = now`); on an expired link it is `409
+SHARE_NEEDS_RENEW`; a race is `409 SHARE_CHANGED`. **Renew** (expired links only, else `409
+SHARE_NOT_EXPIRED`) is a rotate: a new token, a new life, `expiresAt = now + days`, `cv` bumped, the
+budget and week cleared, the password kept. **Rotate** is a new token, `cv` bumped, budget and week
+cleared, expiry and life unchanged.
+
+**Legacy links** (`isLegacyOpen`: no password or no expiry) keep working. Adding a password also sets
+an expiry (the default life from now) and `lifetimeStartAt`, so the link leaves `isLegacyOpen`. `POST
+/shares/revoke-legacy` (admins only; it is org-wide) is a dry run unless `{ confirm: true }`, then
+disables every active legacy link in the organization and bumps their `cv`.
+
+**Unlock and keep signed in.** `POST /share/:token/unlock { password, remember }` returns a share JWT for
+24 hours, or **30 days** when `remember === true` ("Keep me signed in on this device"). The page keeps
+it in `sessionStorage` (this tab) or, remembered, `localStorage`, one copy only
+([shareAccess.js](../client/src/lib/shareAccess.js)), and drops it on a 401, a 410, or a 404 with
+`SHARE_NOT_FOUND` ([shareSession.js](../client/src/lib/shareSession.js)); a remembered sign-out in one
+tab follows to the others. A legacy open link is unlocked without a password so every read works the
+same way.
+
+**Nothing before the password.** `GET /share/:token` returns `{ requiresPassword }` only. The campaign
+name, organization name and `hasLogo` ride `GET /share/:token/reports`, behind access; the link's label
+is never sent.
+
+**"Last opened"** (`stampLinkAccess`) is stamped only when access is granted (a correct password, a
+valid share token, a legacy open link), at most once a minute per link, never by the password screen
+or a wrong guess.
+
+**Rate limiting.** Beside the per-link budget, the per-IP limiter stays: 10 failed attempts per 15
+minutes per IP + token (`429` with code `rate-limited`).
+
+**Headers and indexing.** Every `/share` response carries `Cache-Control: no-store` and `X-Robots-Tag:
+noindex, nofollow`; the `/r/` HTML gets `X-Robots-Tag: noindex, nofollow` from the SPA fallback in
+[app.js](../server/src/app.js), the only place that HTML is served; the page also injects a robots meta.
+[robots.txt](../client/public/robots.txt) no longer disallows `/r/`: a crawler kept out by robots.txt
+never sees a noindex, and can still list a forwarded link's bare URL. `/api` stays disallowed.
+
+**Billing.** `loadShare` answers `410 SHARE_UNAVAILABLE` when the organization's access is suspended
+or canceled (`shareLinksBlocked`); links survive `past_due`.
+
+## L. Opens
+
+No new collection: counts live on the report in `views`. The report page sends `POST
+/share/:token/reports/:id/opened` (behind `requireShareAccess`) once per report per browser per day,
+marked in `localStorage` under one key per link holding the day and the report ids, so the panel says
+"about". The route answers `204` first. Only afterwards does `recordReportOpen` look at an
+`Authorization: Bearer` session token, which the page sends when this browser is signed in to Doorline
+(`identifyIfSignedIn` on `api()`, which keeps the call out of the session-ended handling).
+`resolveSessionUser` runs `requireAuth`'s checks (ended sessions, password changed, deleted or inactive
+account, expiry, the 90-day cap) without responding or stamping last-seen; resolveSessionUser.int.test.js
+runs both over the same token matrix. A super admin counts under `members.staff`; an active member of
+the link's organization under `members.admins`, `members.leads` or `members.others` by role (a lead
+who is the client shows under leads); anyone else, including an ended or stale session or another
+organization's member, under the link. It never grants or refuses anything. The write is one pipeline
+update with `$min`/`$max` dates and null-safe counters, with timestamps off. No IP address, no device.
+It no longer touches the report's old `viewCount` and `lastViewedAt` (code review ADMINUX-12): they are
+frozen at what they were before per-link counts, so the panel's "N views before per-link counts"
+(`linkState.js`) is a before-the-upgrade number.
+
+## M. History
+
+Rows ride `CampaignChange` with `source: 'client_report'`
+([clientReportHistory.js](../server/src/services/reports/clientReportHistory.js)):
+
+- `clientReport.created | published | edited | numbersRefreshed | refreshDiscarded | takenDown |
+  putBackUp | deleted | remapped` (with `clientReportId`, `seriesId` and `periodLabel`: other rows name
+  the report's period, never its title);
+- `clientReportSeries.created | renamed | crewsChanged | ended | continued` (`continued` since code
+  review round 2, WALK-3: written when a PATCH ends an ended team's `endedAt`, holding `{ label,
+  coordinatorIds }` in `toValue`, the team's name and its coordinators' user ids, like the created and
+  crews-changed rows; the ended and crews-changed rows now carry `label` in `toValue` too);
+- `reportLink.created | passwordChanged | rotated | renewed | extended | disabled | enabled |
+  wrongPasswords | locked | unlocked | deleted` (with `shareLinkId`; never the URL token, a password or
+  its hash, and no IP or user agent; values are filtered once more for any key that looks like a
+  credential).
+
+An `edited` row (published reports only) keeps only the **earlier** text, in `fromValue`, taken from
+the write's own pre-image; `toValue` stays null because the current text lives on the report, so each
+version is kept in exactly one row. `numbersRefreshed` keeps the before-and-after totals. A `deleted`
+row is written by `DELETE /:id` and, since code review round 1 (STATE-3), once for each draft that
+ending a team with `deleteOpenDrafts` actually deletes (§H).
+
+**Kept out of the general feed.** `GET /admin/campaigns/:campaignId/history` adds `source: { $ne:
+'client_report' }` by default, so the web campaign History and the phone (which calls it unfiltered)
+see what they saw before, 200-row cap included. With `?include=client_reports` it returns only these
+rows, newest first, capped at 200, with the actor's and eraser's names. Web labels are in
+[campaignHistory.js](../client/src/lib/campaignHistory.js): a report row's subject is its period and
+its tab, read from the campaign's series list by the row's `seriesId` (`reportRowName`: "Oct 13 – Oct
+19, 2026 · Paid team report"; the period alone with no tab), and a team row's is the `label` it was
+written with, else the team's current name, else "A team" (WALK-3).
+
+**Restore** (`POST /admin/campaigns/:campaignId/history/:rowId/restore`, anyone who manages the
+campaign) applies an `edited` row's earlier text as a normal edit: it reads the report's `eraseEpoch`
+first and the row after, and the write requires the epoch unchanged, so an Erase landing mid-restore
+wins (`409 HISTORY_ERASED`). **Erase** (admins: `POST …/history/:rowId/erase`, or `POST …/history/erase
+{ clientReportId }` for every edit row of a report, beyond the drawer's page and after the report is
+deleted) sets `fromValue: null`, `erasedAt`, `erasedBy`, then bumps `eraseEpoch`. `dryRun` returns the
+row count, whether the text is the report's current text (Erase never touches the report itself), and
+the later drafts Next copied it into, by period; `alsoDrafts` removes those sections there and resets
+their `copiedNotesReviewed`. Other codes: `400 INVALID_ID`, `404 HISTORY_NOT_FOUND`, `400
+NOT_RESTORABLE`, `400 NOT_ERASABLE`.
+
+Leads read this history on their campaigns, and a lead can be the client, so it is customer-facing
+([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 38(g)).
+
+## N. Branding
+
+**In the browser** ([logoImage.js](../client/src/components/clientReports/logoImage.js)): the chosen
+image (PNG, JPEG or SVG; an SVG is sized from its attributes or `viewBox`) is drawn onto a canvas no
+larger than 800 × 320 and exported as PNG, shrinking until it fits 256 KB; a canvas `SecurityError`
+shows a plain message.
+
+**On the server** ([png.js](../server/src/services/branding/png.js)): PNG only (`400 LOGO_NOT_PNG`),
+checked strictly (`400 LOGO_INVALID`): the signature; exactly one `IHDR`, first, 13 bytes; every chunk's
+CRC; 1 to 2,000 pixels a side and at most 4 megapixels; bit depth 8; colour type 2 or 6; compression,
+filter and interlace bytes 0; one run of `IDAT`s inflating, bounded by `maxOutputLength`, to exactly
+`height × (1 + width × bytesPerPixel)` bytes with nothing after the zlib stream; every row's filter
+byte ≤ 4; `tRNS` only on colour type 2, 6 bytes, before the image data; `PLTE` and ancillary chunks
+dropped, an unknown critical chunk refused; nothing after `IEND`. It then **writes a fresh PNG** from
+the validated fields (`IHDR`, `tRNS` for type 2 when present, one `IDAT` of its own deflate, `IEND`), so
+none of the uploaded chunk bytes is stored; over 256 KB after re-encoding is `413 LOGO_TOO_LARGE`.
+Both zlib steps are asynchronous, on libuv's threadpool, never on the event loop, and the re-encode
+deflates at level 6 (code review SEC-2): this runs inside `PUT /admin/branding/logo` on the one web
+dyno every customer shares, and a crafted 255 KB upload (2,000 × 2,000, low-entropy rows) held the loop
+about 4 seconds in a level-9 `deflateSync`, so six at once stalled every other request for 16 seconds.
+The inflate keeps its exact `maxOutputLength` bound. One behaviour change follows: the 256 KB limit is
+checked on the fresh level-6 PNG, so an upload whose own compression was tighter than level 6 can now be
+refused with `LOGO_TOO_LARGE`.
+multer memory storage with `{ fileSize: 256 KB, files: 1, fields: 0 }`; a multer refusal is `413
+LOGO_TOO_LARGE` or `413 LOGO_UPLOAD_REFUSED`; no file is `400 LOGO_REQUIRED`. Saved by an upsert on
+`organizationId` (a racing insert retries as an update).
+
+**Routes:** `GET /admin/branding` and `GET /admin/branding/logo` (admins and leads), `PUT` and `DELETE
+/admin/branding/logo` (admins). The public `GET /share/:token/logo` is behind `requireShareAccess`
+(`204` when there's none, `no-store`); the page fetches it with `X-Share-Token` and shows a blob URL,
+revoked on unmount. The PDF draws it with jsPDF's `addImage` inside a try/catch, so a bad logo never
+breaks a PDF, and prints "Powered by Doorline" in the footer. The logo is printed at most 150 × 42 pt;
+[reportPdf.js](../client/src/lib/reportPdf.js) first redraws a larger one on a canvas at about 3 pixels
+per printed point (`LOGO_PX_PER_PT`) and embeds it deflated (`'MEDIUM'`), because a 2,000 × 2,000 logo
+embedded raw made a 16 MB PDF (code review PUBUX-2).
+
+## O. Endpoints
+
+**Admin reports**, `/admin/client-reports`, gated `requireOrgRole('admin', 'lead')`, every handler
+scoped to the active organization (the campaign, report or series is loaded in it, or the query filters
+on it) and authorizing the campaign with `canManageCampaign`, which on its own says yes to any org admin
+for any campaign id (§H):
+
+| Endpoint | Does |
+|---|---|
+| `GET /series?campaignId=` | Every series with its current label and crews, the crew picker (free, in a team, past in a team), former crews, canvassers with no crew, `teamsReady` |
+| `POST /series` | New team `{ campaignId, label, coordinatorIds }` |
+| `PATCH /series/:seriesId` | `{ label?, confirmLabel?, coordinatorIds?, keepPast?, removePast?, makeCurrent?, end?, continue?, deleteOpenDrafts? }` |
+| `GET /series/:seriesId/team-changed?reportId=` | The team-changed card's data, counted against that report (optional; §H) |
+| `GET /series/affected?campaignId=&coordinatorIds=` | The campaign's active teams with a report whose crews (current or past) include those coordinators, as `{ teams: [{ seriesId, label }] }`: labels only. The coordinator-change confirm on the Team tab ([CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx)) names them: "This also changes the numbers in the Paid team client report." |
+| `POST /` | Create a draft `{ campaignId, weekStart, weekEnd, title?, seriesId?, effortId?, teamSeriesId?, seriesLabel?, confirmLabel? }` and claim its first build: `201 { report, build }` |
+| `GET /?campaignId=&seriesId=` | The list (no breakdowns, no build result), with each row's series key, current series label, `campaignType` (null on a report from before the field), build view, views and dates |
+| `GET /:id` | The report, campaign and org names, current series label, scoped `openMockFlags`, the build (with `live` and `queuePosition`), `checks` (*Before you publish*) and `liveInputs: { showMap, mapMode, areaSize, mapKeys, questionDeps }`, what the live snapshot was built with as the server reads it (`mapContextFor`, so a legacy published report's comes through every survey its answers can have come from; code review contract C4). The builder's question table, map ticks, Refresh dialog and preview map follow it instead of guessing from the stored settings |
+| `PATCH /:id` | Edit (§F), with optional `ifStatus` (`409 STATUS_CHANGED` on a mismatch) and `ifEditVersion` (`409 CHANGED_ELSEWHERE` with `{ editVersion, report }` on a mismatch; contract C8) |
+| `POST /:id/recompute` · `POST /:id/refresh` | Claim a build: `202 { build }` |
+| `GET /:id/build` | Status, progress, why it waits, its error, its place in the queue; a ready refresh's `result` (with `mapKeys`, what the map will carry once applied) and a top-level `areaWithoutAnswers` (a ready refresh's, or a switch to areas that just finished) |
+| `POST /:id/refresh/apply` · `/refresh/discard` | `{ snapshotId }` of the reviewed result |
+| `POST /:id/build/cancel` | Cancel a live build |
+| `POST /:id/publish` | `{ snapshotId, editVersion }` previewed |
+| `POST /:id/take-down` (alias `/unpublish`) · `/put-back-up` | |
+| `GET /:id/preview` · `POST /:id/preview` | The client payload; POST overlays the on-screen settings; plus internal `provenance` |
+| `GET /:id/preview/map` · `/preview/map/doors` · `/preview/areas` | The live snapshot's map, as the client reads it |
+| `POST /:id/next` | The next period's draft, idempotent |
+| `DELETE /:id` | Delete; `?eraseHistory=1` (admins) erases its earlier text |
+
+**Admin links**, `/admin/client-reports/shares`, the same gate:
+
+| Endpoint | Does |
+|---|---|
+| `GET /?campaignId=` | Rows: token, label, password and expiry flags, `lifetimeEndsAt`, `passwordMeetsRule`, `lock`, `failures { last24h, since, last7d, total }`, `rotateAdvice`, `lastAccessedAt`. Never the password or its hash. |
+| `POST /` | `{ campaignId, label?, password?, expiresInDays? }`; `generatedPassword` once when generated |
+| `PATCH /:id` | `{ label?, password?, isActive? }` |
+| `POST /:id/extend` · `/renew` | `{ expiresInDays }` |
+| `POST /:id/rotate` · `/unlock` | |
+| `DELETE /:id` | |
+| `POST /revoke-legacy` | Admins only; dry run unless `{ confirm: true }` |
+
+**Branding** and **History**: §N and §M.
+
+**Public**, `/share`, no login:
+
+| Endpoint | Does |
+|---|---|
+| `GET /:token` | `{ requiresPassword }` |
+| `POST /:token/unlock` | `{ password, remember }` → `{ accessToken }` (rate-limited per IP + token, budgeted per link) |
+| `GET /:token/reports` | `{ campaignName, orgName, hasLogo, reports }`: published, not taken down, newest first |
+| `GET /:token/reports/:id` | `{ report, survey }` |
+| `GET /:token/reports/:id/map` · `/map/doors` · `/areas` | §J |
+| `POST /:token/reports/:id/opened` | `204` (§L) |
+| `GET /:token/logo` | PNG, or `204` |
+| `GET /:token/mapbox-token` | The public `pk.` token |
+| anything else | `404 NOT_FOUND` |
+
+All but the first two run `loadShare` then `requireShareAccess` (a valid `X-Share-Token` for this link at
+its current `cv`, else `401 password-required`; legacy open links pass), and report routes `loadReport`
+(the link's campaign, published, not taken down).
+
+## P. Error codes
+
+| Code | Status | Where |
+|---|---|---|
+| `SHARE_NOT_FOUND` | 404 | No active link with that token (public); no link with that id (admin) |
+| `SHARE_EXPIRED` | 410 | Past `expiresAt` |
+| `SHARE_UNAVAILABLE` | 410 | The organization's access is suspended or canceled |
+| `password-required` | 401 | No valid share token for this link and `cv` |
+| `SHARE_PASSWORD_WRONG` · `SHARE_PASSWORD_MISSING` | 401 · 400 | Unlock |
+| `SHARE_LOCKED` · `rate-limited` | 429 | The link's budget is full · the per-IP limiter |
+| `REPORT_NOT_FOUND` | 404 | Taken down, deleted or never published (public); not found (admin) |
+| `INVALID_ID` | 400 | A malformed report id |
+| `MAP_NOT_SHARED` · `MAP_UPDATED` | 404 · 409 | Map readers (§J) |
+| `SNAPSHOT_KEY_REQUIRED`, `ROWS_REQUIRED`, `TOO_MANY_ROWS`, `ROWS_INVALID` | 400 | `…/map/doors` |
+| `NOT_FOUND` | 404 | Any other `/share` path |
+| `SHARE_PASSWORD_TOO_SHORT` · `SHARE_PASSWORD_REQUIRED` | 400 | Admin link create or PATCH |
+| `SHARE_NEEDS_RENEW` · `SHARE_NOT_EXPIRED` · `SHARE_CHANGED` | 409 | Extend an expired link · Renew a live one · a racing change |
+| `TEAM_ATTRIBUTION_NOT_READY` | 400 | Teams without team attribution |
+| `WALK_LIST_LABEL_HAS_NAME` | 400 | Confirmable (`confirmLabel`) |
+| `TEAM_LABEL_HAS_NAME`, `SERIES_LABEL_INVALID`, `SERIES_LABEL_FIXED`, `TEAM_NEEDS_CREW`, `TEAM_CREW_INVALID`, `TEAM_CREW_NOT_RUNNING`, `NOT_A_TEAM` | 400 | Series |
+| `SERIES_ENDED`, `SERIES_NAME_ENDED`, `TEAM_LABEL_TAKEN`, `CREW_IN_OTHER_TEAM`, `SERIES_CHANGED` | 409 | Series |
+| `SERIES_NOT_FOUND` | 404 / 400 | A series id not in the org / not on the campaign |
+| `MAP_ANSWER_KEYS_NOT_CHOICE`, `NO_GOAL_SNAPSHOT`, `GOAL_AFTER_BUILD`, `NEEDS_REFRESH`, `NOT_DRAFT`, `NOT_PUBLISHED`, `MAP_KEYS_NOT_ALLOWED`, `MAP_KEYS_NEED_PARENTS` | 400 | Edit, Recompute, Refresh |
+| `STATUS_CHANGED` | 409 | Edit sent with an `ifStatus` the report no longer has, or a report whose status moved while the edit ran (`{ status, takenDown }`) |
+| `CHANGED_ELSEWHERE` | 409 | Edit sent with an `ifEditVersion` the report no longer has, checked before the write and pinned in it (`{ editVersion, report }`; nothing written) |
+| `REVIEW_PENDING`, `REPORT_BUSY`, `STATUS_CHANGED`, `NOTHING_TO_CANCEL` | 409 | Claims and Cancel |
+| `ALREADY_PUBLISHED`, `RECOMPUTE_NEEDED`, `SNAPSHOT_CHANGED`, `SAVING` | 409 | Publish |
+| `NOTHING_TO_APPLY`, `NOTHING_TO_DISCARD`, `NOT_PUBLISHED` | 409 | Apply, Discard, Take down, Put back up |
+| `NEXT_PERIOD_MISMATCH`, `NOT_LATEST_REPORT`, `NEXT_RACE` | 409 | Next |
+| `HISTORY_NOT_FOUND` · `NOT_RESTORABLE` · `NOT_ERASABLE` · `HISTORY_ERASED` | 404 · 400 · 400 · 409 | History |
+| `LOGO_REQUIRED`, `LOGO_NOT_PNG`, `LOGO_INVALID` · `LOGO_TOO_LARGE`, `LOGO_UPLOAD_REFUSED` | 400 · 413 | Branding |
+
+Build failures carry their own codes on `build.error` (§E).
+
+## Q. Frontend
+
+- **Admin tab:** [ClientReportsPage.jsx](../client/src/pages/ClientReportsPage.jsx) (`/campaigns/:campaignId/reports`:
+  tabs per series, rows, gap lines between reports of a series, links and branding beside), with
+  [components/clientReports/](../client/src/components/clientReports/): `ReportRow`, `NewReportDialog`,
+  `TeamDialog`, `TeamChangedCard`, `ClientLinksPanel` (+ `linkState.js`: usable, badges, failures line,
+  extend choices, opens line), `BrandingCard` (+ `logoImage.js`), `HistoryDrawer`,
+  `CopyMessageDialog` (+ `copyMessage.js`), `buildState.js` (the build states' words) and `hooks.js`
+  (`useBuildPoll`, shared by the builder and the list rows: every 3 s while queued or running, 15 s
+  while waiting; since code review ADMINUX-7 a `404` or `403` stops it and re-reads the report and the
+  lists, so a deleted report reads "Report not found" instead of "Queued" forever, and any other failure
+  backs off to 6, 12, 24, 48, then 60 s until a poll answers again).
+- **New report and teams:** `defaultPeriod` ([reportDates.js](../client/src/components/clientReports/reportDates.js))
+  suggests the period after the series' last report, the same length; when at least one more whole
+  report-length stretch would stay unreported after that natural next period, it suggests the same
+  length ending yesterday and returns the `skipped` days, which the dialog names ("No report covers
+  Sep 14 – Oct 16 — change the dates to cover it."). An ended team's tab offers "Continue this team"
+  instead of End and Edit team (ADMINUX-10); `NewReportDialog` shows an ended team as "(ended)",
+  keeps Create draft disabled while it is picked and offers Continue the team, and after Continue it
+  reopens on the team with the dates and title kept. `TeamDialog`'s Continue settles a departed lead's past doors in a first PATCH (kept or
+  removed), then sends `{ continue: true, coordinatorIds }` with any rename and the past doors that must
+  leave; on `TEAM_CREW_NOT_RUNNING`, `CREW_IN_OTHER_TEAM`, `TEAM_NEEDS_CREW` or `SERIES_CHANGED` it
+  re-reads the picker. `TeamChangedCard` sends `?reportId=`. Link confirms (`ClientLinksPanel`) offer an
+  expired link only Renew (ADMINUX-8), and the History drawer's Restore confirm branches on
+  `takenDownAt` (ADMINUX-9).
+- **Builder:** [ClientReportBuilderPage.jsx](../client/src/pages/ClientReportBuilderPage.jsx)
+  (`/campaigns/:campaignId/reports/:id`) with `ReportSettings`, `QuestionTable` (+ `questionRules.js`,
+  the server's map rules on screen), `BeforePublish`, `PublishDialog`, `RefreshDialog`, and
+  `autoSave.js` (800 ms targeted PATCHes, a `keepalive` flush on unmount, a `beforeunload` guard while a
+  save is pending or failed, and the three-way merge below). A change that hasn't reached the report is
+  kept in `localStorage` (below) and offered back. Its preview map is the client's `ClientReportMap` with the report's own empty-map line (the
+  period's words, from `deriveReportSections`), keyed on the preview's `mapVersion`, and it reloads the
+  report on a `409 MAP_UPDATED` (new numbers applied, or a switch to areas committed). The question
+  table, map ticks and Refresh dialog read the server's `liveInputs` (§O), falling back to the report's
+  own fields only for an answer without them.
+- **The builder shows one version, and every save is pinned to it** (code review round 1, ADMINUX-1 to
+  ADMINUX-6 and ADMINUX-11; round 2, contract C8):
+  - The screen is seeded only from a copy fetched after the page opened (a placeholder shows until
+    then), so it can't show a cached copy older than the operator's own last save on the way out.
+  - It tracks the `editVersion` it reflects (`screen.current`: the seed's, then each of its own saves),
+    and Publish sends that one. Every PATCH carries `ifEditVersion`: the draft auto-save and the unmount
+    keepalive (`useAutoSave`, `keepalivePatch` in hooks.js) send the screen's; Update sends the open
+    edit's (`editVer`: the version at Edit, or at its last merge); the remap retry sends the version the
+    page shows.
+  - A draft save refused `409 CHANGED_ELSEWHERE` is not a failure: `createAutoSaver` parks, the page
+    puts the returned report in the query cache, and `flush()` (Publish…, Recompute, ‹ All reports)
+    waits for the merge instead of failing. An Update refused the same way (`afterMerge`) is merged and
+    sent again with only the operator's changes ("Picked up changes made elsewhere. {What} changed
+    there first; your update went on top, so both are kept."), or, with nothing left to send, closes
+    ("Your change had already been made there, so there was nothing more to update.").
+  - The report query re-reads on window focus, and every re-read (a save's answer, the tab regaining
+    focus, a refusal) is compared with what the screen was built on. With nothing unsaved, the screen
+    catches up ("Picked up changes made elsewhere. … This screen now shows the latest saved version.").
+    Otherwise it merges three ways, `mergeSettings(base, theirs, mine)` in autoSave.js, then `tidy`
+    (map ticks closed under their dependencies, unless the latest version itself wasn't tidy):
+    - key lists (`visibleQuestionKeys`, `visibleTags`, `mapAnswerKeys`) member by member, `theirs ∪
+      (mine − base) − (base − mine)` (`mergeList`), never a conflict, so a removal made elsewhere
+      stands unless this operator re-adds that very member and Keep mine can never resurrect what they
+      didn't touch;
+    - scalars (`title`, `supportQuestionKey`, `copiedNotesReviewed`, `showMap`, `showGoal`, `mapMode`,
+      `areaSize`): only mine changed, mine; only theirs, theirs; both, differently, a conflict;
+    - observations by section (`mergeSections`; sections have no ids): matched first by identical
+      content (a section moved), then by heading (its text edited), then by text (its heading renamed),
+      in theirs' order; a section either side added is kept (when both add at the same spot, mine go
+      first); a base section I deleted goes; a section both changed differently, or one deleted while
+      the other edited it, is a conflict.
+    With no conflict both sides are kept and only the operator's changes go again ("…your changes are
+    kept on top"). With one, the operator's screen stays as typed, auto-save holds, settings go
+    read-only, Publish… and Update are disabled, leaving asks first, and the banner names only the
+    conflicting items and what Keep mine replaces (`conflictWords`): "You both changed the title and
+    the “North side” section …: Keep mine (it replaces their title “Week 3 final” and their version of
+    “North side”) or Use theirs." Keep mine and Use theirs re-run the merge with `prefer`.
+  - Draft saves also carry `ifStatus: 'draft'`. If someone publishes the draft meanwhile, a pending
+    change goes through the same merge and becomes an unsent edit, kept on the device ("Someone
+    published this report while you were editing…"); with nothing pending the page reads "Published
+    elsewhere".
+  - Refusals that mean the report moved (`REREAD_CODES` in parts.jsx: `SAVING`, `SNAPSHOT_CHANGED`,
+    `ALREADY_PUBLISHED`, `STATUS_CHANGED`, `CHANGED_ELSEWHERE`, `NOTHING_TO_APPLY`,
+    `NOTHING_TO_DISCARD` and the rest of that set, plus any `404`) re-read the report, its build and its
+    preview, and say so instead of "try again".
+  - The first build starts automatically only for a draft first seen with no numbers and an idle
+    build, judged once per report, so a build finishing while the page is open never claims a second.
+  - A report whose `campaignId` isn't the URL's campaign (the sidebar's switcher keeps the rest of the
+    path) redirects to that campaign's Client Reports list.
+  - Retry on a failed or stalled switch to areas is its own request (`remapRetryM`), so an open edit and
+    its device copy survive it.
+  - Publish… flushes until nothing is pending; only a refused save reads "Your latest change didn't
+    save", otherwise "Still saving your latest change".
+- **Kept on this device** (`readUnsent`/`writeUnsent` in hooks.js, one `localStorage` entry per report,
+  `doorline.clientReport.unsentEdit.<id>`: `{ settings, base, version, at }`, so restoring runs the
+  same three-way merge and puts back only the operator's own changes; a newer copy replaces an older
+  one):
+  - **An open edit of a published report** (code review CONCUR-2): written only once the edit has a
+    change, deleted by Update, Cancel edit, Discard it, or undoing every change. **Edit** opens a kept
+    copy ("Your unsent edit is open. From {time}, kept on this device. Update report sends it; Cancel
+    edit throws it away.") instead of wiping it, as round 1's Edit did; Cancel edit with changes
+    confirms first ("Throw away your edit?" / "Nothing you changed reaches your client, and the copy
+    kept on this device is deleted." [Cancel] [Throw it away]).
+  - **A draft change on the way out** (P-3): the saver's `onDetach` writes the copy before the
+    keepalive leaves, so a keepalive refused (published or changed elsewhere meanwhile) comes back:
+    as "A change you made didn't save before you left. From {time}, kept on this device. Restore it or
+    discard it." on a draft (Restore disabled while a change is saving; `restoreDraftCopy` rebases the
+    saver onto it), or as "You have an unsent edit." with **Restore your unsent edit** if the report was
+    published. A copy is cleared on its own once a copy of the report at least as new as the one it was
+    made against shows every change landed (`storedLanded`).
+- **Worth a look** (`PublishedChecks` in BeforePublish.jsx, code review P-2 and WALK-7): on a published
+  report's builder, `checks.areaWithoutAnswers`, `checks.conditionsUnknown` and
+  `checks.earlierReportRefreshed` (with **Refresh numbers**, unless an edit is open), in their published
+  wording; nothing shown when none applies.
+- **Refresh numbers** (`RefreshDialog`): `initialMapPicks` pre-ticks the kept picks while the map is
+  off (a shown choice question, with the questions it depends on, never one that follows a written
+  answer), `refreshMapBody` sends the final list (VERIFY-2), the ready review names the map questions
+  from `result.mapKeys` and lists `areaWithoutAnswers`, and the expanded outcome rows use the client's
+  labels (`contactLabel`, WALK-6). The switch-to-areas confirm names the single-choice map questions
+  that may show no answers by area, and an Update that only switches drops the "right away" sentence
+  (WALK-7, WALK-8). With no usable link, publishing reads "Published — create a link so your client can
+  open it." with **Client links** (WALK-5).
+- **Smaller round-2 changes:** the link row prints `failureLine` whenever a count is above zero, the
+  warning badge only for the last 24 hours on an unlocked, unexpired link (WALK-2); History subjects
+  name the tab and team (`reportRowName`, WALK-3); matched canvasser names show as written (the server
+  returns them so, and `asName`/`quotedNames` in TeamDialog.jsx capitalise an older server's answer,
+  WALK-9).
+- **Known limit.** Closing the tab, or a Back that leaves the app, doesn't save a pending change: the
+  `beforeunload` guard only prompts. (Round 1's other limit, a keepalive refused in the last 800 ms and
+  lost, is closed by the copy above.)
+- **Client pages** (outside `ProtectedRoute` in [App.jsx](../client/src/App.jsx), pinned to the light
+  theme): [PublicReportLayout.jsx](../client/src/components/PublicReportLayout.jsx) (the gate, the
+  logo, Sign out on this device, "Powered by Doorline"), [PublicReportListPage.jsx](../client/src/pages/PublicReportListPage.jsx)
+  (the hub: every whole-campaign report in one tab, a tab per other series, the trend chart),
+  [PublicReportDetailPage.jsx](../client/src/pages/PublicReportDetailPage.jsx) (a report, Older/Newer,
+  the opened ping, the PDF), [shareSession.js](../client/src/lib/shareSession.js) and
+  [shareErrors.js](../client/src/lib/shareErrors.js) (the one error handler and its copy). The detail
+  page re-reads the report on window focus and when revisited after a minute, and passes
+  `visibility.mapVersion` to the map (code review PUBUX-1), so new numbers, pins switched to areas, a
+  new area size, or a map question added or taken off reload the map at once; a filter or area shade
+  the new payload no longer offers is cleared (`liveFilters`, `liveShade` in reportMapData.js), and the
+  view fits once per extent, so a reader zoomed in keeps the view when the doors didn't move. "This
+  report was just updated — reload." now shows only when a door is tapped before the page re-read the
+  report. A tap that catches several spots reads "N doors near here — zoom in to pick one"; "N doors at
+  one spot" is kept for one spot holding several doors (PUBUX-5).
+- **The map from the keyboard** (`ClientReportMap`, code review WALK-10; the client page and the
+  builder preview): the canvas is focusable (Mapbox's own `tabindex`), and Mapbox's arrow keys and +/−
+  move and zoom it. While it has `:focus-visible` (not after a click) a red ring (`border-brand-600`,
+  24 px) marks the centre; **Enter** opens what a tap inside the ring would (`queryRenderedFeatures` over
+  `CENTRE_MARK_RADIUS` 12 px: the doors of every spot there, "near here" for several) or the area
+  under the centre; **Escape** closes an open card from the map or from inside the card and returns
+  focus to the canvas. The canvas is described by a hint ("Use the arrow keys to move the map, and plus
+  or minus to zoom. Press Enter to show the doors at the centre of the map, and Escape to close them.";
+  areas: "…the area at the centre of the map, and Escape to close it."), and a polite live line says
+  what happened ("Showing the door at the centre of the map. Press Escape to close.", "Showing 3 doors
+  …", "Showing the area at the centre of the map: 64 doors reached. Press Escape to close it.", "No
+  doors at the centre of the map. Move the map with the arrow keys, then press Enter.", "No area at
+  the centre of the map. …", "Closed.").
+- **The area legend matches the map** (WALK-1): hexagons are filled at `AREA_FILL_OPACITY` 0.62 so
+  streets show, and each legend swatch is `seenOver(colour, ground)`, the class colour blended over the
+  map's ground at that opacity (reportMapData.js), the ground read from the basemap's own background at
+  the current zoom; Satellite and Hybrid use a mid-tone stand-in (`#5f625a`), and the fallbacks
+  `#f2f2f2` (light) and `#202124` (dark) are chosen values (`MAP_GROUNDS`). The "No answers to show"
+  hatch is drawn over the same ground. Before, a full-strength swatch made a darker class read like a
+  lighter one.
+- **Shared:** [ClientReportView.jsx](../client/src/components/ClientReportView.jsx), [reportDerive.js](../client/src/lib/reportDerive.js)
+  (`deriveReportSections`, `periodPhrase`, the earlier-totals line, the team note, the dates line, the
+  hub grouping), [ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) with
+  [reportMapData.js](../client/src/lib/reportMapData.js), [reportPdf.js](../client/src/lib/reportPdf.js)
+  (jsPDF, lazy-loaded; every string folded to printable characters through
+  [pdfText.js](../client/src/lib/pdfText.js), which also fixed a dropped en dash; the file named for the
+  campaign, the scope and both dates). Since code review PUBUX-3 long text wraps to the content width
+  (the campaign and organization names, the header line, the dates, the quiet-period line, chart titles
+  and subtitles, options, voter groups, observation headings and the "What these numbers mean" terms),
+  and a question taller than a page keeps its heading and first three rows together (`keepTogether`).
+  The logo is redrawn and compressed (§N). Since code review WALK-11 the PDF's brand colour is the web's
+  red (`PDF_BRAND` `#dc2626`, the light theme's `--brand` and Tailwind's `brand-600`) on Doors knocked,
+  the door-goal bar and any bar without its own colour; it was indigo. In `ClientReportView` the
+  headline cards are a container query: two across, four across only at `lg` (1024 px) **and** when the
+  report section itself is at least 720 px wide (`lg:[@container(min-width:720px)]:grid-cols-4`), so the
+  builder's preview at 1280 px shows two and no card's "(i)" is clipped.
+- **The share map's Not a target voter chip** is gated on presence: offered only when a loaded point
+  carries that status (the public wire carries no campaign settings), pinned by
   [clientReportMapRender.smoke.test.js](../client/src/lib/clientReportMapRender.smoke.test.js).
-- API plumbing: [api/client.js](../client/src/api/client.js) gained a `public: true` option (no user
-  `Authorization`/`X-Org-Id`) and a `shareToken` option (`X-Share-Token`);
-  [lib/shareAccess.js](../client/src/lib/shareAccess.js) stores the unlock token per share in
-  `sessionStorage`.
 
-## Migration & deploy
+## R. Migration, deploy and old documents
 
-There are no client login accounts anymore. [cleanupClientRole.js](../server/src/migrations/cleanupClientRole.js)
-(`npm run migrate:cleanup-client-role -- --apply`, idempotent) deletes the old `role:'client'`
-memberships and unsets any leftover `clientCampaignIds` (the `Membership.role` enum is now
-`admin | lead | canvasser` — the `lead` role arrived after this migration; see [ROLES.md](ROLES.md)).
-Run it with the deploy. No new env vars — `MAPBOX_PUBLIC_TOKEN` and `JWT_SECRET`
-already exist. Mobile is unaffected.
+**The deploy comes before the migration**, and the new code works on every unmigrated document:
+missing fields read through fallbacks (§B), legacy map rows get positions lazily (§J), every new
+query filter tolerates absence (`{ field: null }` matches a missing field), and every counter is
+written with `$ifNull` (since `$inc` on an explicit null throws).
 
-The PDF export adds one client dependency, **`jspdf`** (lazy-loaded into its own chunk) — `npm --prefix
-client install` (the `heroku-postbuild` `install:all` already does this). The `viewCount`/`lastViewedAt`
-fields need **no migration** (`$inc` treats a missing field as 0; schema defaults apply on read) — and
-neither do `effortId`/`effortName` (both default `null` = whole campaign, which is what every existing
-report already is; no new index). Nor does the `not_target` row (2026-10-02): a frozen report without
-the key renders exactly as before, and a draft gains the key on its next recompute (its row hidden
-while the count is 0). `provenance.editedResponses` (2026-10-19) needs no migration either — with the
-2026-10-19 schema fix under *The numbers*, a draft gains both provenance counts on its next recompute.
+**`npm run migrate:client-report-visibility`** ([clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js);
+dry run unless `-- --apply`; proxied in the root `package.json`, so it runs from the Run console).
+Every write selects only what is still missing, so a second run, or one over documents the new code
+wrote between deploy and migration, changes nothing. Steps:
+
+0. Seed `depsEver` on every survey that lacks it, from today's conditions, and `depsEverFromVersion`
+   (the survey's current `version`) where that is missing; a survey edited since the deploy already has
+   both. Then one aggregation over the responses of every campaign with client reports lists each
+   survey with answers given under a version older than its record starts at, as
+   `olderVersionTemplates: [{ templateId, from, versions }]` (renamed from `multiVersionTemplates`,
+   which listed only surveys whose answers spanned two or more versions). Those versions' conditions
+   can't be known; the builder warns (`conditionsUnknown`, §C). Every later step reads an old report's
+   dependencies the way the deployed code does: from every survey its answers can have come from
+   (`legacyTemplatesFor`, once per campaign, after this seeding), failing closed.
+1. List legacy reports whose operator unticked every question (empty used to mean all). By default
+   they keep none; `--keep-legacy-all` first writes their charts' keys, and a dry run with the flag
+   counts steps 3 to 5 as the flag would leave them. Decide before step 4: a published report already
+   through steps 3 to 5 of an earlier `--apply` logs "charts only: its map answers were already
+   discarded", never "KEPT", because the flag brings back its charts but not its map answers (code
+   review LEGACY-3).
+2. Series: one whole-campaign series per campaign and one per walk list with reports, through
+   `ensureSeries`; walk-list labels that contain a canvasser's name are listed, never refused.
+3. Backfill: `editVersion: 0`; `statsComputedAt = publishedAt` on published reports; `snapshotInputs`
+   on legacy reports, exactly what `liveInputs` reads today, frozen: a published report's current
+   settings through every survey, and a legacy **draft**'s nothing-live inputs (no map, no map
+   questions until its first build); legacy rows' `seq` and the report's `extent`.
+4. **Discards information:** each legacy **published** report's `mapAnswerKeys` narrows to what may
+   reach the map. Drafts keep their settings: a draft's first build maps only what its current survey
+   allows.
+5. **Irreversible:** legacy rows of map-off reports (drafts included) are deleted, and answers outside
+   the served map questions are pulled from the rest, so an old draft's rows, never served, keep no
+   answers (the nightly sweep then deletes them, §E).
+6. Links: `credentialVersion: 0`, the budget fields, and `lifetimeStartAt` (= `createdAt`) on links
+   that expire. `passwordMeetsRule` is never written here.
+
+It also lists open drafts with no snapshot (they recompute when opened).
+
+**Deploy steps**, in order (the owner runs them; see [OPERATIONS.md](OPERATIONS.md) → *Release:
+client reports upgrade*):
+
+1. Before committing: `npm run audit:mobile-api` (the history route changed; the phone's response is
+   unchanged).
+2. Deploy server and web from `main`. No OTA, no client-version bump. The web and the worker build the
+   three new collections' indexes at boot; the worker starts the new queue and the nightly sweep.
+3. Heroku dashboard → **More → Run console**: `npm run migrate:build-indexes` (dry run; it should list
+   `ClientReportMapPoint { clientReportId, snapshotId, seq }` and `CampaignChange { campaignId,
+   clientReportId }`), then `npm run migrate:build-indexes -- --apply`.
+4. Same console: `npm run migrate:client-report-visibility` (dry run). Decide on the reports step 1
+   lists and glance at step 2's labels, then `npm run migrate:client-report-visibility -- --apply`
+   (adding `--keep-legacy-all` to keep those charts).
+
+**Config** (all optional; none is needed to deploy): `CLIENT_REPORT_JOB_CONCURRENCY` (2),
+`CLIENT_REPORT_BATCH` (2,000), `CLIENT_REPORT_SWEEP_CRON` (`31 5 * * *`),
+`CLIENT_REPORT_QUEUE_TIMEOUT_MS`, `CLIENT_REPORT_MAP_CACHE_MB` (64; the web process's map payload
+cache budget in megabytes, `0` turns the cache off, §J), `SHARE_LINK_DEFAULT_DAYS` (90; keep it there). Test overrides only,
+left unset in production: `CLIENT_REPORT_WAIT_RETRY_MS` (30 s), `CLIENT_REPORT_BLOCKED_AFTER_MS` (30
+minutes; the `BLOCKED` message's wording assumes it), `CLIENT_REPORT_BEAT_MS` (30 s), and the map
+cache's `CLIENT_REPORT_MAP_CACHE_TTL_MS` (15 minutes) and `CLIENT_REPORT_MAP_CACHE_SWEEP_MS` (60 s).
+`MAPBOX_PUBLIC_TOKEN` and `JWT_SECRET` (which also salts the opaque series keys and the share token's
+link key) already exist.
+
+**Older history.** There are no client login accounts:
+[cleanupClientRole.js](../server/src/migrations/cleanupClientRole.js) removed the old `role:'client'`
+memberships long ago. A report frozen before the `not_target` row (2026-10-02) or before `provenance`
+was stored (fixed 2026-10-19) renders as it always did; their next build fills them in.
+
+## S. Tests
+
+Server (`npm run test:int`): [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js)
+(the audit's defects flipped to assert the fixes, headers, codes),
+[clientReportBuild.int.test.js](../server/test/clientReportBuild.int.test.js) (parity, fence, arrivals,
+liveness, cancel, commit misses, deletion mid-build, changes mid-build, sweep, publish, take down,
+refresh, remap, removals), [clientReportTeamParity.int.test.js](../server/test/clientReportTeamParity.int.test.js),
+[clientReportSeries.int.test.js](../server/test/clientReportSeries.int.test.js),
+[clientReportChecks.int.test.js](../server/test/clientReportChecks.int.test.js),
+[clientReportMigration.int.test.js](../server/test/clientReportMigration.int.test.js) (legacy documents
+through every route, the migration's order and idempotence),
+[clientReportEdits.int.test.js](../server/test/clientReportEdits.int.test.js) (code review round 1:
+`liveInputs` on `GET /:id`, `ifStatus` and `STATUS_CHANGED`, `GOAL_AFTER_BUILD`, a pending Refresh's
+additions surviving an edit, the legacy fallback rule across a survey swap, stale keys, the migration's
+"charts only" verdict),
+[clientReportMapPayload.int.test.js](../server/test/clientReportMapPayload.int.test.js) (the streamed
+pins payload byte-identical to the old build, the cache and its coalescing, gzip only when accepted,
+headers, `mapVersion`),
+[shareLinks.int.test.js](../server/test/shareLinks.int.test.js) (the budget under concurrency, `cv`,
+expiry, renew),
+[clientReportOpens.int.test.js](../server/test/clientReportOpens.int.test.js),
+[resolveSessionUser.int.test.js](../server/test/resolveSessionUser.int.test.js),
+[clientReportBranding.int.test.js](../server/test/clientReportBranding.int.test.js) (good and malformed
+PNGs, the cascade), and [staticPages.int.test.js](../server/test/staticPages.int.test.js) (`X-Robots-Tag`
+on `/r/`).
+
+Client (`npm --prefix client test`): `reportDerivePeriod.test.js`, `reportMapData.test.js`,
+`reportPdf.test.js`, `shareSession.test.js`, `apiIdentify.test.js`, `clientReportsLogic.test.js`,
+`clientReportAutoSave.test.js`, and the render and effects smoke tests
+(`clientReportsRender`, `clientReportBuilderEffects`, `clientReportIntegration`,
+`clientReportRefreshDialog`, `publicReportRender`, `publicReportEffects`, `clientReportMapRender`) in
+[client/src/lib/](../client/src/lib/).

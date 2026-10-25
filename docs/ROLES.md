@@ -50,6 +50,17 @@ Export Center, **look up any voter in the campaign and read their profile** (rea
 notes but edits nothing; the campaign **Voters** tab, see [VOTERS.md](VOTERS.md)), and see all the
 reporting — map, timeline, insights, early voting, and client reports.
 
+**Automatic pause** ([AUDIT.md](AUDIT.md) → *Automatic pause*) follows the same wall. A lead sees and
+**unpauses** a canvasser paused on a campaign they manage — and, since a lead may be the client, that
+includes the client's own rep — but only that campaign's doors: a door the canvasser saved on another
+campaign that day shows as *a door on another campaign*, with no address, result or distance. A lead whose
+canvasser is paused on a campaign they don't manage learns only that much (*Paused for review — an org
+admin can unpause*), because the canvasser can't work the lead's campaign either. Org admins see every
+pause and alone delete a resolved one, fix the doors on Door Outcomes, and open the preview; only a
+billing admin changes the setting and who gets the alert email. **Only canvassers are ever judged or
+paused:** admins and team leads review and unpause, and they are the ones who enter paper results door by
+door, which would otherwise pause them.
+
 ## What a team lead can never do
 
 - **Create, archive, or delete a campaign** — admins shape the campaign list; a lead is handed campaigns.
@@ -131,6 +142,12 @@ reporting — map, timeline, insights, early voting, and client reports.
   campaign takes them out of that campaign too. The app says which campaigns it reaches before you
   confirm, and the lead can reverse it.
 - **Grant the team-lead role** or change anyone's grants — only admins do that.
+- **Remove anyone from the organization, or delete anyone's account.** Both are org-admin actions on
+  the person's profile on the web and the phone: **Remove from org**, and **Delete account** — tucked
+  behind **More options**, with two confirmations — for an account that belongs only to this
+  organization (since 2026-10-24; see [USERS.md](USERS.md) → *Deleting a member's account*). A lead never
+  sees either, and the server refuses them (`ADMIN_ONLY`). Even among admins, **billing access protects
+  its holder**: only an admin who has billing access too can remove or delete someone who has it.
 - **See or touch any campaign they weren't granted** — everything is default-deny; a lead with no
   grants sees an empty console.
 
@@ -235,6 +252,24 @@ temporary password in an internal org goes through the **normal org-admin surfac
 uses (see [USERS.md](USERS.md)). Staff act *as* the internal org's admin, directly; there is nothing to
 build alongside it.
 
+**Deleting a member's account from inside an org** (`/admin/memberships/:userId/deletion-check` and
+`…/account`, 2026-10-24) resolves staff in the same `orgContext` order, inside `reviewOrgDeletion`
+([deleteAccount.js](../server/src/services/users/deleteAccount.js)):
+
+| How the super admin is there | What they can delete | `reason` recorded |
+|---|---|---|
+| As one of the organization's own admins (a membership with role `admin`) | The same as any admin | `org_admin` |
+| As a member in some other role | Nothing — `ADMIN_ONLY`, as a blocker the review shows | — |
+| In an internal org, without a membership | Like any admin | `super_admin` |
+| Under a support grant, support tier | Unused accounts only — a used one is `BREAK_GLASS_REQUIRED` | `super_admin` |
+| Under a support grant, break-glass | Any account the rules allow | `super_admin` |
+
+A grant-holder's call names the account in the support-access log (`addAuditSubjects`), and
+`refuseVendorStaffTarget` still refuses one that targets a staff account (`STAFF_SELF_MINT`). No caller,
+staff included, can delete a staff account here (`STAFF_ACCOUNT`). The platform page
+(`DELETE /super-admin/users/:userId`, break-glass) is unchanged, and is still how staff delete an account
+that belongs to several organizations.
+
 ## Per-surface enforcement (the contract)
 
 **Campaign-nested routers** — `requireCampaignManager` (super/admin/granted-lead): `assignments`,
@@ -247,6 +282,18 @@ directory, a profile that is campaign-scoped for leads and org-wide for admins, 
 **lead read surface for voter records**, read-only by construction since add-note is the router's
 only write; every other profile mutation stays on the admin-only org router. See
 [VOTERS.md](VOTERS.md) §B–C). A lead does everything an admin does inside a granted campaign.
+
+**Automatic pause** — [routes/admin/pacePauses.js](../server/src/routes/admin/pacePauses.js), under
+`requireOrgRole('admin', 'lead')`, every lookup filtered by `organizationId`. `viewerScope`: org admins
+(and super admins) see the org; a lead the campaigns `managedCampaignIds` returns. `GET /` and `GET /:id`
+redact for a lead (`shapeWindowVisit`: another campaign's visit is `{ at, fail, otherCampaign }`, and a
+hop whose other end is hidden keeps only its seconds and verdict), and add `rosterLines` — the one fact
+about another campaign a lead gets, a roster canvasser blocked there. `POST /:id/unpause` follows the
+pause's campaign (403 `FORBIDDEN_ROLE` once the lead no longer manages it). Org admins only: `DELETE /:id`,
+`GET /settings`, `GET /preview`; `PATCH /settings` additionally needs `billingAccess` (or a super admin) —
+403 `billing-access-required`. The live check and the gate judge **canvassers only** (`judgedMember`: role
+`canvasser`, active), and any role change moves the member's restart point (`memberships.js`), so a
+demotion or promotion never carries old fails.
 
 **Correcting a household pin** — the same `canManageCampaign` policy on **both** write paths, one of
 them not campaign-nested: web `PATCH /admin/campaigns/:id/households/:householdId/location` (via the
@@ -349,8 +396,14 @@ rule, and the web pickers offer staff "You" only in an internal org (`useCampaig
     `/responses` returned any account's name, email, phone and last sign-in by id, to admins and leads
     of any org, and let a lead open anyone in their own org.
 - **`client-reports`** ([clientReports.js](../server/src/routes/admin/clientReports.js)) — every handler
-  authorizes on the report/share/campaign's `campaignId` via `manages()`; the list scopes to
-  `managedCampaignIds`.
+  authorizes on the report/series/campaign's `campaignId` via `manages()`; the list scopes to
+  `managedCampaignIds`. Leads keep full control of their campaigns' reports, team series and links
+  (owner ruling 2026-10-23), including the client links in
+  [clientReportShares.js](../server/src/routes/admin/clientReportShares.js) and Restore in the tab's
+  History. Three things are admin-only: the org-wide report logo (`PUT`/`DELETE /admin/branding/logo`,
+  [branding.js](../server/src/routes/admin/branding.js); leads may read it), Erase of an edit's earlier
+  text (`POST /admin/campaigns/:campaignId/history/…/erase`, and `?eraseHistory=1` on a report delete),
+  and the legacy-link sweep below ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
 
 **Org-wide, read-for-leads** — `tags`: role `('admin','lead')` so a lead can `GET` the library (to
 filter by tag), but every mutation (create, edit, merge, delete) carries a per-route
@@ -413,7 +466,20 @@ cliff, live).
 - `GET /:userId/{crews,campaigns,stats,recent-activity}` — read drills allowed for any *visible*
   target (`leadMaySeeTarget`), 403 outside the scope.
 - `POST /`, `PATCH /:userId` (role/grants/billing), `DELETE /:userId` — walled by
-  `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`.
+  `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`. So are the two account-deletion routes added
+  2026-10-24, `GET /:userId/deletion-check` and `DELETE /:userId/account` ([USERS.md](USERS.md) → *The org
+  door*).
+- **The Remove rule.** `DELETE /:userId` (Remove from org) of a membership with `billingAccess` also needs
+  the caller's own billing access: an org admin without it gets `403 BILLING_ACCESS_REQUIRED`, the same
+  protection `BILLING_TARGET` gives against deletion — otherwise Remove followed by re-adding the email
+  would clear the flag. Staff are exempt, and so is a deleted account's row (anyone may tidy a tombstone).
+  Both clients hide Remove and Delete on such a row from a viewer without billing access (the phone gained
+  Remove from org on 2026-10-24).
+- **No org without a live admin.** Remove from org, a demotion (`PATCH /:userId` role or `isActive:false`)
+  and `/deactivate` re-count LIVE admins after their write and undo one that reached zero
+  (`409 LAST_ADMIN`), mirroring the billing backstop. An admin acting on another admin is always one of
+  those left, so only a race (two admins taking each other out from two doors, one of them a deletion) or a
+  staff actor can reach it.
 - The whole matrix is pinned by
   [`test/leadUserManagement.int.test.js`](../server/test/leadUserManagement.int.test.js).
 
@@ -482,7 +548,8 @@ keep profile self-service; the profiles hold column mappings, never voter data.
 
 **Client-report shares — one write is org-shaped, and it is admin-only.** Every share route
 authorizes leads per campaign via `manages()`
-([clientReports.js](../server/src/routes/admin/clientReports.js)) — except
+([clientReportShares.js](../server/src/routes/admin/clientReportShares.js), since 2026-10-24; it was
+part of clientReports.js) — except
 `POST /shares/revoke-legacy`, the org-wide sweep that kills every legacy-open link at once. That is
 an org operator's switch, so since 2026-08-07 it carries a per-route `requireOrgRole('admin')`;
 before that a lead could enumerate and bulk-revoke links on campaigns they held no grant for. Pinned

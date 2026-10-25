@@ -6,7 +6,7 @@ kind: faq
 order: 49
 sourceDoc: WALK_PACKETS.md
 summary: Printed packets never sync back, so a paper day leaves coverage, the map, and reports untouched.
-tags: print, packets, paper, coverage, reports, zero, unknocked
+tags: print, packets, paper, coverage, reports, zero, unknocked, automatic pause
 ---
 
 Because printed packets are **print-only**. Whatever a volunteer writes on the paper stays on the paper — there's no upload, no scan, and no screen for typing it in later.
@@ -25,6 +25,8 @@ No. Billing is a flat rate per campaign per month — it doesn't count knocks, s
 ## Can we type the results in afterward?
 
 Not in bulk. There's no import for paper results and no admin screen for recording a knock on someone else's behalf. If a client needs their paper Saturday to appear in reports, someone has to enter it door by door in the app — realistically, that's a person with a stack of packets and an afternoon.
+
+**Do that typing from a team lead or admin account, never a canvasser's.** If your organization uses automatic pause, a canvasser account saving door after door from one spot can read as doors nobody could have knocked, and its recording pauses. Lead and admin accounts are never paused. Their entries still show in the GPS audit like anyone's — typed at a desk, they read as far from every house — so tell whoever reviews the audit. (A door that's already recorded but missing its survey is a different job: an org admin adds the answers on the Door Outcomes page, as the *Can I add a survey answer after the fact?* article in an org admin's Help Center explains.)
 
 The honest advice: decide **before** the day whether the results need to be in Doorline. If they do, the app is the tool. If they don't, print the packets and accept that the numbers will show the day as untouched.
 

@@ -145,7 +145,10 @@ ones you want:
   afterwards** — that is the deliberate trade for the point above, and it is bounded to the one
   campaign. It is reversible: set the crew back and the numbers return exactly. Every change is
   recorded (who moved whom, on which campaign, from which crew to which, and how much moved), and the
-  console shows you the door count before it commits.
+  console shows you the door count before it commits. When either crew belongs to a client-report
+  team that has reports, the web confirm also says so: "This also changes the numbers in the Paid team
+  client report" (published reports keep their numbers until refreshed; [CLIENT_PORTAL.md](CLIENT_PORTAL.md)
+  → *Team reports*). The phone's member sheet doesn't show that line yet; it needs an app update.
 - **Someone who leaves keeps their doors on their team.** Deactivate them, take them off the campaign,
   remove them from the org, delete their account — their doors stay where they belong. **Losing a
   person never moves a number; only a crew change does.** (This used to be broken: the team was read
@@ -425,7 +428,12 @@ be undone. Until this existed, the only staff route was a command-line script on
 `DELETE /super-admin/organizations/:orgId`: deleting one person should not be easier than deleting
 their whole org. `confirmEmail` is the analogue of that route's `confirmSlug` and is *the same string
 `npm run delete:account` takes*, so this is a one-for-one replacement for the command it retires
-rather than a looser second door. Every blocker is enforced and there is no force flag.
+rather than a looser second door. Every blocker is enforced and there is no force flag. Since
+2026-10-24 its blockers are phrased about the person being deleted (`checkDeletionBlockers(…, { subject:
+'other' })`: "This person is the only admin of …", not the self-deletion "You are…"), the `[user-delete]`
+log line carries ids, never the deleted address, and the response is `{ deletedAt, retentionUntil,
+organizationIds }`. A deletion already under way answers `409 DELETION_IN_PROGRESS` (see *Account
+deletion* below).
 
 `deleteAccount()` gained a real `deletedBy`, and its long-dead `reason` parameter — destructured and
 then never referenced, so both callers passed a value into a void — is now persisted on
@@ -464,11 +472,32 @@ Because the account is shared, some things are global and some are per-org:
 | Team-lead campaign grants | Per-org (`CampaignManager`) | Each org's admin — which campaigns a lead manages |
 | Crew / coordinator | **Per-campaign** (the campaign roster) | An admin, or a team lead on that campaign — points to an admin or team lead in the same org |
 | Active / inactive | Per-org (membership) | Each org's admin — or a lead, for a canvasser on their campaigns (the switch itself is org-wide, disclosed before confirm) |
-| Removed from org | Per-org (membership) | Each org's admin — only removes *their* membership |
+| Removed from org | Per-org (membership) | Each org's admin — only removes *their* membership (a member with billing access only by an admin who has it too, since 2026-10-24) |
+| **Account deleted** | Global (the one account) | The person themselves; an org admin, only when the account belongs to that org alone (see *Deleting a member's account*); Doorline |
 
 The important one: for a person who belongs to **more than one org**, a regular admin **cannot change
 their login email** (that would change how they sign into the *other* orgs). The email field is shown
 **disabled with an explanation** in that case. Only the user themselves or a super-admin can change it.
+
+## Paused for review (automatic pause)
+
+When automatic pause stops a canvasser whose doors came in faster than anyone could knock them
+([AUDIT.md](AUDIT.md) → *Automatic pause*), the people surfaces say so:
+
+- **Users page (web, org admins):** a red **Paused for review** chip beside the person, and in their
+  profile *Paused for review on {campaign} since {time}* with **Review** (the pause on the campaign's
+  Audit page) and **Unpause**, then their past pauses. A team lead unpauses from the Audit page.
+- **Phone:** a *paused* badge on the Users list (after *deleted* and *inactive*, one badge per row), and a
+  red line on their profile that opens the pause.
+- **The Automatic pause card** at the top of the Users page (org admins see it; **billing admins** change
+  it): on or off for the whole organization (on by default; turning it off unpauses everyone at once), and
+  **who gets the email** — *Billing admins (always)*, plus any org admins and team leads you tick (a lead
+  only hears about campaigns they manage, and a lead may be your client). The email names no one; the card
+  shows who last changed it.
+
+**Changing someone's role starts their count over.** Only canvassers are ever judged, and a role change —
+up or down — moves their restart point, so a lead demoted to canvasser can't be paused on doors they
+entered as a lead.
 
 ## When someone leaves
 
@@ -501,9 +530,10 @@ campaign deletes their place on it, and with it the crew field — re-add them t
 to move their doors.
 
 **Their name stays, within limits.** Deactivation, campaign-removal and org-removal all keep the
-person's name on reports. **Self-deletion is the exception**: the account is scrubbed (the App Store
-requires a real delete), but the org's record of the *work* survives, and a snapshot of the identity
-is kept for a **retention window** so an audit can still say who walked which doors. Once that window
+person's name on reports. **Deleting the account is the exception** — whether the person does it or an
+org admin does (see *Deleting a member's account*): the account is scrubbed (the App Store requires a
+real delete), but the org's record of the *work* survives, and a snapshot of the name is kept for a
+**retention window** so an audit can still say who walked which doors. Once that window
 lapses the snapshot is purged and their past work no longer directly identifies them (it stays keyed to
 an internal account id — de-identified, not anonymous) — that is the intended end state, not a bug.
 The snapshot is **name-only**: email and phone die with the account, immediately, on every surface.
@@ -515,7 +545,7 @@ The snapshot is **name-only**: email and phone die with the account, immediately
 | **Deactivate** their account | Their login, in this org. Reversible any time. | Nothing — they keep their books, because you may well switch them back on tomorrow. |
 | **Remove from a campaign** | That campaign only, including their crew there. | Their books and effort-crew places **on that campaign**. Books they hold on *other* campaigns — and their crews there — are untouched. |
 | **Remove from the org** | Everything, in this org. | Their books, crews, campaign places and team-lead grants across **every** campaign in the org. |
-| **Delete the account** (the person does this themselves) | The account, permanently. | Everything they were holding, everywhere. |
+| **Delete the account** (the person themselves, or an org admin) | The account, permanently. | Everything they were holding, everywhere. |
 
 A book can have **several canvassers on it**. Releasing one person leaves everyone else's assignment
 exactly where it was — only the departing person's is handed back. If they were the only one on it,
@@ -525,6 +555,106 @@ the book simply returns to the pool as unassigned, ready to give to somebody els
 > place on the roster and leave the books themselves assigned to them. If that happened to you, run
 > `npm run repair:orphaned-assignments` (dry-run by default; add `--apply` to commit) to hand those
 > books back. It never touches a knock.
+
+## Deleting a member's account
+
+**Org admins can delete a member's account** from the person's profile, on the web and in the phone's
+admin app (since 2026-10-24). Team leads never can. It's for a person who asked to be deleted, or an
+account that shouldn't exist at all: a test account, a duplicate, one made with the wrong email, someone
+hired who never started. **Most of the time, Remove from org is what you want**: it ends their access and
+keeps everything your records need, including their name on reports and on a team.
+
+**It's hard to do by accident.**
+
+1. **It's tucked away.** Open the person's profile, then **More options** at the bottom of the Account
+   section. **Delete account…** is in there, next to a reminder that Remove from org is usually what you
+   want. On the web: **Users → the person → Account → More options**. On the phone: **More → Users → the
+   person** (from a campaign's list, tap **Manage profile ›** first) **→ Account → More options**.
+2. **First confirmation: a review.** It names the person (name, role, email) and spells out what deleting
+   them means, worked out from their own records: how many door results and surveys stay on your
+   reports, which books come back and which stay with the other canvassers on them, whether they lead a
+   crew, and what to do about doors still on their phone. **Continue** or **Cancel**.
+3. **Second confirmation: type their email.** **Delete permanently** stays grey until the email you type
+   matches theirs. Going back a step clears what you typed.
+
+When it can't be deleted, the review lists the reasons instead, each saying what to do (another
+organization → Remove from org; billing access → ask an admin who has it; the only admin → make someone
+else an admin first), and offers only **Close**.
+
+**Which accounts you can delete.** Any account that **belongs only to your organization**:
+
+- **Not your own.** To delete yourself, use Profile → Delete account on the phone.
+- **Not a Doorline staff account.**
+- **Not in any other organization**, active or switched off. The review says so without naming the
+  organization, and points you to Remove from org. An organization they *used to* work for doesn't stop
+  you; it keeps their name on its records for 180 days, the same as yours (below).
+- **People with billing access are protected.** Only an admin who also has billing access can delete
+  them — or remove them from the organization, which any admin could do before. Without billing access,
+  neither option shows on their profile.
+- **Not the only admin, and not the only admin with billing access.**
+- **The demo's app-review logins can't delete anyone.**
+
+**What deleting does, for everyone:**
+
+- **Their login and contact details are erased now:** email, phone, password, and the name on the account
+  itself. They can never sign in again, and nobody can restore the account. Any invite or password link we
+  emailed stops working.
+- They come off every campaign, walk-list crew and team-lead grant. Books only they were on go back to
+  unassigned; shared books stay with the other canvassers on them.
+- Their email address is freed. If they come back, they get a **new** account, and their past work stays
+  with the deleted one.
+- The emails we sent them personally (invites, password resets, added-to notices) no longer show their
+  address in Doorline's send log. Deletion warnings and staff-access notices that went to them as a
+  billing admin keep it, as evidence ([EMAIL.md](EMAIL.md)).
+
+**If they did work here** (door results, surveys, FbTime hours):
+
+- **Nothing on your reports or your bill changes.** Every door result and survey stays.
+- **Doorline keeps their name privately for 180 days**, so it still shows on canvasser reports on the web
+  and the phone, team labels and by-team totals, the GPS audit, and Survey Results downloads and every
+  other export — then they show as **Deleted user**. This holds even if you deactivated them first, and in
+  any organization where they recorded doors or surveys before.
+- **Other screens show "Deleted user" right away:** the rest of the map (the GPS audit's flags on it keep
+  the name), a door's history, survey details and other detail screens. They read the account directly; a
+  separate fix will bring them in line.
+- **If they lead a crew**, those people have no coordinator until you pick one. The team keeps its numbers,
+  and its name for the same 180 days. Remove from org keeps the name, because the account stays — the
+  better choice if you'll keep reporting by that team to a client.
+- **Doors still on their phone.** For any account somebody has used, the review asks you to have them open
+  the app with signal first, so their phone sends everything it's holding, and warns more strongly if
+  their phone sent doors in the last week. Until the phone fix ships after Election Day, anything left on
+  the phone goes up under whoever signs in on it next. A switched-off (deactivated) person's phone can't
+  send anything: whatever it already tried to send while switched off was refused and thrown away. Switch
+  them back on first if the doors it still holds matter (once billing is sorted, if it's paused).
+
+**Their row on the Users list.** If the account was used (they signed in, have anything on your records,
+or ever coordinated a crew), the row stays as **Deleted account**, with who deleted it and when ("Deleted
+Oct 23, 2026 by Alex Kim", "Deleted their own account", "Deleted through Doorline support"). On the web it
+keeps one action, **Remove from org**, which tidies the row away without changing anything on your
+reports. **If nobody used it**, they disappear from your Users list completely. Accounts made before
+mid-May 2026 always keep a **Deleted account** row, because Doorline only started recording sign-ins then.
+
+**Billing paused.** While an organization is read-only (billing paused, ended, or a trial that ran out),
+an admin can still delete an account and switch someone's access off with **Deactivate** or **Remove from
+org**. Turning access back on still waits for billing ([BILLING.md](BILLING.md)).
+
+**Super admins inside an organization** (the web Users page, or the phone's admin Users screen) — it
+depends on how they're there:
+
+| How the super admin is there | What they can delete |
+|---|---|
+| As one of the organization's own admins | The same as any admin. |
+| As a member in some other role | Nothing; the review says why. |
+| In Doorline's own organizations (the demo), without a membership | Like any admin. |
+| Under a support grant, support level | Unused accounts only. |
+| Under a support grant, break-glass | Any account the rules allow. |
+
+Every deletion under a grant is recorded in the support-access log, naming the account. The platform page
+(*Deleting an account from the console*, above) works as before: break-glass only, and it can delete any
+account, including one in several organizations.
+
+How it works: Part 2 → *Account deletion* → *The org door*. The plan, the owner's decisions and the
+review log: [PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md).
 
 ## Deleting your account
 
@@ -536,13 +666,18 @@ is different from *deactivating* someone, which an admin can undo at any time.
 campaign**. Those are the organization's records of work performed, not the person's personal content, so
 deleting an account never changes a campaign's counts, its coverage, or its bill.
 
-**Where their name still shows.** For as long as the retention window below is open, the **leaderboard,
-the Timeline and the canvassers CSV** still show their real name — those three surfaces resolve it from
-the retained snapshot ([`hydrateCanvassers`](../server/src/services/reports/canvasserIdentity.js)), which
-is the whole point of keeping it. **Other surfaces — the map, the GPS audit, the per-canvasser
-drill-downs — read the scrubbed account row and show "Deleted user".** Once the window lapses and the
-snapshot is purged, everything shows "Deleted user" and their past work no longer directly identifies
-them (the records remain keyed to the internal account id).
+**Where their name still shows.** For as long as the retention window below is open, the organization's
+**canvasser reports** (the leaderboard, the Timeline, each canvasser's own page, the canvassers CSV),
+**team labels and by-team totals**, the **GPS audit**, and **Survey Results downloads and every other
+export** still show their real name — they resolve it from the retained snapshot
+([`hydrateCanvassers`](../server/src/services/reports/canvasserIdentity.js)), which is the whole point of
+keeping it. Since 2026-10-24 that covers every organization whose records carry the person: a membership
+in any status (deactivated included), and any organization where they recorded doors or surveys before
+(it used to be only the organizations where they were still active). **Other surfaces — the rest of the
+map (the GPS audit's flags keep the name), a door's history, survey details — read the scrubbed account row
+and show "Deleted user" at once.** Once the
+window lapses and the snapshot is purged, everything shows "Deleted user" and their past work no longer
+directly identifies them (the records remain keyed to the internal account id).
 
 **Their name is kept for a while, on purpose.** Alongside those records we hold their name for **180 days**
 so the organization can still check *who* did which field work — canvassing records include the location
@@ -619,6 +754,10 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   **no migration** is needed. Fields:
   - `acknowledgedAt: Date|null` — `null` = the "added to org" banner is still pending; a timestamp =
     dismissed.
+  - `paceRestartAt: Date|null` — automatic pause's restart point for this member: visits before it never
+    count toward a pause. Moved forward only (`$max`) — on every resolve (unpause, the org turning it off,
+    the console rollback) and on any role change (`routes/admin/memberships.js`). It lives here, not on the
+    pause record, so deleting a resolved pause can't bring old fails back ([AUDIT.md](AUDIT.md) §G.1).
   - `coordinatorId: ObjectId|null` (ref `User`) — **legacy, no longer read.** The crew moved to
     `CampaignAssignment.coordinatorId` (below) when it became per-campaign. Nothing writes it any more
     except the org-departure cleanup, and no surface reads it; it is left on disk deliberately so a
@@ -988,11 +1127,18 @@ campaign removal is safe.
 [CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx) → commit). The panel is **not**
 gated on the member's active state: a deactivated-but-rostered person's crew must stay settable, which is
 what makes the ~1,700 doors sitting in "No team" on a live org — knocked by people since switched off —
-recoverable at all.
+recoverable at all. When doors would move, `CoordinatorConfirm` also asks `GET
+/admin/client-reports/series/affected?campaignId=&coordinatorIds=` (the coordinators the move touches)
+and names the client-report teams it answers, active teams whose current or past crews include them and
+that already have a report: "This also changes the numbers in the Paid team client report(s)." Labels
+only; a failed check just leaves the line out ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §H). The phone's
+member sheet ([MemberSheet.jsx](../mobile/components/MemberSheet.jsx), whose Coordinator dropdown uses the
+same preview and write, [ADMIN_APP.md](ADMIN_APP.md)) doesn't call it yet; that needs an app update.
 [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) renders the read-only **Crews**
 block from `/crews`; [UsersPage.jsx](../client/src/pages/UsersPage.jsx) lost its Coordinator column,
-coordinator filter and add-member coordinator field. **Mobile has no crew-setting surface** — the campaign
-Team screen adds and creates members only.
+coordinator filter and add-member coordinator field. **Mobile** sets a crew from the Users screen's member
+sheet (its Coordinator dropdown, above; the old campaign Team screen, which only added and created
+members, merged into Users).
 
 **Reports ARE team-scoped — but NOT through `baseFilter`.** `?coordinatorId=<id|none>` on
 `/canvasser-timeline`, plus `GET /admin/reports/team-breakdown` (every team at once, with the
@@ -1113,6 +1259,24 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
 - Dismiss → `POST /auth/memberships/:membershipId/acknowledge` (scoped to `userId: req.user._id`), which
   sets `acknowledgedAt`. Web flips `isNew` in `AuthContext`; mobile drops it from state and rewrites the
   cached memberships so it stays gone on cold start.
+
+## Automatic pause on the people surfaces
+
+`Organization.pacePause` holds the org's setting — `enabled` (default `true`), `billingAdmins` (default
+`true`), `alertUserIds` (`default: undefined`, so it isn't written as `[]`), `enabledAt` (stamped only on
+an off → on change), `changedAt`, `changedBy` — always written by **dotted path**, since assigning the
+object would wipe its siblings. `GET /admin/pace-pauses/settings` (org admins) returns it with `live` (the
+`PACE_PAUSE` switch covers the org), `canEdit`, `openPauses`, and `eligible` (active org admins and leads,
+named, with their billing access); `PATCH` needs the admin role **and** `billingAccess` (or a super admin;
+`billingAccess` isn't cleared on demotion, so the role is checked too) and takes `{ enabled?,
+billingAdmins?, alertUserIds? }` under zod `.strict()` — at most 25 ids, each an active admin or lead.
+Web: [PacePauseSettingsCard.jsx](../client/src/components/users/PacePauseSettingsCard.jsx) on
+`UsersPage.jsx` (read-only without billing access), the chip from `GET /admin/pace-pauses?status=paused`
+(blocking pauses only), and
+[PacePauseProfileSection.jsx](../client/src/components/users/PacePauseProfileSection.jsx) in
+`UserProfileModal.jsx` (`?userId=&status=all`; renders nothing for someone never paused). Phone: the
+shared paused list (`mobile/lib/pacePauses.js`) feeds `admin/users.jsx`'s badge and `admin/users/[id].jsx`'s
+line ([ADMIN_APP.md](ADMIN_APP.md)). No change to `GET /admin/memberships`.
 
 ## Client gating
 
@@ -1237,10 +1401,14 @@ without touching the runs' `updatedAt`
 ([scrubFrozenNames.js](../server/src/services/retention/scrubFrozenNames.js); privacy item 32(c), closed
 2026-10-20). The job's log line and the console script report the count (`names off run lines`).
 
-**Guards** (all in [deleteAccount.js](../server/src/services/users/deleteAccount.js), all enforced on the
-*write*, not just the pre-check): `DELETION_LOCKED`, `LAST_SUPER_ADMIN`, `LAST_ADMIN`, `LAST_BILLING_ADMIN`.
+**Guards** (all in [deleteAccount.js](../server/src/services/users/deleteAccount.js)): `DELETION_LOCKED`,
+`LAST_SUPER_ADMIN`, `LAST_ADMIN`, `LAST_BILLING_ADMIN`. The last two are asked twice: by
+`checkDeletionBlockers` before anything is written, and again by a recount of *live* admins and live billing
+admins after the person's memberships go off (step 4 of the model below), which refuses — and switches them
+back on — rather than strand an org. Both counts are of live accounts only (`deletedAt` checked), the same
+definition as [billingGuards.js](../server/src/services/memberships/billingGuards.js).
 The billing one matters most: losing the last `billingAccess` admin means nobody can pay the subscription,
-and the entitlement gate drives the whole org read-only when it lapses — **self-deletion must not be able to
+and the entitlement gate drives the whole org read-only when it lapses — **no deletion, by anyone, may
 financially suspend a customer.**
 
 **The offline queue is a live hazard.** [offlineQueue.js](../mobile/lib/offlineQueue.js) *holds* every 401
@@ -1249,7 +1417,14 @@ the queue forever. The moment the account dies, every unsynced knock 401s with r
 held on a phone whose account can never sign in again: it can only go up under whoever signs in next on
 that phone, and it is real, billable field work.
 `DeleteAccountSheet` therefore **flushes first and refuses to delete while anything is still pending**. Do
-not weaken that.
+not weaken that. **Every other door deletes from somebody else's device**, so nothing can flush the
+person's phone first: for any `used` account the org door's review asks the admin to have them open the
+app with signal (the stronger variant when the profile's `lastActivityAt` is within 7 days), and until
+the phone clean-up ships after Election Day
+([PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md) §E2) a deleted account's
+leftover items still go up under the next sign-in on that phone. A **deactivated**
+person's items are not held but dropped: with no active membership their writes answer `403 ORG_CONTEXT`
+([orgContext.js](../server/src/middleware/orgContext.js)), not a 401, and the queue drops any non-401 4xx.
 
 **Two `required` traps** worth stating, since both fail *silently* the wrong way:
 `passwordHash` cannot be cleared (a `.save()` throws; a `$set: null` slips past the validator and then makes
@@ -1277,6 +1452,207 @@ a deleted canvasser still selectable on the campaign map with her GPS trail reso
 `EffortMember` — so removing someone from an org left them still holding their books: the doors never
 resurfaced as unassigned and the effort readiness rollup still counted them as crew. Both paths now share
 `releaseAssignedWork`.
+
+### The deletion model (every door, since 2026-10-24)
+
+Four doors call one `deleteAccount()`: the person (`DELETE /auth/account`), the platform page
+(`DELETE /super-admin/users/:userId`, break-glass), the CLI (`npm run delete:account`), and the org door
+below. One rule: **one deletion at a time per account; only membership changes before the account dies,
+and those are undone on refusal; everything else afterwards, idempotent, keyed by `userId`, and finished by
+a sweep if a crash interrupts it.** There are no Mongo transactions here, so every step is a conditional
+write or a compensating recount:
+
+1. **Blockers** — `checkDeletionBlockers`, or the org door's `reviewOrgDeletion`, which its route runs
+   first (`reviewed: true`).
+2. **The lock is the pending `DeletedUserRecord`** (`claimDeletionLock`). It is inserted with
+   `$setOnInsert` — `pendingAt`, `pendingToken`, the name (blank for an unused account), `reason`,
+   `deletedBy`, `unusedOrgId`, `touchedMemberships: []`, `finishedAt: null` — or an existing record is
+   claimed only when it is **not finished** and not held by a live attempt (`pendingAt` null, or older than
+   `LOCK_STALE_MS`, 10 minutes), its shape reset. A finished record is never claimable. Anything else
+   answers `409 DELETION_IN_PROGRESS` ("A deletion of this account is already under way. Try again in a few
+   minutes.") on all three routes. A refusal from here on deletes the record only by its own
+   `pendingToken`. Every lock field is declared on the schema: `strictQuery` drops an undeclared path from a
+   filter, which would then match every record.
+3. **The burned password hash**, precomputed (bcrypt), so the window from the last re-check to the gate is
+   a single write.
+4. **Memberships off, one row at a time**, each id written onto the lock's `touchedMemberships` first; then
+   the recount for each org touched — an admin row with no live admin left → `LAST_ADMIN`, a billing-admin
+   row with no live billing admin left → `LAST_BILLING_ADMIN` — and the org door re-asks
+   `OTHER_ORGANIZATION`. A refusal switches those rows back on and releases the lock; two admins deleting
+   each other both refuse rather than strand the org. Any other error between the lock and the gate does
+   the same, so a retry isn't locked out for ten minutes.
+5. **The gate**: one `User.findOneAndUpdate({ _id, deletedAt: null, …(unused ? { lastLoginAt: null } : {}) },
+   { $set: <the scrub> })`. On no match: deleted by something else → `ALREADY_DELETED` (the record is left
+   for the sweep); still live (an unused-account deletion whose target just signed in) → undone,
+   `USAGE_CHANGED`. A gate write that errors but landed is finished at once.
+6. **`finishDeletion(userId)`**, idempotent, which the sweep also calls: `organizationIds` = every org with
+   a membership in **any** status, plus the orgs of the person's own `CanvassActivity` (desk marks,
+   `via: 'bulk'`, excluded — their `userId` is whoever pressed the button) and `SurveyResponse` rows, by
+   `userId`-only aggregates; every membership `isActive: false, billingAccess: false` (an unused account's
+   row in the deleting org deleted outright); `releaseAssignedWork(userId)`; the FbTime links'
+   `fbtimeEmail` nulled; the account's own email-log rows scrubbed ([EMAIL.md](EMAIL.md)); and the record
+   stamped `finishedAt`, with the name from the scrub's pre-image (blank when `unusedOrgId`),
+   `organizationIds`, `deletedAt`, `retentionUntil`, `purgedAt: null`, `reason`/`deletedBy` only on insert,
+   and the lock fields and any legacy `email`/`phone` unset.
+
+The widened `organizationIds` applies to **every** door, self-deletion included: deactivated memberships
+and former organizations whose ledgers carry the person now get the name for the window too (it was only
+the memberships active at deletion).
+
+`reason` is fixed by the lock claim:
+
+| Who deleted | `reason` | Users-list `how` |
+|---|---|---|
+| The person themselves | `self` | `self` — "Deleted their own account" |
+| The CLI | `operator` | `support` — "Deleted through Doorline support" |
+| The platform page; staff under a grant; staff in an internal org without a membership | `super_admin` | `support` |
+| A customer admin, or a staffer acting as this org's own admin member | `org_admin` | `admin` — "Deleted by Alex Kim" |
+
+**The sweep** is `sweepDeletionLocks`: every 15 minutes as the `deletion-lock-sweep` job (at :07, :22,
+:37 and :52, override `DELETION_SWEEP_CRON`; registered in `MAINTENANCE_JOBS`, never `REPEATABLE_JOBS`,
+which stays retention-only for the health banner), and again as the first step of the nightly
+`purge-deleted-identities` run, which records its counts on its `RetentionRun` (`deletionsFinished`,
+`deletionsReleased`, `liveRecordsDeleted`, `legacyRecordsFinished`, `emailRowsRescrubbed`, `skippedLive`;
+failures fold into `failed`). The 15-minute job writes no run of its own. "Deleted" means `deletedAt` is
+set **or** there is no User document. A record pending for more than ten minutes: account deleted →
+`finishDeletion`; still live (the attempt died before the gate) → its `touchedMemberships` switched back
+on and the lock deleted by its token. A record neither pending nor finished predates the lock: on a
+deleted account it is stamped finished (unclaimable for good); on a live one it is deleted, conditioned on
+`{ _id, pendingAt: null, finishedAt: null }` so it can't race a fresh claim. Accounts deleted in the last
+7 days get the email-log scrub again, for mail logged after it ran. The purge itself then **skips, and
+counts (`skippedLive`), any due record whose account isn't deleted**: its FbTime step deletes links and
+must never run for a live account ([OPERATIONS.md](OPERATIONS.md)).
+
+### The org door: an admin deletes a member
+
+```
+GET    /admin/memberships/:userId/deletion-check   requireAdminRole
+DELETE /admin/memberships/:userId/account          requireAdminRole   body { confirmEmail, expectKind }
+```
+
+[memberships.js](../server/src/routes/admin/memberships.js). Guards, in order: `requireAdminRole` (a lead
+gets `403 ADMIN_ONLY`), `ensureOrgScoped`, `isValidObjectId` (400), `refuseVendorStaffTarget` (a
+grant-holder targeting a staff account: `403 STAFF_SELF_MINT`), and `addAuditSubjects(res, 'user', userId)`,
+so a grant-holder's call is logged naming the account. Then **`reviewOrgDeletion`**
+([deleteAccount.js](../server/src/services/users/deleteAccount.js)) — one function for the preflight and
+the DELETE, so the review the admin read and the rule the server enforces are the same code. It throws
+`NOT_A_MEMBER` (404, the identical body for an unknown id and for a member of another org) and
+`ALREADY_DELETED` (409). Otherwise its checks run in this order, the first refusal ends them, and each
+comes back as a **blocker** `{ code, message }` whose message names the remedy (on the preflight, `200`
+with `canDelete: false`):
+
+1. **Who's asking**, in `orgContext`'s order. A super admin with a membership here: an admin one → this
+   org's admin (`reason: org_admin`); any other role → `ADMIN_ONLY`. In an internal org without a
+   membership: allowed (`super_admin`). Under a support grant (`super_admin`): support tier → unused
+   accounts only (`BREAK_GLASS_REQUIRED`); break-glass → any. A non-staff caller with `deletionLocked` (a
+   store review login) → `REVIEW_LOGIN`.
+2. `SELF`, then `STAFF_ACCOUNT` (the target is a super admin).
+3. **`OTHER_ORGANIZATION`**: `Membership.exists({ userId, organizationId: { $ne } })`, **any status**
+   (owner decision 2026-10-24). When it fires the response is that one blocker and nothing else — no name,
+   id or count of the other org, and no `usage`.
+4. **`BILLING_TARGET`**: the target's membership here has `billingAccess` and the caller is a customer
+   admin without it.
+5. `checkDeletionBlockers` restricted to this org and phrased about the person (`DELETION_LOCKED`,
+   `LAST_ADMIN`, `LAST_BILLING_ADMIN`); no blocker carries an `organizationId`.
+
+Otherwise the preflight answers `{ canDelete, blockers, confirmEmail, kind, usage, holding }`:
+
+- **`usage`**, this org only: `signedIn` = `!!lastLoginAt` (`lastSeenAt` stays super-admin-only);
+  `fieldRecordsHere` (this org among the person's own ledger orgs, desk marks excluded — `userId`-only
+  `distinct`s, the org compared in code, so no other org's rows are read); `fbtimeHours`; `crew { people,
+  campaigns }` (roster rows on this org's campaigns whose `coordinatorId` is the person); `wasCoordinator`
+  (a crew now, a `CoordinatorChange` from or to them, or a legacy `Membership.coordinatorId`).
+- **`kind`**: `'unused'` only when the account was created on or after `CLOCKS_RELIABLE_FROM` (2026-05-15,
+  a week after `lastLoginAt` shipped) and every `usage` value is false or zero; otherwise `'used'`.
+- **`holding`**: campaign rosters, active-round books `{ soleHolder, shared }`, effort crews, lead grants,
+  `membershipActive`, `retained: { days }`.
+
+The clients take the door-result count (`doorsKnocked + restricted`), the survey count and the sync line's
+`lastActivityAt` from the profile's existing `GET /:userId/stats`.
+
+**The DELETE**: a blocker → `409 BLOCKED { blockers }`; `confirmEmail` not equal to the account's email
+(trimmed, case-insensitive) → `400 confirm-email-mismatch`; `expectKind` ≠ the review's `kind` →
+`409 USAGE_CHANGED` (both clients go back to the review); then `deleteAccount(userId, { reason, deletedBy,
+org: { organizationId, unused }, reviewed: true })` → `200 { ok, deletedAt, kind, released }`, or its own
+`409 DELETION_IN_PROGRESS`, `ALREADY_DELETED` or `USAGE_CHANGED`. An **unused** account's membership row
+in this org is deleted, so it leaves the Users list; a **used** one stays as a tombstone row. The log line
+is `[user-delete] <actor id> deleted account <id> in org <org id> (<kind>)` — ids, never an address.
+
+**Tombstone rows.** `GET /admin/memberships` gives each deleted account's row `deletion: { at, how, byName }`
+— `null` while there is no record or it is still pending, which reads "Deleted account". `how` comes from
+the record's `reason` (table above; anything else → `unknown`, "Deleted <date>"). `byName` is filled only
+for `how: 'admin'`, and only when that admin has a membership, in any status, in the organization viewing
+the row and a live account of their own — otherwise "Deleted by an admin", so a link that raced the
+deletion into another org never shows that org's admin by name. A deleted row's `user.email` is still the
+tombstone address; neither client displays it. The web keeps **Remove from org** on the row; the phone
+shows only the header and the deletion line, and `MemberSheet` hides temp password, Resend invite, Assign
+and Reactivate.
+
+**Remove from org needs billing access for a billing-access member.** `DELETE /admin/memberships/:userId`
+on a membership with `billingAccess` answers `403 BILLING_ACCESS_REQUIRED` ("Only an admin with billing
+access can remove this person.") to an org admin who lacks billing access. Without it, Remove followed by
+re-adding the same email would quietly clear the flag — the deletion rule's back door. Staff are exempt,
+and so is a **deleted** account's row (anyone may tidy a tombstone, and accounts deleted before this
+shipped never had the flag cleared). The clients hide Remove and Delete on a live billing-access row from
+a viewer without billing access (`isSuperAdmin || activeMembership.billingAccess`).
+
+**No door leaves an org without a live admin.** Remove from org, a demotion (`PATCH /:userId` with a
+non-admin `role` or `isActive:false`) and `/deactivate` re-count LIVE admins after their write and undo
+one that reached zero (`409 LAST_ADMIN`, `LAST_ADMIN_ERROR` in `billingGuards.js`), the same post-write
+backstop billing access has. With account deletion two admins can take each other out from two doors at
+once (one deleting, one removing); a staff actor can no longer remove, demote or switch off an org's only
+admin either.
+
+**No write lands on a deleted account.** Eleven writers used to read `deletedAt` and then write, or never
+check it. Each is now safe one of three ways:
+
+- **Conditional on `deletedAt: null`:** the login and `lastSeenAt` stamps (one helper,
+  [sessionStamps.js](../server/src/services/auth/sessionStamps.js)), `PATCH /auth/me`,
+  `POST /auth/change-password` and `issuePasswordResetToken` (which then returns no link, and every caller
+  skips its email). The two self routes answer `401` reason `deleted` on no match.
+- **Conditional, answering `409 ACCOUNT_DELETED`:** `PATCH /admin/memberships/:userId/user` and
+  `/:userId/password`.
+- **Re-read after the route's LAST write and converge** (`convergeIfDeleted`: the membership back to
+  `isActive: false, billingAccess: false`, the person's `CampaignManager` grants in the org deleted, and the
+  roster row the write added) — never a snapshot restore, which brought back the very admin role and
+  billing flag the deletion had just removed: `PATCH /admin/memberships/:userId` (which also refuses a
+  tombstone up front), `/reactivate`, the crew `/reactivate`, the crew add's inline reactivation and roster
+  upsert, and `createOrgMember`'s link.
+
+**Paused organizations.** The DELETE, Remove from org and both Deactivate doors pass the entitlement gate
+in a read-only org; nothing that turns access back on does ([BILLING.md](BILLING.md) → *The gate*, rule 4).
+
+**Names on the promised screens.** Eight lookups that read the scrubbed account row now go through
+`hydrateCanvassers`, which restores a deleted person's name from the record for **the request's org only**
+(the record's `organizationIds`) and blanks their email: the GPS audit's canvasser and reviewer
+([AUDIT.md](AUDIT.md)); the Coordinator label on the leaderboard and the Timeline
+(`ledgerCoordinatorLabels`, which now takes the org); `/team-breakdown` and `/tag-teams` team names;
+`/canvassers/:userId/summary` and `/responses`; `/voters-by-answer.csv`'s canvasser columns; and the
+canvasser CSV's crew stamp (`crewStampLabel`) — team names through one `teamNamesOf` in
+[reports.js](../server/src/routes/admin/reports.js). `hydrateCanvassers` restores nothing when handed no
+org (fail closed). About 45 other lookups (`.populate()` and plain `User.find`: the map, door history, the
+response detail, the Notes hub…) still print "Deleted user" at once, left for a follow-up. The record is no
+way in: the per-person drills still answer only for people the org, or a lead's campaigns, carries
+(`orgCarriesUser` / `campaignsCarryUser`). Pinned by
+[deletedUserNames.int.test.js](../server/test/deletedUserNames.int.test.js); the deletion itself by
+[orgAccountDeletion.int.test.js](../server/test/orgAccountDeletion.int.test.js).
+
+**Clients.** Web: [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) (**More options**,
+closed on every open; the Escape guard), [DeleteMemberDialog.jsx](../client/src/components/DeleteMemberDialog.jsx)
+(the two steps) and [UsersPage.jsx](../client/src/pages/UsersPage.jsx) (the Deleted pill, the deletion
+line, the page notice), every sentence built in [lib/memberDeletion.js](../client/src/lib/memberDeletion.js).
+Phone: `admin/users/[id].jsx`, [DeleteMemberSheet.jsx](../mobile/components/DeleteMemberSheet.jsx) and
+[MemberSheet.jsx](../mobile/components/MemberSheet.jsx), copy in
+[lib/memberDeletion.js](../mobile/lib/memberDeletion.js) — see [ADMIN_APP.md](ADMIN_APP.md). Both offer
+the option only when `isOrgAdmin` (phone: the admin or super role), not on oneself, a deleted account or a
+staff account, and not on a billing-access member to a viewer without billing access — a display gate; the
+server decides. Both read a failed DELETE the same way (`afterFailedDelete`, `reloadNote`, `goneNotice` —
+held word for word by `client/src/lib/memberDeletion.parity.test.js`): a stale review or a block goes back
+to a reloaded review with the reasons on top; a lost answer (`ALREADY_DELETED`, or `NOT_A_MEMBER` for an
+unused account whose row went with the delete) closes as after a success; no answer reloads the review,
+whose preflight finds out. The web dialog owns its stats subscription (a refetch of unchanged stats once
+left it stuck on "Checking…"), and a synchronous ref keeps a double click or Enter-plus-click from sending
+two DELETEs or closing the dialog mid-delete.
 
 ## Releasing work: `releaseAssignedWork(userId, scope)`
 

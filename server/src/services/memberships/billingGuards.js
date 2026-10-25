@@ -1,4 +1,5 @@
 import { Membership } from '../../models/Membership.js';
+import { User } from '../../models/User.js';
 
 // An org must never lose its LAST billing admin through a console action: the billing-grade
 // notices — support-access grants and the wind-down/dormancy DELETION WARNINGS — go only to
@@ -33,13 +34,28 @@ import { Membership } from '../../models/Membership.js';
 // filter itself (see routes/admin/leadCrew.js's deactivate) so the write cannot land on a doc that
 // stopped matching.
 
+// "Live" admins only: an active admin membership whose ACCOUNT is live too (not deleted, not
+// switched off). A membership can outlive its account — deletion leaves it, deactivated, and a race
+// can briefly revive one — so counting memberships alone could let a deleted account keep an org
+// looking covered. Every count below, and account deletion's own recount, goes through this one
+// definition (services/users/deleteAccount.js).
+const liveAdminCount = async (filter) => {
+  const ids = await Membership.find({ role: 'admin', isActive: true, ...filter }).distinct('userId');
+  if (!ids.length) return 0;
+  return User.countDocuments({ _id: { $in: ids }, isActive: true, deletedAt: null });
+};
+
+// Live admins of an org, and live billing admins: what account deletion re-counts after it has
+// switched the person's memberships off, so neither can reach zero.
+export const countLiveAdmins = (organizationId) => liveAdminCount({ organizationId });
+export const countLiveBillingAdmins = (organizationId) =>
+  liveAdminCount({ organizationId, billingAccess: true });
+
 export async function isLastBillingAdmin(membership) {
   if (!membership?.billingAccess || membership.role !== 'admin' || !membership.isActive) return false;
-  const others = await Membership.countDocuments({
+  const others = await liveAdminCount({
     organizationId: membership.organizationId,
     userId: { $ne: membership.userId },
-    role: 'admin',
-    isActive: true,
     billingAccess: true,
   });
   return others === 0;
@@ -49,13 +65,7 @@ export async function isLastBillingAdmin(membership) {
 // (not "others") because the just-written doc already reflects the strip. Only worth calling after
 // a write that actually stripped a billing admin — an ordinary member edit can't reach zero.
 export async function strandsBilling(organizationId) {
-  const remaining = await Membership.countDocuments({
-    organizationId,
-    role: 'admin',
-    isActive: true,
-    billingAccess: true,
-  });
-  return remaining === 0;
+  return (await countLiveBillingAdmins(organizationId)) === 0;
 }
 
 // Would removing THIS person leave the org with no billing admin? The same question
@@ -63,15 +73,19 @@ export async function strandsBilling(organizationId) {
 // (services/users/deleteAccount.js). Shares the count so the two cannot drift into disagreeing
 // about who is last.
 export async function wouldStrandBilling({ organizationId, userId }) {
-  const others = await Membership.countDocuments({
-    organizationId,
-    userId: { $ne: userId },
-    role: 'admin',
-    isActive: true,
-    billingAccess: true,
-  });
+  const others = await liveAdminCount({ organizationId, userId: { $ne: userId }, billingAccess: true });
   return others === 0;
 }
+
+// The admin twin of the guard below, for the post-write recount the console's access-ending doors run
+// (Remove from org, demotion, Deactivate): with account deletion, two admins can now take each other
+// out from two different doors at once, so every door re-counts LIVE admins after its write and undoes
+// the one that reached zero. No pre-write gate is needed: an admin acting on another admin is always
+// one of the live admins left, so only a race or a staff actor can reach zero.
+export const LAST_ADMIN_ERROR = {
+  error: 'This is the organization’s only admin. Make someone else an admin first.',
+  code: 'LAST_ADMIN',
+};
 
 export const LAST_BILLING_ADMIN_ERROR = {
   error:

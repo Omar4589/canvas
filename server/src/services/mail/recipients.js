@@ -19,6 +19,15 @@ import { Subscription } from '../../models/Subscription.js';
 // the userId, then a second query resolves the User account, which must be active AND not
 // soft-deleted — a membership row can outlive a deactivated/deleted user.
 export async function billingNotifyEmails(organizationId) {
+  return (await billingNotifyRecipients(organizationId)).map((r) => r.email);
+}
+
+// The same billing identities with their accounts: `{ email, userId }` per billing admin, or
+// `{ email, userId: null }` for the Subscription billing contact, who may have no Doorline account. For a
+// sender that writes one email per person with meta.userId (automatic pause, services/audit/pacePause.js),
+// so EmailLog's by-account scrub covers every row it can. De-duplicated by address, lowercased, in the
+// order billingNotifyEmails has always returned.
+export const billingNotifyRecipients = async (organizationId) => {
   const admins = await Membership.find({
     organizationId,
     role: 'admin',
@@ -26,20 +35,28 @@ export async function billingNotifyEmails(organizationId) {
     billingAccess: true,
   }).select('userId').lean();
 
-  let emails = [];
+  let recipients = [];
   if (admins.length) {
     const users = await User.find({
       _id: { $in: admins.map((m) => m.userId) },
       isActive: true,
       deletedAt: null,
     }).select('email').lean();
-    emails = users.map((u) => u.email).filter(Boolean);
+    recipients = users.filter((u) => u.email).map((u) => ({ email: u.email, userId: String(u._id) }));
   }
-  if (!emails.length) {
+  if (!recipients.length) {
     const sub = await Subscription.findOne({ organizationId }).select('billingContact').lean();
     const contact = sub?.billingContact?.email;
-    if (contact) emails = [contact];
+    if (contact) recipients = [{ email: contact, userId: null }];
   }
 
-  return [...new Set(emails.map((e) => String(e).toLowerCase().trim()).filter(Boolean))];
-}
+  const seen = new Set();
+  const out = [];
+  for (const r of recipients) {
+    const email = String(r.email).toLowerCase().trim();
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    out.push({ email, userId: r.userId });
+  }
+  return out;
+};

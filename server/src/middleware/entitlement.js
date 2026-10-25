@@ -5,6 +5,21 @@ import { entitlementFor } from '../services/billing/entitlement.js';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// Writes that END access, allowed in a read-only org too (owner ruling 2026-10-23: deletion stays
+// possible while billing is paused, read as covering switching access off as well). Deleting an
+// account, removing a member, and the two Deactivate doors — the org's and a campaign crew's.
+// Method-and-path exact, anchored at both ends, 24-hex ids only: nothing that turns access back ON
+// (Reactivate, PATCH /:userId, role or billing changes) and no /mobile lookalike rides through.
+// Like the export carve-out, this widens entitlement only; every route still runs its own role and
+// billing guards. See docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md §C5.
+const HEX24 = '[0-9a-fA-F]{24}';
+const ACCESS_ENDING_WRITES = [
+  ['DELETE', new RegExp(`^/api/admin/memberships/${HEX24}/account$`)],
+  ['DELETE', new RegExp(`^/api/admin/memberships/${HEX24}$`)],
+  ['PATCH', new RegExp(`^/api/admin/memberships/${HEX24}/deactivate$`)],
+  ['PATCH', new RegExp(`^/api/admin/campaigns/${HEX24}/crew/${HEX24}/deactivate$`)],
+];
+
 // Mirror orgContext's org resolution without its extra queries: the X-Org-Id
 // header when present (every mobile call and the web api() wrapper send it),
 // else the single-active-membership auto-pick. Null = no org scope resolvable;
@@ -58,13 +73,15 @@ export async function requireEntitlement(req, res, next) {
     // The wind-down (and any read-only state) is a REAL export window — privacy.html
     // ("may export its data during that period"), terms.html §13, DPA §9, and the 402 copy
     // below all promise it. Creating an export job — and its /estimate preview, a read
-    // wearing POST (counts only, no artifact, no data write) — are therefore the ONLY
-    // writes a read-only org may perform: method-and-path exact ×2, nothing else rides
-    // through, and the role/campaign gates on the exports router still apply (this widens
-    // entitlement only, never authorization). Guard-tested in test/exports.int.test.js +
-    // billing.int.test.js; the scope amendment is stamped in docs/PRIVACY_VERIFICATION.md.
+    // wearing POST (counts only, no artifact, no data write) — therefore pass, method-and-path
+    // exact ×2, and the role/campaign gates on the exports router still apply (this widens
+    // entitlement only, never authorization). Since 2026-10-24 the only other writes a read-only
+    // org may perform are the four that END access (ACCESS_ENDING_WRITES above). Guard-tested in
+    // test/exports.int.test.js + billing.int.test.js + orgAccountDeletion.int.test.js; both scope
+    // amendments are stamped in docs/PRIVACY_VERIFICATION.md.
     const fullPath = `${req.baseUrl}${req.path}`.replace(/\/+$/, '');
     if (req.method === 'POST' && /\/admin\/exports(\/estimate)?$/.test(fullPath)) return next();
+    if (ACCESS_ENDING_WRITES.some(([method, re]) => req.method === method && re.test(fullPath))) return next();
 
     const isMobile = `${req.baseUrl}${req.path}`.includes('/mobile');
     const stampedAt = req.body?.timestamp ? Date.parse(req.body.timestamp) : NaN;

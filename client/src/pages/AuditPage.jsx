@@ -17,6 +17,9 @@ import { REASON_META, SEV_RANK } from '../lib/flags.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
+import PausedCanvassers from '../components/audit/PausedCanvassers.jsx';
+import PacePausePanel from '../components/audit/PacePausePanel.jsx';
+import PacePausePreview from '../components/audit/PacePausePreview.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -64,7 +67,9 @@ const FLAG_FLASH_LABEL = { reviewed: 'reviewed', dismissed: 'dismissed', confirm
 // the summary (KPIs + table) is always the full picture, while the reason chips + status +
 // canvasser selection narrow the entries you review. "View on map" jumps to the geographic view.
 export default function AuditPage() {
-  const { campaignId } = useParams();
+  // pauseId: one automatic pause opened from the list or the alert email
+  // (/campaigns/:campaignId/audit/pauses/:pauseId) — read reactively, never seeded once like the filters.
+  const { campaignId, pauseId } = useParams();
   const orgTz = useOrgTimeZone();
   const { isOrgAdmin } = useAuth();
   // Deep link from the dashboard's mock-GPS banner:
@@ -128,6 +133,7 @@ export default function AuditPage() {
   }
 
   const [live, setLive] = useState(true);
+  const [showResolvedPauses, setShowResolvedPauses] = useState(false);
 
   const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
@@ -147,6 +153,7 @@ export default function AuditPage() {
     setScopeMode(false);
     setBulkNote('');
     setLive(true);
+    setShowResolvedPauses(false);
     setDateRange(defaultRange('today', tz));
     rangeTouchedRef.current = false;
   }
@@ -201,6 +208,15 @@ export default function AuditPage() {
     // under the checkboxes. Cache invalidation after a bulk write still refetches.
     ...livePollOptions(live && !selectionArmed, includesToday),
     placeholderData: keepPreviousData,
+  });
+  // Automatic pause (docs/PROPOSAL_PACE_PAUSE.md §G.2): polls on its own whatever the date range — a pause is
+  // about now — and joins the live pill below so the pill can't call it fresh when it isn't.
+  const pausesQ = useQuery({
+    queryKey: ['admin', 'pace-pauses', 'list', campaignId],
+    queryFn: () => api(`/admin/pace-pauses?campaignId=${campaignId}&status=all`),
+    enabled: !!campaignId,
+    retry: false,
+    ...livePollOptions(live, true),
   });
   const data = flagsQ.data || {};
   const summary = data.summary || null;
@@ -358,7 +374,7 @@ export default function AuditPage() {
         <div className="flex flex-wrap items-center gap-3">
           {includesToday && (
             <LiveStatus
-              {...liveStatusProps([flagsQ], { live, onToggle: () => setLive((v) => !v) })}
+              {...liveStatusProps([flagsQ, pausesQ], { live, onToggle: () => setLive((v) => !v) })}
             />
           )}
           {data.tzAbbrev && (
@@ -368,6 +384,17 @@ export default function AuditPage() {
           )}
         </div>
       </div>
+
+      {pauseId && <PacePausePanel key={pauseId} pauseId={pauseId} campaignId={campaignId} tz={tz} />}
+      <PausedCanvassers
+        data={pausesQ.data}
+        tz={tz}
+        campaignId={campaignId}
+        showResolved={showResolvedPauses}
+        onToggleResolved={() => setShowResolvedPauses((v) => !v)}
+        selectedId={pauseId}
+      />
+      {isOrgAdmin && <PacePausePreview campaignId={campaignId} tz={tz} />}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">

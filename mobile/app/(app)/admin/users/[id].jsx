@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,14 +11,31 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
-import { loadCurrentUser } from '../../../../lib/cache';
+import { loadCurrentUser, loadMemberships, loadActiveOrgId } from '../../../../lib/cache';
 import { formatDate, formatRelative as sharedFormatRelative } from '../../../../lib/dates';
 import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../../lib/validators';
+import {
+  DELETED_ACCOUNT_LABEL,
+  accountDeletedText,
+  goneNotice,
+  displayName,
+  deleteAccountBlurb,
+  deletionLine,
+  mayOfferDelete,
+  mayOfferRemove,
+  removeConfirm,
+  touchedByDeletion,
+  viewerHasBillingAccess,
+} from '../../../../lib/memberDeletion';
+import { leaveDeletionNotice } from '../../../../lib/deletionNotice';
+import { usePausedList } from '../../../../lib/pacePauses';
+import { formatInTz } from '../../../../lib/datetime';
 import PasswordInput from '../../../../components/PasswordInput';
+import DeleteMemberSheet from '../../../../components/DeleteMemberSheet';
 import { radius, spacing, ACTION_LABELS } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useConsoleRole } from '../../../../lib/useConsoleRole';
@@ -79,8 +96,23 @@ export default function AdminUserDetail() {
     queryKey: ['admin', 'memberships'],
     queryFn: () => api('/admin/memberships'),
   });
+  // Paused for review (automatic pause, docs/PROPOSAL_PACE_PAUSE.md §G.4): this person's open pause, from the
+  // same list the GPS audit shows — or, for a team lead, the roster line saying they're paused on a campaign the
+  // lead doesn't manage.
+  const pausedQ = usePausedList();
+  const pausedHere = (pausedQ.data?.pauses || []).find((p) => String(p.userId) === String(userId) && p.status === 'paused' && p.blocking);
+  const pausedElsewhere = (pausedQ.data?.rosterLines || []).some((l) => String(l.userId) === String(userId) && l.paused);
 
-  const member = (usersQ.data?.members || []).find((m) => m.user.id === userId);
+  // Set once this person's account is deleted, or they are removed from the org, from here: the
+  // screen pops at once and, until it is gone, keeps drawing them as they were. The refetched list no longer holds an unused account
+  // ("User not found") and turns a used one into a deleted row; neither should flash on the way out.
+  const frozenMemberRef = useRef(null);
+  // One confirm at a time, and the screen leaves once: a double tap could otherwise stack two Remove
+  // confirms on Android, and a second success would pop a second screen, past the Users list.
+  const removeAskingRef = useRef(false);
+  const leftRef = useRef(false);
+  const member =
+    frozenMemberRef.current || (usersQ.data?.members || []).find((m) => m.user.id === userId);
   const user = member
     ? {
         ...member.user,
@@ -216,6 +248,19 @@ export default function AdminUserDetail() {
     onError: (err) => flash('error', err.message),
   });
 
+  // Remove from org (DELETE /admin/memberships/:userId) — the web's action, on the phone too. Every
+  // cache it touches is refreshed here, so even if the screen is gone by the time it answers the
+  // Users list catches up; leaving the profile happens per call (onRemove), once it succeeds.
+  const removeFromOrg = useMutation({
+    mutationFn: () => api(`/admin/memberships/${userId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      // Freeze first: the refresh below must never redraw this screen without the person on it.
+      if (!frozenMemberRef.current && member) frozenMemberRef.current = member;
+      qc.invalidateQueries({ predicate: (q) => touchedByDeletion(q.queryKey) });
+    },
+    onError: (err) => flash('error', err.message),
+  });
+
   // Campaign roster membership — assign this person to campaigns from their own profile.
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
@@ -253,6 +298,36 @@ export default function AdminUserDetail() {
     onError: (err) => flash('error', err.message),
   });
 
+  // Delete account (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md §E1). The viewer's own membership here
+  // decides whether a billing admin's profile offers it: only to a viewer with billing access too.
+  const [viewerMembership, setViewerMembership] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([loadMemberships(), loadActiveOrgId()])
+      .then(([memberships, orgId]) => {
+        if (!alive) return;
+        setViewerMembership(
+          (memberships || []).find((m) => String(m.organizationId) === String(orgId)) || null
+        );
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  // More options folds away whenever the screen is left, so it never greets the next visit open —
+  // except on the way out after a deletion, when the frozen screen shouldn't change as it pops.
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        if (!frozenMemberRef.current) setMoreOpen(false);
+      },
+      []
+    )
+  );
+
   if (usersQ.isLoading || !currentUser) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
@@ -271,6 +346,96 @@ export default function AdminUserDetail() {
         <View style={styles.center}>
           <Text style={styles.errorText}>User not found.</Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  // The person has left this organization (deleted, removed, or found already gone): freeze this
+  // screen on them as they were, leave the Users list its notice, pop back to it, and refresh what
+  // their leaving changed — the list itself, the rosters and crews they came off, the books they
+  // released. Refreshed straight away, not after InteractionManager.runAfterInteractions: React
+  // Native 0.81 ships InteractionManager deprecated and stubbed to a setImmediate, so it never waited
+  // for the pop — the frozen screen is what keeps the person from flashing as it leaves.
+  const leaveProfile = (notice) => {
+    if (leftRef.current) return;
+    leftRef.current = true;
+    frozenMemberRef.current = member;
+    leaveDeletionNotice(notice);
+    setDeleteOpen(false);
+    if (router.canGoBack()) router.back();
+    else router.replace('/(app)/admin/users');
+    qc.invalidateQueries({ predicate: (q) => touchedByDeletion(q.queryKey) });
+  };
+
+  // A display gate only, the web's rule: the server decides (billing access, the last admin).
+  const offerRemove = mayOfferRemove({
+    viewerRole,
+    isSelf,
+    user,
+    billingAccess: !!member.billingAccess,
+    viewerHasBilling: viewerHasBillingAccess(currentUser, viewerMembership),
+  });
+
+  // Cancel first, as every confirm in the app. A refusal (billing access, the last admin) comes back
+  // as the server's words in the feedback strip.
+  const onRemove = () => {
+    if (removeAskingRef.current || removeFromOrg.isPending) return;
+    removeAskingRef.current = true;
+    const answered = () => {
+      removeAskingRef.current = false;
+    };
+    const { title, body } = removeConfirm(user);
+    Alert.alert(
+      title,
+      body,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: answered },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            answered();
+            removeFromOrg.mutate(undefined, {
+              onSuccess: () =>
+                leaveProfile(user.isDeleted ? `${DELETED_ACCOUNT_LABEL} removed.` : goneNotice(displayName(user))),
+            });
+          },
+        },
+      ],
+      { cancelable: true, onDismiss: answered }
+    );
+  };
+
+  // A deleted account whose row stays (a used one) has nothing left to change but its row: the
+  // header, who deleted it, and Remove from org to tidy it away. Never its email, which is the
+  // tombstone address.
+  if (user.isDeleted) {
+    return (
+      <SafeAreaView style={styles.screen} edges={['top']}>
+        <Header onBack={() => router.back()} />
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.headerCard}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials('Deleted', 'account')}</Text>
+            </View>
+            <Text style={styles.headerName}>{DELETED_ACCOUNT_LABEL}</Text>
+            {member.deletion ? (
+              <Text style={styles.headerEmail}>{deletionLine(member.deletion)}</Text>
+            ) : null}
+          </View>
+          {feedback?.type === 'error' ? (
+            <View style={[styles.feedback, { backgroundColor: colors.dangerBg }]} accessibilityLiveRegion="polite">
+              <Text style={{ color: colors.dangerFg }}>{feedback.text}</Text>
+            </View>
+          ) : null}
+          {offerRemove ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionLabel}>Account</Text>
+              <Text style={styles.deleteText}>Remove from org tidies this row away. Nothing on your reports changes.</Text>
+              <RemoveFromOrgButton onPress={onRemove} pending={removeFromOrg.isPending} />
+            </View>
+          ) : null}
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -333,6 +498,26 @@ export default function AdminUserDetail() {
       },
     ]);
   }
+
+  // A display gate only: the server decides who can be deleted (the review says why not).
+  const offerDelete = mayOfferDelete({
+    viewerRole,
+    isSelf,
+    user,
+    billingAccess: !!member.billingAccess,
+    viewerHasBilling: viewerHasBillingAccess(currentUser, viewerMembership),
+  });
+
+  // The account is gone: 'deleted' (this delete, or one whose answer was lost) or 'gone' (no longer
+  // in this organization — the sheet can't tell that from someone else removing them, so the notice
+  // stays neutral). Freeze this screen on the person as they were, leave the Users list its notice,
+  // pop back to it, and refresh what the deletion changed: the list itself, the rosters and crews
+  // they came off, and the books they released. Refreshed straight away, not after
+  // InteractionManager.runAfterInteractions: React Native 0.81 ships InteractionManager deprecated
+  // and stubbed to a setImmediate, so it never waited for the pop — the frozen screen is what keeps
+  // the person from flashing as it leaves.
+  const onAccountDeleted = (outcome) =>
+    leaveProfile(outcome === 'gone' ? goneNotice(displayName(user)) : accountDeletedText(user));
 
   const stats = statsQ.data;
   const activities = activityQ.data?.activities || [];
@@ -443,6 +628,25 @@ export default function AdminUserDetail() {
               Last password login {formatRelative(user.lastLoginAt)}
             </Text>
           </View>
+
+          {pausedHere ? (
+            <Pressable
+              onPress={() => router.push(`/(app)/admin/pause/${pausedHere.id}`)}
+              style={({ pressed }) => [styles.feedback, { backgroundColor: colors.dangerBg, opacity: pressed ? 0.85 : 1 }]}
+              accessibilityRole="button"
+            >
+              <Text style={{ color: colors.dangerFg, fontWeight: '600' }}>
+                Paused for review on {pausedHere.campaignName || 'a campaign'} since{' '}
+                {formatInTz(pausedHere.firedAt, pausedHere.timeZone)} · Review ›
+              </Text>
+            </Pressable>
+          ) : pausedElsewhere ? (
+            <View style={[styles.feedback, { backgroundColor: colors.dangerBg }]}>
+              <Text style={{ color: colors.dangerFg, fontWeight: '600' }}>
+                Paused for review on another campaign — an org admin can unpause.
+              </Text>
+            </View>
+          ) : null}
 
           {/* Profile form — identity edits follow the server's wall: an admin edits anyone; a LEAD
               edits their CANVASSERS (2026-08-09 ruling — same boundary as the temp-password power
@@ -863,13 +1067,78 @@ export default function AdminUserDetail() {
                   {user.isActive ? 'Deactivate' : 'Reactivate'}
                 </Text>
               </Pressable>
+
+              {offerRemove && <RemoveFromOrgButton onPress={onRemove} pending={removeFromOrg.isPending} />}
+
+              {/* Delete account, tucked behind More options so it's hard to reach by accident;
+                  the sheet then asks twice. */}
+              {offerDelete && (
+                <>
+                  <Pressable
+                    onPress={() => setMoreOpen((v) => !v)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: moreOpen }}
+                    hitSlop={8}
+                    style={styles.moreToggle}
+                  >
+                    <Text style={styles.moreToggleText}>More options {moreOpen ? '▾' : '▸'}</Text>
+                  </Pressable>
+                  {moreOpen && (
+                    <View style={styles.deleteBox}>
+                      <Text style={styles.deleteTitle}>Delete account</Text>
+                      <Text style={styles.deleteText}>{deleteAccountBlurb(user)}</Text>
+                      <Pressable
+                        onPress={() => setDeleteOpen(true)}
+                        accessibilityRole="button"
+                        style={[
+                          styles.secondaryBtn,
+                          { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
+                        ]}
+                      >
+                        <Text style={[styles.secondaryBtnText, { color: colors.dangerFg }]}>
+                          Delete account…
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </>
+              )}
             </View>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {deleteOpen ? (
+        <DeleteMemberSheet
+          userId={userId}
+          person={{ firstName: user.firstName, lastName: user.lastName, email: user.email, role: user.role }}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={onAccountDeleted}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
+
+// Remove from org: the danger-outline button the web uses, on the profile and on a deleted row.
+const RemoveFromOrgButton = ({ onPress, pending }) => {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={pending}
+      accessibilityRole="button"
+      accessibilityLabel={pending ? 'Removing from org' : 'Remove from org'}
+      accessibilityState={{ disabled: pending, busy: pending }}
+      style={[styles.secondaryBtn, styles.removeBtn, { borderColor: colors.dangerBorder }, pending && { opacity: 0.6 }]}
+    >
+      <Text style={[styles.secondaryBtnText, { color: colors.danger }]}>
+        {pending ? 'Removing…' : 'Remove from org'}
+      </Text>
+    </Pressable>
+  );
+};
 
 function Header({ onBack }) {
   const styles = useThemedStyles(makeStyles);
@@ -1109,6 +1378,24 @@ function makeStyles(t) {
     borderRadius: radius.md,
     padding: spacing.md,
   },
+  removeBtn: { marginTop: spacing.sm },
+  moreToggle: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  moreToggleText: { color: colors.brand, fontWeight: '700', fontSize: 14 },
+  deleteBox: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  deleteTitle: { ...type.bodyStrong, fontSize: 14 },
+  deleteText: { ...type.caption },
 
   errorText: {
     color: colors.danger,

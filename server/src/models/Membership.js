@@ -34,6 +34,11 @@ const membershipSchema = new mongoose.Schema(
     // bill-payers, not every admin. Default false; the first admin seated at
     // provisioning gets true, and migrateBillingAccess grandfathers existing admins.
     billingAccess: { type: Boolean, default: false },
+    // Automatic pause's restart point (docs/PROPOSAL_PACE_PAUSE.md §B.5): visits saved before it never count
+    // toward a pause again. Moved forward ($max) on every resolve of this member's pause and on any role
+    // change. It lives here, not on the pause record, because a resolved pause can be deleted and deleting
+    // it must never bring the old fails back.
+    paceRestartAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

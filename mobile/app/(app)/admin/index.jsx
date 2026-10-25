@@ -66,7 +66,13 @@ function campaignRowProps(c, isLitDrop) {
   return {
     label: c.name,
     labelLines: 2,
-    badge: (c.openMockFlags || 0) > 0 ? { text: `${c.openMockFlags} mock GPS` } : null,
+    // One badge: canvassers paused for review outrank mock-GPS flags (docs/PROPOSAL_PACE_PAUSE.md §F.5).
+    badge:
+      (c.openPacePauses || 0) > 0
+        ? { text: `${c.openPacePauses} paused` }
+        : (c.openMockFlags || 0) > 0
+          ? { text: `${c.openMockFlags} mock GPS` }
+          : null,
     value: fmt(c.knocks),
     unit: `${isLitDrop ? 'Lit drop' : 'Survey'} · ${fmt(c.households)} households · ${c.knockedPct ?? 0}% knocked`,
     sub: `${primary} · ${fmt(c.activeCanvassers)} canv · ${last} · `,

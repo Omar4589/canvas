@@ -39,9 +39,22 @@ const clientReportMapPointSchema = new mongoose.Schema(
     status: { type: String, default: 'unknocked' },
     // Only the operator-whitelisted survey answers, for client-side map filtering.
     answers: { type: [pointAnswerSchema], default: [] },
+
+    // The snapshot this row belongs to (ClientReport.snapshotId). Readers serve the LIVE snapshot
+    // only. Rows frozen before snapshots existed carry none, and `{ snapshotId: null }` matches the
+    // missing field — so no default: a legacy row must never hydrate as some other snapshot's.
+    snapshotId: { type: mongoose.Schema.Types.ObjectId },
+    // The row's position in the client's compact payload (GET …/map's columnar arrays) and the
+    // handle a tapped door is fetched by (…/map/doors). Legacy rows get their rank by _id, lazily
+    // on the first map read or by the migration — the same order either way.
+    seq: { type: Number },
   },
   { timestamps: false }
 );
+
+// The map readers: the live snapshot's rows in position order, and a tapped door by position.
+// Existing collection, so production builds it with migrate:build-indexes.
+clientReportMapPointSchema.index({ clientReportId: 1, snapshotId: 1, seq: 1 });
 
 export const ClientReportMapPoint = mongoose.model(
   'ClientReportMapPoint',
