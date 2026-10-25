@@ -1050,7 +1050,7 @@ the body; a legacy one-level snapshot converts on the next save. Same row, same 
 | `GET /` | admins: the org; leads: managed campaigns | `?status=paused\|resolved\|all`, `?campaignId`, `?userId` → `{ pauses, rosterLines, enabled, live }`, newest 200. A lead's `rosterLines` name their roster's canvassers blocked on a campaign they don't manage, nothing more. An unmanaged `campaignId` is 403 `FORBIDDEN_ROLE`. |
 | `GET /settings` | org admins | `{ enabled, billingAdmins, alertUserIds, live, changedAt, changedByName, canEdit, eligible, openPauses }` |
 | `PATCH /settings` | org admin with billing access, or super admin | zod `.strict()`, dotted paths only; on → off resolves the org's open pauses; off → on resolves leftovers, then stamps `enabledAt`. Alert recipients: active org admins and leads, at most 25. |
-| `GET /preview` | org admins | `?campaignId&from&to` (1–120 days): every would-be pause on the campaign, each lifted at once; live rows merged with unknocked chunk rows (live wins by `_id`); refuses with 422 `TOO_MANY_ROWS` over `PACE_PREVIEW_ROW_CAP` (250,000) rather than truncating. |
+| `GET /preview` | org admins | `?campaignId&from&to` (1–120 days): every would-be pause on the campaign, each lifted at once; live rows merged with unknocked chunk rows (live wins by `_id`); refuses with 422 `TOO_MANY_ROWS` over `PACE_PREVIEW_ROW_CAP` (150,000; `previewRowCap` in `paceRule.js` — a whole number of at least 1, `1` turns the preview off) rather than truncating. It runs on the web dyno, so its cost is per row: each row's day is worked out once. |
 | `GET /:id` | org admins; leads on its campaign | the facts, the redacted `window`, `summary`, `implausible` (a failing hop of over 200 m at over 100 mph), `medianDistanceFromHouseM`, `dayEntries` (the day re-judged live, marked), `canUnpause`, `canDelete`, `doorOutcomesUrl` (admins only), `mapUrl` |
 | `POST /:id/unpause` | same | 409 `NOT_OPEN` when it isn't open |
 | `DELETE /:id` | org admins | resolved only, 409 `NOT_RESOLVED` |
@@ -1094,3 +1094,8 @@ in-flight lock and before the door-change confirmation; pin fixes (`requireFix: 
   privacy item 39 ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)).
 - **`replaced.history` must stay server-built.** Accepting it from a body would let a client forge or erase
   visits.
+- **Never build an `Intl` formatter per row.** Use `utils/timezone.js` (`zonedDayStr`, `zonedTimeToUtc`,
+  `tzAbbrev`), which share one per pattern and zone. On 2026-10-25 the preview built a new one for every row
+  on every day of a 22-day range — millions — and took the 1 GB web dyno to about 4 GB ([OPERATIONS.md](OPERATIONS.md)
+  → *If the preview takes the web server down*). Group rows by day in one pass, never filter the rows once
+  per day.

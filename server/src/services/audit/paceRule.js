@@ -54,6 +54,24 @@ export const paceConfig = (env = process.env, overrides = {}) => {
   return out;
 };
 
+// The preview's size limit (routes/admin/pacePauses.js), in rows, counted before anything loads. The preview runs
+// on the web dyno beside the phones' traffic: measured after the 2026-10-25 fix, 132,000 rows took 3.3 s and about
+// 430 MB, so the default keeps a 1 GB dyno clear. PACE_PREVIEW_ROW_CAP must be a whole number of at least 1 (1
+// refuses every range — the preview's off switch); anything else is the default, with one warning, so a typo can
+// never lift the limit.
+export const PREVIEW_ROW_CAP_DEFAULT = 150000;
+export const previewRowCap = (env = process.env) => {
+  const raw = env?.PACE_PREVIEW_ROW_CAP;
+  if (raw === undefined || raw === null || raw === '') return PREVIEW_ROW_CAP_DEFAULT;
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 1) return n;
+  if (!warned.has('PACE_PREVIEW_ROW_CAP')) {
+    warned.add('PACE_PREVIEW_ROW_CAP');
+    console.warn(`[pace] PACE_PREVIEW_ROW_CAP=${raw} is not a whole number of at least 1; using ${PREVIEW_ROW_CAP_DEFAULT}`);
+  }
+  return PREVIEW_ROW_CAP_DEFAULT;
+};
+
 // Results a visit is judged on (decisions 4 and 14). Wrong address, No soliciting, Restricted and lit drops
 // are never judged, though they still count as "the last thing saved" for the next door's timing.
 export const JUDGED_RESULTS = new Set(['not_home', 'refused', 'survey_submitted', 'not_target']);

@@ -1180,4 +1180,9 @@ Everything in §B–§I shipped as designed, except:
 - **Help Center.** The canvasser articles leave out that doors saved offline after a pause are still
   accepted, which would teach a way around it; the lead article lists what isn't judged, so the review's
   *Not judged* marks read clearly.
-
+- **After release (2026-10-25): the preview crashed the web dyno.** A 22-day preview of a busy campaign
+  worked out every door's day once per day of the range, with a new date formatter each time; the 1 GB web
+  dyno reached about 4 GB. Fixed by sharing formatters in `utils/timezone.js` and grouping rows by day in one
+  pass (22.9 s and 1,955 MB → 2.4 s and 214 MB on the same data), and the size limit's default dropped to
+  150,000 rows with `PACE_PREVIEW_ROW_CAP` = `1` as the preview's off switch. Details in
+  [OPERATIONS.md](OPERATIONS.md) → *If the preview takes the web server down*.

@@ -373,6 +373,13 @@ Resetting pagination/accumulators in a `useEffect` fires one wasted render+query
 
 ## Misc
 
+- **Date formatters are shared, never built per row** (2026-10-25). Building an `Intl.DateTimeFormat` costs
+  tens of microseconds and ICU memory that is freed only later: 300,000 fresh ones measured 11.5 s and
+  1.4 GB, one shared one 0.24 s and 48 MB. `server/src/utils/timezone.js` keeps one per pattern and zone
+  (bounded, since a zone can come from a query string), so day grouping in reports costs microseconds a
+  row. The automatic-pause preview built millions and crashed the web dyno the day after it shipped
+  ([AUDIT.md](AUDIT.md) §G.9); `server/test/timezone.test.js` pins the sharing. Format through those
+  helpers rather than `new Intl.DateTimeFormat` in a loop.
 - **expo-file-system v19 (SDK 54):** the main entry throws on legacy functions and doesn't export
   `cacheDirectory`/`EncodingType`. Import from **`expo-file-system/legacy`** (`mobile/lib/csv.js`).
   `downloadCsv` also sweeps **stale** `*.csv` files (older than 1h, by `modificationTime`) from the

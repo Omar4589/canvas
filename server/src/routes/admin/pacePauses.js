@@ -21,7 +21,7 @@ import {
   unpause,
   resolveAllOpen,
 } from '../../services/audit/pacePause.js';
-import { paceConfig, entriesOf, visitsOf, judgeVisits, replayPauses, summarize, JUDGED_RESULTS } from '../../services/audit/paceRule.js';
+import { paceConfig, previewRowCap, entriesOf, visitsOf, judgeVisits, replayPauses, summarize, JUDGED_RESULTS } from '../../services/audit/paceRule.js';
 import { PACE_ROW_FIELDS, loadStandingRows, loadFrozenRows, countFrozenRows, mergeRows, loadUnitFacts } from '../../services/audit/paceTimeline.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 
@@ -283,7 +283,8 @@ router.patch('/settings', async (req, res, next) => {
 // once. Org admins only (a preview's windows span campaigns). Rows are counted before anything is loaded
 // and the request refuses rather than truncating — a partial preview would silently hide pauses.
 const PREVIEW_MAX_DAYS = 120;
-const PREVIEW_ROW_CAP = Number(process.env.PACE_PREVIEW_ROW_CAP || 250000);
+// The size limit, in rows (paceRule.js previewRowCap): read once, since saving a config var restarts the dynos.
+const PREVIEW_ROW_CAP = previewRowCap();
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const previewQuerySchema = z.object({ campaignId: z.string(), from: z.string().regex(DAY), to: z.string().regex(DAY) });
 
@@ -342,8 +343,18 @@ router.get('/preview', async (req, res, next) => {
         if (!byDay.has(d)) byDay.set(d, []);
         byDay.get(d).push(v);
       }
+      // Each row's day, worked out once and in the rows' own order (the "Nth door that day" reads it). It was
+      // re-worked for every row on every day of the range — days × rows — which, with a new formatter per
+      // call, took the web dyno past 4 GB on a 22-day preview (2026-10-25).
+      const rowIdsByDay = new Map();
+      for (const r of rows) {
+        const d = zonedDayStr(new Date(r.timestamp), timeZone);
+        if (!byDay.has(d)) continue;
+        if (!rowIdsByDay.has(d)) rowIdsByDay.set(d, []);
+        rowIdsByDay.get(d).push(String(r._id));
+      }
       for (const [day, vs] of byDay) {
-        const dayRows = rows.filter((r) => zonedDayStr(new Date(r.timestamp), timeZone) === day).map((r) => String(r._id));
+        const dayRows = rowIdsByDay.get(day) || [];
         for (const p of replayPauses(vs, config).pauses) {
           if (String(p.trigger.visit.campaignId) !== String(campaign._id)) continue;
           found.push({ userId: String(userId), day, at: new Date(p.trigger.visit.first.at), entry: dayRows.indexOf(p.trigger.visit.standingRowId) + 1 || null, window: p.window, summary: summarize(p.window) });

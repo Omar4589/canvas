@@ -880,9 +880,11 @@ every request; saving it restarts the dynos — no deploy.
 **The rule's numbers** are config vars too, all optional — leave them unset unless you decide to tune, and
 try a change with the replay first (step 4): `PACE_DOOR_SEC` (15), `PACE_SURVEY_SEC` (45),
 `PACE_TRAVEL_MPS` (11.2 m/s = 25 mph), `PACE_WINDOW` (20), `PACE_FAILS_TO_PAUSE` (8), `PACE_SAME_VISIT_SEC`
-(600); and `PACE_ALERT_SEND_GAP_MS` (600, the gap between alert emails) and `PACE_PREVIEW_ROW_CAP`
-(250000, the preview's size limit). A value that isn't a positive number falls back to its default with a
-warning ([AUDIT.md](AUDIT.md) §G.1).
+(600) — a value that isn't a positive number falls back to its default with a warning ([AUDIT.md](AUDIT.md)
+§G.1); `PACE_ALERT_SEND_GAP_MS` (600, the gap between alert emails; `0` sends them back to back); and
+`PACE_PREVIEW_ROW_CAP` (150000, the preview's size limit, in rows) — a whole number of at least 1, else the
+default with a warning, and **`1` switches the preview off** (every range answers *Too many doors for one
+preview — choose a shorter range*).
 
 **To release it, in this order:**
 
@@ -942,6 +944,17 @@ npm run pace:resolve-open -- --apply
 
 The first is a dry run (how many, per organization, no names); the second lifts them all and starts each
 person's count over.
+
+**If the preview takes the web server down** (memory past the dyno's quota, then *App crashed*): set
+`PACE_PREVIEW_ROW_CAP` = `1` in Config Vars. Saving it restarts the dynos, and from then on the preview
+refuses every range instead of loading it. Remove the var once a fix is deployed. That happened once, on
+2026-10-25, the day after the release: a 22-day preview of a busy campaign worked out each door's day once
+for every day of the range, building a new date formatter each time — millions of them — and the 1 GB web
+dyno reached about 4 GB and crashed. The fix shares one formatter per time zone in `utils/timezone.js`
+(every report that groups by day got faster too) and works out each door's day once; the same preview on
+a copy of the data went from 22.9 s and 1,955 MB to 2.4 s and 214 MB, and 132,000 rows now take 3.6 s and
+about 380 MB, which is why the size limit dropped from 250,000 to 150,000. Measured with the real route on
+a throwaway database; the test that pins it is `server/test/timezone.test.js`.
 
 ### Build database indexes (after a deploy that added one)
 
