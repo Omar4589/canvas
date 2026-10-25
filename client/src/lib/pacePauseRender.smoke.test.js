@@ -138,19 +138,6 @@ test('the settings card is read-only for an admin without billing access', async
   assert.match(html, /Only a billing admin can change this\./);
 });
 
-test('the preview lists would-be pauses with the ordinal entry', async () => {
-  const data = {
-    campaign: { timeZone: 'America/Los_Angeles' },
-    pauses: [{ userId: 'u1', name: 'Jody Fastwalker', day: '2026-10-22', at: '2026-10-22T20:10:03Z', entry: 17, summary: { fails: 8, vehicle: 6, still: 1, walking: 1, minMph: 7.3, maxMph: 10.9 }, window: [{ address: '102 Pace St', result: 'refused', at: '2026-10-22T20:01:31Z', fail: true, gapSec: 11 }] }],
-  };
-  const html = await render({
-    entry: (h) =>
-      wrap(h, (x) => `import { PreviewList } from '${join(x, '../components/audit/PacePausePreview.jsx')}';`, `<PreviewList data={${JSON.stringify(data)}} tz="America/Los_Angeles" />`),
-  });
-  assert.match(html, /Jody Fastwalker/);
-  assert.match(html, /would have been paused .*, on their 17th door that day/);
-});
-
 test('the email link page opens for a console member of the org, and refuses anyone else', async () => {
   const ORG = 'aaaaaaaaaaaaaaaaaaaaaaaa';
   const entry = (h) =>

@@ -19,7 +19,6 @@ import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 import PausedCanvassers from '../components/audit/PausedCanvassers.jsx';
 import PacePausePanel from '../components/audit/PacePausePanel.jsx';
-import PacePausePreview from '../components/audit/PacePausePreview.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -394,7 +393,6 @@ export default function AuditPage() {
         onToggleResolved={() => setShowResolvedPauses((v) => !v)}
         selectedId={pauseId}
       />
-      {isOrgAdmin && <PacePausePreview campaignId={campaignId} tz={tz} />}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">

@@ -17,7 +17,7 @@ Each card says when the house pin is approximate (placed by address lookup) or w
 
 Reviewing flags records a decision; it never changes what an entry *says*. When a drilled-in canvasser's entries turn out to need actual correcting, **Correct their entries in Door Outcomes** (org admins, shown while drilled into one canvasser) carries them and this page's date window straight to the Door Outcomes page.
 
-**Paused canvassers.** If your organization uses automatic pause and someone on this campaign is paused for review, a **Paused canvassers** panel sits at the top of the page: who, when, and how many of their doors were faster than possible. **Review** opens the pause — the plain sentence saying what kind of fast it was, the doors behind it, and **Unpause**. Past pauses are under **Show resolved**. Org admins also find **What automatic pause would have done** here: every moment over a date range when it would have paused someone on this campaign, with nobody actually paused. More in [A canvasser was paused for review — what do I do?](a-canvasser-was-paused).
+**Paused canvassers.** If your organization uses automatic pause and someone on this campaign is paused for review, a **Paused canvassers** panel sits at the top of the page: who, when, and how many of their doors were faster than possible. **Review** opens the pause — the plain sentence saying what kind of fast it was, the doors behind it, and **Unpause**. Past pauses are under **Show resolved**. More in [A canvasser was paused for review — what do I do?](a-canvasser-was-paused).
 
 For the full walkthrough, see [The GPS audit](audit).
 

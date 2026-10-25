@@ -56,7 +56,7 @@ includes the client's own rep — but only that campaign's doors: a door the can
 campaign that day shows as *a door on another campaign*, with no address, result or distance. A lead whose
 canvasser is paused on a campaign they don't manage learns only that much (*Paused for review — an org
 admin can unpause*), because the canvasser can't work the lead's campaign either. Org admins see every
-pause and alone delete a resolved one, fix the doors on Door Outcomes, and open the preview; only a
+pause and alone delete a resolved one and fix the doors on Door Outcomes; only a
 billing admin changes the setting and who gets the alert email. **Only canvassers are ever judged or
 paused:** admins and team leads review and unpause, and they are the ones who enter paper results door by
 door, which would otherwise pause them.
@@ -290,7 +290,7 @@ redact for a lead (`shapeWindowVisit`: another campaign's visit is `{ at, fail, 
 hop whose other end is hidden keeps only its seconds and verdict), and add `rosterLines` — the one fact
 about another campaign a lead gets, a roster canvasser blocked there. `POST /:id/unpause` follows the
 pause's campaign (403 `FORBIDDEN_ROLE` once the lead no longer manages it). Org admins only: `DELETE /:id`,
-`GET /settings`, `GET /preview`; `PATCH /settings` additionally needs `billingAccess` (or a super admin) —
+`GET /settings`; `PATCH /settings` additionally needs `billingAccess` (or a super admin) —
 403 `billing-access-required`. The live check and the gate judge **canvassers only** (`judgedMember`: role
 `canvasser`, active), and any role change moves the member's restart point (`memberships.js`), so a
 demotion or promotion never carries old fails.

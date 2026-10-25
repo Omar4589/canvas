@@ -14,8 +14,6 @@ import {
   countsAfter,
   summarize,
   HISTORY_CAP,
-  previewRowCap,
-  PREVIEW_ROW_CAP_DEFAULT,
 } from '../src/services/audit/paceRule.js';
 import { zonedDayStr } from '../src/utils/timezone.js';
 
@@ -410,16 +408,5 @@ test('simulated car cheats are always paused, with fake surveys and with re-save
     for (let i = 0; i < 60; i++) {
       assert.ok(replayPauses(judgeRows(carDay(rand, opts))).pauses.length > 0, `${JSON.stringify(opts)} day ${i}`);
     }
-  }
-});
-
-test('the preview size limit: a whole number of at least 1, else the default — a typo never lifts it', () => {
-  assert.equal(PREVIEW_ROW_CAP_DEFAULT, 150000);
-  assert.equal(previewRowCap({}), 150000, 'unset');
-  assert.equal(previewRowCap({ PACE_PREVIEW_ROW_CAP: '' }), 150000, 'empty');
-  assert.equal(previewRowCap({ PACE_PREVIEW_ROW_CAP: '1' }), 1, 'the off switch: every range refuses');
-  assert.equal(previewRowCap({ PACE_PREVIEW_ROW_CAP: '200000' }), 200000);
-  for (const bad of ['0', '-5', '2.5', 'abc', 'Infinity', '1e9x']) {
-    assert.equal(previewRowCap({ PACE_PREVIEW_ROW_CAP: bad }), 150000, bad);
   }
 });

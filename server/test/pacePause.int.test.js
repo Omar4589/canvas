@@ -493,19 +493,6 @@ test('a failing alert dispatch never fails the write or the process', { skip }, 
   await call('POST', `/admin/pace-pauses/${p._id}/unpause`, asAdmin());
 });
 
-test('the preview: org admins only, finds the would-be pauses, refuses an over-long range', { skip }, async () => {
-  const today = zonedDayStr(new Date(), TZ);
-  let r = await call('GET', `/admin/pace-pauses/preview?campaignId=${ctx.c1.camp._id}&from=${today}&to=${today}`, asAdmin());
-  assert.strictEqual(r.status, 200);
-  assert.ok(r.json.pauses.length >= 1);
-  assert.ok(r.json.pauses.some((p) => p.name === 'Jody Fastwalker'));
-  assert.ok(r.json.pauses.every((p) => p.window.length));
-  r = await call('GET', `/admin/pace-pauses/preview?campaignId=${ctx.c1.camp._id}&from=${today}&to=${today}`, { token: ctx.leadATok, orgId: ctx.org._id });
-  assert.strictEqual(r.status, 403);
-  r = await call('GET', `/admin/pace-pauses/preview?campaignId=${ctx.c1.camp._id}&from=2026-01-01&to=2026-12-31`, asAdmin());
-  assert.strictEqual(r.status, 400);
-});
-
 test('cascades: campaign and org deletes and the late-write sweep cover pauses', { skip }, async () => {
   assert.ok(ORG_SCOPED.includes(PacePause));
   assert.ok(LATE_WRITE_MODELS.includes(PacePause));
@@ -518,4 +505,9 @@ test('cascades: campaign and org deletes and the late-write sweep cover pauses',
   await deleteCampaignCascade(camp);
   assert.strictEqual(await PacePause.countDocuments({ campaignId: camp._id }), 0);
   assert.ok((await PacePause.countDocuments({ organizationId: ctx.org._id })) > 0, 'other campaigns untouched');
+});
+
+test('the in-product preview is gone (removed 2026-10-25): its address answers 404, even for an org admin', { skip }, async () => {
+  const r = await call('GET', `/admin/pace-pauses/preview?campaignId=${ctx.c1.camp._id}&from=2026-10-01&to=2026-10-25`, asAdmin());
+  assert.strictEqual(r.status, 404);
 });

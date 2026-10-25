@@ -358,13 +358,13 @@ admins and team leads on the Users page's **Automatic pause** card — a lead on
 and a lead can be your client. *Billing admins (always)* is its own choice, so a billing admin added later
 is included. The paused person is never emailed about their own pause.
 
-**On, off, and the preview.** On for every customer organization by default; a billing admin turns it off
-on the same card, which unpauses anyone paused at once, and turning it back on starts everyone's count
-fresh. Doorline's own internal organizations are never paused. Doorline has a switch of its own that decides
-whether it runs at all ([OPERATIONS.md](OPERATIONS.md)); while it's off nobody is paused, and the settings,
-review screens and preview still work. On each campaign's Audit page, org admins can open **What automatic
-pause would have done**: every moment, over up to 120 days, when the rule would have paused someone —
-nobody is actually paused.
+**On and off.** On for every customer organization by default; a billing admin turns it off on the same
+card, which unpauses anyone paused at once, and turning it back on starts everyone's count fresh. Doorline's
+own internal organizations are never paused. Doorline has a switch of its own that decides whether it runs
+at all ([OPERATIONS.md](OPERATIONS.md)); while it's off nobody is paused, and the settings and review screens
+still work. (An in-product preview, *What automatic pause would have done*, helped decide before go-live; it
+was removed on 2026-10-25. Doorline's console replay still counts what the rule would have done, without
+names.)
 
 ---
 
@@ -950,9 +950,9 @@ with its evidence frozen at the moment it fired.
 | Model | [models/PacePause.js](../server/src/models/PacePause.js); `Membership.paceRestartAt`; `Organization.pacePause` |
 | Gate + after-write check | [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js) `paceRefusal`, `paceAfterWrite` |
 | The phone's state | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) (`/bootstrap`, `/changes`, `GET /mobile/pace`) |
-| Review, unpause, delete, preview, settings | [routes/admin/pacePauses.js](../server/src/routes/admin/pacePauses.js), mounted at `/admin/pace-pauses` |
+| Review, unpause, delete, settings | [routes/admin/pacePauses.js](../server/src/routes/admin/pacePauses.js), mounted at `/admin/pace-pauses` |
 | Console | [migrations/replayPacePause.js](../server/src/migrations/replayPacePause.js), [migrations/resolveOpenPacePauses.js](../server/src/migrations/resolveOpenPacePauses.js) |
-| Web | `components/audit/PacePausePanel.jsx`, `PausedCanvassers.jsx`, `PacePausePreview.jsx`; `components/users/PacePauseSettingsCard.jsx`, `PacePauseProfileSection.jsx`; `pages/PauseLinkPage.jsx`; wording in `lib/pacePause.js` |
+| Web | `components/audit/PacePausePanel.jsx`, `PausedCanvassers.jsx`; `components/users/PacePauseSettingsCard.jsx`, `PacePauseProfileSection.jsx`; `pages/PauseLinkPage.jsx`; wording in `lib/pacePause.js` |
 | Phone | rules in `mobile/lib/pace.js`; `setPace` + the local block in `lib/recordAction.js`; `components/PausedBanner.jsx`, `PausedCanvassersSection.jsx`; `app/(app)/admin/pause/[id].jsx`; `lib/pacePauses.js`; wording in `lib/pacePauseText.js` (a MIRROR of the web's, compared by its test) |
 
 ### G.1 The rule (`paceRule.js`)
@@ -1050,7 +1050,6 @@ the body; a legacy one-level snapshot converts on the next save. Same row, same 
 | `GET /` | admins: the org; leads: managed campaigns | `?status=paused\|resolved\|all`, `?campaignId`, `?userId` → `{ pauses, rosterLines, enabled, live }`, newest 200. A lead's `rosterLines` name their roster's canvassers blocked on a campaign they don't manage, nothing more. An unmanaged `campaignId` is 403 `FORBIDDEN_ROLE`. |
 | `GET /settings` | org admins | `{ enabled, billingAdmins, alertUserIds, live, changedAt, changedByName, canEdit, eligible, openPauses }` |
 | `PATCH /settings` | org admin with billing access, or super admin | zod `.strict()`, dotted paths only; on → off resolves the org's open pauses; off → on resolves leftovers, then stamps `enabledAt`. Alert recipients: active org admins and leads, at most 25. |
-| `GET /preview` | org admins | `?campaignId&from&to` (1–120 days): every would-be pause on the campaign, each lifted at once; live rows merged with unknocked chunk rows (live wins by `_id`); refuses with 422 `TOO_MANY_ROWS` over `PACE_PREVIEW_ROW_CAP` (150,000; `previewRowCap` in `paceRule.js` — a whole number of at least 1, `1` turns the preview off) rather than truncating. It runs on the web dyno, so its cost is per row: each row's day is worked out once. |
 | `GET /:id` | org admins; leads on its campaign | the facts, the redacted `window`, `summary`, `implausible` (a failing hop of over 200 m at over 100 mph), `medianDistanceFromHouseM`, `dayEntries` (the day re-judged live, marked), `canUnpause`, `canDelete`, `doorOutcomesUrl` (admins only), `mapUrl` |
 | `POST /:id/unpause` | same | 409 `NOT_OPEN` when it isn't open |
 | `DELETE /:id` | org admins | resolved only, 409 `NOT_RESOLVED` |
@@ -1095,7 +1094,7 @@ in-flight lock and before the door-change confirmation; pin fixes (`requireFix: 
 - **`replaced.history` must stay server-built.** Accepting it from a body would let a client forge or erase
   visits.
 - **Never build an `Intl` formatter per row.** Use `utils/timezone.js` (`zonedDayStr`, `zonedTimeToUtc`,
-  `tzAbbrev`), which share one per pattern and zone. On 2026-10-25 the preview built a new one for every row
+  `tzAbbrev`), which share one per pattern and zone. On 2026-10-25 the preview (since removed) built a new one for every row
   on every day of a 22-day range — millions — and took the 1 GB web dyno to about 4 GB ([OPERATIONS.md](OPERATIONS.md)
   → *If the preview takes the web server down*). Group rows by day in one pass, never filter the rows once
   per day.

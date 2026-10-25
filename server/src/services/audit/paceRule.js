@@ -2,8 +2,8 @@ import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { isUnitAddress } from '../../utils/streetName.js';
 
 // Automatic pause — the ONE pace rule (docs/PROPOSAL_PACE_PAUSE.md §B). Pure: no DB, no clock, no req.
-// The live check on the mobile write paths, the review screens, the in-product preview and the console
-// replay all call these functions, so they can never disagree about what a visit is or whether it failed.
+// The live check on the mobile write paths, the review screens and the console replay all call these
+// functions, so they can never disagree about what a visit is or whether it failed.
 //
 // The rule in one sentence: a canvasser's saves at one door no more than PACE_SAME_VISIT_SEC apart are one
 // VISIT; each visit is judged once, from the latest entry before it at a DIFFERENT door, and fails when there
@@ -52,24 +52,6 @@ export const paceConfig = (env = process.env, overrides = {}) => {
   }
   if (out.failsToPause > out.window) out.failsToPause = out.window;
   return out;
-};
-
-// The preview's size limit (routes/admin/pacePauses.js), in rows, counted before anything loads. The preview runs
-// on the web dyno beside the phones' traffic: measured after the 2026-10-25 fix, 132,000 rows took 3.3 s and about
-// 430 MB, so the default keeps a 1 GB dyno clear. PACE_PREVIEW_ROW_CAP must be a whole number of at least 1 (1
-// refuses every range — the preview's off switch); anything else is the default, with one warning, so a typo can
-// never lift the limit.
-export const PREVIEW_ROW_CAP_DEFAULT = 150000;
-export const previewRowCap = (env = process.env) => {
-  const raw = env?.PACE_PREVIEW_ROW_CAP;
-  if (raw === undefined || raw === null || raw === '') return PREVIEW_ROW_CAP_DEFAULT;
-  const n = Number(raw);
-  if (Number.isInteger(n) && n >= 1) return n;
-  if (!warned.has('PACE_PREVIEW_ROW_CAP')) {
-    warned.add('PACE_PREVIEW_ROW_CAP');
-    console.warn(`[pace] PACE_PREVIEW_ROW_CAP=${raw} is not a whole number of at least 1; using ${PREVIEW_ROW_CAP_DEFAULT}`);
-  }
-  return PREVIEW_ROW_CAP_DEFAULT;
 };
 
 // Results a visit is judged on (decisions 4 and 14). Wrong address, No soliciting, Restricted and lit drops
@@ -276,7 +258,7 @@ export const findPause = (verdicts, { restartAt = null, config = PACE_DEFAULTS }
   return null;
 };
 
-// The preview and the replay: every would-be pause, each treated as lifted at once (the count restarts
+// The console replay: every would-be pause, each treated as lifted at once (the count restarts
 // after its trigger). `worst` is the most fails any window reached, for "how close did it come".
 export const replayPauses = (verdicts, config = PACE_DEFAULTS) => {
   const pauses = [];

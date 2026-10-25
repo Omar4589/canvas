@@ -57,5 +57,3 @@ By default, your organization's **billing admins** — the org admins with billi
 ## Turning it off
 
 The setting starts out **On** for every organization; a billing admin can turn it off on the same **Automatic pause** card. Turning it off unpauses anyone who is paused, right away; turning it back on starts everyone's count fresh. While the card says *Automatic pause isn't running for your organization right now*, it isn't stopping anyone in your organization from recording.
-
-Curious how it would treat your crews? Org admins can open **What automatic pause would have done** on any campaign's Audit page: every moment over a date range when it would have paused someone, with nobody actually paused.

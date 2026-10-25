@@ -9,9 +9,9 @@ import { loadStandingRows, loadFrozenRows, mergeRows, loadUnitFacts } from '../s
 import { zonedDayStr } from '../utils/timezone.js';
 
 // Automatic pause — the season replay across every customer organization (docs/PROPOSAL_PACE_PAUSE.md §I.2).
-// READ-ONLY: it never writes. The same rule (services/audit/paceRule.js) and the same loader as the
-// in-product preview, run with each would-be pause lifted at once, so it answers "how often would this have
-// fired, and on what" before the switch goes on.
+// READ-ONLY: it never writes. The same rule (services/audit/paceRule.js) and the same loader
+// (services/audit/paceTimeline.js) as the live check, run with each would-be pause lifted at once, so it
+// answers "how often would this have fired, and on what" — before the switch goes on, or before a tuning.
 //
 //   npm run replay:pace-pause                                  # every customer org, all history
 //   npm run replay:pace-pause -- --since=2026-08-01             # rows from that day (00:00 UTC) on
@@ -21,7 +21,7 @@ import { zonedDayStr } from '../utils/timezone.js';
 // values by their short names. COUNTS ONLY: no name, id, address or coordinate is ever printed, and a count
 // under 3 prints as "fewer than 3" — staff can see an org's member list, so a 1 would point at a person.
 // Internal orgs (the demo) and orgs being deleted are skipped. It is a full scan of the ledger: run it late in
-// the evening. Detail for your own organization is the Audit page's "What automatic pause would have done".
+// the evening.
 
 const FLAG_KEYS = { door: 'doorSec', survey: 'surveySec', travel: 'travelMps', window: 'window', fails: 'failsToPause', visit: 'sameVisitSec' };
 const LONG_HOP_M = 400;

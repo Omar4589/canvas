@@ -3587,7 +3587,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     stamps kept when a door is re-saved, and a new email — but no new subprocessor, and no published Privacy
     Policy, Terms or DPA sentence becomes false.]** Plan, the owner's decisions 1–19 and both review rounds:
     [PROPOSAL_PACE_PAUSE.md](PROPOSAL_PACE_PAUSE.md); doc of record [AUDIT.md](AUDIT.md) → *Automatic pause*
-    and §G. Everything below was read from the code.
+    and §G. Everything below was read from the code. *[v6 2026-10-25: server deployed 2026-10-25 (`d1d12ac`);
+    `PACE_PAUSE` not yet on for customers (it was set to the internal demo for the device check); the
+    in-product preview removed (stamped at (e)).]*
     - **(a) The pause, and the record of it.** When 8 of any 20 judged visits in a canvasser's day came in
       faster than anyone could get there and knock, `runPaceCheck` (`services/audit/pacePause.js`) writes a
       `PacePause` (new collection, `models/PacePause.js`), and the mobile write routes refuse that canvasser's
@@ -3627,6 +3629,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       organization's own ledger and unknock copies; nothing is stored. The console replay
       (`npm run replay:pace-pause`, Run console) prints **counts only** per customer organization — no name, id,
       address or coordinate, a count under 3 as *fewer than 3* — and skips internal and deleting orgs.
+      *[v6 2026-10-25: **the in-product preview is removed** (owner, after go-live): `GET /admin/pace-pauses/preview`
+      and its Audit-page panel are gone, so no screen lists would-be pauses with names and addresses any more.
+      Exposure only shrinks. The console replay above is unchanged.]*
     - **(f) The alert email** (`pacePauseAlert`): one per recipient; a neutral subject (*A canvasser was paused
       for review*); a body naming the campaign, the organization, the day and the time, **no person and no
       address**, and a link behind sign-in. So Resend receives no more than privacy.html `:106` says (the
@@ -4390,7 +4395,7 @@ Coordinates are removed only by: (i) hard deletion of the whole organization (wh
 4. **A per-canvasser quality report** — average distance, far-door counts, distance histogram (`reports.js:3050+`).
 5. **An activity feed** returning the full location object per action (`reports.js:2689`, `:2733`; `admin/activities.js:51-52`).
 6. **A distance-walked metric** shown to the canvasser themselves (`routes/mobile/me.js:100-106`, `:381-389`).
-7. *[v6 2026-10-24 — item 39]* **Automatic pause** — a new **enforcement** use: the time and distance between a canvasser's consecutive stamps decide whether their recording pauses for review (`services/audit/paceRule.js`, read by `runPaceCheck`). The stored `PacePause` keeps the derived seconds and meters, never a coordinate; its preview (org admins) re-reads the ledger and shows addresses, not coordinates.
+7. *[v6 2026-10-24 — item 39]* **Automatic pause** — a new **enforcement** use: the time and distance between a canvasser's consecutive stamps decide whether their recording pauses for review (`services/audit/paceRule.js`, read by `runPaceCheck`). The stored `PacePause` keeps the derived seconds and meters, never a coordinate; its preview (org admins) re-reads the ledger and shows addresses, not coordinates. *[v6 2026-10-25: the preview is removed (item 39(e)).]*
 
 Access gate on all of these: `requireOrgRole('admin', 'lead')` (`reports.js:37`) — org admins **and campaign-scoped team leads**.
 
@@ -4641,7 +4646,7 @@ which orgs need a session, computed from membership + `isInternal` + the caller'
 > that `'internal'` confers is now reachable only through break-glass org creation, never through a
 > billing edit on an existing customer org.**
 
-*[v6 2026-10-24 — item 39: one new staff-facing output, and no new way in. `npm run replay:pace-pause` (the Heroku Run console) prints automatic pause's would-be pauses as **counts per customer organization only** — no name, id, address or coordinate, and a count under 3 as *fewer than 3*, since staff can see an organization's member list. The per-person preview stays in the product for the organization's own admins (`GET /admin/pace-pauses/preview`), and the pause review screens sit behind `orgContext` like every org page, so staff reach them only under a support grant.]*
+*[v6 2026-10-24 — item 39: one new staff-facing output, and no new way in. `npm run replay:pace-pause` (the Heroku Run console) prints automatic pause's would-be pauses as **counts per customer organization only** — no name, id, address or coordinate, and a count under 3 as *fewer than 3*, since staff can see an organization's member list. The per-person preview stays in the product for the organization's own admins (`GET /admin/pace-pauses/preview`), and the pause review screens sit behind `orgContext` like every org page, so staff reach them only under a support grant.]* *[v6 2026-10-25: the per-person preview is removed (item 39(e)); the review screens' gate is unchanged.]*
 
 ### Three things you must NOT imply
 

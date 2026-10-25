@@ -1,7 +1,8 @@
 # Proposal: Automatic pause — stop a canvasser whose doors come in faster than anyone could knock them
 
-> **Status: BUILT 2026-10-24 — uncommitted, in the shared folder; deploy, phone update and switch-on
-> pending (§N). What the build changed from this plan is in [As built](#as-built-2026-10-24).** Design
+> **Status: server deployed 2026-10-25 (`d1d12ac`); the phone's production update and switch-on are pending
+> (§N). What the build changed from this plan — including the preview's crash and removal on 2026-10-25 — is
+> in [As built](#as-built-2026-10-24).** Design
 > revision 4 (2026-10-24). The owner's decisions are in
 > [Decisions](#decisions-owner-2026-10-24) (1 to 19). Two review rounds ran against the code: round 1
 > (three reviewers: server correctness; an owner walkthrough with a simplicity audit; privacy, release
@@ -1186,3 +1187,7 @@ Everything in §B–§I shipped as designed, except:
   pass (22.9 s and 1,955 MB → 2.4 s and 214 MB on the same data), and the size limit's default dropped to
   150,000 rows with `PACE_PREVIEW_ROW_CAP` = `1` as the preview's off switch. Details in
   [OPERATIONS.md](OPERATIONS.md) → *If the preview takes the web server down*.
+- **The preview removed (owner, 2026-10-25).** Once the test pause on the demo had worked, the owner had *What
+  automatic pause would have done* (§I.1) taken out: the `GET /admin/pace-pauses/preview` route, its Audit-page
+  panel, its size limit (`PACE_PREVIEW_ROW_CAP`) and its tests. The console replay (§I.2) stays, and so do the
+  shared timezone formatters from the crash fix. §I.1 above is kept as the design record.

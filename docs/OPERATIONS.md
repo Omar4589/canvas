@@ -872,7 +872,7 @@ every request; saving it restarts the dynos — no deploy.
 
 | `PACE_PAUSE` | What happens |
 | --- | --- |
-| **Unset** — how the deploy ships — or **`off`** | Nothing is judged and nobody is paused. The review screens, the Users-page card and the preview all work; the card says *Automatic pause isn't running for your organization right now.* |
+| **Unset** — how the deploy ships — or **`off`** | Nothing is judged and nobody is paused. The review screens and the Users-page card work; the card says *Automatic pause isn't running for your organization right now.* |
 | **`orgs:<slug>,<slug>`** | Only those organizations, internal ones allowed — for the device check below. A mistyped slug does nothing, so check that organization's card no longer says it isn't running. |
 | **`on`** | Every customer organization whose own setting is on (the default; a billing admin can turn theirs off). Doorline's internal organizations are never paused. |
 | Anything else | Off, with one warning in the log. |
@@ -881,10 +881,7 @@ every request; saving it restarts the dynos — no deploy.
 try a change with the replay first (step 4): `PACE_DOOR_SEC` (15), `PACE_SURVEY_SEC` (45),
 `PACE_TRAVEL_MPS` (11.2 m/s = 25 mph), `PACE_WINDOW` (20), `PACE_FAILS_TO_PAUSE` (8), `PACE_SAME_VISIT_SEC`
 (600) — a value that isn't a positive number falls back to its default with a warning ([AUDIT.md](AUDIT.md)
-§G.1); `PACE_ALERT_SEND_GAP_MS` (600, the gap between alert emails; `0` sends them back to back); and
-`PACE_PREVIEW_ROW_CAP` (150000, the preview's size limit, in rows) — a whole number of at least 1, else the
-default with a warning, and **`1` switches the preview off** (every range answers *Too many doors for one
-preview — choose a shorter range*).
+§G.1); and `PACE_ALERT_SEND_GAP_MS` (600, the gap between alert emails; `0` sends them back to back).
 
 **To release it, in this order:**
 
@@ -898,8 +895,8 @@ preview — choose a shorter range*).
 3. **Run console:** `npm run migrate:build-indexes` (the pause indexes show as already built), then
    `npm run migrate:build-indexes -- --apply` for whatever else the deploy added. Run every other session's
    console steps in their own order.
-4. **Look before switching on.** On your own campaigns' Audit pages, open **What automatic pause would
-   have done**. Then, late in the evening (it reads every customer's history), in the Run console:
+4. **Look before switching on.** Late in the evening (it reads every customer's history), in the Run
+   console:
 
    ```
    npm run replay:pace-pause
@@ -945,16 +942,15 @@ npm run pace:resolve-open -- --apply
 The first is a dry run (how many, per organization, no names); the second lifts them all and starts each
 person's count over.
 
-**If the preview takes the web server down** (memory past the dyno's quota, then *App crashed*): set
-`PACE_PREVIEW_ROW_CAP` = `1` in Config Vars. Saving it restarts the dynos, and from then on the preview
-refuses every range instead of loading it. Remove the var once a fix is deployed. That happened once, on
-2026-10-25, the day after the release: a 22-day preview of a busy campaign worked out each door's day once
-for every day of the range, building a new date formatter each time — millions of them — and the 1 GB web
-dyno reached about 4 GB and crashed. The fix shares one formatter per time zone in `utils/timezone.js`
-(every report that groups by day got faster too) and works out each door's day once; the same preview on
-a copy of the data went from 22.9 s and 1,955 MB to 2.4 s and 214 MB, and 132,000 rows now take 3.6 s and
-about 380 MB, which is why the size limit dropped from 250,000 to 150,000. Measured with the real route on
-a throwaway database; the test that pins it is `server/test/timezone.test.js`.
+**The preview that took the web server down (2026-10-25).** The release first shipped an in-product
+preview on each campaign's Audit page, *What automatic pause would have done*. The day after, a 22-day
+preview of a busy campaign worked out each door's day once for every day of the range, building a new date
+formatter each time — millions of them — and the 1 GB web dyno reached about 4 GB and crashed
+(`PACE_PREVIEW_ROW_CAP` = `1` kept it up until the fix). The fix shares one formatter per time zone in
+`utils/timezone.js` — every report that groups by day got faster too — and the same preview on a copy of the
+data went from 22.9 s and 1,955 MB to 2.4 s and 214 MB (measured with the real route on a throwaway database;
+`server/test/timezone.test.js` pins it). Once the test pause on the demo had worked, the owner had the preview
+removed the same day. `PACE_PREVIEW_ROW_CAP` does nothing now — delete it from Config Vars if it's still there.
 
 ### Build database indexes (after a deploy that added one)
 
@@ -1519,8 +1515,8 @@ Turning it off **resolves nothing**: open pauses stay open, simply not blocking 
 *Not blocking — automatic pause is switched off*), and block again when it comes back on. That is what
 `pace:resolve-open -- --apply` is for. The org's own setting differs on purpose: a billing admin turning it
 off resolves that org's open pauses at once (`setting_off`), and turning it back on stamps
-`pacePause.enabledAt`, which restarts every count there. The preview and the replay ignore the switch —
-they never pause anyone.
+`pacePause.enabledAt`, which restarts every count there. The console replay ignores the switch — it never
+pauses anyone.
 
 ### `contactKnockCount` and the required recompute (`migrate:campaign-stats`)
 

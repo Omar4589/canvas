@@ -2,8 +2,8 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
 import { Household } from '../../models/Household.js';
 
-// The rows automatic pause reads (docs/PROPOSAL_PACE_PAUSE.md §C.3, §I). One loader for the live check, the
-// review screens, the preview and the console replay, so they read the same fields the same way.
+// The rows automatic pause reads (docs/PROPOSAL_PACE_PAUSE.md §C.3, §I.2). One loader for the live check, the
+// review screens and the console replay, so they read the same fields the same way.
 
 // What services/audit/paceRule.js entriesOf reads of a CanvassActivity row.
 export const PACE_ROW_FIELDS = [
@@ -30,16 +30,6 @@ export const loadFrozenRows = (organizationId, userId, timestamp) =>
     { $project: Object.fromEntries(PACE_ROW_FIELDS.map((f) => [f, 1])) },
   ]);
 
-// How many frozen rows the same filter would load — for the preview's cap, counted before loading.
-export const countFrozenRows = async (organizationId, userIds, timestamp) => {
-  const [r] = await UnknockRunChunk.aggregate([
-    { $match: { organizationId } },
-    { $unwind: '$rows' },
-    { $match: { 'rows.userId': { $in: userIds }, 'rows.timestamp': timestamp } },
-    { $count: 'n' },
-  ]);
-  return r?.n || 0;
-};
 
 // Live and frozen rows, one per _id, the live row winning: an Unknock undo re-inserts the frozen rows with
 // their original ids and keeps the chunks, and a visit struck twice sits in two runs' chunks.

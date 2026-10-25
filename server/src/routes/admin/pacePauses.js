@@ -12,7 +12,6 @@ import { Campaign } from '../../models/Campaign.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { Household } from '../../models/Household.js';
 import { Organization } from '../../models/Organization.js';
-import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
 import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 import {
   switchCovers,
@@ -21,11 +20,12 @@ import {
   unpause,
   resolveAllOpen,
 } from '../../services/audit/pacePause.js';
-import { paceConfig, previewRowCap, entriesOf, visitsOf, judgeVisits, replayPauses, summarize, JUDGED_RESULTS } from '../../services/audit/paceRule.js';
-import { PACE_ROW_FIELDS, loadStandingRows, loadFrozenRows, countFrozenRows, mergeRows, loadUnitFacts } from '../../services/audit/paceTimeline.js';
+import { paceConfig, entriesOf, visitsOf, judgeVisits, summarize, JUDGED_RESULTS } from '../../services/audit/paceRule.js';
+import { PACE_ROW_FIELDS, loadUnitFacts } from '../../services/audit/paceTimeline.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 
-// Automatic pause — review, unpause, delete, preview and settings (docs/PROPOSAL_PACE_PAUSE.md §G, §H, §I).
+// Automatic pause — review, unpause, delete and settings (docs/PROPOSAL_PACE_PAUSE.md §G, §H). The in-product
+// preview (§I.1) was removed on 2026-10-25, after go-live; the console replay (§I.2) stays.
 // Mounted at /admin/pace-pauses. Org admins see the org; a team lead sees pauses on the campaigns they
 // manage, with every other campaign's doors redacted — a lead can be the paying client (ROLES.md), and
 // leads are walled per campaign everywhere else (reports.js, memberships.js).
@@ -272,126 +272,6 @@ router.patch('/settings', async (req, res, next) => {
       }
     }
     res.json(await settingsOf(org, req));
-  } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
-    next(err);
-  }
-});
-
-// ── GET /preview (§I.1) — before /:id ───────────────────────────────────────────────────────────────
-// "What automatic pause would have done": the rule over a campaign's range, each would-be pause lifted at
-// once. Org admins only (a preview's windows span campaigns). Rows are counted before anything is loaded
-// and the request refuses rather than truncating — a partial preview would silently hide pauses.
-const PREVIEW_MAX_DAYS = 120;
-// The size limit, in rows (paceRule.js previewRowCap): read once, since saving a config var restarts the dynos.
-const PREVIEW_ROW_CAP = previewRowCap();
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const previewQuerySchema = z.object({ campaignId: z.string(), from: z.string().regex(DAY), to: z.string().regex(DAY) });
-
-router.get('/preview', async (req, res, next) => {
-  try {
-    const org = orgOf(req, res);
-    if (!org) return;
-    if (!isOrgAdmin(req)) return res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN_ROLE' });
-    const q = previewQuerySchema.parse(req.query);
-    if (!mongoose.isValidObjectId(q.campaignId)) return res.status(400).json({ error: 'Invalid campaignId' });
-    const campaign = await Campaign.findOne({ _id: q.campaignId, organizationId: org._id }, 'name timeZone').lean();
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-    const spanDays = (Date.parse(q.to) - Date.parse(q.from)) / 86400000 + 1;
-    if (!(spanDays >= 1) || spanDays > PREVIEW_MAX_DAYS) {
-      return res.status(400).json({ error: `Choose a range of 1 to ${PREVIEW_MAX_DAYS} days.` });
-    }
-    const timeZone = campaign.timeZone || org.timeZone || 'America/New_York';
-    const range = zonedDayRange(q.from, q.to, timeZone);
-    const since = { $gte: range.$gte };
-
-    // Who canvassed this campaign in the range (live or since unknocked), judged members only (decision 13).
-    const [liveUsers, frozenUsers] = await Promise.all([
-      CanvassActivity.distinct('userId', { organizationId: org._id, campaignId: campaign._id, timestamp: range, via: { $ne: 'bulk' } }),
-      UnknockRunChunk.aggregate([
-        { $match: { organizationId: org._id, campaignId: campaign._id } },
-        { $unwind: '$rows' },
-        { $match: { 'rows.timestamp': range } },
-        { $group: { _id: '$rows.userId' } },
-      ]),
-    ]);
-    const candidates = [...new Map([...liveUsers, ...frozenUsers.map((r) => r._id)].filter(Boolean).map((u) => [String(u), u])).values()];
-    const canvassers = (await Membership.find({ organizationId: org._id, userId: { $in: candidates }, role: 'canvasser' }, 'userId').lean()).map((m) => m.userId);
-
-    const [liveCount, frozenCount] = await Promise.all([
-      CanvassActivity.countDocuments({ organizationId: org._id, userId: { $in: canvassers }, timestamp: since }),
-      countFrozenRows(org._id, canvassers, since),
-    ]);
-    if (liveCount + frozenCount > PREVIEW_ROW_CAP) {
-      return res.status(422).json({ error: 'Too many doors for one preview — choose a shorter range.', code: 'TOO_MANY_ROWS' });
-    }
-
-    const config = paceConfig();
-    const found = [];
-    // One canvasser at a time: their whole org timeline from the range's start to now, so a door re-saved
-    // on a later day keeps its earlier visit (review round 2).
-    for (const userId of canvassers) {
-      const rows = mergeRows(await loadStandingRows(org._id, userId, since), await loadFrozenRows(org._id, userId, since));
-      if (!rows.length) continue;
-      const households = await loadUnitFacts(rows.map((r) => r.householdId));
-      const entries = entriesOf(rows);
-      const verdicts = judgeVisits(visitsOf(entries, config), entries, { households, config });
-      const byDay = new Map();
-      for (const v of verdicts) {
-        const d = zonedDayStr(new Date(v.visit.first.at), timeZone);
-        if (d < q.from || d > q.to) continue;
-        if (!byDay.has(d)) byDay.set(d, []);
-        byDay.get(d).push(v);
-      }
-      // Each row's day, worked out once and in the rows' own order (the "Nth door that day" reads it). It was
-      // re-worked for every row on every day of the range — days × rows — which, with a new formatter per
-      // call, took the web dyno past 4 GB on a 22-day preview (2026-10-25).
-      const rowIdsByDay = new Map();
-      for (const r of rows) {
-        const d = zonedDayStr(new Date(r.timestamp), timeZone);
-        if (!byDay.has(d)) continue;
-        if (!rowIdsByDay.has(d)) rowIdsByDay.set(d, []);
-        rowIdsByDay.get(d).push(String(r._id));
-      }
-      for (const [day, vs] of byDay) {
-        const dayRows = rowIdsByDay.get(day) || [];
-        for (const p of replayPauses(vs, config).pauses) {
-          if (String(p.trigger.visit.campaignId) !== String(campaign._id)) continue;
-          found.push({ userId: String(userId), day, at: new Date(p.trigger.visit.first.at), entry: dayRows.indexOf(p.trigger.visit.standingRowId) + 1 || null, window: p.window, summary: summarize(p.window) });
-        }
-      }
-    }
-
-    const uMap = await hydrateCanvassers(found.map((f) => f.userId), org._id);
-    const hhIds = [...new Set(found.flatMap((f) => f.window.flatMap((v) => [v.visit.householdId, v.prev?.householdId].filter(Boolean))))];
-    const hh = new Map((await Household.find({ _id: { $in: hhIds }, organizationId: org._id }, 'addressLine1 addressLine2 city').lean()).map((h) => [String(h._id), h]));
-    res.json({
-      campaign: { id: String(campaign._id), name: campaign.name, timeZone },
-      from: q.from,
-      to: q.to,
-      scanned: { canvassers: canvassers.length, rows: liveCount + frozenCount },
-      pauses: found
-        .sort((a, b) => a.at - b.at)
-        .map((f) => ({
-          userId: f.userId,
-          name: nameOf(uMap, f.userId),
-          day: f.day,
-          at: f.at,
-          entry: f.entry,
-          summary: f.summary,
-          window: f.window.map((v) => ({
-            address: addressOf(hh.get(v.visit.householdId)),
-            result: v.visit.result,
-            at: new Date(v.visit.first.at),
-            fail: Boolean(v.fail),
-            pattern: v.pattern ?? null,
-            gapSec: v.gapSec ?? null,
-            meters: v.meters ?? null,
-            neededSec: v.neededSec ?? null,
-            prevAddress: v.prev ? addressOf(hh.get(v.prev.householdId)) : null,
-          })),
-        })),
-    });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
     next(err);
