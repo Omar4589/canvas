@@ -27,6 +27,7 @@
     "audit:gps-stamps": "npm --prefix server run audit:gps-stamps --",
     "replay:pace-pause": "npm --prefix server run replay:pace-pause --",
     "pace:resolve-open": "npm --prefix server run pace:resolve-open --",
+    "report:tab-weeks": "npm --prefix server run report:tab-weeks --",
     "remirror:pass": "npm --prefix server run remirror:pass --",
     "repair:orphan-attribution": "npm --prefix server run repair:orphan-attribution --",
     "sweep:raw-imports": "npm --prefix server run sweep:raw-imports --",

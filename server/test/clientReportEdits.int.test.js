@@ -67,7 +67,8 @@ const runBuild = async (reportId) => {
   return processClientReportJob({ id: jobId, data: { reportId: String(reportId) }, moveToDelayed: async () => {}, updateProgress: async () => {} }, 'token');
 };
 const draft = async (extra = {}) => {
-  const res = await call('POST', '/admin/client-reports', { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', ...extra });
+  // allowDuplicate: one week drafted many times on purpose (the duplicate guard has its own suite).
+  const res = await call('POST', '/admin/client-reports', { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', allowDuplicate: true, ...extra });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
   return res.json.report;
 };

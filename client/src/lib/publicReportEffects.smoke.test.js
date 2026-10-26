@@ -9,8 +9,10 @@ import esbuild from 'esbuild';
 // the layout's own <title> and noindex meta handed back on unmount, the logo fetched with the token
 // in a header and its blob URL revoked, the storage listener removed, a legacy open link unlocked;
 // "Keep me signed in", the one error handler and "Sign out on this device" driven through the
-// layout's own session store and re-rendered; the report page's once-a-day "opened" ping; and the
-// map's phone listener and error reporting.
+// layout's own session store and re-rendered; the report page's once-a-day "opened" ping; the map's
+// phone listener and error reporting; and a link to one report — the hub page handing over to its
+// report with <Navigate replace> (recorded here: renderToString never runs Navigate's own effect),
+// and a report gone sending the hub to be read again.
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const dir = mkdtempSync(join(here, '../../.smoke-public-effects-'));
@@ -77,6 +79,11 @@ export default R;
 export const useEffect = (fn) => { globalThis.__effects.push(fn); };`
   );
   writeFileSync(
+    join(dir, 'routerShim.js'),
+    `export * from 'react-router-dom';
+export const Navigate = (props) => { globalThis.__navigates.push(props); return null; };`
+  );
+  writeFileSync(
     join(dir, 'mapboxStub.js'),
     `class FakeMap { constructor(o) { globalThis.__maps.push(this); this.o = o; } addControl() {} on() {} once() {} off() {} remove() { this.removed = true; } resize() {} getCanvas() { return { style: {} }; } setCooperativeGestures(v) { this.coop = v; } getSource() { return null; } getLayer() { return null; } }
 export default { Map: FakeMap, NavigationControl: class {}, LngLatBounds: class {}, accessToken: null };`
@@ -94,14 +101,16 @@ import ClientReportMap from '${join(here, '../components/ClientReportMap.jsx')}'
 export { getShareSession } from '${join(here, './shareSession.js')}';
 globalThis.__effects = [];
 globalThis.__maps = [];
+globalThis.__navigates = [];
 // gcTime: Infinity — with a \`window\` defined, TanStack Query thinks it's in a browser and would keep
 // the process alive on five-minute GC timers. retryOnMount: false lets a seeded error render as one.
 export const newQc = () =>
   new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity, retryOnMount: false } } });
 const run = (node, qc) => {
   globalThis.__effects = [];
+  globalThis.__navigates = [];
   const html = renderToString(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
-  return { html, effects: globalThis.__effects };
+  return { html, effects: globalThis.__effects, navigates: globalThis.__navigates };
 };
 export const layout = (qc, path) =>
   run(
@@ -120,6 +129,17 @@ export const detail = (qc, ctx, path) =>
       <Routes>
         <Route element={<Outlet context={ctx} />}>
           <Route path="/r/:token/reports/:reportId" element={<PublicReportDetailPage />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+    qc
+  );
+export const list = (qc, ctx, path) =>
+  run(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route element={<Outlet context={ctx} />}>
+          <Route path="/r/:token" element={<PublicReportListPage />} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -145,6 +165,10 @@ export const map = (qc, props) => run(<ClientReportMap {...props} />, qc);
           b.onResolve({ filter: /\.css$/ }, (args) => ({ path: args.path, namespace: 'css-stub' }));
           b.onLoad({ filter: /.*/, namespace: 'css-stub' }, () => ({ contents: '', loader: 'js' }));
           b.onResolve({ filter: /mapboxInit\.js$/ }, () => ({ path: join(dir, 'mapboxStub.js') }));
+          // The hub page's <Navigate> is recorded; every other import of the router is the real one.
+          b.onResolve({ filter: /^react-router-dom$/ }, (a) =>
+            /PublicReportListPage\.jsx$/.test(a.importer) ? { path: join(dir, 'routerShim.js') } : undefined
+          );
           // Only these files' own effects are recorded; everything they import keeps the real ones.
           b.onResolve({ filter: /^react$/ }, (a) =>
             /(PublicReportLayout|PublicReportDetailPage|ClientReportMap)\.jsx$/.test(a.importer) ? { path: join(dir, 'reactShim.js') } : undefined
@@ -348,4 +372,68 @@ test('the map on a phone: two-finger panning from the start, filters behind a bu
   } finally {
     mq.matches = false;
   }
+});
+
+// ── A link to one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) ───────────────────────────
+const hubRow = { id: 'r9', title: '', weekStart: '2026-10-19', weekEnd: '2026-10-25', scope: { kind: 'campaign', label: 'Whole campaign', seriesKey: 'kC' }, headline: { cumulative: { doorsKnocked: 10 }, period: { doorsKnocked: 2 } } };
+const singleHub = (extra = {}) => ({ campaignName: 'Fall 2026', orgName: 'Fox Bryant', hasLogo: false, single: true, reportId: 'r9', gone: false, reports: [hubRow], ...extra });
+const listCtx = (hub) => ({ token: 'TS', hub, hubQ: { data: hub, isLoading: false, error: null, refetch() {} } });
+
+test('a link to one report: the browser tab says “Report”; a link to all your reports keeps “Reports”', () => {
+  sessionStorage.setItem('doorline.share.TT', 'jwt-t');
+  const qc = m.newQc();
+  qc.setQueryData(['share-meta', 'TT'], { requiresPassword: true });
+  qc.setQueryData(['share', 'TT', 'jwt-t', 'reports'], singleHub());
+  let cleanups = runAll(m.layout(qc, '/r/TT').effects);
+  assert.equal(document.title, 'Fall 2026 · Report');
+  cleanups.forEach((c) => c());
+  assert.equal(document.title, 'Doorline', 'handed back');
+  qc.setQueryData(['share', 'TT', 'jwt-t', 'reports'], { ...singleHub(), single: false, reportId: undefined, gone: undefined });
+  cleanups = runAll(m.layout(qc, '/r/TT').effects);
+  assert.equal(document.title, 'Fall 2026 · Reports');
+  cleanups.forEach((c) => c());
+});
+
+test('a link to one report: the hub page opens its report in its place, replacing itself in the history', () => {
+  const qc = m.newQc();
+  let r = m.list(qc, listCtx(singleHub()), '/r/TS');
+  assert.equal(r.html, '');
+  assert.deepEqual(r.navigates, [{ replace: true, to: '/r/TS/reports/r9' }]);
+  // Taken down or removed: it says so and goes nowhere.
+  r = m.list(qc, listCtx(singleHub({ gone: true, reports: [] })), '/r/TS');
+  assert.deepEqual(r.navigates, []);
+  assert.match(r.html, /This report was taken down or removed\. Ask the person who sent it\./);
+  // A link to all your reports stays on its hub.
+  const all = { campaignName: 'Fall 2026', orgName: 'Fox Bryant', hasLogo: false, single: false, reports: [hubRow] };
+  r = m.list(qc, listCtx(all), '/r/TS');
+  assert.deepEqual(r.navigates, []);
+  assert.match(r.html, /Latest · Oct 19 – Oct 25, 2026 · Whole campaign/);
+});
+
+test('a link to one report: a report gone sends the hub to be read again; a shown one pings "opened" as on any link', async () => {
+  const session = { get: () => new Promise(() => {}), handleError: () => ({}) };
+  const ctx = (hub) => ({ token: 'TS', accessToken: 'jwt-s', session, hub, hubQ: { data: hub, isLoading: false, error: null }, logo: { url: null, blob: null } });
+
+  const qc = m.newQc();
+  qc.setQueryData(['share', 'TS', 'jwt-s', 'reports'], singleHub());
+  const err = Object.assign(new Error('This report was taken down or removed.'), { status: 404, code: 'REPORT_NOT_FOUND' });
+  qc.getQueryCache().build(qc, { queryKey: ['share', 'TS', 'jwt-s', 'report', 'r9'] }).setState({ status: 'error', error: err, fetchStatus: 'idle', data: undefined });
+  let r = m.detail(qc, ctx(singleHub()), '/r/TS/reports/r9');
+  assert.match(r.html, /This report was taken down or removed\. Ask the person who sent it\./);
+  assert.doesNotMatch(r.html, /see all reports/);
+  runAll(r.effects);
+  assert.equal(qc.getQueryState(['share', 'TS', 'jwt-s', 'reports']).isInvalidated, true, 'the hub is asked again, and learns `gone`');
+
+  const shown = m.newQc();
+  shown.setQueryData(['share', 'TS', 'jwt-s', 'report', 'r9'], { report: { ...report, id: 'r9', nav: null }, survey: { questions: [] }, single: true });
+  route = () => ({ status: 204, body: null });
+  r = m.detail(shown, ctx(singleHub()), '/r/TS/reports/r9');
+  assert.match(r.html, /This link opens this report only\./);
+  const cleanups = runAll(r.effects);
+  const ping = calls.find((c) => c.url === '/api/share/TS/reports/r9/opened');
+  assert.ok(ping, 'pinged');
+  assert.equal(ping.init.headers['X-Share-Token'], 'jwt-s');
+  await tick();
+  cleanups.forEach((c) => c());
+  assert.equal(ping.init.signal.aborted, true, 'the cleanup aborts it');
 });

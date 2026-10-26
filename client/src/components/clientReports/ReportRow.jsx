@@ -4,7 +4,7 @@ import { BuildStatus } from './parts.jsx';
 import TeamChangedCard from './TeamChangedCard.jsx';
 import { buildStateOf } from './buildState.js';
 import { formatDayOf, formatPeriod } from './reportDates.js';
-import { noUsableLinkReason, opensLine, usableLinks } from './linkState.js';
+import { opensLine, reportLinkReason } from './linkState.js';
 import { useBuildPoll } from './hooks.js';
 
 // One report on the Client Reports tab (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G1):
@@ -12,11 +12,13 @@ import { useBuildPoll } from './hooks.js';
 //   Oct 13 – Oct 19  Published · Edited Oct 21
 //   3,412 doors (+412) · 1,980 surveys (+260)
 //   Opened via Candidate: about 2 visits
-//   [Open] [Next report] [Copy message] [⋮]
+//   [Open] [Next report] [Share] [⋮]
 //
 // Its build is polled while live (useBuildPoll). Next report appears only on the latest report of its
-// tab; Copy message only on a report the client can see, and only with a usable link — otherwise it
-// is disabled and the row says why, in the Publish confirm's words.
+// tab; Share on every report the client can see (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) — it
+// offers to make a link when none opens the report, and the row then says why, counting only the links
+// that can open THIS report (linksFor, in linkState.js reportLinkReason). `shares` is null until the links
+// list is here: no line meanwhile.
 
 const n = (v) => Number(v || 0).toLocaleString();
 const plus = (v) => `${Number(v || 0) >= 0 ? '+' : '−'}${n(Math.abs(Number(v || 0)))}`;
@@ -54,7 +56,7 @@ const ReportRow = ({
   busy,
   onOpen,
   onNext,
-  onCopy,
+  onShare,
   onTakeDown,
   onPutBackUp,
   onDelete,
@@ -69,9 +71,10 @@ const ReportRow = ({
   const state = buildStateOf(build, { hasSnapshot: row.hasSnapshot });
   const status = statusOf(row);
   const shown = row.status === 'published' && !row.takenDownAt;
-  const linkReason = shown ? noUsableLinkReason(shares) : null;
-  const canCopy = shown && usableLinks(shares).length > 0;
-  const opens = row.status === 'published' ? opensLine(row, shares) : '';
+  const linkReason = shown ? reportLinkReason({ shares, reportId: row.id, published: true }) : null;
+  // Which link it was opened through needs the links' names: nothing until the list is here (else every
+  // link would read "a deleted link" meanwhile).
+  const opens = row.status === 'published' && shares ? opensLine(row, shares) : '';
   const hasNumbers = row.hasSnapshot || row.status === 'published';
   const menu = [
     shown ? { label: 'Take down', onClick: () => onTakeDown(row) } : null,
@@ -136,15 +139,15 @@ const ReportRow = ({
           </Button>
         )}
         {shown && (
-          <Button size="sm" variant="secondary" disabled={!canCopy} onClick={() => onCopy(row)}>
-            Copy message
+          <Button size="sm" variant="secondary" onClick={() => onShare(row)}>
+            Share
           </Button>
         )}
         <span className="ml-auto">
           <RowMenu items={menu} />
         </span>
       </div>
-      {shown && !canCopy && linkReason && <p className="mt-1 text-xs text-fg-muted">Copy message: {linkReason.text}</p>}
+      {linkReason && <p className="mt-1 text-xs text-fg-muted">{linkReason.text}</p>}
     </li>
   );
 };

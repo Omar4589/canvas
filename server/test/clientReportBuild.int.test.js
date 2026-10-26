@@ -370,8 +370,10 @@ const runBuild = async (reportId, extra = {}) => {
 };
 
 const createReport = async (body = {}) => {
+  // allowDuplicate: these suites make many reports for one tab and week on purpose; the duplicate guard
+  // (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E) has its own suite, clientReportDuplicates.int.test.js.
   const res = await call('POST', '/admin/client-reports', asAdmin({
-    campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', ...body,
+    campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', allowDuplicate: true, ...body,
   }));
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
   return res.json.report;

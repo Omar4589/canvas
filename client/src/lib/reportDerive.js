@@ -276,7 +276,10 @@ const joinList = (parts) =>
  * The one neutral line when earlier totals moved after they were sent (owner ruling 10-24): "Earlier
  * totals were updated by −120 doors and +3 surveys since the Oct 13 – Oct 19 report." The server
  * drops `since` once that report is no longer the series' latest shown one, and the whole object
- * when nothing moved. No reasons, ever.
+ * when nothing moved. On a link to this report only, the server sends `before` (this report's first
+ * day) instead and the line names no other report: "Totals from before Oct 19 were updated by −120
+ * doors after they were first reported." (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D — the same counts;
+ * the PDF prints this same line). No reasons, ever.
  */
 export const earlierTotalsText = (earlierTotals) => {
   const changes = (earlierTotals?.changes || []).filter(
@@ -284,6 +287,9 @@ export const earlierTotalsText = (earlierTotals) => {
   );
   if (!changes.length) return null;
   const parts = changes.map(({ card, delta }) => `${signedCount(delta)} ${CARD_NOUNS[card][Math.abs(delta) === 1 ? 0 : 1]}`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(earlierTotals.before ?? '')) {
+    return `Totals from before ${shortDate(earlierTotals.before)} were updated by ${joinList(parts)} after they were first reported.`;
+  }
   const since = earlierTotals.since?.weekStart && earlierTotals.since?.weekEnd
     ? ` since the ${shortRange(earlierTotals.since.weekStart, earlierTotals.since.weekEnd)} report`
     : '';

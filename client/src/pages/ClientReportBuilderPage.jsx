@@ -16,7 +16,7 @@ import ReportSettings from '../components/clientReports/ReportSettings.jsx';
 import BeforePublish, { PublishedChecks } from '../components/clientReports/BeforePublish.jsx';
 import PublishDialog from '../components/clientReports/PublishDialog.jsx';
 import RefreshDialog from '../components/clientReports/RefreshDialog.jsx';
-import CopyMessageDialog from '../components/clientReports/CopyMessageDialog.jsx';
+import ShareDialog from '../components/clientReports/ShareDialog.jsx';
 import TeamChangedCard from '../components/clientReports/TeamChangedCard.jsx';
 import TeamDialog from '../components/clientReports/TeamDialog.jsx';
 import { fetchLogoDataUrl, useLogoUrl } from '../components/clientReports/BrandingCard.jsx';
@@ -45,7 +45,7 @@ import {
   toggleMap,
 } from '../components/clientReports/questionRules.js';
 import { formatDayOf, formatPeriod } from '../components/clientReports/reportDates.js';
-import { opensLine, usableLinks } from '../components/clientReports/linkState.js';
+import { linksFor, opensLine, singleLinksOf, takeDownLinksText, usableLinks } from '../components/clientReports/linkState.js';
 import { messageReportOf } from '../components/clientReports/copyMessage.js';
 import { statusOf } from '../components/clientReports/ReportRow.jsx';
 import {
@@ -864,7 +864,7 @@ const ClientReportBuilderPage = () => {
     }, { replace: true });
   }, [reviewParam, build, setParams]);
 
-  const [copyOpen, setCopyOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [team, setTeam] = useState(null); // { series, initialEnding }
   const [pdfBusy, setPdfBusy] = useState(false);
 
@@ -983,7 +983,8 @@ const ClientReportBuilderPage = () => {
   const scopeText = scopeKind === 'campaign' ? 'Whole campaign' : scopeKind === 'walk_list' ? `Walk list: ${scopeName}` : `Team: ${scopeName}`;
   // A draft with no snapshot has no numbers, whatever an older field says.
   const numbersAsOf = report.snapshotId || published ? checks?.numbersAsOf || report.statsComputedAt || report.publishedAt || null : null;
-  const opens = published ? opensLine(report, shares) : '';
+  // Opened via which link: named once the links list is here (never "a deleted link" while it loads).
+  const opens = published && sharesQ.data ? opensLine(report, shares) : '';
   const notes = [
     report.contentEditedAt ? `Edited ${formatDayOf(report.contentEditedAt, tz)}` : null,
     report.numbersRefreshedAt ? `Numbers refreshed ${formatDayOf(report.numbersRefreshedAt, tz)}` : null,
@@ -1016,9 +1017,15 @@ const ClientReportBuilderPage = () => {
 
   const teamSeriesId = buildState?.teamChanged ? buildState.seriesId : null;
   const teamRow = (seriesQ.data?.series || []).find((s) => s.id === teamSeriesId) || null;
-  const canCopy = shown && usableLinks(shares).length > 0;
-  // Can any link open it (WALK-5)? The links list once loaded, else what the checks counted.
-  const hasUsableLink = sharesQ.isSuccess ? usableLinks(shares).length > 0 : (checks?.links?.usable ?? 0) > 0;
+  // The links list, or null until it has loaded: Before you publish and the Publish confirm then read
+  // the checks' count instead.
+  const linkList = sharesQ.isSuccess ? shares : null;
+  // Can a link open it (WALK-5)? Only the links that can open THIS report count — the links to all
+  // your reports and this report's own, never another report's (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md
+  // §D, contract K8): the list once loaded, else what the checks counted (the server counts the same).
+  const hasUsableLink = linkList ? usableLinks(linksFor(linkList, id)).length > 0 : (checks?.links?.usable ?? 0) > 0;
+  // Take down names this report's own links (§D): they show "taken down" until it is put back up.
+  const takeDownLinks = takeDownLinksText(singleLinksOf(shares, id));
   const elsewhereWords = elsewhere ? conflictWords(elsewhere.conflicts, { labelOf, theirs: settingsOf(report) }) : null;
   // An Update that only switches to areas isn't seen "right away" (WALK-8).
   const switchOnly =
@@ -1062,7 +1069,7 @@ const ClientReportBuilderPage = () => {
         <BeforePublish
           checks={checks}
           report={report}
-          shares={shares}
+          shares={linkList}
           labelOf={labelOf}
           tz={tz}
           busy={recomputeM.isPending || buildLive}
@@ -1268,9 +1275,17 @@ const ClientReportBuilderPage = () => {
                 <Button variant="secondary" disabled={editing} title={editing ? 'Finish or cancel the edit first.' : undefined} onClick={() => setRefreshOpen(true)}>
                   Refresh numbers
                 </Button>
+                {/* Share replaces Copy message (§D): the message, the link it uses — and Make a link, so it
+                    is never held for want of one. It waits for the links list, so it never says that no
+                    link opens the report before the list is in. */}
                 {shown && (
-                  <Button variant="secondary" disabled={!canCopy || editing} onClick={() => setCopyOpen(true)}>
-                    Copy message
+                  <Button
+                    variant="secondary"
+                    disabled={editing || sharesQ.isPending}
+                    title={editing ? 'Finish or cancel the edit first.' : undefined}
+                    onClick={() => setShareOpen(true)}
+                  >
+                    Share
                   </Button>
                 )}
                 {shown ? (
@@ -1316,12 +1331,17 @@ const ClientReportBuilderPage = () => {
       )}
       {draftMode && saveState.status === 'error' && <ErrorBanner title="Couldn’t save your latest change." error={saveState.error} />}
       {justPublished && shown && (hasUsableLink ? (
-        <NextStepBanner tone="success" title="Published." action={canCopy ? { label: 'Copy the message for your client', onClick: () => setCopyOpen(true) } : null}>
+        <NextStepBanner tone="success" title="Published." action={linkList ? { label: 'Copy the message for your client', onClick: () => setShareOpen(true) } : null}>
           Your client can see it now.
         </NextStepBanner>
       ) : (
-        // No link can open it yet (WALK-5): say what is missing, not "your client can see it".
-        <NextStepBanner tone="success" title="Published — create a link so your client can open it." action={{ label: 'Client links', onClick: () => leave(backTo) }} />
+        // No link can open THIS report yet (WALK-5; §D — links to other reports don't count): say what
+        // is missing, not "your client can see it". Share makes the link, here.
+        <NextStepBanner
+          tone="success"
+          title="Published — create a link so your client can open it."
+          action={sharesQ.isPending ? null : { label: 'Share', onClick: () => setShareOpen(true) }}
+        />
       ))}
       {published && report.takenDownAt && (
         <NextStepBanner tone="warning" title={`Taken down ${formatDayOf(report.takenDownAt, tz)}.`}>
@@ -1419,7 +1439,7 @@ const ClientReportBuilderPage = () => {
           report={report}
           checks={checks}
           build={build}
-          shares={shares}
+          shares={linkList}
           tz={tz}
           previewFresh={previewFresh}
           mapStale={!!mapStale}
@@ -1459,11 +1479,21 @@ const ClientReportBuilderPage = () => {
           onCancelBuild={() => cancelM.mutate()}
         />
       )}
-      {copyOpen && shown && (
-        <CopyMessageDialog
+      {shareOpen && shown && (
+        <ShareDialog
           report={{ ...messageReportOf(shaped ? { ...shaped, seriesLabel: data.seriesLabel } : { ...report, id: String(report._id), seriesLabel: data.seriesLabel }), campaignType: report.campaignType || campaign?.type }}
-          shares={shares}
-          onClose={() => setCopyOpen(false)}
+          // Null until the links list is here (code review LINK-3): Share then waits, or says it failed.
+          shares={sharesQ.data ? shares : null}
+          linksError={sharesQ.error}
+          campaignId={campaignId}
+          tz={tz}
+          isAdmin={isOrgAdmin}
+          onClose={() => setShareOpen(false)}
+          // A link made here: the list (the banner, the header's opens and Take down read it) and History.
+          onLinksChanged={() => {
+            qc.invalidateQueries({ queryKey: sharesKey(campaignId) });
+            qc.invalidateQueries({ queryKey: historyKey(campaignId) });
+          }}
         />
       )}
       {confirmUpdate && unsentDiff && (
@@ -1542,6 +1572,7 @@ const ClientReportBuilderPage = () => {
           onConfirm={() => takeDownM.mutate()}
         >
           <p>Your client stops seeing it. It stays exactly as it was — numbers, map and publish date — and Put back up shows it again.</p>
+          {takeDownLinks && <p>{takeDownLinks}</p>}
           <p>Any build or new numbers waiting for review are cancelled.</p>
         </ConfirmDialog>
       )}

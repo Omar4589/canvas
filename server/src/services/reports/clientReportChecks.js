@@ -149,19 +149,27 @@ const teamPeriodFigures = async (report, inputs) => {
 
 // The link the client would open: is there a usable one — active, unexpired and not locked (G5, G6)
 // — and if not, why, so the last line can name the fix: create one, renew it, unlock or rotate it,
-// enable it.
+// enable it. Only links that can open THIS report count (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D,
+// contract K8): every link to all the campaign's reports — reportId null, or missing on a link made
+// before the field, both of which `$in: [null, …]` matches — and this report's own one-report links.
+// The reason is worked out over THOSE links first, since each names a fix for this report: an expired
+// link to all the reports reads "renew it" even while a link to another report works (code review round
+// 1, LINK-2; the client's reportLinkReason follows the same rule). 'other_reports' only when no link of
+// any state opens this report but the campaign has others — each a link to one other report; 'no_link'
+// when it has none.
 const linkState = async (report) => {
-  const links = await ReportShareLink.find(
-    { organizationId: report.organizationId, campaignId: report.campaignId },
-    { isActive: 1, expiresAt: 1, label: 1, failedUnlockAt: 1 }
-  ).lean();
+  const scope = { organizationId: report.organizationId, campaignId: report.campaignId };
+  const fields = { isActive: 1, expiresAt: 1, label: 1, failedUnlockAt: 1 };
+  const links = await ReportShareLink.find({ ...scope, reportId: { $in: [null, report._id] } }, fields).lean();
   const now = new Date();
   const usable = links.filter((l) => l.isActive && !isExpired(l, now) && !lockOf(l, now).locked);
   let reason = null;
   if (!usable.length) {
     const active = links.filter((l) => l.isActive);
-    if (!links.length) reason = 'no_link';
-    else if (!active.length) reason = 'disabled';
+    if (!links.length) {
+      const elsewhere = await ReportShareLink.exists({ ...scope, reportId: { $nin: [null, report._id] } });
+      reason = elsewhere ? 'other_reports' : 'no_link';
+    } else if (!active.length) reason = 'disabled';
     // An active, unexpired link that still isn't usable is locked.
     else if (active.some((l) => !isExpired(l, now))) reason = 'locked';
     else reason = 'expired';
@@ -226,10 +234,12 @@ const earlierTotalsCheck = async ({ report, inputs, team }) => {
   };
 };
 
-// Area reports (§F5, §O5): every link of a campaign shows all its published reports, so another
+// Area reports (§F5, §O5): a link to all the campaign's reports shows every published one, so another
 // shown report that maps the same single-choice question — door by door, or by area for another
 // period, team or walk list — or charts it for a narrower scope (a team or a walk list), can narrow
-// down what this report's areas keep hidden. Named per question, so the operator can decide.
+// down what this report's areas keep hidden. Named per question, so the operator can decide. A link to
+// one report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) shows only that report, but one person can hold
+// several links, so every shown report still counts.
 // `inputsOf` reads each report's live inputs — a report from before snapshots with every survey its
 // answers can have come from (LEGACY-1).
 const areaNarrowing = async ({ report, inputs, inputsOf, labelOf }) => {

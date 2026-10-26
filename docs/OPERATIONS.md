@@ -102,7 +102,7 @@ thing failing. A published legal promise cannot be enforced by something nobody 
 | `platform-stats-reconcile` | Daily 03:47 UTC | Recomputes the Control Room lifetime counters' **live** bucket from real rows and stamps "last reconciled" (drift-corrector; **not** a retention job — the retention health banner deliberately does not watch it), **and rebuilds the `PlatformDaily` trend series in full from the same rows** (the sparklines' data; same job, no extra cron). Cron override: `PLATFORM_STATS_CRON`. Also runnable on demand from the Control Room's **Reconcile now** button (`POST /super-admin/access/platform-stats/reconcile` — same idempotent recompute). |
 | `reconcile-campaign-stats` | Daily 04:07 UTC | **Re-checks every campaign's stored all-time counts** (`Campaign.stats` — what the campaigns list and the All-time dashboards read) against the knock and survey records, and writes back the true numbers. Same code as `npm run migrate:campaign-stats -- --apply`. When it had to repair something, the worker log carries a warning naming each campaign and count; a campaign that needs repairing every night is a bug in the counters. Cron override: `CAMPAIGN_STATS_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 | `retention-triggers` | Daily 04:41 UTC | **Warns, then condemns organizations**: emails deletion warnings ~30 days ahead (wind-down + dormancy), then hands each due org (wind-down, dormancy, due deletion requests) to **`org-delete-queue`** — one job per org, so a failure is isolated to that org instead of aborting the sweep, and the worker does the destroying minutes later. **Wind-down and dormancy never delete an unwarned org**: the purge requires a delivery-verified warning marker plus a grace period, so while email is unconfigured those two purges simply hold (data kept, never deleted unwarned). Delete-on-request is exempt — it *is* the customer's instruction. The run receipt reports `enqueued`; `purged` is 0 because this job no longer destroys anything itself. |
-| `client-report-row-sweep` | Daily 05:31 UTC | **Deletes client-report map rows nothing needs any more** (since the client reports upgrade, 2026-10-24): the door pins and area cells of reports that were deleted, of reports whose map is off (which includes old drafts from before the upgrade, whose maps are never shown), of builds that died or were replaced, and pre-upgrade rows of reports that have been rebuilt since. It never touches a report's live map, a build still running or new numbers waiting for review, and nothing a build started after the sweep read. Logs `[maintenance] client-report-row-sweep: N orphan, N map-off, N legacy, N stale row(s) over N report(s)`. Cron override: `CLIENT_REPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
+| `client-report-row-sweep` | Daily 05:31 UTC | **Deletes client-report map rows nothing needs any more** (since the client reports upgrade, 2026-10-24): the door pins and area cells of reports that were deleted, of reports whose map is off (which includes old drafts from before the upgrade, whose maps are never shown), of builds that died or were replaced, and pre-upgrade rows of reports that have been rebuilt since. It never touches a report's live map, a build still running or new numbers waiting for review, and nothing a build started after the sweep read. Logs `[maintenance] client-report-row-sweep: N orphan, N map-off, N legacy, N stale row(s) over N report(s)`. Since 2026-10-25 it first re-checks the duplicate-report guard's index and builds it if it's missing (see *Release: client reports, simpler start*; silent when it's there). Cron override: `CLIENT_REPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 | `sweep-stale-imports` | Daily 05:53 UTC | **Fails stuck imports and deletes orphaned upload files.** Expires import jobs whose worker died mid-run (no heartbeat for minutes) with a clear failure message, then deletes the **raw uploaded voter files** left behind by finished, failed, or vanished imports older than 24h — a crashed import used to keep the complete uploaded file forever — plus stray worker temp files. Cron override: `IMPORT_SWEEP_CRON`. Not a retention job; the retention health banner deliberately does not watch it. |
 
 **Check they're alive:** `GET /api/super-admin/access/health/retention`. It goes **RED** when the last
@@ -952,6 +952,48 @@ data went from 22.9 s and 1,955 MB to 2.4 s and 214 MB (measured with the real r
 `server/test/timezone.test.js` pins it). Once the test pause on the demo had worked, the owner had the preview
 removed the same day. `PACE_PREVIEW_ROW_CAP` does nothing now — delete it from Config Vars if it's still there.
 
+### Release: client reports, simpler start (October 2026)
+
+The Client Reports page's How it works guide, report dates on your organization's report week, links to just
+one report with a Share button on every published report, and a guard against two reports for the same tab
+and dates ([CLIENT_PORTAL.md](CLIENT_PORTAL.md); plan and *As built* in
+[PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md](PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md)). A server deploy plus the web
+build; **no console step, no migration, no config var, no OTA, no client-version bump**: every new field
+reads as its default when it's missing (an organization's report week is Monday to Sunday until an admin
+changes it), and the new duplicate-guard index on client reports builds itself when the web and the worker
+start. `npm run audit:mobile-api` before committing should find no phone call on the changed routes (the
+phone calls none of them).
+
+**The guard index looks after itself — nothing to run.** It builds at every start of the web dyno and the
+worker, and the nightly `client-report-row-sweep` (05:31 UTC) checks it again first. A build that succeeds
+logs nothing. What you might see in the logs, and what each means:
+
+- `ClientReport report_period_guard: a duplicate key failed the build; N report(s) sharing a tab and dates
+  with an earlier one now sit outside the guard, as second reports (…) — building it again` — two reports for
+  the same tab and dates got in while the index was missing; the later ones are now ordinary second reports
+  (nothing is deleted, and New report still finds them), then it builds;
+- `… index built` (after that) or `… index built on retry N` — it's in place;
+- `… index failed — retry N of 4 in 5 s: <error>` (then 30 s, 120 s, 600 s) — a database hiccup; it tries
+  again by itself;
+- `… index failed — no retries left; the next boot tries again: <error>` — still nothing to do: the next
+  restart or the next nightly sweep builds it, and meanwhile New report still checks for an existing report
+  before making one.
+
+**Optional, read-only, before or after:** how many report tabs will show New report's week nudge ("Your last
+Whole campaign report ran Wednesday – Tuesday. Your organization's report weeks run Monday – Sunday."), per
+organization, from the Heroku dashboard → **More → Run console**:
+
+```
+npm run report:tab-weeks
+```
+
+It prints counts and organization names only, for example "Acme — report weeks Monday – Sunday / 6 open
+tab(s) with reports · 2 will show the week nudge / their weeks: Sunday – Saturday: 1 · Wednesday – Tuesday: 1",
+and ends "Nothing was changed." It reads each organization's week exactly as the app does, and a tab's
+latest report the way New report picks it (the newest last day, then the newest made). Nothing to do with
+the answer: each tab's next New report offers **Move this tab to Monday – Sunday weeks**, and an admin can
+instead set the organization's week there.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -1202,6 +1244,7 @@ fraud audit).
 | `npm run migrate:scrub-deleted-email-log -- --apply` | **Once, after the admin account-deletion release.** Rewrites those rows' recipient to the account's tombstone address and clears their error and bounce text — the same `scrubAccountEmailLog` a deletion now runs itself. Deletion-warning and support-grant notice rows carry no `userId` and keep their recipients. Idempotent |
 | `npm run migrate:client-report-visibility` | **Read-only.** What the client-reports migration would do, step by step ([clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*): surveys whose follow-up record (and the version it starts at) it would seed, surveys with answers older than that version, legacy reports whose operator unticked every question, reports to put in a series (and walk-list names matching a canvasser's), backfills, the two steps marked as discarding information, the links' new fields, and open drafts that need a rebuild |
 | `npm run migrate:client-report-visibility -- --apply` | **Once, after the client reports upgrade deploy** (add `--keep-legacy-all` to keep the charts of legacy reports whose operator unticked every question). Writes only what is still missing, so a second run, or one over documents the new code wrote, changes nothing |
+| `npm run report:tab-weeks` | **Read-only, optional.** Per organization, how many open client-report tabs' latest report runs whole weeks on another weekday than the organization's report week — the tabs whose New report shows the week nudge ([reportTabWeeks.js](../server/src/migrations/reportTabWeeks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Report weeks and the next period*). Counts and organization names only; refuses any extra argument; ends "Nothing was changed." |
 | `npm run sweep:raw-imports` | Once after the import-fix release (purges the pre-fix backlog of orphaned raw voter-file uploads), or whenever an import looks wedged — same code as the nightly `sweep-stale-imports` job ([sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js)) |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |

@@ -95,6 +95,15 @@ const reportShareLinkSchema = new mongoose.Schema(
     // lifetimeStart() (lifetimeStartAt ?? createdAt). Unset on a legacy link that never expires, until
     // it gains an expiry; renew starts a new life.
     lifetimeStartAt: { type: Date, default: null },
+
+    // A link to ONE report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D): it opens that report and
+    // nothing else. null — and missing, on every link made before this field — opens every published
+    // report of the campaign. Set at creation, never changed; deleting the report deletes its links
+    // (DELETE /admin/client-reports/:id). DECLARED on purpose: strictQuery drops an undeclared filter
+    // key, so `{ reportId: … }` would silently match every link (round 2 reproduced it). Filters read
+    // `reportId: null` / `$in: [null, …]`, which match the missing field too. No index of its own: a
+    // campaign has a handful of links, and {campaignId, isActive} finds them.
+    reportId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientReport', default: null },
   },
   { timestamps: true }
 );

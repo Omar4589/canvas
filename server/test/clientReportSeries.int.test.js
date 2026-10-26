@@ -155,7 +155,8 @@ const rebuild = async (reportId) => {
   return runBuild(reportId);
 };
 const teamReport = async (seriesId, extra = {}) => {
-  const res = await call('POST', '/admin/client-reports', { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', seriesId: String(seriesId), ...extra });
+  // allowDuplicate: one week built several times on purpose (the duplicate guard has its own suite).
+  const res = await call('POST', '/admin/client-reports', { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', seriesId: String(seriesId), allowDuplicate: true, ...extra });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
   return res.json.report;
 };

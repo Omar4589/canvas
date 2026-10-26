@@ -8,13 +8,17 @@ import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
 import { ClientReportSeries } from '../../models/ClientReportSeries.js';
+import { ReportShareLink } from '../../models/ReportShareLink.js';
+import { User } from '../../models/User.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Effort } from '../../models/Effort.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
-import { daysBetween, addDays } from '../../services/reports/goalProgress.js';
+import { nextPeriod, suggestPeriod, weekStartOf, reportWeekStartsOnOf } from '../../services/reports/reportPeriods.js';
+import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { shapeReportForClient, mapFilterSurvey } from '../../services/reports/clientReportView.js';
 import {
   MapError,
@@ -65,7 +69,10 @@ import {
   HistoryError,
   REPORT_FIELDS,
   SERIES_FIELDS,
+  writeLinkHistory,
+  LINK_FIELDS,
 } from '../../services/reports/clientReportHistory.js';
+import { isReportPeriodGuardError } from '../../services/reports/clientReportIndexes.js';
 import {
   choiceKeysOf,
   closeUnderDeps,
@@ -77,6 +84,7 @@ import {
   breakdownKeysOf,
   mapServed,
   servedMapKeys,
+  periodLabelOf,
 } from '../../services/reports/reportVisibility.js';
 
 // Admin report BUILDER (docs/CLIENT_PORTAL.md; the upgrade in docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md).
@@ -138,6 +146,9 @@ const createSchema = z.object({
   // matching a canvasser's name is a place, not a person.
   seriesLabel: z.string().max(200).optional(),
   confirmLabel: z.boolean().optional(),
+  // "Make a second one" (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): a report for dates this tab
+  // already has, on purpose — no REPORT_EXISTS, and outside the duplicate guard.
+  allowDuplicate: z.boolean().optional(),
 });
 const sectionSchema = z.object({ heading: z.string().min(1).max(200), body: z.string().max(20000).default('') });
 const updateSchema = z.object({
@@ -246,6 +257,9 @@ function adminListRow(r) {
     nextReportId: r.nextReportId ? String(r.nextReportId) : null,
     build: buildView(r.build),
     updatedAt: r.updatedAt,
+    // New report's "last report of the tab" breaks a same-day tie by when the report was made, as
+    // report:tab-weeks does (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §C; staff-only list).
+    createdAt: r.createdAt || null,
     headline: {
       cumulative: r.stats?.cumulative?.totals || {},
       period: r.stats?.period?.totals || {},
@@ -288,11 +302,24 @@ router.get('/series', async (req, res, next) => {
     const campaign = await loadCampaignInOrg(orgId, req.query.campaignId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found in this org' });
     if (!(await manages(req, res, campaign._id))) return;
-    const [picker, ready] = await Promise.all([
+    // New report's week facts too (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §C), so the dialog needs no
+    // other request: the organization's report week, today in the campaign's zone, and whether anyone
+    // knocked before this week began — a new campaign's first report is This week, never an empty last
+    // week. One exists(): the planner takes the single-field { campaignId } index, not { campaignId,
+    // timestamp } (measured on a 1M-row ledger, code review round 1), and stops at the first earlier
+    // knock it meets — one row read for the measured campaigns that had knocked before; all of a
+    // campaign's rows only when none is a knock from before this week (20,505 restrictions and notes:
+    // about 25 ms).
+    const weekStartsOn = reportWeekStartsOnOf(req.activeOrg);
+    const tz = campaign.timeZone || 'America/New_York';
+    const today = zonedDayStr(new Date(), tz);
+    const thisWeekBegan = zonedDayRange(weekStartOf(today, weekStartsOn), null, tz).$gte;
+    const [picker, ready, knocked] = await Promise.all([
       seriesPicker({ organizationId: orgId, campaignId: campaign._id }),
       teamsReady(orgId),
+      CanvassActivity.exists({ campaignId: campaign._id, actionType: { $in: KNOCK_ACTIONS }, timestamp: { $lt: thisWeekBegan } }),
     ]);
-    res.json({ ...picker, teamsReady: ready });
+    res.json({ ...picker, teamsReady: ready, weekStartsOn, today, knockedBeforeThisWeek: !!knocked });
   } catch (err) {
     fail(res, next)(err);
   }
@@ -627,6 +654,38 @@ const insertDraftWithBuild = async ({ _id = new mongoose.Types.ObjectId(), doc, 
   return { report: created.toObject(), build };
 };
 
+// No accidental doubles (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E). Of the reports a tab already has
+// for these dates (more than one only from before the guard, or made on purpose), the one most worth
+// opening: a draft, then one the client sees, then one taken down — the newest of each.
+const openFirst = (r) => (r.status === 'draft' ? 0 : r.status === 'published' && !r.takenDownAt ? 1 : 2);
+const existingOf = (list) => [...list].sort((a, b) => openFirst(a) - openFirst(b) || new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
+const aOrAn = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
+// 409 REPORT_EXISTS: what New report needs to name that report and open it, or make a second one.
+const REPORT_EXISTS = (r, scopeLabel) => {
+  const period = periodLabelOf(r);
+  const kind = `${aOrAn(scopeLabel)} ${scopeLabel} report for ${period}`;
+  return {
+    error:
+      r.status === 'draft'
+        ? `You already have a draft ${scopeLabel} report for ${period}.`
+        : r.takenDownAt
+          ? `You already published ${kind}, taken down.`
+          : `You already published ${kind}. To bring its numbers up to date, open it and press Refresh numbers.`,
+    code: 'REPORT_EXISTS',
+    reportId: String(r._id),
+    status: r.status,
+    takenDown: !!r.takenDownAt,
+    weekStart: r.weekStart,
+    weekEnd: r.weekEnd,
+    scopeLabel,
+  };
+};
+// "Ada made this report a moment ago — you're both in it.": the winner's creator, first and last name.
+const creatorNameOf = async (report) => {
+  const u = report.createdBy ? await User.findById(report.createdBy, { firstName: 1, lastName: 1 }).lean() : null;
+  return u ? [u.firstName, u.lastName].filter(Boolean).join(' ') || null : null;
+};
+
 // Create a draft for a campaign + period, in a series (new or existing), and start its numbers.
 router.post('/', async (req, res, next) => {
   try {
@@ -651,37 +710,67 @@ router.post('/', async (req, res, next) => {
     const resolved = await resolveCreateSeries(req, res, { campaign, data });
     if (!resolved) return;
     const { series, team, effort, label } = resolved;
+    // No accidental doubles (§E): look first — organizationId and campaignId keep this on the campaign
+    // index ({seriesId, …} alone was a collection scan) — and name the report that's there, unless the
+    // operator chose "Make a second one".
+    const key = { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, weekStart: data.weekStart, weekEnd: data.weekEnd };
+    if (!data.allowDuplicate) {
+      const there = existingOf(await ClientReport.find(key, { status: 1, takenDownAt: 1, weekStart: 1, weekEnd: 1, createdAt: 1 }).lean());
+      if (there) return res.status(409).json(REPORT_EXISTS(there, label));
+    }
     const template = await resolveTemplate(orgId, campaign);
 
-    const { report, build } = await insertDraftWithBuild({
-      template,
-      coordinatorIds: crewKeysOf(team),
-      by: req.user._id,
-      doc: {
-        organizationId: orgId,
-        campaignId: campaign._id,
-        campaignType: campaign.type,
-        title: data.title || '',
-        // The walk list's name is FROZEN at creation (the public page never needs a live lookup).
-        effortId: effort ? effort._id : null,
-        effortName: effort ? effort.name : null,
-        seriesId: series._id,
-        scope: { kind: series.kind, label },
-        weekStart: data.weekStart,
-        weekEnd: data.weekEnd,
-        timeZone: tz,
-        rangeStartUtc: range.$gte,
-        rangeEndUtc: range.$lt,
-        status: 'draft',
-        supportQuestionKey: null,
-        visibility: defaultVisibility(template),
-        createdBy: req.user._id,
-      },
-    });
+    // Guarded (dupGuard) unless it is a deliberate second one. Two Creates that both passed the look
+    // above meet at the insert, where report_period_guard lets one in; the other answers that draft.
+    // The insert comes BEFORE enqueueBuild and writeReportHistory, so the loser leaves no job and no
+    // "created" row.
+    const insert = () =>
+      insertDraftWithBuild({
+        template,
+        coordinatorIds: crewKeysOf(team),
+        by: req.user._id,
+        doc: {
+          organizationId: orgId,
+          campaignId: campaign._id,
+          campaignType: campaign.type,
+          title: data.title || '',
+          // The walk list's name is FROZEN at creation (the public page never needs a live lookup).
+          effortId: effort ? effort._id : null,
+          effortName: effort ? effort.name : null,
+          seriesId: series._id,
+          scope: { kind: series.kind, label },
+          weekStart: data.weekStart,
+          weekEnd: data.weekEnd,
+          timeZone: tz,
+          rangeStartUtc: range.$gte,
+          rangeEndUtc: range.$lt,
+          status: 'draft',
+          supportQuestionKey: null,
+          visibility: defaultVisibility(template),
+          ...(data.allowDuplicate ? {} : { dupGuard: true }),
+          createdBy: req.user._id,
+        },
+      });
+    let made;
+    try {
+      made = await insert();
+    } catch (err) {
+      if (!isReportPeriodGuardError(err)) throw err;
+      const winner = await ClientReport.findOne({ ...key, dupGuard: true }).lean();
+      if (winner) {
+        return res.json({ report: winner, build: buildView(winner.build), existing: true, createdByName: await creatorNameOf(winner) });
+      }
+      // Deleted between its insert and this read: the key is free again.
+      made = await insert();
+    }
+    const { report, build } = made;
     await enqueueBuild({ reportId: report._id, jobId: build.jobId });
     await writeReportHistory(report, REPORT_FIELDS.created, { by: req.user._id }).catch(() => {});
     const fresh = await ClientReport.findById(report._id).lean();
-    res.status(201).json({ report: fresh, build: buildView(fresh.build) });
+    // A period that starts after today in the campaign's zone says so, as Next's answer does, and the
+    // builder opens on its "hasn't started yet" note (code review round 1, WEEK-3).
+    const today = zonedDayStr(new Date(), tz);
+    res.status(201).json({ report: fresh, build: buildView(fresh.build), warnings: data.weekStart > today ? ['STARTS_AFTER_TODAY'] : [] });
   } catch (err) {
     fail(res, next)(err);
   }
@@ -1373,24 +1462,18 @@ router.get(
 );
 router.get('/:id/preview/areas', previewPayload('area'));
 
-// The period after `report`'s (§F10): the same number of civil days, starting the day after its
-// end — a source that is exactly one calendar month rolls by month.
-const MONTH_END = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
-const nextPeriodOf = (report) => {
-  const start = addDays(report.weekEnd, 1);
-  const [sy, sm, sd] = report.weekStart.split('-').map(Number);
-  const [ey, em, ed] = report.weekEnd.split('-').map(Number);
-  const wholeMonth = sd === 1 && sy === ey && sm === em && ed === MONTH_END(ey, em);
-  if (wholeMonth) {
-    const [ny, nm] = start.split('-').map(Number);
-    return { weekStart: start, weekEnd: `${start.slice(0, 8)}${String(MONTH_END(ny, nm)).padStart(2, '0')}` };
-  }
-  return { weekStart: start, weekEnd: addDays(start, daysBetween(report.weekStart, report.weekEnd)) };
-};
+// The period after `report`'s (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §C): whole months by the same
+// number of months, whole weeks by the same length on any weekday, any other length to the end of the
+// organization's last complete week — services/reports/reportPeriods.js, the one definition New report's
+// first choice uses too. `today` is the campaign zone's day. Copying the last report's length is what
+// made the "Oct 14 – Oct 26" reports.
+const nextPeriodOf = (report, weekStartsOn, today) => nextPeriod({ weekStart: report.weekStart, weekEnd: report.weekEnd }, weekStartsOn, today);
 
 // Next report, in one click (§F10). Idempotent under a double click: the draft is inserted FIRST
-// with a pre-generated _id, then the source is claimed with a CAS on nextReportId; the loser deletes
-// its own draft and returns the winner.
+// with a pre-generated _id and dupGuard, so report_period_guard lets one draft per tab and period in
+// and a request that loses there answers the winner (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E); then the
+// source is claimed with a CAS on nextReportId, whose loser deletes its own draft and returns the
+// winner — the path that still holds one draft if the guard index failed to build.
 router.post('/:id/next', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -1422,21 +1505,49 @@ router.post('/:id/next', async (req, res, next) => {
     }
     if (team && !(await teamsReady(orgId))) return res.status(400).json(TEAMS_NOT_READY);
 
-    const period = nextPeriodOf(source);
+    // The zone and today come BEFORE the period (§C): after a report of any other length the period
+    // runs to the end of last week, which only today can say.
     const tz = source.timeZone || campaign.timeZone || 'America/New_York';
+    const today = zonedDayStr(new Date(), tz);
+    const weekStartsOn = reportWeekStartsOnOf(req.activeOrg);
+    const period = nextPeriodOf(source, weekStartsOn, today);
     const range = zonedDayRange(period.weekStart, period.weekEnd, tz);
     if (!range.$gte || range.$gte.getTime() !== new Date(source.rangeEndUtc).getTime()) {
       return res.status(409).json({ error: 'The next period does not start where this one ends.', code: 'NEXT_PERIOD_MISMATCH' });
     }
-    // Offered only on the latest report of each series.
-    const later = await ClientReport.exists({
-      organizationId: orgId,
-      campaignId: campaign._id,
-      seriesId: series._id,
-      _id: { $ne: source._id },
-      rangeStartUtc: { $gte: source.rangeEndUtc },
-    });
-    if (later) return res.status(409).json({ error: 'A later report of this series already exists.', code: 'NOT_LATEST_REPORT' });
+    // Offered only on the latest report of each series. A later report for exactly the next period is
+    // the one Next would make — a double click's second request, or the same dates made in New report —
+    // so it is answered, not refused (§C); any other later report still is. ONE read decides both: a
+    // sibling click's draft is either in it or meets this request at the guard below. (Two reads — the
+    // exact one, then "any later" — let a draft landing between them be seen only by the second, and a
+    // double click got NOT_LATEST_REPORT: 2 runs in 5 of ten concurrent clicks.)
+    const later = await ClientReport.find(
+      { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, _id: { $ne: source._id }, rangeStartUtc: { $gte: source.rangeEndUtc } },
+      { weekStart: 1, weekEnd: 1 }
+    )
+      .sort({ createdAt: 1 })
+      .lean();
+    const exactId = later.find((r) => r.weekStart === period.weekStart && r.weekEnd === period.weekEnd)?._id;
+    if (exactId) {
+      const exact = await ClientReport.findOne({ _id: exactId, organizationId: orgId }).lean();
+      if (!exact) return res.status(409).json({ error: 'Try again.', code: 'NEXT_RACE' });
+      return res.json({ report: exact, build: buildView(exact.build), existing: true });
+    }
+    if (later.length) return res.status(409).json({ error: 'A later report of this series already exists.', code: 'NOT_LATEST_REPORT' });
+    // One click never makes a catch-up longer than two weeks (§C): refused with that period and New
+    // report's long-gap choice (last week), which the row opens New report on — the same rule, from the
+    // same definition, as New report's first choice.
+    if (period.kind === 'catch_up') {
+      const suggested = suggestPeriod({ last: source, s: weekStartsOn, today, knockedBeforeThisWeek: true });
+      if (suggested.longGap) {
+        return res.status(409).json({
+          error: 'More than two weeks have passed since this report. Choose the next report’s dates in New report.',
+          code: 'NEXT_GAP_TOO_LONG',
+          catchUp: { weekStart: period.weekStart, weekEnd: period.weekEnd },
+          suggested: { weekStart: suggested.weekStart, weekEnd: suggested.weekEnd },
+        });
+      }
+    }
 
     const template = await resolveTemplate(orgId, campaign);
     const sv = source.visibility || {};
@@ -1444,42 +1555,65 @@ router.post('/:id/next', async (req, res, next) => {
     const label = await seriesLabelOf(series, { team });
     const _id = new mongoose.Types.ObjectId();
     const staleNext = source.nextReportId && !(await ClientReport.exists({ _id: source.nextReportId })) ? source.nextReportId : null;
-    const { report, build } = await insertDraftWithBuild({
-      _id,
-      template,
-      coordinatorIds: crewKeysOf(team),
-      by: req.user._id,
-      doc: {
+    // Guarded (dupGuard, §E): a request for the same tab and period that passed the look above at the
+    // same moment meets this one at report_period_guard — BEFORE the claim, the enqueue and the History
+    // row, so the one that loses leaves no job and no "created" row, and answers the draft that got in.
+    const insert = () =>
+      insertDraftWithBuild({
+        _id,
+        template,
+        coordinatorIds: crewKeysOf(team),
+        by: req.user._id,
+        doc: {
+          organizationId: orgId,
+          campaignId: campaign._id,
+          campaignType: campaign.type,
+          title: '',
+          effortId: source.effortId || null,
+          effortName: source.effortName || null,
+          seriesId: series._id,
+          scope: { kind: series.kind, label: label || scopeOf(source).label || CAMPAIGN_LABEL },
+          weekStart: period.weekStart,
+          weekEnd: period.weekEnd,
+          timeZone: tz,
+          rangeStartUtc: range.$gte,
+          rangeEndUtc: range.$lt,
+          status: 'draft',
+          supportQuestionKey: source.supportQuestionKey || null,
+          observations,
+          copiedFrom: observations.length ? { reportId: source._id, weekStart: source.weekStart, weekEnd: source.weekEnd } : null,
+          copiedNotesReviewed: observations.length ? false : null,
+          visibility: {
+            visibleQuestionKeys: sv.visibleQuestionKeys || [],
+            mapAnswerKeys: sv.mapAnswerKeys || [],
+            showMap: sv.showMap !== false,
+            mapMode: sv.mapMode === 'area' ? 'area' : 'pins',
+            areaSize: sv.areaSize === 'large' ? 'large' : 'small',
+            visibleTags: sv.visibleTags || [],
+            showGoal: !!sv.showGoal,
+          },
+          dupGuard: true,
+          createdBy: req.user._id,
+        },
+      });
+    let made;
+    try {
+      made = await insert();
+    } catch (err) {
+      if (!isReportPeriodGuardError(err)) throw err;
+      const theirs = await ClientReport.findOne({
         organizationId: orgId,
         campaignId: campaign._id,
-        campaignType: campaign.type,
-        title: '',
-        effortId: source.effortId || null,
-        effortName: source.effortName || null,
         seriesId: series._id,
-        scope: { kind: series.kind, label: label || scopeOf(source).label || CAMPAIGN_LABEL },
         weekStart: period.weekStart,
         weekEnd: period.weekEnd,
-        timeZone: tz,
-        rangeStartUtc: range.$gte,
-        rangeEndUtc: range.$lt,
-        status: 'draft',
-        supportQuestionKey: source.supportQuestionKey || null,
-        observations,
-        copiedFrom: observations.length ? { reportId: source._id, weekStart: source.weekStart, weekEnd: source.weekEnd } : null,
-        copiedNotesReviewed: observations.length ? false : null,
-        visibility: {
-          visibleQuestionKeys: sv.visibleQuestionKeys || [],
-          mapAnswerKeys: sv.mapAnswerKeys || [],
-          showMap: sv.showMap !== false,
-          mapMode: sv.mapMode === 'area' ? 'area' : 'pins',
-          areaSize: sv.areaSize === 'large' ? 'large' : 'small',
-          visibleTags: sv.visibleTags || [],
-          showGoal: !!sv.showGoal,
-        },
-        createdBy: req.user._id,
-      },
-    });
+        dupGuard: true,
+      }).lean();
+      if (theirs) return res.json({ report: theirs, build: buildView(theirs.build), existing: true });
+      // Deleted between its insert and this read: the key is free again.
+      made = await insert();
+    }
+    const { report, build } = made;
     const claimed = await ClientReport.updateOne(
       { _id: source._id, organizationId: orgId, $or: [{ nextReportId: null }, ...(staleNext ? [{ nextReportId: staleNext }] : [])] },
       { $set: { nextReportId: _id } }
@@ -1494,7 +1628,6 @@ router.post('/:id/next', async (req, res, next) => {
     }
     await enqueueBuild({ reportId: _id, jobId: build.jobId });
     await writeReportHistory(report, REPORT_FIELDS.created, { by: req.user._id }).catch(() => {});
-    const today = zonedDayStr(new Date(), tz);
     const fresh = await ClientReport.findById(_id).lean();
     res.status(201).json({
       report: fresh,
@@ -1506,9 +1639,10 @@ router.post('/:id/next', async (req, res, next) => {
   }
 });
 
-// Delete a report: the report, any nextReportId pointing at it, then every map row with its id. A
-// live build's heartbeat misses and it stops; the nightly sweep catches anything left. An admin may
-// erase its earlier text from History in the same act (the confirm offers it).
+// Delete a report: the report, any nextReportId pointing at it, then every map row with its id, and
+// its links to just this report. A live build's heartbeat misses and it stops; the nightly sweep
+// catches anything left. An admin may erase its earlier text from History in the same act (the
+// confirm offers it).
 router.delete('/:id', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -1520,6 +1654,17 @@ router.delete('/:id', async (req, res, next) => {
     await ClientReport.updateMany({ organizationId: orgId, nextReportId: pre._id }, { $set: { nextReportId: null } });
     await Promise.all([ClientReportMapPoint.deleteMany({ clientReportId: pre._id }), ClientReportAreaCell.deleteMany({ clientReportId: pre._id })]);
     await writeReportHistory(pre, REPORT_FIELDS.deleted, { by: req.user._id }).catch(() => {});
+    // Its links to just this report stop working for good (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D):
+    // deleted AFTER the report, so a link made at the same moment is either seen here or sees the
+    // report gone and deletes itself (routes/admin/clientReportShares.js). A History row each, "deleted
+    // with its report" — a flag inside toValue, as the legacy sweep's (CampaignChange has no `via`).
+    const reportLinks = await ReportShareLink.find({ organizationId: orgId, campaignId: pre.campaignId, reportId: pre._id }).lean();
+    for (const link of reportLinks) {
+      const gone = await ReportShareLink.deleteOne({ _id: link._id, organizationId: orgId });
+      if (gone.deletedCount) {
+        await writeLinkHistory(link, LINK_FIELDS.deleted, { by: req.user._id, toValue: { label: link.label || '', reportDeleted: true } }).catch(() => {});
+      }
+    }
     const wantsErase = req.body?.eraseHistory === true || req.query.eraseHistory === '1';
     let erased = null;
     if (wantsErase && isOrgAdmin(req)) {

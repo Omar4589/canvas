@@ -2,7 +2,7 @@ import { Button, Modal } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { errorText } from './parts.jsx';
 import { formatCivil, formatPeriod } from './reportDates.js';
-import { linksLine } from './linkState.js';
+import { reportLinksLine } from './linkState.js';
 import { displayStatusOf } from './buildState.js';
 
 // Publish this report? (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G5, §F3, §O1). Publish is not a
@@ -44,7 +44,9 @@ const REASON_WORDS = {
 export const recomputeReasons = (reasons = []) => reasons.map((r) => REASON_WORDS[r] || r).join(', ');
 
 const PublishDialog = ({ report, checks, build, shares, tz, previewFresh, mapStale = false, busy, error, onPublish, onRecompute, onClose }) => {
-  const links = linksLine(shares);
+  // The links that will show it: the ones that can open THIS report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md
+  // §D, K8) — the list once loaded (`shares` null until then), else the checks' count.
+  const links = reportLinksLine({ shares, reportId: report._id ?? report.id, server: checks?.links });
   const live = displayStatusOf(build);
   const liveBuild = live === 'queued' || live === 'running' || live === 'waiting';
   const asOf = checks?.numbersAsOf ? formatInTz(checks.numbersAsOf, tz) : null;
@@ -102,7 +104,7 @@ const PublishDialog = ({ report, checks, build, shares, tz, previewFresh, mapSta
           <Warn>The notes were copied from {formatPeriod(checks.copiedFrom.weekStart, checks.copiedFrom.weekEnd)} and haven’t been reviewed.</Warn>
         )}
         <Dot>Your client sees exactly the preview.</Dot>
-        <Dot tone={links.ok ? 'muted' : 'danger'}>{links.text}</Dot>
+        {links.text && <Dot tone={links.ok ? 'muted' : 'danger'}>{links.text}</Dot>}
         {(links.expiringSoon || []).map((s) => (
           <Dot key={s.id}>The {s.label || 'unlabelled'} link expires {formatInTz(s.expiresAt, tz, { month: 'short', day: 'numeric' }, false)} — extend it so your client keeps access.</Dot>
         ))}

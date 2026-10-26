@@ -1139,6 +1139,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   *[v6 2026-10-24, code review round 1: re-verified for `visibility.mapVersion` (an opaque HMAC of the
   live snapshot's key, mode, area size and served questions only; item 34(d) stamp) and the map payload
   cache (the same bytes, held in web memory; item 38(j)). The lines above still hold.]*
+  *[v7 2026-10-25, links to one report (item 38(m)): re-verified for the client payloads' new fields —
+  the hub's `single`, and on a one-report link `reportId` (the id of the one report it opens, which the
+  hub's own row already carries as `id`) and `gone`; the report's `single`; and the earlier-totals line's `before` (this
+  report's own first day, a civil date). No hidden question, no other report, no instant, no new id.
+  The lines above still hold; a link to all reports serves exactly what it did.]*
 - *(v6 2026-10-24)* **Automatic pause (item 39).** Lines the code keeps true, each with its owner:
   - privacy.html `:94` ("We collect location only at the time an action is recorded"): the rule reads only
     the stamps of recorded actions (`services/audit/paceRule.js`); no trail, no extra capture. A design that
@@ -3397,6 +3402,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       the report, the campaign (campaign cascade) and the organization (`ORG_SCOPED`), in
       `LATE_WRITE_MODELS`, swept nightly. privacy.html `:101`'s "shown at the address level" over-describes
       an area report, which shows less: an optional owner refinement, not a false sentence.
+      *[v7 2026-10-25 — scoped by links to one report (item 38(m)): "other reports on the same link" now
+      means a link to ALL the campaign's reports; a link to one report shows only that report. One person
+      can hold several links, so Before you publish still names every shown report that could narrow an
+      area report down (`areaNarrowing`, `services/reports/clientReportChecks.js`, whose comment says the
+      same).]*
     - **(b) `SurveyTemplate.depsEver`**: every question-to-question dependency a survey has ever had, as
       question-key pairs. Survey structure, no personal data; it only ever keeps a follow-up off a client's
       map. Seeded by `migrate:client-report-visibility` (step 0), kept by survey create, edit and Duplicate.
@@ -3534,6 +3544,37 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       you signed in"; like the report page's once-a-day marker under (c), this is another use of local
       storage that sentence doesn't exclude (it doesn't say *only*): the operator's own device, holding the
       operator's own unsaved work. No policy sentence becomes false; an owner refinement could mention it.
+      *[v7 2026-10-25 — one more operator-device entry, beside this copy: the Client Reports page's **How
+      it works** guide remembers **Got it** per person in the operator's own browser,
+      `localStorage['doorline.clientReports.howItWorks.<userId>'] = '1'` (`howItWorksKey`,
+      `client/src/components/clientReports/HowItWorks.jsx`). A UI flag, no personal data beyond the
+      operator's own user id in the key; How it works deletes it, a private window or blocked storage keeps
+      nothing (the guide just shows again). No server collection, no third party; the same `:97` reading as
+      above.]*
+    - **(m) [v7 2026-10-25 — links to one report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, built 2026-10-25,
+      uncommitted). Narrows what a link holder reaches; collects nothing new.]** A share link can now open
+      one report instead of every published report of its campaign: `ReportShareLink.reportId`
+      (`models/ReportShareLink.js`, null or missing = all reports, as every link made before), set when
+      the link is made and never changed, and only for a report the client can see then (published, not
+      taken down: `409 REPORT_NOT_SHOWN` otherwise, `routes/admin/clientReportShares.js`). **What it
+      reaches:** that report only — its page, its map, its tapped doors, its areas and its open count —
+      and a hub that lists just it (`single`, `gone`). `loadReport` (`routes/public/share.js`) refuses
+      any other report's id with the same `404 REPORT_NOT_FOUND` a taken-down report gets, before its
+      query, for every route behind it; the hub filters `{ …reportScope, $and: [{ _id: <its report> }] }`,
+      so no key of the scope can be overwritten (both failure modes of an `_id` inside `reportScope` were
+      reproduced in the plan's review and are closed). Its page has no Older/Newer (`nav: null`) and no
+      way to the other reports, and **its earlier-totals line names no other report**: "Totals from before
+      Oct 19 were updated by −120 doors after they were first reported." (`earlierTotalsLine` with
+      `oneReport`, `services/reports/clientReportRead.js`; the same counts, without the other report's
+      period). **Deleting the report deletes its one-report links** (`DELETE /admin/client-reports/:id`),
+      each with a History row read as "<label> · Link deleted" with "Deleted with its report" under it (`reportLink.deleted`, `toValue:
+      { label, reportDeleted: true }`), and a link being made while its report is deleted deletes itself
+      the same way; the demo reset deletes the demo campaign's one-report links and never adopts one as the
+      demo link (`ensureShareLink` queries `reportId: null`). Campaign and organization deletion already
+      delete every link. Each link keeps its own password, expiry, lock, sign-in tokens and open counts, as
+      every link did. Readers of the share rows (the campaign's admins and leads) now see which report a
+      link opens (its dates and its tab's name). Pinned by `clientReportSingleLinks.int.test.js`; a link to
+      all reports renders byte for byte as before (`publicReportAllLinks.snapshot.json`).
     - **What reaches a link holder is otherwise less than before**: a door's street line only when tapped
       (`…/map/doors`, at most 200 per request, from the live snapshot only), coordinates rounded to six
       decimal places (about 4 in, still exact for a house), no internal ids or keys, and dates as civil
@@ -3579,6 +3620,19 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       (PRIV-1, CONCUR-1). The one widening is (l): the builder's on-device copy now also holds a draft change
       that didn't save on the way out, in the operator's own browser only. privacy.html `:97` and `:101` and
       Terms §6 still hold.]*
+      *[v7 2026-10-25 — the simplify follow-up (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md; new (m), stamps on (a)
+      and (l)) re-checked: still **no Privacy Policy, Terms or DPA sentence becomes false**, and **no new
+      subprocessor** (DPA §6 unchanged, no customer notice). privacy.html `:101` ("a report … at a unique
+      link", "protected by a password and expire automatically — after 90 days by default, or a period of
+      up to one year chosen by an administrator", "a password can never be removed", "may revoke a link at
+      any time") holds for a link to one report exactly as for one to all reports: Share's **Make a link**
+      always generates a password and offers 30–365 days (90 by default), and New link keeps its usual
+      rules. terms.html `:118` ("Anyone with an unrevoked, unexpired link (and its password) can view the
+      report") holds; a one-report link views less. Nothing new is collected: the organization's report
+      week (`Organization.reportWeekStartsOn`, a weekday), a yes/no about whether the campaign had a knock
+      before this week (`knockedBeforeThisWeek`, computed, not stored), the duplicate guard's flag
+      (`ClientReport.dupGuard`), and the race answer's `createdByName`, a teammate's name shown to another
+      operator of the same organization, which History already shows. The guide's flag is under (l).]*
     - **Watchlist:** the 2026-10-24 client-reports bullet in *New policy sentences to keep true*.
 39. **[v6 2026-10-24 — Automatic pause: Doorline pauses a canvasser's recording when their doors come in
     faster than anyone could knock them. BUILT 2026-10-24, uncommitted; deploy pending, and it acts only once

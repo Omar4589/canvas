@@ -227,7 +227,8 @@ const snapshotState = async () => ({
 const strip = (state) => JSON.parse(JSON.stringify(state, (k, v) => (k === 'updatedAt' ? undefined : v)));
 
 test('a post-deploy report, built by the new code, before the migration runs', { skip }, async () => {
-  const created = await call('POST', '/admin/client-reports', { body: { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12' } });
+  // allowDuplicate: the fixtures already hold reports for this week (the duplicate guard has its own suite).
+  const created = await call('POST', '/admin/client-reports', { body: { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', allowDuplicate: true } });
   assert.strictEqual(created.status, 201, JSON.stringify(created.json));
   const jobId = new ObjectId().toHexString();
   await ClientReport.updateOne({ _id: created.json.report._id }, { $set: { 'build.status': 'queued', 'build.jobId': jobId, 'build.startedAt': new Date() } });

@@ -45,8 +45,12 @@ export const comparedSnapshotMoved = (report, prev) =>
  * taken down or replaced, the "since …" clause drops; once it is gone, or its numbers were refreshed
  * since (comparedSnapshotMoved), so is the line. Returns { changes: [{ card, delta }], since:
  * { weekStart, weekEnd } | null } or null. `prev` skips the read when the caller already has it.
+ *
+ * `oneReport`: read through a link to one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D), which
+ * names no other report — the same counts, with `since: null` and `before: <this report's start>`:
+ * "Totals from before Oct 19 were updated by −120 doors after they were first reported."
  */
-export const earlierTotalsLine = async (report, { prev: loaded = undefined } = {}) => {
+export const earlierTotalsLine = async (report, { prev: loaded = undefined, oneReport = false } = {}) => {
   if (!report?.earlierTotals || !report.comparedReportId) return null;
   const prev = loaded === undefined ? await comparedReportNow(report) : loaded;
   if (!prev || prev.status !== 'published') return null;
@@ -56,6 +60,7 @@ export const earlierTotalsLine = async (report, { prev: loaded = undefined } = {
     .map((card) => ({ card, delta: (report.earlierTotals[card] ?? 0) - (sent[card] ?? 0) }))
     .filter((c) => c.delta !== 0);
   if (!changes.length) return null;
+  if (oneReport) return { changes, since: null, before: report.weekStart };
   let since = null;
   if (!prev.takenDownAt) {
     const latest = await ClientReport.findOne(

@@ -15,7 +15,7 @@ When one client wants separate reports for, say, a **volunteer team** and a **pa
 
 ## Making one
 
-On the campaign's **Client Reports** tab, press **New report**, choose **A team**, then **+ New team**. Type the name your client will see and tick its crews. Then pick the period and press **Create draft**.
+On the campaign's **Client Reports** tab, press **New report**, choose **A team**, then **+ New team**. Type the name your client will see and tick its crews. Then pick the dates and press **Create draft**.
 
 - **The name can't include a canvasser's name**, because your client reads it. "Paid team" is fine; "Dee's team" is refused.
 - **A crew can be in only one team.** The list says when a crew already belongs to another team.

@@ -102,7 +102,9 @@ export function shapeReportListRow(report, { inputs, seriesLabel = null } = {}) 
 
 /**
  * The client's report. `inputs` is the live snapshot's (liveInputs); `earlierTotals` the line
- * computed at read time (earlierTotalsLine); `nav` the older/newer report in the same series.
+ * computed at read time (earlierTotalsLine); `nav` the older/newer report in the same series. On a
+ * link to one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) the share route passes nav null and
+ * the line's one-report form ({ changes, since: null, before }), so nothing names another report.
  * `mapSource` is the report the map endpoints read when it isn't `report` itself — the admin
  * preview shapes the on-screen overlay, but its map (and so its map version) is the saved report's.
  */

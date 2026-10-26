@@ -53,6 +53,13 @@ const organizationSchema = new mongoose.Schema(
     // on what DOORLINE charges this org — our price is flat per campaign per month.
     // Set by the org's own billing admin (PATCH /admin/billing/settings).
     billRestrictedDoors: { type: Boolean, default: false },
+    // The weekday client-report weeks start on (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §C): 0 = Sunday … 6 =
+    // Saturday, Monday unless an admin changes it (PATCH /admin/client-reports/settings). It sets the dates New
+    // report suggests and what Next report makes after an odd-length report, for every campaign; reports
+    // already made keep their dates. Read through reportWeekStartsOnOf (services/reports/reportPeriods.js) —
+    // `?? 1`, so an organization saved before this field existed is Monday with no migration. Other pages'
+    // This/Last week presets stay Monday-based (client/src/lib/datePresets.js).
+    reportWeekStartsOn: { type: Number, min: 0, max: 6, default: 1 },
     // Automatic pause (docs/PROPOSAL_PACE_PAUSE.md §H). On for every customer by default; read
     // `pacePause?.enabled !== false`, so an org saved before this field existed is on with no migration.
     // `alertUserIds` undefined = nobody chosen beyond the billing admins (never default an array here: a []

@@ -10,6 +10,7 @@ import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExp
 import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
 import { sweepOrphanSnapshots, SNAPSHOT_SWEEP_JOB } from '../turf/snapshotRetention.js';
 import { sweepClientReportRows, CLIENT_REPORT_SWEEP_JOB } from '../reports/clientReportSweep.js';
+import { ensureReportPeriodGuard } from '../reports/clientReportIndexes.js';
 import {
   runFbtimeSync,
   syncOneConnection,
@@ -222,6 +223,10 @@ export async function processMaintenanceJob(job) {
     return res;
   }
   if (job.name === CLIENT_REPORT_SWEEP_JOB) {
+    // The duplicate-report guard's index (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E) is built at boot; checking it
+    // nightly as well means a build that failed and ran out of retries is repaired within a day, not at the
+    // next restart. A no-op when it exists; never throws.
+    await ensureReportPeriodGuard('maintenance');
     const res = await sweepClientReportRows();
     console.log(
       `[maintenance] ${CLIENT_REPORT_SWEEP_JOB}: ${res.orphans} orphan, ${res.mapOff} map-off, ${res.legacy} legacy, ${res.stale} stale row(s) over ${res.reports} report(s)`

@@ -6,9 +6,12 @@ import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
+import { ClientReport } from '../../models/ClientReport.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { writeLinkHistory, LINK_FIELDS } from '../../services/reports/clientReportHistory.js';
+import { currentSeriesLabels } from '../../services/reports/clientReportRead.js';
+import { scopeOf } from '../../services/reports/reportVisibility.js';
 import {
   DAY_MS,
   SHARE_DEFAULT_DAYS,
@@ -26,8 +29,9 @@ import {
 } from '../../services/reports/shareLinks.js';
 
 // Client links — the Client Reports tab's link panel (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 as
-// overridden by §O7, G7). Public, revocable per-campaign links to the campaign's published reports
-// (routes/public/share.js). Mounted at /admin/client-reports/shares AHEAD of the client-reports router
+// overridden by §O7, G7). Public, revocable per-campaign links to the campaign's published reports —
+// all of them, or just one (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) — (routes/public/share.js).
+// Mounted at /admin/client-reports/shares AHEAD of the client-reports router
 // (routes/index.js), so its `/:id` routes never see `:id = "shares"`.
 //
 // What every write here keeps true:
@@ -76,6 +80,9 @@ const shareCreateSchema = z.object({
   password: z.string().max(200).optional(),
   // The picker offers 30, 90, 180 or 365 days (default 90).
   expiresInDays: days.optional(),
+  // A link to just this report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D); absent or null = every
+  // published report of the campaign. Set here, never changed.
+  reportId: z.string().nullable().optional(),
 });
 const shareUpdateSchema = z.object({
   label: z.string().max(120).optional(),
@@ -108,6 +115,53 @@ const loadShareInOrg = async (req, res) => {
 
 const fresh = (id) => ReportShareLink.findById(id).lean();
 
+// What each link opens (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contract K6): every row adds
+// `reportId` — null on a link to all the campaign's reports, a link from before the field included —
+// and `report`, that one report's dates and its tab's name as the tabs read now. `report: null` beside a
+// reportId is a report deleted mid-race (DELETE /admin/client-reports/:id takes its links with it).
+const rowsOf = async (req, links, now = new Date()) => {
+  const ids = [...new Set(links.filter((l) => l.reportId).map((l) => String(l.reportId)))];
+  const reports = ids.length
+    ? await ClientReport.find(
+        { _id: { $in: ids }, organizationId: activeOrgId(req) },
+        { weekStart: 1, weekEnd: 1, seriesId: 1, scope: 1, effortId: 1, effortName: 1, takenDownAt: 1 }
+      ).lean()
+    : [];
+  const labels = await currentSeriesLabels(reports);
+  const byId = new Map(reports.map((r) => [String(r._id), r]));
+  return links.map((l) => {
+    const r = l.reportId ? byId.get(String(l.reportId)) : null;
+    return {
+      ...shareRow(l, now),
+      reportId: l.reportId ? String(l.reportId) : null,
+      // takenDown: the links panel says the link reads "taken down" until the report is put back up —
+      // Share isn't offered on a taken-down report, so the panel is where the operator would look.
+      report: r
+        ? {
+            id: String(r._id),
+            weekStart: r.weekStart,
+            weekEnd: r.weekEnd,
+            scopeLabel: (r.seriesId && labels.get(String(r.seriesId))) || scopeOf(r).label,
+            takenDown: !!r.takenDownAt,
+          }
+        : null,
+    };
+  });
+};
+const rowOf = async (req, link, now) => (await rowsOf(req, [link], now))[0];
+
+// A link to one report needs a report the client can see now (§D): a draft has nothing to show yet,
+// and a taken-down report — still status 'published' — would only ever say "taken down".
+const NOT_SHOWN = (report) => ({
+  error: report.takenDownAt
+    ? 'This report is taken down. Put it back up, then make its link.'
+    : 'This report isn’t published yet. Publish it, then make its link.',
+  code: 'REPORT_NOT_SHOWN',
+  status: report.status,
+  takenDown: !!report.takenDownAt,
+});
+const REPORT_NOT_FOUND = { error: 'Report not found', code: 'REPORT_NOT_FOUND' };
+
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -118,8 +172,7 @@ router.get('/', async (req, res, next) => {
     const shares = await ReportShareLink.find({ organizationId: activeOrgId(req), campaignId: req.query.campaignId })
       .sort({ createdAt: -1 })
       .lean();
-    const now = new Date();
-    res.json({ shares: shares.map((s) => shareRow(s, now)) });
+    res.json({ shares: await rowsOf(req, shares) });
   } catch (err) {
     next(err);
   }
@@ -138,6 +191,14 @@ router.post('/', async (req, res, next) => {
     const campaign = await Campaign.findOne({ _id: data.campaignId, organizationId: orgId, ...NOT_DELETING }, { _id: 1 }).lean();
     if (!campaign) return res.status(404).json({ error: 'Campaign not found in this org' });
     if (!(await manages(req, res, campaign._id))) return;
+    // A link to just this report (§D): a report of this campaign that the client can see now.
+    let report = null;
+    if (data.reportId != null) {
+      if (!mongoose.isValidObjectId(data.reportId)) return res.status(400).json({ error: 'Invalid reportId' });
+      report = await ClientReport.findOne({ _id: data.reportId, organizationId: orgId, campaignId: campaign._id }, { status: 1, takenDownAt: 1 }).lean();
+      if (!report) return res.status(404).json(REPORT_NOT_FOUND);
+      if (report.status !== 'published' || report.takenDownAt) return res.status(409).json(NOT_SHOWN(report));
+    }
     const generated = data.password ? null : generateSharePassword();
     const now = new Date();
     const created = await ReportShareLink.create({
@@ -153,12 +214,20 @@ router.post('/', async (req, res, next) => {
       failedUnlockAt: [],
       failedUnlocksTotal: 0,
       failedByDay: [],
+      reportId: report ? report._id : null,
       createdBy: req.user._id,
     });
     const share = created.toObject();
     await writeLinkHistory(share, LINK_FIELDS.created, { by: req.user._id, toValue: { ...labelOnly(share), expiresAt: share.expiresAt } }).catch(() => {});
+    // Its report deleted while the link was being made: the delete took the report's links before this
+    // one existed, so this one goes the same way, and says so — never left behind opening nothing.
+    if (report && !(await ClientReport.exists({ _id: report._id }))) {
+      const r = await ReportShareLink.deleteOne({ _id: share._id, organizationId: orgId });
+      if (r.deletedCount) await writeLinkHistory(share, LINK_FIELDS.deleted, { by: req.user._id, toValue: { ...labelOnly(share), reportDeleted: true } }).catch(() => {});
+      return res.status(404).json(REPORT_NOT_FOUND);
+    }
     res.status(201).json({
-      share: shareRow(share, now),
+      share: await rowOf(req, share, now),
       // Present only when WE generated it. Show it to the operator once, then it's gone.
       ...(generated ? { generatedPassword: generated } : {}),
     });
@@ -241,7 +310,7 @@ router.patch('/:id', async (req, res, next) => {
       if (data.isActive === false) bump = true;
     }
     if (bump) set.credentialVersion = plusOne('credentialVersion');
-    if (!Object.keys(set).length) return res.json({ share: shareRow(share, now) });
+    if (!Object.keys(set).length) return res.json({ share: await rowOf(req, share, now) });
     const pre = await ReportShareLink.findOneAndUpdate({ _id: share._id, organizationId: activeOrgId(req) }, [{ $set: set }], {
       returnDocument: 'before',
     }).lean();
@@ -256,7 +325,7 @@ router.patch('/:id', async (req, res, next) => {
     if (data.isActive !== undefined && data.isActive !== (pre.isActive === true)) {
       await writeLinkHistory(pre, data.isActive ? LINK_FIELDS.enabled : LINK_FIELDS.disabled, { by, toValue: labelOnly(pre) }).catch(() => {});
     }
-    res.json({ share: shareRow(await fresh(share._id), now) });
+    res.json({ share: await rowOf(req, await fresh(share._id), now) });
   } catch (err) {
     zodFail(res, next)(err);
   }
@@ -304,7 +373,7 @@ router.post('/:id/extend', async (req, res, next) => {
         toValue: { ...labelOnly(after), expiresAt: after.expiresAt },
       }).catch(() => {});
     }
-    res.json({ share: shareRow(after, now) });
+    res.json({ share: await rowOf(req, after, now) });
   } catch (err) {
     zodFail(res, next)(err);
   }
@@ -346,7 +415,7 @@ router.post('/:id/renew', async (req, res, next) => {
       fromValue: { expiresAt: pre.expiresAt || null },
       toValue: { ...labelOnly(after), expiresAt: after.expiresAt },
     }).catch(() => {});
-    res.json({ share: shareRow(after, now) });
+    res.json({ share: await rowOf(req, after, now) });
   } catch (err) {
     zodFail(res, next)(err);
   }
@@ -368,7 +437,7 @@ router.post('/:id/rotate', async (req, res, next) => {
     if (!pre) return res.status(404).json({ error: 'Share link not found', code: 'SHARE_NOT_FOUND' });
     const after = await fresh(share._id);
     await writeLinkHistory(after, LINK_FIELDS.rotated, { by: req.user._id, toValue: labelOnly(after) }).catch(() => {});
-    res.json({ share: shareRow(after) });
+    res.json({ share: await rowOf(req, after, new Date()) });
   } catch (err) {
     next(err);
   }
@@ -396,7 +465,7 @@ router.post('/:id/unlock', async (req, res, next) => {
         toValue: { ...labelOnly(pre), wasLocked: lockOf(pre, now).locked, cleared },
       }).catch(() => {});
     }
-    res.json({ share: shareRow(await fresh(share._id), now) });
+    res.json({ share: await rowOf(req, await fresh(share._id), now) });
   } catch (err) {
     next(err);
   }

@@ -49,6 +49,7 @@ import mobileMeRouter from './mobile/me.js';
 import mobileVotersRouter from './mobile/voters.js';
 import adminClientReportsRouter from './admin/clientReports.js';
 import adminClientReportSharesRouter from './admin/clientReportShares.js';
+import adminClientReportSettingsRouter from './admin/clientReportSettings.js';
 import adminBrandingRouter from './admin/branding.js';
 import shareRouter from './public/share.js';
 import buildStatusRouter from './public/buildStatus.js';
@@ -156,6 +157,8 @@ router.use('/admin/activities', adminActivitiesRouter);
 // Client links. Must stay ABOVE '/admin/client-reports' below: that router's `/:id` routes would
 // otherwise read `shares` as a report id.
 router.use('/admin/client-reports/shares', adminClientReportSharesRouter);
+// The organization's report week (admins write, leads read) — above it for the same reason, `settings`.
+router.use('/admin/client-reports/settings', adminClientReportSettingsRouter);
 router.use('/admin/client-reports', adminClientReportsRouter);
 // Report branding (the organization's logo on its clients' reports): admins write, leads read.
 router.use('/admin/branding', adminBrandingRouter);

@@ -50,6 +50,7 @@
     "audit:gps-stamps": "node src/migrations/auditGpsStamps.js",
     "replay:pace-pause": "node src/migrations/replayPacePause.js",
     "pace:resolve-open": "node src/migrations/resolveOpenPacePauses.js",
+    "report:tab-weeks": "node src/migrations/reportTabWeeks.js",
     "remirror:pass": "node src/migrations/remirrorPass.js",
     "sweep:raw-imports": "node src/migrations/sweepRawImports.js",
     "recompute:territories": "node src/migrations/recomputeTerritories.js",

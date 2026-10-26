@@ -274,6 +274,9 @@ export const clientReportHistoryLine = (item, { seriesLabels = null } = {}) => {
       detail = `${count(item.toValue.cleared)} wrong passwords cleared`;
     } else if (f === 'reportLink.passwordChanged' && item.toValue?.wasOpenLink) {
       detail = 'A password was added to an open link';
+    } else if (f === 'reportLink.deleted' && item.toValue?.reportDeleted) {
+      // A link to just one report goes with its report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, Cascade).
+      detail = 'Deleted with its report';
     } else if (f === 'reportLink.locked' && item.toValue?.until) {
       const until = new Date(item.toValue.until);
       if (!Number.isNaN(until.getTime())) detail = `Locked until ${until.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;

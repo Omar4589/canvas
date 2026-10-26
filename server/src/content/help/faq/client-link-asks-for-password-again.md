@@ -14,13 +14,15 @@ A client link remembers your client only for a while, and some changes sign ever
 - **They didn't tick Keep me signed in on this device.** Without it, the link remembers them only until the browser tab closes. With it, they stay signed in for up to 30 days, though some phones clear it sooner.
 - **Someone changed the link's password.** Every device is signed out at once, so send your client the new password.
 - **They're on another browser or device**, or in a private window. Each one asks once.
+- **They opened a different link.** Each link has its own password. A link to just one report (say, one you made with **Share** for a board member) asks for its own password, not the one for your link to all your reports, and signing in to one link doesn't sign anyone in to another.
 - **They pressed Sign out on this device.**
 
 **Check the tab's History first.** On the campaign's **Client Reports** tab, press **History**: a password change, rotate, renew or disable shows there with who did it and when.
 
 ## If the page says something else
 
-- **"This link isn't available"**: the link was rotated, renewed, disabled or deleted, so the address your client has no longer works. Rotating and renewing give the link a new address: copy it from the **Client links** panel and send it again (the password stays the same).
+- **"This link isn't available"**: the link was rotated, renewed, disabled or deleted, so the address your client has no longer works. Rotating and renewing give the link a new address: copy it from the **Client links** panel and send it again (the password stays the same). Deleting a report deletes its links to just that report too.
+- **"This report was taken down or removed. Ask the person who sent it."**: on a link to just one report, that report is taken down. Put it back up and the link works again. (If the report was deleted, its link went with it, so the page says "This link isn't available" instead.)
 - **"This report link has expired. Ask your campaign contact for a new one."**: press **Renew** on the link. That gives it a new address, which you send to your client.
 - **"This link is locked after too many wrong passwords"**: someone typed 50 wrong passwords within a day. Anyone already signed in keeps reading, but nobody new can sign in until the lock ends or you press **Unlock now**. Fifty wrong passwords is never your client, so **Rotate** the link and send the new address.
 - **"Too many tries from this connection — wait 15 minutes"**: they guessed wrong several times in a row. Send the password again and have them wait a few minutes.

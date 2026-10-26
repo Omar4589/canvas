@@ -110,13 +110,18 @@ function requireShareAccess(req, res, next) {
   return res.status(401).json({ error: 'Password required', code: 'password-required' });
 }
 
-// Every report a link reaches: its campaign's PUBLISHED reports, never one taken down (§F3).
+// Every report a link reaches: its campaign's PUBLISHED reports, never one taken down (§F3). A link to
+// one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) narrows this to that report — never by an
+// `_id` in here: spread beside the URL's own `_id` in loadReport, it would be overwritten by it or
+// overwrite it (round 1 hit both). loadReport checks the id first; the hub adds it under `$and`.
 const reportScope = (req) => ({
   organizationId: req.share.organizationId,
   campaignId: req.share.campaignId,
   status: 'published',
   takenDownAt: null,
 });
+// A link to one report (§D). req.share is the hydrated link: a link from before the field reads null.
+const singleReportOf = (req) => req.share.reportId || null;
 
 // Meta — drives the password gate, and nothing else: before the password, a link reveals neither the
 // campaign, the organization nor its private label (B7). The names ride GET /:token/reports.
@@ -189,9 +194,13 @@ router.post('/:token/unlock', unlockLimiter, loadShare, async (req, res, next) =
 // The hub: the campaign's shown reports, newest first, with the names the page's header needs — the
 // campaign and the organization ride HERE, behind the password, rather than on the meta call — and
 // whether the organization has a logo (GET /:token/logo serves it). Rows carry civil dates only.
+// A link to one report (§D) lists that report alone — the page goes straight to it — and says `gone`
+// when it isn't shown (taken down, never published, deleted); put back up, it is there again.
 router.get('/:token/reports', loadShare, requireShareAccess, async (req, res, next) => {
   try {
-    const reports = await ClientReport.find(reportScope(req))
+    const only = singleReportOf(req);
+    // Under `$and`, so no key of reportScope can be overwritten (§D).
+    const reports = await ClientReport.find(only ? { ...reportScope(req), $and: [{ _id: only }] } : reportScope(req))
       .sort({ weekStart: -1, publishedAt: -1 })
       .lean();
     const [campaign, org, labels, logo] = await Promise.all([
@@ -214,18 +223,27 @@ router.get('/:token/reports', loadShare, requireShareAccess, async (req, res, ne
       orgName: org?.name || '',
       hasLogo: !!logo,
       reports: rows,
+      single: !!only,
+      ...(only ? { reportId: String(only), gone: !rows.length } : {}),
     });
   } catch (err) {
     next(err);
   }
 });
 
+// Taken down, deleted or never published all read the same to a link holder — and so does another
+// report on a link to one report.
+const REPORT_GONE = { error: 'This report was taken down or removed.', code: 'REPORT_NOT_FOUND' };
+
 async function loadReport(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id', code: 'INVALID_ID' });
+    // A link to one report opens that report and nothing else (§D) — checked BEFORE the query, for
+    // every route behind this: the report, its map, doors, areas and opens.
+    const only = singleReportOf(req);
+    if (only && String(only) !== String(req.params.id)) return res.status(404).json(REPORT_GONE);
     const report = await ClientReport.findOne({ _id: req.params.id, ...reportScope(req) }).lean();
-    // Taken down, deleted or never published all read the same to a link holder.
-    if (!report) return res.status(404).json({ error: 'This report was taken down or removed.', code: 'REPORT_NOT_FOUND' });
+    if (!report) return res.status(404).json(REPORT_GONE);
     req.report = report;
     next();
   } catch (err) {
@@ -234,14 +252,17 @@ async function loadReport(req, res, next) {
 }
 
 // A report, shaped through the server-side visibility rules (§F1). It no longer counts an open:
-// fetching is not opening (stage 2's /opened ping counts the page's visits).
+// fetching is not opening (stage 2's /opened ping counts the page's visits). On a link to one report
+// (§D) it names no other report: no Older/Newer (nav null), and the earlier-totals line without its
+// "since <period>" clause — the same counts, as "Totals from before <its start>".
 router.get('/:token/reports/:id', loadShare, requireShareAccess, loadReport, async (req, res, next) => {
   try {
     const r = req.report;
+    const single = !!singleReportOf(req);
     const [{ inputs }, earlierTotals, nav, labels] = await Promise.all([
       mapContextFor(r),
-      earlierTotalsLine(r),
-      seriesNav(r),
+      earlierTotalsLine(r, { oneReport: single }),
+      single ? null : seriesNav(r),
       currentSeriesLabels([r]),
     ]);
     res.json({
@@ -252,6 +273,7 @@ router.get('/:token/reports/:id', loadShare, requireShareAccess, loadReport, asy
         seriesLabel: r.seriesId ? labels.get(String(r.seriesId)) : null,
       }),
       survey: mapFilterSurvey(r, inputs),
+      single,
     });
   } catch (err) {
     next(err);

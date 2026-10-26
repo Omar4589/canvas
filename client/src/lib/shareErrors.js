@@ -15,6 +15,8 @@
 //   locked         429 SHARE_LOCKED — 50 wrong passwords a day     the gate says so
 //   rate-limited   429 — this connection guessed too often        the gate says so
 //   report-gone    404 REPORT_NOT_FOUND — taken down or removed   keeps the session, links to all reports
+//                  (on a link to one report, also any other id)   — on a link to one report, "Ask the
+//                                                                 person who sent it." instead
 //   map-off        404 MAP_NOT_SHARED                             keeps the session, hides the map
 //   map-updated    409 MAP_UPDATED — a new snapshot since loading keeps the session, offers a reload
 //   retry          a network or server error, anything else      "Couldn't load — Try again"
@@ -51,6 +53,8 @@ export const SHARE_COPY = {
   noPassword: 'Enter the password you were given.',
   unreachable: "Couldn't reach the report. Check your connection and try again.",
   reportGone: 'This report was taken down or removed',
+  // A link to one report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) has no other reports to point to.
+  reportGoneSingle: 'This report was taken down or removed. Ask the person who sent it.',
   mapUpdated: 'This report was just updated — reload.',
   retry: "Couldn't load",
   signedOut: "You've signed out on this device.",

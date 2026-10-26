@@ -168,6 +168,40 @@ test('the earlier-totals line: neutral, every card that moved, "since" only whil
   assert.equal(s.earlierTotals, `Earlier totals were updated by ${MINUS}20 doors since the Oct 6 – Oct 12 report.`);
 });
 
+test('on a link to one report the earlier-totals line names no other report: "Totals from before <its first day>" (SIMPLIFY §D)', () => {
+  const before = (changes, extra = {}) => earlierTotalsText({ changes, since: null, before: '2026-10-19', ...extra });
+  assert.equal(
+    before([{ card: 'doorsKnocked', delta: -120 }]),
+    `Totals from before Oct 19 were updated by ${MINUS}120 doors after they were first reported.`
+  );
+  // The same counts, in the same words, as the line on a link to all your reports.
+  assert.equal(
+    before([
+      { card: 'doorsKnocked', delta: -1200 },
+      { card: 'surveysTaken', delta: 1 },
+      { card: 'surveyedVoters', delta: 2 },
+    ]),
+    `Totals from before Oct 19 were updated by ${MINUS}1,200 doors, +1 survey and +2 voters surveyed after they were first reported.`
+  );
+  assert.equal(
+    earlierTotalsText({ changes: [{ card: 'litKnocks', delta: -1 }, { card: 'homesKnocked', delta: 4 }], since: null, before: '2027-01-04' }),
+    `Totals from before Jan 4 were updated by ${MINUS}1 lit drop and +4 homes after they were first reported.`
+  );
+  assert.equal(before([{ card: 'doorsKnocked', delta: 0 }]), null, 'nothing moved, no line');
+  assert.equal(before([]), null);
+  // `before` wins over a `since` — the line on a one-report link never names another report.
+  assert.equal(
+    before([{ card: 'doorsKnocked', delta: -5 }], { since: { weekStart: '2026-10-12', weekEnd: '2026-10-18' } }),
+    `Totals from before Oct 19 were updated by ${MINUS}5 doors after they were first reported.`
+  );
+  // Anything but a day falls back to the line that names nothing.
+  for (const junk of [null, '', 'soon', '2026-10-19T05:00:00.000Z', 20261019]) {
+    assert.equal(before([{ card: 'doorsKnocked', delta: -5 }], { before: junk }), `Earlier totals were updated by ${MINUS}5 doors.`, String(junk));
+  }
+  const s = deriveReportSections(report({ weekStart: '2026-10-19', weekEnd: '2026-10-25', extra: { earlierTotals: { changes: [{ card: 'doorsKnocked', delta: -120 }], since: null, before: '2026-10-19' } } }));
+  assert.equal(s.earlierTotals, `Totals from before Oct 19 were updated by ${MINUS}120 doors after they were first reported.`, 'the screen and the PDF both read it here');
+});
+
 test('the report says when its numbers stopped, its dates (later first), its scope, and the team rule', () => {
   assert.equal(numbersAsOfText(null), null);
   assert.equal(numbersAsOfText('2026-10-24'), 'Numbers as of Oct 24 — the period was still running.');

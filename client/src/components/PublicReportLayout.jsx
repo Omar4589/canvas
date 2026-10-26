@@ -196,9 +196,11 @@ export default function PublicReportLayout() {
   });
   const hub = hubQ.data || null;
 
+  // A link to one report opens just that report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D): its tab
+  // says "Report"; a link to all your reports keeps "Reports".
   useEffect(() => {
-    document.title = accessToken && hub?.campaignName ? `${hub.campaignName} · Reports` : 'Shared report';
-  }, [accessToken, hub?.campaignName]);
+    document.title = accessToken && hub?.campaignName ? `${hub.campaignName} · ${hub.single ? 'Report' : 'Reports'}` : 'Shared report';
+  }, [accessToken, hub?.campaignName, hub?.single]);
 
   // A dropped session forgets everything read with it (door addresses included) and asks the link again.
   useEffect(() => {

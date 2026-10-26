@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
-import { Badge, Button, Card, Modal, Select } from '../ui/index.js';
+import { Badge, Button, Card, IconChevronDown, IconChevronRight, Modal, Select } from '../ui/index.js';
 import PasswordInput from '../PasswordInput.jsx';
 import RowMenu from '../RowMenu.jsx';
 import { formatDateInTz } from '../../lib/datetime.js';
@@ -15,27 +15,40 @@ import {
   isExpired,
   isLocked,
   linkBadges,
+  linkOpens,
   renewText,
   rotateConfirmLines,
   shareUrl,
   shortUrl,
 } from './linkState.js';
 import { linkMessageFor } from './copyMessage.js';
+import { formatPeriod } from './reportDates.js';
 import { ConfirmDialog, ErrorBanner } from './parts.jsx';
-import { historyKey, sharesKey, useCopy } from './hooks.js';
+import { historyKey, reportsKey, sharesKey, useCopy } from './hooks.js';
 
 // Client links (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6, §G7, §O7). One client per campaign, so
-// links are per campaign; each opens every report shown on it. A link has a password (a generated one
-// is shown ONCE), an expiry chosen at creation (30 days to a year), and a one-year life it can be
-// extended within. An expired link is RENEWED — a new address, so a URL forwarded long ago stays dead —
-// and never offered Rotate, which keeps the expiry (ADMINUX-8).
+// links are per campaign. A link has a password (a generated one is shown ONCE), an expiry chosen at
+// creation (30 days to a year), and a one-year life it can be extended within. An expired link is
+// RENEWED — a new address, so a URL forwarded long ago stays dead — and never offered Rotate, which
+// keeps the expiry (ADMINUX-8).
 // A password change, rotate or disable signs everyone out. Fifty wrong passwords in a day lock it;
 // devices already signed in keep working, and the panel says to rotate (50 is never the client).
+//
+// A link opens all your reports, or just one (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D): New link
+// asks which ("One report only" picks a report the client can see now), and each row says what it opens
+// ("Opens only the Oct 19 – Oct 25 report (Whole campaign)"). The links to all your reports come first;
+// the one-report links fold under "Links to one report (N)", closed until opened — they pile up.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const untilLabel = (days, tz) => formatDateInTz(new Date(Date.now() + days * DAY_MS), tz);
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
-const ClientLinksPanel = ({ campaignId, tz }) => {
+/** The reports a one-report link can open: published and not taken down (§D — else REPORT_NOT_SHOWN), newest first. */
+export const shownReportsOf = (reports) => (reports || []).filter((r) => r.status === 'published' && !r.takenDownAt);
+const reportChoiceLabel = (r) => `${formatPeriod(r.weekStart, r.weekEnd)} (${r.seriesLabel || r.scope?.label || 'Whole campaign'})`;
+
+// `reports`: the campaign's reports — null while the list loads; `reportsError` its failure, if it failed.
+const ClientLinksPanel = ({ campaignId, tz, reports = [], reportsError = null }) => {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: sharesKey(campaignId),
@@ -43,6 +56,9 @@ const ClientLinksPanel = ({ campaignId, tz }) => {
     enabled: !!campaignId,
   });
   const shares = q.data?.shares || [];
+  const allReports = shares.filter((s) => s.reportId == null);
+  const singles = shares.filter((s) => s.reportId != null);
+  const [singlesOpen, setSinglesOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [ready, setReady] = useState(null); // { share, generatedPassword }
   const invalidate = () => {
@@ -55,30 +71,62 @@ const ClientLinksPanel = ({ campaignId, tz }) => {
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-fg">Client links</h2>
-          <p className="mt-0.5 text-xs text-fg-muted">Each link opens every report you’ve put up. Send the link and its password separately.</p>
+          <p className="mt-0.5 text-xs text-fg-muted">A link opens all your reports, or just one. Each has its own password — send it separately.</p>
         </div>
         <Button size="sm" variant="secondary" onClick={() => setCreating(true)}>
           + New link
         </Button>
       </div>
       {q.isLoading && <p className="text-sm text-fg-muted">Loading links…</p>}
-      {q.isError && <ErrorBanner title="Couldn’t load the links." error={q.error} />}
+      {q.isError && (
+        // Never a dead end (code review round 2, VER-2): Try again reads the list again.
+        <div className="space-y-2">
+          <ErrorBanner title="Couldn’t load the links." error={q.error} />
+          <Button size="sm" variant="secondary" loading={q.isFetching} onClick={() => q.refetch()}>
+            Try again
+          </Button>
+        </div>
+      )}
       {!q.isLoading && !q.isError && shares.length === 0 && (
         <p className="text-sm text-fg-muted">No link yet — create one to send to your client.</p>
       )}
       <ul className="space-y-3">
-        {shares.map((s) => (
+        {allReports.map((s) => (
           <LinkRow key={s.id} share={s} tz={tz} onChanged={invalidate} />
         ))}
       </ul>
+      {singles.length > 0 && (
+        <div className={allReports.length ? 'mt-3' : ''}>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs font-semibold text-fg-muted hover:text-fg"
+            aria-expanded={singlesOpen}
+            onClick={() => setSinglesOpen((v) => !v)}
+          >
+            {singlesOpen ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+            Links to one report ({singles.length})
+          </button>
+          {singlesOpen && (
+            <ul className="mt-2 space-y-3">
+              {singles.map((s) => (
+                <LinkRow key={s.id} share={s} tz={tz} onChanged={invalidate} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {creating && (
         <NewLinkDialog
           campaignId={campaignId}
           tz={tz}
+          reports={reports ? shownReportsOf(reports) : null}
+          reportsError={reportsError}
           onClose={() => setCreating(false)}
           onCreated={(res) => {
             setCreating(false);
             setReady(res);
+            // A new one-report link shows where it went.
+            if (res?.share?.reportId != null) setSinglesOpen(true);
             invalidate();
           }}
         />
@@ -145,6 +193,12 @@ const LinkRow = ({ share: s, tz, onChanged }) => {
           ))}
         </div>
       </div>
+      {/* What it opens, under who it's for (§D): "Opens only the Oct 19 – Oct 25 report (Whole campaign)". */}
+      <p className="mt-0.5 px-1 text-xs text-fg-muted">{sentence(linkOpens(s))}</p>
+      {/* Its report taken down (code review round 2, FRESH-6): the link stays Active, but opens only that line. */}
+      {s.report?.takenDown && (
+        <p className="mt-0.5 px-1 text-xs text-warning-fg">Its report is taken down — the link shows “taken down” until you put it back up.</p>
+      )}
 
       <div className="mt-2 flex items-center gap-2">
         <code className="min-w-0 flex-1 truncate rounded border border-border bg-sunken px-2 py-1 text-xs text-fg-muted" title={url}>
@@ -362,7 +416,23 @@ const RenewPanel = ({ share, tz, busy, onCancel, onRenew }) => {
 
 // ── New link, and the one time its password is shown ─────────────────────────────────────────────
 
-const NewLinkDialog = ({ campaignId, tz, onClose, onCreated }) => {
+// `reports`: the ones a one-report link can open (shownReportsOf), newest first — null while the
+// reports list is still loading; `reportsError` that list's failure: then it says so, with Try again,
+// and opening New link after a failure reads the list again (code review round 2, VER-2).
+const NewLinkDialog = ({ campaignId, tz, reports: offered = [], reportsError = null, onClose, onCreated }) => {
+  const reports = offered || [];
+  const qc = useQueryClient();
+  const reportsFetching = useIsFetching({ queryKey: reportsKey(campaignId) }) > 0;
+  const reportsFailed = offered == null && !!reportsError && !reportsFetching;
+  // The read is the page's own list's: nothing of this dialog's to stop.
+  const retryReports = () => qc.refetchQueries({ queryKey: reportsKey(campaignId) });
+  useEffect(() => {
+    if (offered == null && reportsError) retryReports();
+    // Once, as New link opens: Try again covers the rest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [opens, setOpens] = useState('all'); // 'all' | 'one'
+  const [reportId, setReportId] = useState(''); // the report picked in the select, once one is
   const [label, setLabel] = useState('');
   const [days, setDays] = useState(DEFAULT_EXPIRY_DAYS);
   const [mode, setMode] = useState('generate');
@@ -373,14 +443,22 @@ const NewLinkDialog = ({ campaignId, tz, onClose, onCreated }) => {
     onSuccess: onCreated,
   });
   const short = mode === 'own' && pw.trim().length < PASSWORD_MIN;
+  // The report "One report only" opens: the one picked while it is still on offer, else the newest. Worked
+  // out from the list as it is NOW — the list can arrive or change after the dialog opened, and a pick fixed
+  // at open left the select showing a report the request didn't send (code review LINK-1).
+  const chosen = reports.some((r) => r.id === reportId) ? reportId : reports[0]?.id || '';
+  const one = opens === 'one';
   const submit = () => {
     setTouched(true);
     if (short) return;
+    // A one-report link always names its report — never an all-reports link in its place.
+    if (one && !chosen) return;
     create.mutate({
       campaignId,
       label: label.trim() || undefined,
       expiresInDays: days,
       ...(mode === 'own' ? { password: pw.trim() } : {}),
+      ...(one ? { reportId: chosen } : {}),
     });
   };
   return (
@@ -394,20 +472,52 @@ const NewLinkDialog = ({ campaignId, tz, onClose, onCreated }) => {
           <Button variant="secondary" onClick={onClose} disabled={create.isPending}>
             Cancel
           </Button>
-          <Button loading={create.isPending} onClick={submit}>
+          <Button loading={create.isPending} disabled={one && !chosen} onClick={submit}>
             Create link
           </Button>
         </>
       }
     >
       <div className="space-y-4 text-sm">
+        <fieldset>
+          <legend className="text-xs font-medium text-fg-muted">Opens</legend>
+          <label className="mt-1 flex items-center gap-2">
+            <input type="radio" className="accent-brand-accent" checked={opens === 'all'} onChange={() => setOpens('all')} />
+            All your reports
+          </label>
+          <label className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${reports.length ? '' : 'text-fg-subtle'}`}>
+            <input type="radio" className="accent-brand-accent" disabled={!reports.length} checked={opens === 'one'} onChange={() => setOpens('one')} />
+            One report only
+            {!reports.length && !reportsFailed && <span className="text-xs">{offered ? '— publish a report first' : '— loading your reports…'}</span>}
+            {opens === 'one' && reports.length > 0 && (
+              <>
+                <Select value={chosen} onChange={(e) => setReportId(e.target.value)} className="max-w-full py-1 text-sm" aria-label="Report">
+                  {reports.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {reportChoiceLabel(r)}
+                    </option>
+                  ))}
+                </Select>
+                <span className="text-xs text-fg-muted">— next week’s report won’t be on it.</span>
+              </>
+            )}
+          </label>
+          {reportsFailed && (
+            <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-fg">
+              <span>Couldn’t load your reports.</span>
+              <Button size="sm" variant="secondary" onClick={retryReports}>
+                Try again
+              </Button>
+            </div>
+          )}
+        </fieldset>
         <label className="block">
           <span className="text-xs font-medium text-fg-muted">Label (only you see it)</span>
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             maxLength={120}
-            placeholder="e.g. Candidate"
+            placeholder={opens === 'one' ? 'e.g. Board' : 'e.g. Candidate'}
             className="mt-1 w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none"
           />
         </label>

@@ -144,7 +144,10 @@ so "signed out then in" and "session expired then in" landed in different places
   its expiry out to 90 days from now, never shorter than it was and never past the end of its year; once
   less than 90 days of that year remain, a reset **renews** it the way the panel's Renew does (a new year,
   everyone signed out, and a **new address** unless `SEED_DEMO_SHARE_TOKEN` pins the token), so the URL in
-  a demo script can change about once a year.
+  a demo script can change about once a year. Since 2026-10-25 a reset also deletes the demo campaign's
+  links to **one** report (their reports are deleted with the rest), and the link it keeps or makes is
+  always a link to all the campaign's reports, never a one-report link (`ensureShareLink` looks only at
+  `reportId: null`).
 
   Two things it deliberately will **not** do. It never changes an existing app-review account's
   **password** — Apple and Google keep the credentials already sitting in their review notes, so a

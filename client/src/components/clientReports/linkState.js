@@ -1,4 +1,5 @@
 import { formatDateInTz, formatInTz } from '../../lib/datetime.js';
+import { formatPeriod } from './reportDates.js';
 
 // What a client link can do right now, in words (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6, §G5,
 // §G6, §G7, as amended by §O7). One module for the links panel's badges, the Publish confirm's last
@@ -7,8 +8,10 @@ import { formatDateInTz, formatInTz } from '../../lib/datetime.js';
 //
 // The row shape is the admin share list's (routes/admin/clientReports.js shareRow): expiresAt,
 // lifetimeEndsAt, isActive, hasPassword, passwordMeetsRule (true | false | null = unknown),
-// lock { locked, until }, failures { last24h, last7d, total }, rotateAdvice. Old rows that predate a
-// field read as "nothing to say" about it, never as a problem.
+// lock { locked, until }, failures { last24h, last7d, total }, rotateAdvice, and which reports it
+// opens — reportId (null = all of the campaign's published reports) with report { id, weekStart,
+// weekEnd, scopeLabel } for a link to one (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D). Old rows
+// that predate a field read as "nothing to say" about it, never as a problem.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -26,6 +29,67 @@ export const isExpired = (s, now = Date.now()) => !!s?.expiresAt && ms(s.expires
 export const isLocked = (s, now = Date.now()) => !!s?.lock?.locked && (!s.lock.until || ms(s.lock.until) > now);
 export const isUsable = (s, now = Date.now()) => !!s?.isActive && !isExpired(s, now) && !isLocked(s, now);
 export const usableLinks = (shares, now = Date.now()) => (shares || []).filter((s) => isUsable(s, now));
+
+// ── Which links can open a report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contract K8) ────────
+// A link opens all of the campaign's published reports (reportId null, or absent on a link made before
+// links to one report) or just one. Every place that asks "can a link open this report?" filters the
+// campaign's links through linksFor FIRST, then asks usableLinks / noUsableLinkReason / linksLine as
+// before — a link to another report never counts. The server's linkState filters the same way
+// (reportId in [null, this report]).
+
+const isAllReports = (s) => s?.reportId == null;
+
+/** The links that can open this report: every all-reports link, and this report's own one-report links. */
+export const linksFor = (shares, reportId) => (shares || []).filter((s) => isAllReports(s) || String(s.reportId) === String(reportId));
+
+/** Only this report's one-report links — the ones its Take down and Delete confirms name. */
+export const singleLinksOf = (shares, reportId) => (shares || []).filter((s) => !isAllReports(s) && String(s.reportId) === String(reportId));
+
+/**
+ * What a link opens, in the words the links list and Share name it by (§D): "opens all your reports";
+ * "opens only the Oct 19 – Oct 25 report (Whole campaign)" — or, beside that report itself (Share,
+ * `thisReportId`), "opens only this report". A link whose report was deleted a moment ago (the share
+ * row's `report` is null — only reachable mid-race): "opens only a deleted report".
+ */
+export const linkOpens = (s, { thisReportId = null } = {}) => {
+  if (isAllReports(s)) return 'opens all your reports';
+  if (thisReportId != null && String(s.reportId) === String(thisReportId)) return 'opens only this report';
+  if (!s.report) return 'opens only a deleted report';
+  return `opens only the ${formatPeriod(s.report.weekStart, s.report.weekEnd)} report${s.report.scopeLabel ? ` (${s.report.scopeLabel})` : ''}`;
+};
+
+/** "Board — opens only the Oct 19 – Oct 25 report (Whole campaign)": who a link is for, and what it opens. */
+export const linkName = (s, opts) => `${s.label || 'Unlabelled link'} — ${linkOpens(s, opts)}`;
+
+/** "Board", "Board and Donor", "Board, Donor and Field". */
+const andList = (xs) => (xs.length <= 1 ? xs[0] || '' : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+/**
+ * Take down's line naming the report's one-report links (§D, from singleLinksOf): "Board, a link to
+ * just this report, shows “taken down” until you put it back up." Only the ones a client can still
+ * open — active and not expired (a locked one opens again once the lock lifts); the rest show nothing
+ * already. '' when there are none.
+ */
+export const takeDownLinksText = (singles, now = Date.now()) => {
+  const open = (singles || []).filter((s) => s.isActive && !isExpired(s, now));
+  if (!open.length) return '';
+  const names = andList(open.map((s) => s.label || 'Unlabelled link'));
+  return open.length === 1
+    ? `${names}, a link to just this report, shows “taken down” until you put it back up.`
+    : `${names}, links to just this report, show “taken down” until you put it back up.`;
+};
+
+/**
+ * Delete's line naming the report's one-report links (§D, from singleLinksOf) — deleting a report
+ * deletes them: "Its link Board (just this report) stops working for good." Only the ones a client can
+ * still open — active and not expired, as Take down's line (takeDownLinksText); '' when none.
+ */
+export const deleteLinksText = (singles, now = Date.now()) => {
+  const open = (singles || []).filter((s) => s.isActive && !isExpired(s, now));
+  if (!open.length) return '';
+  const names = andList(open.map((s) => s.label || 'Unlabelled link'));
+  return open.length === 1 ? `Its link ${names} (just this report) stops working for good.` : `Its links ${names} (just this report) stop working for good.`;
+};
 
 /** Whole days left before a link expires (0 = later today), or null when it never expires. */
 export const daysLeft = (s, now = Date.now()) => (s?.expiresAt ? Math.max(0, Math.floor((ms(s.expiresAt) - now) / DAY_MS)) : null);
@@ -70,6 +134,60 @@ export const linksLine = (shares, now = Date.now()) => {
       return d != null && d < EXPIRING_SOON_DAYS;
     }),
   };
+};
+
+// ── Which links open THIS report, in words (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contract K8) ──
+// "Can a link open this report?" is asked of the links that can open it (linksFor) — a link to another
+// report never counts. When none of them can be opened, the reason is theirs first — expired, locked or
+// disabled, each with its fix (renew, unlock or rotate, enable) — and only when NO link of any state
+// opens this report while the campaign has links to other reports do the words say so ('other_reports';
+// Share makes one once the report is published); with no link at all, "No link yet". The server's
+// linkState (services/reports/clientReportChecks.js, checks.links) follows the same rule (code review
+// round 1, LINK-2: an expired all-reports link beside a working link to another report reads "renew it").
+
+const OTHER_REPORTS_TEXT = {
+  published: 'No link opens this report — your links open other reports. Share makes one.',
+  draft: 'No link opens this report yet. After you publish, Share makes one.',
+};
+// No link at all, on a draft: nothing can be made from where this is read (Before you publish, the
+// Publish confirm) — Share makes one once it is published (code review round 2, FRESH-8).
+const NO_LINK_DRAFT = { code: 'no_link', text: 'No link yet — after you publish, Share makes one.' };
+
+/**
+ * Why no link can open this report — { code, text } — or null when one can. `shares` is the campaign's
+ * links list, or null while it isn't loaded (or failed to load): then `server` decides, the checks'
+ * count made when the report was read (checks.links: { usable, labels, reason }, which counts only the
+ * links that can open this report too). The server doesn't say how many links there are, so a link
+ * that can't be opened is worded for any number of them.
+ */
+export const reportLinkReason = ({ shares, reportId, published = false, server = null }) => {
+  const otherReports = { code: 'other_reports', text: published ? OTHER_REPORTS_TEXT.published : OTHER_REPORTS_TEXT.draft };
+  const noLink = published ? noUsableLinkReason([]) : NO_LINK_DRAFT;
+  if (!shares) {
+    if (!server || (server.usable ?? 0) > 0) return null;
+    if (server.reason === 'other_reports') return otherReports;
+    if (server.reason === 'no_link') return noLink;
+    return { code: server.reason || 'mixed', text: 'None of your links can be opened right now — renew, unlock or enable one.' };
+  }
+  const mine = linksFor(shares, reportId);
+  if (mine.length) return noUsableLinkReason(mine);
+  return shares.length ? otherReports : noLink;
+};
+
+/**
+ * The Publish confirm's link line (linksLine) for this report: "It shows on 1 link: Candidate." over
+ * the links that can open it, or why none can, in reportLinkReason's words. Before the list loads, the
+ * server's names for them (it counts no expiry, so none is said to be expiring soon); with neither,
+ * no line (text '').
+ */
+export const reportLinksLine = ({ shares, reportId, published = false, server = null }) => {
+  const reason = reportLinkReason({ shares, reportId, published, server });
+  if (reason) return { ok: false, text: reason.text, expiringSoon: [] };
+  if (!shares) {
+    const labels = server?.labels || [];
+    return labels.length ? linksLine(labels.map((label, i) => ({ id: `server-${i}`, label, isActive: true }))) : { ok: true, text: '', expiringSoon: [] };
+  }
+  return linksLine(linksFor(shares, reportId));
 };
 
 const plural = (n, one, many = `${one}s`) => `${Number(n || 0).toLocaleString('en-US')} ${n === 1 ? one : many}`;

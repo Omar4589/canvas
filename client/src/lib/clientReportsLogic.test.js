@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, daysBetween, periodDays, formatPeriod, gapBetween, defaultPeriod } from '../components/clientReports/reportDates.js';
+import { addDays, daysBetween, periodDays, formatPeriod, gapBetween } from '../components/clientReports/reportDates.js';
 import { buildStateOf, displayStatusOf, buildPollInterval, isLiveBuild, freshestBuild } from '../components/clientReports/buildState.js';
 import {
   linkBadges,
@@ -14,14 +14,25 @@ import {
   rotateConfirmLines,
   disableConfirmText,
   renewText,
+  linksFor,
+  singleLinksOf,
+  linkOpens,
+  linkName,
+  deleteLinksText,
 } from '../components/clientReports/linkState.js';
 import { copyMessageFor, linkMessageFor, messageReportOf } from '../components/clientReports/copyMessage.js';
+import { choiceText, dateChoices, duplicateText, monthsLabel, weekName, weekNudge } from '../components/clientReports/newReportChoices.js';
+import { GOT_IT, GUIDE_TITLE, HELP_LINE, HELP_PATH, HOW_IT_WORKS_LINK, INTRO, PHONE_STEPS, STEPS } from '../components/clientReports/howItWorksCopy.js';
 import { rowsFor, toggleChart, toggleMap, setHeadline, showAll, showNone, depsMapOf, closeUnderDeps } from '../components/clientReports/questionRules.js';
 import { clientReportHistoryLine, isClientReportField, earlierTextSummary, labelForField, reportRowName } from './campaignHistory.js';
 
 // The Client Reports pages' rules, run without React (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G1-§G8):
 // the dates a row and the New report dialog read, the build states, what makes a link usable and how
 // each link state reads, the copy-ready message, the per-question rules, and the History's words.
+// Since docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md: New report's dated choices and the week nudge (§C), the
+// duplicate prompt's words (§E), links to one report and the message's endings (§D), and the guide's
+// one copy source (§B). The week math itself (reportDates.js, contract K1) is pinned by its fixture
+// table in reportPeriods.parity.test.js.
 
 const NOW = Date.parse('2026-10-24T15:00:00Z');
 const DAY = 86400000;
@@ -38,54 +49,121 @@ test('dates: civil arithmetic, a DST week is 7 days, gaps only between reports',
   assert.equal(gapBetween({ weekStart: '2026-10-10' }, { weekEnd: '2026-10-12' }), null, 'overlapping reports leave no gap');
 });
 
-test('dates: the default period starts the day after the last report and never ends after yesterday', () => {
-  assert.deepEqual(defaultPeriod({ today: '2026-10-24' }), { weekStart: '2026-10-17', weekEnd: '2026-10-23', fromLast: false });
-  assert.deepEqual(
-    defaultPeriod({ today: '2026-10-24', lastReport: { weekStart: '2026-10-06', weekEnd: '2026-10-12' } }),
-    { weekStart: '2026-10-13', weekEnd: '2026-10-19', fromLast: true }
-  );
-  // The natural end would be tomorrow: it stops at yesterday.
-  assert.deepEqual(
-    defaultPeriod({ today: '2026-10-24', lastReport: { weekStart: '2026-10-11', weekEnd: '2026-10-17' } }),
-    { weekStart: '2026-10-18', weekEnd: '2026-10-23', fromLast: true }
-  );
-  // The last report already reached yesterday: the next period lies ahead and keeps its length.
-  const ahead = defaultPeriod({ today: '2026-10-24', lastReport: { weekStart: '2026-10-17', weekEnd: '2026-10-23' } });
-  assert.deepEqual(ahead, { weekStart: '2026-10-24', weekEnd: '2026-10-30', fromLast: true });
+// New report's dated choices (SIMPLIFY §C): [label, skipped days] per choice, in order.
+const MON = '2026-10-26'; // a Monday
+const L = (weekStart, weekEnd) => ({ weekStart, weekEnd });
+const listed = (args) => dateChoices({ s: 1, ...args }).choices.map((c) => [choiceText(c), c.skipped ? `${c.skipped.start}..${c.skipped.end}` : null]);
+const LAST_WEEK = ['Last week · Oct 19 – Oct 25', null];
+const THIS_WEEK = ['This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends', null];
+
+test('New report: what follows each kind of last report, labelled by its kind and branch (SIMPLIFY §C, the round-1 scenarios)', () => {
+  // Whole weeks on the organization's weekday: last week, "after your last report"; This week follows.
+  assert.deepEqual(listed({ last: L('2026-10-12', '2026-10-18'), today: MON }), [['Last week · Oct 19 – Oct 25 — the week after your last report', null], THIS_WEEK]);
+  // Any other length: the catch-up to the end of last week, then the presets.
+  assert.deepEqual(listed({ last: L('2026-10-01', '2026-10-13'), today: MON }), [
+    ['Oct 14 – Oct 25 · 12 days — from the day after your last report to the end of last week, so your next report covers a full Monday – Sunday week', null],
+    LAST_WEEK,
+    THIS_WEEK,
+  ]);
+  // …or, when the last report already reaches into this week, to the end of this week.
+  assert.deepEqual(listed({ last: L('2026-10-01', '2026-10-13'), today: '2026-10-14' })[0], [
+    'Oct 14 – Oct 18 · 5 days — from the day after your last report to the end of this week, so your next report covers a full Monday – Sunday week',
+    null,
+  ]);
+  // A Sunday – Saturday series carries on Sunday – Saturday.
+  assert.deepEqual(listed({ last: L('2026-10-18', '2026-10-24'), today: MON })[0], ['Oct 25 – Oct 31 — the week after your last report', null]);
+  // Two weeks are followed by two weeks; a month by a month; a quarter by a quarter.
+  assert.deepEqual(listed({ last: L('2026-10-12', '2026-10-25'), today: MON })[0], ['Oct 26 – Nov 8 · 2 weeks — the two weeks after your last report', null]);
+  assert.deepEqual(listed({ last: L('2026-09-01', '2026-09-30'), today: '2026-11-10' })[0], ['October — the month after your last report', null]);
+  assert.deepEqual(listed({ last: L('2026-07-01', '2026-09-30'), today: MON })[0], ['October – December — the three months after your last report', null]);
+  // Round 2: a 12-day catch-up then one missed Monday is followed by ONE week, never 14 days.
+  assert.deepEqual(listed({ last: L('2026-10-14', '2026-10-25'), today: '2026-11-02' })[0], ['Last week · Oct 26 – Nov 1 — the week after your last report', null]);
+  // A first choice that is this week (not over yet) hides This week; Last week is still offered.
+  assert.deepEqual(listed({ last: L('2026-10-19', '2026-10-25'), today: '2026-10-28' }), [['Oct 26 – Nov 1 — the week after your last report', null], LAST_WEEK]);
+  // No report yet: last week — or this week, for a campaign whose first doors were knocked this week.
+  assert.deepEqual(listed({ last: null, today: MON }), [LAST_WEEK, THIS_WEEK]);
+  assert.deepEqual(listed({ last: null, today: MON, knockedBeforeThisWeek: false }), [THIS_WEEK, LAST_WEEK]);
 });
 
-test('dates: after a long gap the default is the stretch ending yesterday, and it names the days it skips (§O4)', () => {
-  const week = { weekStart: '2026-10-06', weekEnd: '2026-10-12' }; // natural next: Oct 13 – Oct 19
-  // One day short of a whole extra week after the natural period: exactly as before.
-  assert.deepEqual(defaultPeriod({ today: '2026-10-26', lastReport: week }), { weekStart: '2026-10-13', weekEnd: '2026-10-19', fromLast: true });
-  // A whole week (Oct 20 – Oct 26) would still be unreported after it: the week ending yesterday, and the skipped days.
-  assert.deepEqual(defaultPeriod({ today: '2026-10-27', lastReport: week }), {
-    weekStart: '2026-10-20',
-    weekEnd: '2026-10-26',
-    fromLast: true,
-    skipped: { start: '2026-10-13', end: '2026-10-19' },
-  });
-  // Months later: still the week ending yesterday, and everything since the last report is named.
-  assert.deepEqual(defaultPeriod({ today: '2027-01-15', lastReport: week }).skipped, { start: '2026-10-13', end: '2027-01-07' });
-  // Across a year boundary, on both sides of the threshold.
-  const december = { weekStart: '2025-12-15', weekEnd: '2025-12-21' };
-  assert.deepEqual(defaultPeriod({ today: '2026-01-04', lastReport: december }), { weekStart: '2025-12-22', weekEnd: '2025-12-28', fromLast: true });
-  assert.deepEqual(defaultPeriod({ today: '2026-01-05', lastReport: december }), {
-    weekStart: '2025-12-29',
-    weekEnd: '2026-01-04',
-    fromLast: true,
-    skipped: { start: '2025-12-22', end: '2025-12-28' },
-  });
-  // A 14-day series keeps its length: the gap must be a whole 14 days past the natural period (Sep 15 – Sep 28).
-  const fortnight = { weekStart: '2026-09-01', weekEnd: '2026-09-14' };
-  assert.deepEqual(defaultPeriod({ today: '2026-10-12', lastReport: fortnight }), { weekStart: '2026-09-15', weekEnd: '2026-09-28', fromLast: true });
-  assert.deepEqual(defaultPeriod({ today: '2026-10-13', lastReport: fortnight }), {
-    weekStart: '2026-09-29',
-    weekEnd: '2026-10-12',
-    fromLast: true,
-    skipped: { start: '2026-09-15', end: '2026-09-28' },
-  });
-  assert.equal(periodDays('2026-09-29', '2026-10-12'), 14);
+test('New report after a long gap: the series’ own cadence, no "after your last report", and the days no report covers (SIMPLIFY §C)', () => {
+  // Weekly, two weeks behind: last week, naming the week between.
+  assert.deepEqual(listed({ last: L('2026-10-05', '2026-10-11'), today: MON }), [['Last week · Oct 19 – Oct 25', '2026-10-12..2026-10-18'], THIS_WEEK]);
+  // Two-week runs stay on their own grid (Mon Nov 30: the run Nov 9 – Nov 22, not last week).
+  assert.deepEqual(listed({ last: L('2026-10-12', '2026-10-25'), today: '2026-11-30' })[0], ['Nov 9 – Nov 22 · 2 weeks', '2026-10-26..2026-11-08']);
+  // Monthly, a month behind: the last whole month.
+  assert.deepEqual(listed({ last: L('2026-08-01', '2026-08-31'), today: '2026-11-10' })[0], ['October', '2026-09-01..2026-09-30']);
+  // A catch-up longer than 14 days: last week instead.
+  assert.deepEqual(listed({ last: L('2026-09-01', '2026-09-09'), today: MON })[0], ['Last week · Oct 19 – Oct 25', '2026-09-10..2026-10-18']);
+  // A Wednesday – Tuesday tab long behind: its own most recent complete week.
+  assert.deepEqual(listed({ last: L('2026-09-02', '2026-09-08'), today: MON })[0], ['Oct 14 – Oct 20', '2026-09-09..2026-10-13']);
+  // Across a year: the year is named when it isn't this year's.
+  assert.deepEqual(listed({ last: L('2025-12-15', '2025-12-21'), today: '2026-01-05' })[0], ['Last week · Dec 29, 2025 – Jan 4, 2026', '2025-12-22..2025-12-28']);
+  assert.equal(monthsLabel('2025-12-01', '2025-12-31', '2026-01-10'), 'December 2025');
+  assert.equal(monthsLabel('2025-11-01', '2026-01-31', '2026-02-10'), 'November 2025 – January 2026');
+  assert.equal(monthsLabel('2026-10-01', '2026-12-31', '2026-10-26'), 'October – December');
+});
+
+test('New report on every report week: Last week, This week and the catch-up words follow the organization’s week', () => {
+  const names = ['Sunday – Saturday', 'Monday – Sunday', 'Tuesday – Monday', 'Wednesday – Tuesday', 'Thursday – Wednesday', 'Friday – Thursday', 'Saturday – Friday'];
+  let catchUps = 0;
+  for (let s = 0; s <= 6; s += 1) {
+    assert.equal(weekName(s), names[s]);
+    const [first, second] = dateChoices({ last: null, s, today: MON }).choices;
+    assert.equal(first.key, 'first');
+    assert.equal(new Date(`${first.weekStart}T00:00:00Z`).getUTCDay(), s, `s=${s}: last week starts on the organization's day`);
+    assert.equal(periodDays(first.weekStart, first.weekEnd), 7);
+    assert.ok(daysBetween(first.weekEnd, MON) >= 1, `s=${s}: last week is over`);
+    assert.ok(second.head.startsWith('This week, not over yet · ') && daysBetween(second.weekStart, MON) >= 0 && daysBetween(MON, second.weekEnd) >= 0, `s=${s}: this week holds today`);
+    // An irregular report ending mid-week: the catch-up names this organization's week.
+    // (Wednesday weeks: Oct 14 starts one, so a normal week follows instead — rule 3a — and on Mon Oct 26
+    // that week is last week.)
+    const catchUp = dateChoices({ last: L('2026-10-01', '2026-10-13'), s, today: MON }).choices[0];
+    if (catchUp.kind === 'catch_up') {
+      catchUps += 1;
+      assert.ok(choiceText(catchUp).endsWith(`so your next report covers a full ${names[s]} week`), `s=${s}`);
+    } else {
+      assert.equal(choiceText(catchUp), 'Last week · Oct 14 – Oct 20 — the week after your last report', `s=${s}`);
+    }
+  }
+  assert.equal(catchUps, 6);
+});
+
+test('the week nudge: only a whole-weeks tab on another weekday; Move this tab selects the catch-up (SIMPLIFY §C)', () => {
+  const wedTue = weekNudge({ last: L('2026-10-14', '2026-10-20'), s: 1, today: MON });
+  assert.equal(wedTue.tabWeek, 'Wednesday – Tuesday');
+  assert.equal(wedTue.tabDay, 3);
+  assert.equal(wedTue.orgWeek, 'Monday – Sunday');
+  assert.equal(choiceText(wedTue.move), 'Oct 21 – Oct 25 · 5 days — from the day after your last report to the end of last week, so your next report covers a full Monday – Sunday week');
+  assert.equal(wedTue.move.key, 'move');
+  // A Sunday – Saturday series: a one-day catch-up first.
+  assert.equal(choiceText(weekNudge({ last: L('2026-10-18', '2026-10-24'), s: 1, today: MON }).move), 'Oct 25 · 1 day — from the day after your last report to the end of last week, so your next report covers a full Monday – Sunday week');
+  // Long behind: the catch-up would run past 14 days, so Move picks last week and names the days no report covers.
+  const behind = weekNudge({ last: L('2026-09-02', '2026-09-08'), s: 1, today: MON });
+  assert.equal(choiceText(behind.move), 'Last week · Oct 19 – Oct 25');
+  assert.deepEqual(behind.move.skipped, { start: '2026-09-09', end: '2026-10-18' });
+  // No nudge: the organization's own weekday; no report yet; a month — even a February that is four whole
+  // Sunday-to-Saturday weeks; an irregular report ending on a week end (its next is a normal week).
+  assert.equal(weekNudge({ last: L('2026-10-12', '2026-10-18'), s: 1, today: MON }), null);
+  assert.equal(weekNudge({ last: L('2026-10-18', '2026-10-24'), s: 0, today: MON }), null, 'Sunday weeks in a Sunday organization');
+  assert.equal(weekNudge({ last: null, s: 1, today: MON }), null);
+  assert.equal(weekNudge({ last: L('2026-02-01', '2026-02-28'), s: 1, today: '2026-03-10' }), null);
+  assert.equal(weekNudge({ last: L('2026-10-01', '2026-10-18'), s: 1, today: MON }), null);
+});
+
+test('the duplicate prompt names the tab’s report for those dates, by its state (SIMPLIFY §E)', () => {
+  const d = { reportId: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign' };
+  assert.equal(duplicateText({ ...d, status: 'draft' }, { today: MON }), 'You already have a draft Whole campaign report for Oct 19 – Oct 25.');
+  assert.equal(
+    duplicateText({ ...d, status: 'published', takenDown: false }, { today: MON }),
+    'You already published a Whole campaign report for Oct 19 – Oct 25. To bring its numbers up to date, open it and press Refresh numbers.'
+  );
+  assert.equal(duplicateText({ ...d, status: 'published', takenDown: true }, { today: MON }), 'You already published a Whole campaign report for Oct 19 – Oct 25, taken down.');
+  assert.equal(
+    duplicateText({ ...d, status: 'published', takenDown: true, scopeLabel: 'East side' }, { today: MON }),
+    'You already published an East side report for Oct 19 – Oct 25, taken down.'
+  );
+  // The refusal without a scope label: the dialog's own name for the tab. Another year: its year.
+  assert.equal(duplicateText({ ...d, status: 'draft', scopeLabel: undefined, weekStart: '2025-10-13', weekEnd: '2025-10-19' }, { today: MON, scopeLabel: 'Paid team' }), 'You already have a draft Paid team report for Oct 13 – Oct 19, 2025.');
 });
 
 test('build states: every state reads as §G1 names it, and only live ones poll', () => {
@@ -288,6 +366,84 @@ test('the copy-ready message names the scope and dates, deep-links, and never ca
   assert.ok(!/password/.test(whole), 'an open link’s message says nothing about a password');
   assert.ok(!/k7Hq9mXr2wPz/.test(linkMessageFor({ link: link(), origin: 'https://doorline.app' })));
   assert.equal(linkMessageFor({ link: link(), origin: 'https://doorline.app' }), 'Here\'s the link to our reports: https://doorline.app/r/tok1 — I’ll send the password separately.');
+});
+
+// A link to one report (SIMPLIFY §D): the share row's reportId and report.
+const oneReport = (over = {}) =>
+  link({ id: 'b1', token: 'tokB', label: 'Board', reportId: 'r1', report: { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign' }, ...over });
+
+test('links to one report: linksFor keeps the links that can open a report, before every usable / reason / line (SIMPLIFY §D, K8)', () => {
+  const legacy = link({ id: 'old', label: 'Old' }); // no reportId field at all: made before links to one report
+  const all = link({ id: 'all', label: 'Candidate', reportId: null, report: null });
+  const board = oneReport();
+  const donor = oneReport({ id: 'd2', label: 'Donor', reportId: 'r2', report: { id: 'r2', weekStart: '2026-10-12', weekEnd: '2026-10-18', scopeLabel: 'Paid team' } });
+  const shares = [legacy, all, board, donor];
+  assert.deepEqual(linksFor(shares, 'r1').map((s) => s.id), ['old', 'all', 'b1']);
+  assert.deepEqual(linksFor(shares, 'r3').map((s) => s.id), ['old', 'all'], 'another report’s link never counts');
+  assert.deepEqual(singleLinksOf(shares, 'r1').map((s) => s.id), ['b1']);
+  assert.deepEqual(singleLinksOf(shares, 'r3'), []);
+  assert.deepEqual(linksFor(null, 'r1'), []);
+  // The helpers' own signatures are unchanged — the filter comes first.
+  assert.equal(linksLine(linksFor([board, donor], 'r1'), NOW).text, 'It shows on 1 link: Board.');
+  assert.equal(noUsableLinkReason(linksFor([donor], 'r1'), NOW).text, 'No link yet — create one.');
+  assert.equal(usableLinks(linksFor([donor, link({ id: 'x', isActive: false })], 'r2'), NOW).length, 1);
+  // What each opens, in the links list's and Share's words.
+  assert.equal(linkOpens(all), 'opens all your reports');
+  assert.equal(linkOpens(legacy), 'opens all your reports');
+  assert.equal(linkOpens(board), 'opens only the Oct 19 – Oct 25 report (Whole campaign)');
+  assert.equal(linkOpens(board, { thisReportId: 'r1' }), 'opens only this report');
+  assert.equal(linkOpens(donor, { thisReportId: 'r1' }), 'opens only the Oct 12 – Oct 18 report (Paid team)');
+  assert.equal(linkOpens(oneReport({ report: null })), 'opens only a deleted report', 'mid-race only');
+  assert.equal(linkName(board), 'Board — opens only the Oct 19 – Oct 25 report (Whole campaign)');
+  assert.equal(linkName(link({ label: '', reportId: null })), 'Unlabelled link — opens all your reports');
+});
+
+test('Delete names the report’s one-report links that still open, which go with it (SIMPLIFY §D)', () => {
+  assert.equal(deleteLinksText([oneReport()], NOW), 'Its link Board (just this report) stops working for good.');
+  assert.equal(deleteLinksText([oneReport(), oneReport({ id: 'd', label: 'Donor' })], NOW), 'Its links Board and Donor (just this report) stop working for good.');
+  assert.equal(
+    deleteLinksText([oneReport(), oneReport({ id: 'd', label: 'Donor' }), oneReport({ id: 'p', label: '' })], NOW),
+    'Its links Board, Donor and Unlabelled link (just this report) stop working for good.'
+  );
+  // A disabled or expired one already doesn't open; nothing to say without one.
+  assert.equal(deleteLinksText([oneReport({ isActive: false }), oneReport({ id: 'e', expiresAt: new Date(NOW - DAY).toISOString() })], NOW), '');
+  assert.equal(deleteLinksText([], NOW), '');
+});
+
+test('the copy-ready message ends by its link: all your reports, just this one, or made a moment ago (SIMPLIFY §D)', () => {
+  const report = { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', campaignType: 'survey', scope: { kind: 'campaign', label: 'Whole campaign' }, cumulative: { doorsKnocked: 3412, surveysTaken: 1980 }, period: { doorsKnocked: 412, surveysTaken: 260 } };
+  const msg = (l, justMade) => copyMessageFor({ report, link: l, origin: 'https://doorline.app', justMade });
+  assert.equal(
+    msg(link({ reportId: null })),
+    'The report for Oct 19 – Oct 25 is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). Open it here: https://doorline.app/r/tok1/reports/r1 — use the password I sent you.'
+  );
+  assert.ok(msg(oneReport()).endsWith('Open it here: https://doorline.app/r/tokB/reports/r1 — use the password I sent you for this report.'));
+  assert.ok(msg(oneReport(), true).endsWith('— I’ll send you its password separately.'), 'made just now, a one-report link');
+  assert.ok(msg(link(), true).endsWith('— I’ll send you its password separately.'), 'made just now, an all-reports link');
+  assert.ok(msg(link({ hasPassword: false }), true).endsWith('/reports/r1.'), 'no password, no words about one');
+  for (const l of [link(), oneReport()]) assert.ok(!/k7Hq/.test(msg(l, true)), 'never the password');
+  assert.equal(linkMessageFor({ link: oneReport(), origin: 'https://doorline.app' }), 'Here\'s the link to this report: https://doorline.app/r/tokB — I’ll send the password separately.');
+});
+
+test('the guide’s words live in one place, as Part 1 words them (SIMPLIFY §B) — the Help Center quotes these', () => {
+  assert.equal(
+    INTRO,
+    'Make reports for your client here. Each one shows the campaign’s running totals and what was added in the dates you pick. Share it with a link and its password, or download a PDF.'
+  );
+  assert.equal(HOW_IT_WORKS_LINK, 'How it works');
+  assert.equal(GUIDE_TITLE, 'How client reports work');
+  assert.deepEqual(
+    STEPS.map((s) => `${s.title} — ${s.body}`),
+    [
+      'Make a report — press New report and pick the dates, usually Last week. After that, Next report on your newest report makes the following one in one click, with your settings and notes copied.',
+      'Check it, then publish — the preview is exactly what your client will see. Once it’s published, its numbers stay as they are until you press Refresh numbers.',
+      'Share it — Share gives you a message with the link to paste into your email or text; send the link’s password separately. Or open the report and press Download PDF.',
+    ]
+  );
+  assert.deepEqual(PHONE_STEPS, ['Make a report — usually Last week; then Next report each week.', 'Check the preview, then publish.', 'Share the link; send its password separately.']);
+  assert.equal(HELP_LINE, 'More in the Help Center →');
+  assert.equal(HELP_PATH, '/help/client-reports');
+  assert.equal(GOT_IT, 'Got it');
 });
 
 const breakdowns = [

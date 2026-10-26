@@ -81,33 +81,134 @@ export const gapBetween = (newer, older) => {
   return daysBetween(start, end) >= 0 ? { start, end } : null;
 };
 
-/**
- * The New report dialog's default period (§F10): the day after the series' last report, for that
- * report's length, ending no later than yesterday; with no earlier report, the seven days ending
- * yesterday. When the last report already reaches yesterday the period can only lie ahead, so it
- * keeps the report's length (the server accepts it; the builder says the period isn't over).
- *
- * After a long gap (§O4 "Continue's default period after a long gap is the current week"): when at
- * least one more whole stretch of that length would still be unreported after the natural next
- * period, it suggests the stretch ending yesterday instead, and returns the days it skips as
- * `skipped: { start, end }` so the dialog can say no report covers them. Otherwise the shape is
- * `{ weekStart, weekEnd, fromLast }`, as before. `today` is the campaign zone's civil day.
- */
-export const defaultPeriod = ({ lastReport = null, today }) => {
-  const yesterday = addDays(today, -1);
-  if (!lastReport?.weekStart || !lastReport?.weekEnd) {
-    return { weekStart: addDays(yesterday, -6), weekEnd: yesterday, fromLast: false };
-  }
-  const len = Math.max(1, periodDays(lastReport.weekStart, lastReport.weekEnd));
-  const weekStart = addDays(lastReport.weekEnd, 1);
-  const natural = addDays(weekStart, len - 1);
-  if (daysBetween(natural, yesterday) >= len) {
-    const start = addDays(yesterday, -(len - 1));
-    return { weekStart: start, weekEnd: yesterday, fromLast: true, skipped: { start: weekStart, end: addDays(start, -1) } };
-  }
-  const weekEnd = daysBetween(natural, yesterday) >= 0 ? natural : daysBetween(weekStart, yesterday) >= 0 ? yesterday : natural;
-  return { weekStart, weekEnd, fromLast: true };
-};
-
 /** Today's civil day in a zone. */
 export const todayIn = (tz, now = new Date()) => dayInTz(now, tz) || `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
+
+// ── Report weeks and the period after a report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §C) ─────────────
+// ONE definition in two copies: this block and server/src/services/reports/reportPeriods.js (Next report,
+// the series picker). Both run one fixture table, server/test/fixtures/reportPeriods.json — here through
+// client/src/lib/reportPeriods.parity.test.js — so a change to one copy fails until the other matches it.
+// `s` is the organization's report week start, 0 = Sunday … 6 = Saturday (Monday unless an admin changes
+// it); `today` is the campaign zone's civil day, never the viewer's.
+
+// Months as one running number (year × 12 + month − 1), so "N months on" is plain addition.
+const monthNumberOf = (ymd) => {
+  const p = partsOf(ymd);
+  return p ? p.y * 12 + p.m - 1 : 0;
+};
+const firstOfMonthNumber = (n) => new Date(Date.UTC(Math.floor(n / 12), n % 12, 1)).toISOString().slice(0, 10);
+const lastOfMonthNumber = (n) => new Date(Date.UTC(Math.floor(n / 12), (n % 12) + 1, 0)).toISOString().slice(0, 10);
+
+/** The weekday of a civil day: 0 = Sunday … 6 = Saturday. */
+export const dayOfWeek = (day) => {
+  const p = partsOf(day);
+  return p ? new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay() : 0;
+};
+
+/** The first day of the report week holding `day`. */
+export const weekStartOf = (day, s) => addDays(day, -((dayOfWeek(day) - s + 7) % 7));
+
+/** The last day of the report week holding `day`. */
+export const weekEndOf = (day, s) => addDays(weekStartOf(day, s), 6);
+
+/** The most recent full report week: on a Monday (s = 1), the Monday-to-Sunday just ended. */
+export const lastWeek = (today, s) => {
+  const weekStart = addDays(weekStartOf(today, s), -7);
+  return { weekStart, weekEnd: addDays(weekStart, 6) };
+};
+
+/** The whole current report week, today included — "This week, not over yet". */
+export const thisWeek = (today, s) => {
+  const weekStart = weekStartOf(today, s);
+  return { weekStart, weekEnd: addDays(weekStart, 6) };
+};
+
+/**
+ * N ≥ 1 when start … end is N whole calendar months (starts on a month's first day, ends on a month's
+ * last day), else 0. A February that is also four aligned weeks is a month (§C rule 1 is checked first).
+ */
+export const wholeMonthsOf = (start, end) => {
+  const a = partsOf(start);
+  if (!a || a.d !== 1 || !partsOf(end) || addDays(end, 1).slice(8) !== '01') return 0;
+  const months = monthNumberOf(end) - monthNumberOf(start) + 1;
+  return months >= 1 ? months : 0;
+};
+
+/**
+ * §C rule 3b on its own: from the day after `last` to the end of the last complete report week — or, when
+ * `last` already reaches into this week, to the end of the week that day falls in. It always starts
+ * mid-week, so it is never a whole number of weeks. Also the nudge's "Move this tab to Monday – Sunday
+ * weeks", which is this catch-up for a tab whose weeks run on another weekday.
+ */
+export const catchUpPeriod = (last, s, today) => {
+  const weekStart = addDays(last.weekEnd, 1);
+  const endOfLastWeek = addDays(weekStartOf(today, s), -1);
+  return daysBetween(weekStart, endOfLastWeek) >= 0
+    ? { weekStart, weekEnd: endOfLastWeek, kind: 'catch_up', branch: 'last_week' }
+    : { weekStart, weekEnd: weekEndOf(weekStart, s), kind: 'catch_up', branch: 'this_week' };
+};
+
+/**
+ * The period after report `last` ({ weekStart, weekEnd }) — New report's first choice before its long-gap
+ * rule, and exactly what Next report makes (§C):
+ *   1. N whole calendar months → the next N months (a month → the next month, a quarter → the next quarter).
+ *   2. A whole number of weeks, on any weekday → the same length again.
+ *   3a. Any other length that ended on a report week's end → one report week.
+ *   3b. Any other length → the catch-up (catchUpPeriod); the report after it is a normal week.
+ */
+export const nextPeriod = (last, s, today) => {
+  const weekStart = addDays(last.weekEnd, 1);
+  const months = wholeMonthsOf(last.weekStart, last.weekEnd);
+  if (months) return { weekStart, weekEnd: lastOfMonthNumber(monthNumberOf(weekStart) + months - 1), kind: 'months', months };
+  const len = Math.max(1, periodDays(last.weekStart, last.weekEnd)); // a report always has a day; never divide by 0 weeks
+  if (len % 7 === 0) return { weekStart, weekEnd: addDays(weekStart, len - 1), kind: 'weeks', weeks: len / 7 };
+  if (weekStartOf(weekStart, s) === weekStart) return { weekStart, weekEnd: addDays(weekStart, 6), kind: 'weeks', weeks: 1 };
+  return catchUpPeriod(last, s, today);
+};
+
+/** Next report refuses a catch-up longer than this (NEXT_GAP_TOO_LONG); New report suggests last week instead. */
+export const CATCH_UP_MAX_DAYS = 14;
+
+/**
+ * New report's first choice (§C). With no earlier report in the tab: last week — or this week when the
+ * campaign has no knock before this week began (`knockedBeforeThisWeek === false`, from the series picker).
+ * Otherwise nextPeriod, then the long-gap rule on the series' own cadence, where a run is COMPLETE when its
+ * last day is before today:
+ *   · weeks and months — the grid is the series' runs continued (every 7·weeks days, or every N months, from
+ *     the next period); when at least one more complete run lies on it after the next period, the most
+ *     recent complete run, and `skipped` names the days no report covers;
+ *   · a catch-up longer than CATCH_UP_MAX_DAYS — last week, and `skipped` the days before it.
+ * A first choice that ends after today is kept (the builder says the period isn't over).
+ * Returns { weekStart, weekEnd, kind: 'weeks'|'months'|'catch_up'|'last_week'|'this_week', weeks?, months?,
+ * branch?, longGap, skipped: { start, end } | null, equalsLastWeek }.
+ */
+export const suggestPeriod = ({ last = null, s, today, knockedBeforeThisWeek } = {}) => {
+  const recent = lastWeek(today, s);
+  const choice = (period, skipped = null) => ({
+    ...period,
+    longGap: !!skipped,
+    skipped,
+    equalsLastWeek: period.weekStart === recent.weekStart && period.weekEnd === recent.weekEnd,
+  });
+  if (!last?.weekStart || !last?.weekEnd) {
+    return knockedBeforeThisWeek === false ? choice({ ...thisWeek(today, s), kind: 'this_week' }) : choice({ ...recent, kind: 'last_week' });
+  }
+  const next = nextPeriod(last, s, today);
+  if (next.kind === 'weeks') {
+    const len = 7 * next.weeks;
+    const complete = Math.floor(daysBetween(next.weekStart, today) / len); // complete runs on the grid, the next period first
+    if (complete < 2) return choice(next);
+    const weekStart = addDays(next.weekStart, (complete - 1) * len);
+    return choice({ weekStart, weekEnd: addDays(weekStart, len - 1), kind: 'weeks', weeks: next.weeks }, { start: next.weekStart, end: addDays(weekStart, -1) });
+  }
+  if (next.kind === 'months') {
+    const first = monthNumberOf(next.weekStart);
+    const complete = Math.floor((monthNumberOf(today) - first) / next.months);
+    if (complete < 2) return choice(next);
+    const from = first + (complete - 1) * next.months;
+    const weekStart = firstOfMonthNumber(from);
+    return choice({ weekStart, weekEnd: lastOfMonthNumber(from + next.months - 1), kind: 'months', months: next.months }, { start: next.weekStart, end: addDays(weekStart, -1) });
+  }
+  if (periodDays(next.weekStart, next.weekEnd) <= CATCH_UP_MAX_DAYS) return choice(next);
+  return choice({ ...recent, kind: 'last_week' }, { start: next.weekStart, end: addDays(recent.weekStart, -1) });
+};

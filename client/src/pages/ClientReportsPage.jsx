@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -12,12 +12,14 @@ import BrandingCard from '../components/clientReports/BrandingCard.jsx';
 import NewReportDialog from '../components/clientReports/NewReportDialog.jsx';
 import TeamDialog from '../components/clientReports/TeamDialog.jsx';
 import HistoryDrawer from '../components/clientReports/HistoryDrawer.jsx';
-import CopyMessageDialog from '../components/clientReports/CopyMessageDialog.jsx';
+import ShareDialog from '../components/clientReports/ShareDialog.jsx';
+import HowItWorks, { useHowItWorks } from '../components/clientReports/HowItWorks.jsx';
+import { HOW_IT_WORKS_LINK, INTRO } from '../components/clientReports/howItWorksCopy.js';
 import { ConfirmDialog, ErrorBanner } from '../components/clientReports/parts.jsx';
 import { teamChangedKey } from '../components/clientReports/TeamChangedCard.jsx';
 import { buildKey, historyKey, reportKey, reportsKey, seriesKey, sharesKey } from '../components/clientReports/hooks.js';
 import { formatPeriod, gapBetween } from '../components/clientReports/reportDates.js';
-import { linksLine } from '../components/clientReports/linkState.js';
+import { deleteLinksText, linksFor, linksLine, singleLinksOf, takeDownLinksText } from '../components/clientReports/linkState.js';
 import { messageReportOf } from '../components/clientReports/copyMessage.js';
 
 // The campaign's Client Reports tab (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G1; how it works:
@@ -26,6 +28,23 @@ import { messageReportOf } from '../components/clientReports/copyMessage.js';
 // uncovered. Beside them: the client links and the report branding (below `lg` they stack under the
 // reports). History opens the tab's own History drawer, which the campaign's general History and the
 // phone never show.
+//
+// docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md: the header says what the page is for in one line, ending in
+// How it works, which brings back the guide (§B) at the top of the reports card until that person
+// presses Got it. Every shown report's row has Share (§D). Next report refused NEXT_GAP_TOO_LONG opens
+// New report with the suggested dates picked (§C); so does a link to this page carrying
+// ?new=1&seriesId=&weekStart=&weekEnd= (contract K10 — nothing in the app sends it yet: the builder has
+// no Next button, and a row's Next opens the dialog itself), and the page then drops those params. Take
+// down and Delete name the report's one-report links.
+
+const NEW_REPORT_PARAMS = ['new', 'seriesId', 'weekStart', 'weekEnd'];
+const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+
+// New report's Covers for a series row: its team, its walk list, or the whole campaign.
+const scopeOfSeries = (s) => ({
+  teamId: s?.kind === 'team' ? s.id : s?.kind === 'team_walk_list' ? s.teamSeriesId || null : null,
+  effortId: s?.kind === 'walk_list' || s?.kind === 'team_walk_list' ? s.effortId || null : null,
+});
 
 const KIND_ORDER = { campaign: 0, team: 1, team_walk_list: 1, walk_list: 2 };
 
@@ -72,9 +91,17 @@ const ClientReportsPage = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const { isOrgAdmin } = useAuth();
+  const { isOrgAdmin, user } = useAuth();
   const { campaign, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = campaign?.timeZone || 'America/New_York';
+  const guide = useHowItWorks(user?.id);
+  const [guideFocus, setGuideFocus] = useState(0); // bumped by How it works: bring the guide into view
+  // Got it takes the guide away: the keyboard goes to How it works, which brings it back (FRESH-4).
+  const howItWorksRef = useRef(null);
+  const dismissGuide = () => {
+    guide.dismiss();
+    howItWorksRef.current?.focus();
+  };
 
   const reportsQ = useQuery({
     queryKey: reportsKey(campaignId),
@@ -110,7 +137,7 @@ const ClientReportsPage = () => {
   const [newReport, setNewReport] = useState(null); // { initial } while the dialog is open
   const [team, setTeam] = useState(null); // { mode, series, initialEnding, back } — back: reopen New report
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [copyFor, setCopyFor] = useState(null);
+  const [shareFor, setShareFor] = useState(null); // the row whose Share is open
   const [confirm, setConfirm] = useState(null); // { kind: 'delete' | 'takeDown', row }
   const [eraseToo, setEraseToo] = useState(false);
   const [busy, setBusy] = useState(null); // { id, kind } — which row's which action is running
@@ -136,11 +163,39 @@ const ClientReportsPage = () => {
 
   const openReport = (row, { review = false } = {}) => navigate(`/campaigns/${campaignId}/reports/${row.id}${review ? '?review=1' : ''}`);
   const fail = (title) => (e) => setError({ title, error: e });
+  const refreshShares = () => {
+    qc.invalidateQueries({ queryKey: sharesKey(campaignId) });
+    qc.invalidateQueries({ queryKey: historyKey(campaignId) });
+  };
+
+  // Contract K10: ?new=1&seriesId=&weekStart=&weekEnd= opens New report on that series' tab with those
+  // dates picked (a link made for it — no page in the app sends one yet), once the series list is here;
+  // then the params go, so a reload or Back doesn't open it again. Sets state only — nothing to stop.
+  const seriesData = seriesQ.data;
+  useEffect(() => {
+    if (params.get('new') !== '1' || !seriesData) return;
+    const seriesId = params.get('seriesId');
+    const row = seriesId ? (seriesData.series || []).find((x) => x.id === seriesId) || null : null;
+    const weekStart = params.get('weekStart');
+    const weekEnd = params.get('weekEnd');
+    setNewReport({ initial: { ...scopeOfSeries(row), ...(isDay(weekStart) && isDay(weekEnd) ? { dates: { weekStart, weekEnd } } : {}) } });
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        NEW_REPORT_PARAMS.forEach((k) => next.delete(k));
+        if (row) next.set('tab', row.id);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [params, seriesData, setParams]);
 
   if (resolving) return <CampaignLoading />;
   if (notFound) return <CampaignMissing />;
 
   const listUpdatedAt = reportsQ.dataUpdatedAt;
+  // Take down names the report's own one-report links (§D): they show "taken down" until it is back up.
+  const takeDownLine = confirm?.kind === 'takeDown' ? takeDownLinksText(singleLinksOf(shares, confirm.row.id)) : '';
   const openDraftsOf = (teamId) => {
     const ids = new Set([teamId, ...series.filter((s) => s.teamSeriesId === teamId).map((s) => s.id)]);
     return reports.filter((r) => r.status === 'draft' && ids.has(r.seriesId)).length;
@@ -159,7 +214,20 @@ const ClientReportsPage = () => {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold text-fg">Client Reports</h1>
-          <p className="mt-1 text-sm text-fg-muted">Reports your client opens from a link. Numbers build in the background; you publish exactly what you preview.</p>
+          <p className="mt-1 max-w-3xl text-sm text-fg-muted">
+            {INTRO}{' '}
+            <button
+              ref={howItWorksRef}
+              type="button"
+              className="font-semibold text-brand-accent hover:underline"
+              onClick={() => {
+                guide.reopen();
+                setGuideFocus((n) => n + 1);
+              }}
+            >
+              {HOW_IT_WORKS_LINK}
+            </button>
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => setNewReport({ initial: initialScope })} disabled={!seriesQ.data}>
@@ -176,6 +244,8 @@ const ClientReportsPage = () => {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <Card className="min-w-0 p-4">
           <h2 className="sr-only">Reports</h2>
+          {/* The guide sits above the tabs; on an empty page it stands where "No reports yet" would. */}
+          {guide.open && <HowItWorks onDismiss={dismissGuide} focusAt={guideFocus} />}
           {reportsQ.isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-5 w-1/2" />
@@ -185,13 +255,15 @@ const ClientReportsPage = () => {
           ) : reportsQ.isError ? (
             <ErrorBanner title="Couldn’t load the reports." error={reportsQ.error} />
           ) : tabs.length === 0 ? (
-            <div className="py-8 text-center">
-              <p className="text-sm font-medium text-fg">No reports yet.</p>
-              <p className="mt-1 text-sm text-fg-muted">Create a draft for a period — its numbers build in the background, and you publish when it looks right.</p>
-              <Button className="mt-4" onClick={() => setNewReport({ initial: {} })} disabled={!seriesQ.data}>
-                New report
-              </Button>
-            </div>
+            guide.open ? null : (
+              <div className="py-8 text-center">
+                <p className="text-sm font-medium text-fg">No reports yet.</p>
+                <p className="mt-1 text-sm text-fg-muted">Create a draft for a period — its numbers build in the background, and you publish when it looks right.</p>
+                <Button className="mt-4" onClick={() => setNewReport({ initial: {} })} disabled={!seriesQ.data}>
+                  New report
+                </Button>
+              </div>
+            )
           ) : (
             <>
               <div className="flex flex-wrap items-end justify-between gap-2">
@@ -240,7 +312,8 @@ const ClientReportsPage = () => {
                         isLatest={i === 0}
                         seriesEnded={active.ended}
                         teamLabel={tabTeam?.label || active.label}
-                        shares={shares}
+                        // Null until the links list is here, so a row never says "No link yet" while it loads.
+                        shares={sharesQ.data ? shares : null}
                         busy={busy}
                         onOpen={openReport}
                         onNext={(r) =>
@@ -253,11 +326,20 @@ const ClientReportsPage = () => {
                                 const ahead = (res.warnings || []).includes('STARTS_AFTER_TODAY');
                                 navigate(`/campaigns/${campaignId}/reports/${res.report._id}${ahead ? '?ahead=1' : ''}`);
                               },
-                              onError: fail('Couldn’t start the next report.'),
+                              onError: (e) => {
+                                // A catch-up past 14 days is never made in one click (SIMPLIFY §C): New
+                                // report opens on this tab with the suggested dates picked, naming the gap.
+                                if (e.code === 'NEXT_GAP_TOO_LONG' && e.data?.suggested) {
+                                  // The server's sentence says why, at the top of the dates (FRESH-3).
+                                  setNewReport({ initial: { ...initialScope, dates: e.data.suggested, notice: e.data.error || e.message || null } });
+                                  return;
+                                }
+                                fail('Couldn’t start the next report.')(e);
+                              },
                             }
                           )
                         }
-                        onCopy={(r) => setCopyFor(r)}
+                        onShare={(r) => setShareFor(r)}
                         onTakeDown={(r) => setConfirm({ kind: 'takeDown', row: r })}
                         onPutBackUp={(r) => putBackUpM.mutate({ row: r }, { onSuccess: () => refresh(r.id), onError: fail('Couldn’t put the report back up.') })}
                         onDelete={(r) => {
@@ -315,7 +397,9 @@ const ClientReportsPage = () => {
         </Card>
 
         <div className="min-w-0 space-y-5">
-          <ClientLinksPanel campaignId={campaignId} tz={tz} />
+          {/* Null until the reports list is here: New link's "One report only" waits for it (LINK-1), or
+              says it couldn't load them, with Try again (VER-2). */}
+          <ClientLinksPanel campaignId={campaignId} tz={tz} reports={reportsQ.data ? reports : null} reportsError={reportsQ.data ? null : reportsQ.error} />
           <BrandingCard isAdmin={isOrgAdmin} />
         </div>
       </div>
@@ -328,7 +412,25 @@ const ClientReportsPage = () => {
           seriesData={seriesQ.data}
           efforts={efforts}
           initial={newReport.initial}
+          isAdmin={isOrgAdmin}
+          userId={user?.id || null}
           onClose={() => setNewReport(null)}
+          // The tab already has a report for these dates (REPORT_EXISTS), or someone made it a moment ago.
+          onOpenReport={(id) => {
+            setNewReport(null);
+            refresh();
+            refreshSeries();
+            navigate(`/campaigns/${campaignId}/reports/${id}`);
+          }}
+          onReportsChanged={() => {
+            refresh();
+            refreshSeries();
+          }}
+          // The organization's report week changed: every campaign's series picker carries it (K3).
+          onWeekChanged={(weekStartsOn) => {
+            qc.setQueryData(seriesKey(campaignId), (d) => (d ? { ...d, weekStartsOn } : d));
+            qc.invalidateQueries({ queryKey: ['admin', 'client-report-series'] });
+          }}
           onNewTeam={() => {
             // One dialog at a time: New team replaces New report, and hands back to it with the team picked.
             setNewReport(null);
@@ -347,7 +449,10 @@ const ClientReportsPage = () => {
             setNewReport(null);
             refresh();
             refreshSeries();
-            navigate(`/campaigns/${campaignId}/reports/${res.report._id}`);
+            // Dates that start after today: POST / warns as Next does (STARTS_AFTER_TODAY), and the
+            // builder says the numbers stay empty until then.
+            const ahead = (res.warnings || []).includes('STARTS_AFTER_TODAY');
+            navigate(`/campaigns/${campaignId}/reports/${res.report._id}${ahead ? '?ahead=1' : ''}`);
           }}
         />
       )}
@@ -396,7 +501,19 @@ const ClientReportsPage = () => {
           onReportChanged={(id) => refresh(id)}
         />
       )}
-      {copyFor && <CopyMessageDialog report={{ ...messageReportOf(copyFor), campaignType: copyFor.campaignType || campaign?.type }} shares={shares} onClose={() => setCopyFor(null)} />}
+      {shareFor && (
+        <ShareDialog
+          report={{ ...messageReportOf(shareFor), campaignType: shareFor.campaignType || campaign?.type }}
+          // Null until the links list is here: Share waits for it rather than offer a link it may not need.
+          shares={sharesQ.data ? shares : null}
+          linksError={sharesQ.error}
+          campaignId={campaignId}
+          tz={tz}
+          isAdmin={isOrgAdmin}
+          onClose={() => setShareFor(null)}
+          onLinksChanged={refreshShares}
+        />
+      )}
       {confirm?.kind === 'takeDown' && (
         <ConfirmDialog
           title="Take down this report?"
@@ -417,6 +534,7 @@ const ClientReportsPage = () => {
           }
         >
           <p>Your client stops seeing it. It stays exactly as it was — numbers, map and publish date — and Put back up shows it again.</p>
+          {takeDownLine && <p>{takeDownLine}</p>}
           <p>Any build or new numbers waiting for review are cancelled.</p>
         </ConfirmDialog>
       )}
@@ -436,6 +554,8 @@ const ClientReportsPage = () => {
                   setConfirm(null);
                   qc.removeQueries({ queryKey: reportKey(confirm.row.id) });
                   refresh();
+                  // Its one-report links went with it (§D "Cascade") — the server's word, not this list's.
+                  if (confirm.row.status === 'published') refreshShares();
                 },
               }
             )
@@ -454,18 +574,26 @@ const ClientReportsPage = () => {
   );
 };
 
-// Delete's warning by state (§G1): a shown report names the links it shows on; a taken-down one says
-// the client already can't see it; a draft was never seen.
+// Delete's warning by state (§G1): a shown report names the links it shows on — only the links that
+// can open it (SIMPLIFY §D, linksFor) — and its own one-report links, which go with it; a taken-down
+// one says the client already can't see it; a draft was never seen.
 const DeleteWarning = ({ row, shares }) => {
   const period = formatPeriod(row.weekStart, row.weekEnd);
   if (row.status === 'draft') return <p>The {period} draft and its numbers are deleted. This can’t be undone.</p>;
+  const singles = deleteLinksText(singleLinksOf(shares, row.id));
   if (row.takenDownAt) {
-    return <p>Your client already can’t see the {period} report — it was taken down. Deleting it removes it for good. This can’t be undone.</p>;
+    return (
+      <>
+        <p>Your client already can’t see the {period} report — it was taken down. Deleting it removes it for good. This can’t be undone.</p>
+        {singles && <p>{singles}</p>}
+      </>
+    );
   }
-  const line = linksLine(shares);
+  const line = linksLine(linksFor(shares, row.id));
   return (
     <>
       <p className="text-danger-fg">Your client can see the {period} report right now{line.ok ? ` — ${line.text.replace(/^It shows/, 'it shows').replace(/\.$/, '')}` : ''}.</p>
+      {singles && <p>{singles}</p>}
       <p>Deleting it takes it off their page for good. To hide it but keep it, use Take down instead. This can’t be undone.</p>
     </>
   );

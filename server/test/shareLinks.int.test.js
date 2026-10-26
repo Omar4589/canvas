@@ -644,3 +644,31 @@ test('the migration fills the link fields only where missing, and a second run c
   const second = await runClientReportVisibility({ apply: true, log: quiet });
   assert.deepStrictEqual(second.links, { credentialVersion: 0, lifetimeStartAt: 0, failedUnlockAt: 0, failedUnlocksTotal: 0, failedByDay: 0 });
 });
+
+// docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contract K6: every row says what its link opens — a link to
+// all the campaign's reports (a link from before the field included) reads reportId and report null; a
+// link to one report names it — from every route that returns a row.
+test('every link row says what it opens: null on a link to all the reports, the report on a link to one', { skip }, async () => {
+  const opensAll = (s) => assert.deepStrictEqual([s.reportId, s.report], [null, null], JSON.stringify(s));
+  const link = await makeLink('a-long-rows-password', { label: 'Rows' });
+  opensAll(link);
+  opensAll(await rowOf(link.id));
+  opensAll(await rowOf((await rawLink({ token: 'rows-legacy', passwordHash: null, expiresAt: null }))._id));
+  opensAll((await admin('PATCH', `/${link.id}`, { label: 'Rows again' })).json.share);
+  opensAll((await admin('POST', `/${link.id}/extend`, { expiresInDays: 30 })).json.share);
+  opensAll((await admin('POST', `/${link.id}/rotate`)).json.share);
+  opensAll((await admin('POST', `/${link.id}/unlock`)).json.share);
+  await ReportShareLink.updateOne({ _id: link.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  opensAll((await admin('POST', `/${link.id}/renew`, { expiresInDays: 30 })).json.share);
+
+  const one = await admin('POST', '', { campaignId: String(ctx.camp._id), label: 'Board', password: 'a-long-rows-password', reportId: String(ctx.report._id) });
+  assert.strictEqual(one.status, 201, JSON.stringify(one.json));
+  const named = { id: String(ctx.report._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', scopeLabel: 'Whole campaign', takenDown: false };
+  assert.deepStrictEqual([one.json.share.reportId, one.json.share.report], [String(ctx.report._id), named]);
+  assert.deepStrictEqual((await rowOf(one.json.share.id)).report, named);
+  assert.deepStrictEqual((await admin('POST', `/${one.json.share.id}/rotate`)).json.share.report, named);
+  // Its History row holds the label and expiry, as every link's does — no report id, no token.
+  const [created] = await linkRows(one.json.share.id);
+  assert.strictEqual(created.field, 'reportLink.created');
+  assert.deepStrictEqual(Object.keys(created.toValue).sort(), ['expiresAt', 'label']);
+});

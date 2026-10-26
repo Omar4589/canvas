@@ -680,8 +680,10 @@ async function ensureShareLink({ campaign, adminId, log, requireSharePassword })
   // (log is a no-op) generating one would silently strand the client link behind a password
   // nobody has. Refuse instead, and name the config var that fixes it.
   if (requireSharePassword && !process.env.SEED_DEMO_SHARE_PASSWORD) {
+    // reportId: null — the demo link opens all the campaign's reports, never one (here and below:
+    // docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D); null also matches a link from before the field.
     const existing = await ReportShareLink.findOne(
-      { campaignId: campaign._id, isActive: true, passwordHash: { $ne: null } },
+      { campaignId: campaign._id, isActive: true, passwordHash: { $ne: null }, reportId: null },
       '_id'
     ).lean();
     if (!existing) {
@@ -710,7 +712,7 @@ async function ensureShareLink({ campaign, adminId, log, requireSharePassword })
   const now = new Date();
   const wanted = new Date(now.getTime() + SHARE_DEFAULT_DAYS * DAY_MS);
   const lit = (v) => ({ $literal: v });
-  let share = await ReportShareLink.findOne({ campaignId: campaign._id, isActive: true }).lean();
+  let share = await ReportShareLink.findOne({ campaignId: campaign._id, isActive: true, reportId: null }).lean();
   if (share) {
     const set = {};
     if (!share.passwordHash) {
@@ -778,6 +780,9 @@ async function resetActivityLayer(campaign, log) {
   await ClientReportMapPoint.deleteMany({ clientReportId: { $in: reports.map((r) => r._id) } });
   await ClientReportAreaCell.deleteMany({ campaignId });
   await ClientReport.deleteMany({ campaignId });
+  // A link to one report goes with its report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D), as
+  // DELETE /admin/client-reports/:id does; the demo's link to all its reports survives the reset.
+  await ReportShareLink.deleteMany({ campaignId, reportId: { $ne: null } });
   // The demo's report series go with its reports; a rebuild makes a fresh whole-campaign one.
   await ClientReportSeries.deleteMany({ campaignId });
   // fullyVoted is safe to clear — recomputeFullyVoted rebuilds it from the VotedVoter rows wiped

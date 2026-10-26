@@ -273,6 +273,14 @@ const clientReportSchema = new mongoose.Schema(
     // The draft Next made from this report — the insert-first CAS that makes a double click return
     // one draft (routes/admin/clientReports.js POST /:id/next).
     nextReportId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // No accidental doubles (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): true on every report New
+    // report or Next made without "Make a second one", so the unique partial index below
+    // (report_period_guard) lets a tab hold ONE such report per period — two Creates pressed at the
+    // same moment make one draft. NO DEFAULT on purpose: absent = outside the guard (every report from
+    // before this field, and every deliberate second one). Declared, or strict mode drops it on create
+    // and strictQuery from filters, and the guard silently holds nothing (round 2 reproduced the drop).
+    // Dates never change after creation, so a report's key never moves; deleting it frees the key.
+    dupGuard: { type: Boolean },
     // Bumped by every Erase of this report's History text; a Restore's CAS requires it unchanged, so
     // an Erase landing mid-restore wins (services/reports/clientReportHistory.js).
     eraseEpoch: { type: Number },
@@ -310,5 +318,20 @@ const clientReportSchema = new mongoose.Schema(
 // Client "my weekly reports" list: published reports for a campaign, newest first.
 clientReportSchema.index({ campaignId: 1, status: 1, weekStart: -1 });
 clientReportSchema.index({ organizationId: 1, campaignId: 1, weekStart: -1 });
+
+// The duplicate guard (dupGuard above, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): one guarded report
+// per tab and period, enforced by the database — comparing ids after the insert let two drafts survive
+// (round 1). Partial, so it holds only guarded reports: every report from before it, legacy duplicates
+// included, sits outside it. Production has autoIndex off, so it is BUILT AT BOOT by an explicit
+// createIndex (services/reports/clientReportIndexes.js — never syncIndexes on this collection, which
+// would drop the indexes production built by hand); declared here too, so migrate:build-indexes sees it
+// as built and its --sync never drops it. Changing this definition fails that boot build until the old
+// index is dropped by hand. Frozen, and copied wherever it is handed over (Mongoose and the driver keep
+// what they are given).
+export const REPORT_PERIOD_GUARD = Object.freeze({
+  keys: Object.freeze({ seriesId: 1, weekStart: 1, weekEnd: 1 }),
+  options: Object.freeze({ name: 'report_period_guard', unique: true, partialFilterExpression: Object.freeze({ dupGuard: true }) }),
+});
+clientReportSchema.index(structuredClone(REPORT_PERIOD_GUARD.keys), structuredClone(REPORT_PERIOD_GUARD.options));
 
 export const ClientReport = mongoose.model('ClientReport', clientReportSchema);

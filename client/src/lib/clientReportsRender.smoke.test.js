@@ -11,7 +11,8 @@ import esbuild from 'esbuild';
 // row state; the team-changed card with its live counts and choices, never Retry; and every build
 // state a row or the builder shows. Then the round-1 review fixes: Before you publish's team block and
 // notes, an expired link's buttons, Restore's reach, ended teams (Continue, never End or a dead end),
-// and New report after a long gap.
+// and New report after a long gap — since docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md, a row's Share and
+// New report's dated choices (the clicked-through flows are in clientReportsSimplify.smoke.test.js).
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const dir = mkdtempSync(join(here, '../../.smoke-cr-render-'));
@@ -76,12 +77,17 @@ const load = async () => {
        const qc = client();
        if (teamChanged) qc.setQueryData(['admin', 'client-report-team-changed', 's1', r.id ?? null], teamChanged);
        return wrap(qc, <ul><ReportRow row={r} campaignId="c1" campaignType="survey" listUpdatedAt={1} isLatest={isLatest} seriesEnded={seriesEnded} teamLabel="Paid team" shares={shares} busy={null}
-         onOpen={() => {}} onNext={() => {}} onCopy={() => {}} onTakeDown={() => {}} onPutBackUp={() => {}} onDelete={() => {}} onCancelBuild={() => {}} onRetry={() => {}} onSettled={() => {}} onTeamResolved={() => {}} onChangeCrews={() => {}} onEndTeam={() => {}} /></ul>);
+         onOpen={() => {}} onNext={() => {}} onShare={() => {}} onTakeDown={() => {}} onPutBackUp={() => {}} onDelete={() => {}} onCancelBuild={() => {}} onRetry={() => {}} onSettled={() => {}} onTeamResolved={() => {}} onChangeCrews={() => {}} onEndTeam={() => {}} /></ul>);
      };
      export const before = (checks, report = {}) =>
        wrap(client(), <BeforePublish checks={checks} report={{ status: 'draft', weekStart: '2026-10-20', weekEnd: '2026-10-26', snapshotId: 'snap1', ...report }} shares={[]} labelOf={(k) => k} tz="America/New_York" onRecompute={noop} onReviewMocks={noop} copiedReviewed={false} onCopiedReviewed={noop} busy={false} />);
-     export const newReport = (props) =>
-       wrap(client(), <NewReportDialog campaignId="c1" campaignTz="America/New_York" reports={[]} efforts={[]} onClose={noop} onCreated={noop} onNewTeam={noop} onContinueTeam={noop} {...props} />);
+     // New report reads the series picker again as it opens and shows its dates only from that answer
+     // (code review WEEK-1): here it is in already, stamped after the dialog opened.
+     export const newReport = (props) => {
+       const qc = client();
+       if (props.seriesData) qc.setQueryData(['admin', 'client-report-series', 'c1'], props.seriesData, { updatedAt: Date.now() + 60000 });
+       return wrap(qc, <NewReportDialog campaignId="c1" campaignTz="America/New_York" reports={[]} efforts={[]} onClose={noop} onCreated={noop} onNewTeam={noop} onContinueTeam={noop} {...props} />);
+     };
      export const team = (props) => wrap(client(), <TeamDialog campaignId="c1" onClose={noop} onSaved={noop} onEnded={noop} {...props} />);
      export const restoreReach = (report) => wrap(client(), <div>{<RestoreReach report={report} tz="America/New_York" />}</div>);`
   );
@@ -233,7 +239,7 @@ test('build states render as §G1 names them, with Cancel while live and Retry w
   assert.equal(text(m.status({ status: 'failed', error: { code: 'TEAM_CHANGED', seriesId: 's1' } })).trim(), '');
 });
 
-test('report rows: a queued draft, a published report with opens and Next, and Copy message held with the reason', async () => {
+test('report rows: a queued draft, a published report with opens, Next and Share, and why no link opens it (SIMPLIFY §D)', async () => {
   const m = await load();
   const draft = text(
     m.row({
@@ -269,12 +275,41 @@ test('report rows: a queued draft, a published report with opens and Next, and C
   assert.ok(pub.includes('Published') && pub.includes('Edited Oct 21'));
   assert.ok(pub.includes('3,412 doors (+412) · 1,980 surveys (+260)'));
   assert.ok(pub.includes('Opened via a deleted link: about 2 visits'));
+  // The links list not in yet (null): no opens line — every link would read "a deleted link" meanwhile.
+  const opened = { id: 'r9', status: 'published', weekStart: '2026-10-13', weekEnd: '2026-10-19', timeZone: 'America/New_York', hasSnapshot: true, views: { byLink: { a: { opens: 2 } } }, build: { status: 'idle' }, headline: { cumulative: {}, period: {} } };
+  assert.ok(!text(m.row(opened, { shares: null })).includes('Opened via'));
+  assert.ok(text(m.row(opened, { shares: [{ id: 'a', label: 'Candidate', isActive: true, reportId: null }] })).includes('Opened via Candidate: about 2 visits'));
   assert.ok(pub.includes('Next report'), 'the latest report of its tab offers Next');
-  assert.ok(pub.includes('Copy message: No link yet — create one.'), 'held, with the publish confirm’s reason');
+  assert.ok(!pub.includes('Copy message'), 'Share replaced Copy message');
+  assert.ok(pub.includes('No link yet — create one.'), 'no link at all: the reason, with Share right there');
+  const pubRow = {
+    id: 'r1',
+    status: 'published',
+    weekStart: '2026-10-13',
+    weekEnd: '2026-10-19',
+    timeZone: 'America/New_York',
+    hasSnapshot: true,
+    build: { status: 'idle' },
+    headline: { cumulative: {}, period: {} },
+  };
+  const linkTo = (over) => ({ id: 'l1', token: 'tok1', label: 'Board', isActive: true, hasPassword: true, expiresAt: iso(NOW + 30 * DAY), lock: { locked: false }, ...over });
+  // Share is never held: it makes a link when none opens the report.
+  const shareBtn = buttonFor(m.row(pubRow, { shares: [] }), 'Share');
+  assert.equal(shareBtn.disabled, false);
+  // The campaign's only link opens another report: it doesn't count (linksFor), and the row says so.
+  const other = text(m.row(pubRow, { shares: [linkTo({ reportId: 'r9', report: { id: 'r9', weekStart: '2026-10-06', weekEnd: '2026-10-12', scopeLabel: 'Whole campaign' } })] }));
+  assert.ok(other.includes('No link opens this report — your links open other reports. Share makes one.'));
+  // Its own one-report link, or a link to all your reports, opens it: nothing to say.
+  for (const s of [linkTo({ reportId: 'r1' }), linkTo({ reportId: null, label: 'Candidate' }), linkTo({ label: 'Old' })]) {
+    const t = text(m.row(pubRow, { shares: [s] }));
+    assert.ok(!/No link/.test(t), `${s.label}: a link opens it`);
+  }
+  // The links list not here yet (null): no line at all, never a flash of "No link yet".
+  assert.ok(!/No link/.test(text(m.row(pubRow, { shares: null }))));
   const older = text(m.row({ id: 'r0', status: 'published', weekStart: '2026-10-06', weekEnd: '2026-10-12', timeZone: 'America/New_York', hasSnapshot: true, takenDownAt: '2026-10-22T14:00:00Z', build: { status: 'idle' }, headline: { cumulative: {}, period: {} } }, { isLatest: false }));
   assert.ok(older.includes('Taken down Oct 22'));
   assert.ok(!older.includes('Next report'), 'Next only on the latest');
-  assert.ok(!older.includes('Copy message'), 'no message for a report the client can’t see');
+  assert.ok(!/\bShare\b/.test(older) && !/No link/.test(older), 'no Share, and no link talk, for a report the client can’t see');
 });
 
 const reportDoc = (over = {}) => ({
@@ -305,7 +340,8 @@ test('Publish confirm: what is worth knowing first, Recompute first, and the lin
   assert.ok(t.includes('2 unreviewed mock-GPS flags are in this report’s numbers.'));
   assert.ok(t.includes('The notes were copied from Oct 13 – Oct 19'));
   assert.ok(t.includes('Your client sees exactly the preview.'));
-  assert.ok(t.includes('No link yet — create one.'), 'the state-specific link line');
+  // A draft with no link at all: nothing to create one with here — Share makes one after publishing (FRESH-8).
+  assert.ok(t.includes('No link yet — after you publish, Share makes one.'), 'the state-specific link line');
   const queued = text(m.publish({ report: reportDoc(), checks: { periodNotOver: true }, build: { status: 'running', progress: 40 }, shares: [] }));
   assert.ok(queued.includes('A recompute is running — wait for it, or publish these numbers and cancel it.'));
   assert.ok(!queued.includes('Recompute first'), 'no second recompute while one runs');
@@ -628,12 +664,32 @@ test('New report on an ended team says so and offers Continue — never "No team
   assert.ok(!text(back).includes('has ended'));
 });
 
-test('New report after a long gap: the stretch ending yesterday, naming the days no report covers (§O4)', async () => {
+test('New report after a long gap: the most recent run on the tab’s own weeks, naming the days no report covers (SIMPLIFY §C)', async () => {
   const m = await load();
-  const seriesData = { teamsReady: true, series: [{ id: 'sc', kind: 'campaign', label: 'Whole campaign', ended: false }], crews: [], formerCrews: [], noCrewCanvassers: 0 };
-  const t = text(m.newReport({ seriesData, reports: [{ id: 'r1', seriesId: 'sc', weekStart: '2020-01-01', weekEnd: '2020-01-07' }] }));
-  assert.match(t, /Your last whole campaign report ended Jan 7, 2020\. No report covers Jan 8, 2020 – [A-Z][a-z]{2} \d{1,2}, \d{4} — change the dates to cover it\./);
-  assert.ok(t.includes('7 days'), 'the last report’s length');
+  // The series picker's answer (contract K3): the organization's week, the campaign zone's today.
+  const seriesData = {
+    teamsReady: true,
+    weekStartsOn: 1,
+    today: '2026-10-26',
+    knockedBeforeThisWeek: true,
+    series: [{ id: 'sc', kind: 'campaign', label: 'Whole campaign', ended: false }],
+    crews: [],
+    formerCrews: [],
+    noCrewCanvassers: 0,
+  };
+  // A Wednesday – Tuesday week in 2020, nothing since.
+  const html = m.newReport({ seriesData, reports: [{ id: 'r1', seriesId: 'sc', weekStart: '2020-01-01', weekEnd: '2020-01-07' }] });
+  const t = text(html);
+  assert.ok(t.includes('Oct 14 – Oct 20 No report covers Jan 8, 2020 – Oct 13, 2026.'), 'the most recent complete Wed – Tue week, and the days no report covers');
+  assert.ok(!t.includes('after your last report'), 'a long-gap choice is not “after your last report”');
+  assert.ok(t.includes('Last week · Oct 19 – Oct 25') && t.includes('This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends') && t.includes('Pick dates'));
+  const picked = [...html.matchAll(/<input type="radio" name="report-dates"[^>]*>/g)].map((x) => /\schecked=""/.test(x[0]));
+  assert.deepEqual(picked, [true, false, false, false], 'four choices, the first picked');
+  // The tab runs on Wednesdays: the nudge, with an admin's two ways out.
+  assert.ok(t.includes('Your last Whole campaign report ran Wednesday – Tuesday. Your organization’s report weeks run Monday – Sunday.'));
+  assert.ok(t.includes('Move this tab to Monday – Sunday weeks') && !t.includes('for the whole organization'), 'a lead (the default) is never offered the organization’s week');
+  assert.ok(t.includes('Ask an admin to change the organization’s week, or pick dates.'));
+  assert.ok(t.includes('Report weeks run Monday – Sunday for your organization (set by an admin).'));
 });
 
 test('an ended team’s report row: the team-changed card offers no End (ADMINUX-10)', async () => {

@@ -2,7 +2,7 @@ import { Button } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { SectionTitle } from './parts.jsx';
 import { formatCivil, formatPeriod } from './reportDates.js';
-import { noUsableLinkReason } from './linkState.js';
+import { reportLinkReason } from './linkState.js';
 
 // "Before you publish" (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md Part 1, §G3, §F4, §O5, §O6): what is
 // worth a look before a report goes to the client, from the server's checks
@@ -146,7 +146,9 @@ const BeforePublish = ({ checks, report, shares, labelOf, tz, onRecompute, onRev
       </Item>
     );
   }
-  const noLink = noUsableLinkReason(shares);
+  // Only the links that can open THIS report count (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, K8):
+  // the list once it has loaded (`shares` is null until then), else the server's count in c.links.
+  const noLink = reportLinkReason({ shares, reportId: report._id ?? report.id, published: report.status === 'published', server: c.links });
   if (noLink) items.push(<Item key="links" tone="warn">{noLink.text}</Item>);
   if (c.copiedNotesUnreviewed && c.copiedFrom) {
     items.push(

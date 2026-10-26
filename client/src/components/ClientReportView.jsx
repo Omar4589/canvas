@@ -30,9 +30,10 @@ function kpiProps(k) {
 /**
  * The report's heading as the client reads it (§H3): its title or dates, the scope ("Team: Paid
  * team"), and "Published Oct 20 · Edited Oct 21" — dates, never times. `nav` sits above the title
- * (the client's All reports / Older · Newer), `actions` beside it (the PDF button).
+ * (the client's All reports / Older · Newer), `actions` beside it (the PDF button), and `note` under
+ * the dates (a link to one report says so — PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D).
  */
-export function ClientReportHeading({ report, nav = null, actions = null }) {
+export function ClientReportHeading({ report, nav = null, actions = null, note = null }) {
   const h = reportHeading(report);
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -41,6 +42,7 @@ export function ClientReportHeading({ report, nav = null, actions = null }) {
         <h1 className="mt-1 text-2xl font-semibold text-fg">{h.title}</h1>
         <div className="text-sm text-fg-muted">{[h.range, h.scope].filter(Boolean).join(' · ')}</div>
         {h.dates.length > 0 && <div className="mt-1 text-xs text-fg-muted">{h.dates.join(' · ')}</div>}
+        {note && <p className="mt-1 text-xs text-fg-muted">{note}</p>}
       </div>
       {actions}
     </div>

@@ -17,6 +17,9 @@ import mongoose from 'mongoose';
 // floors refuse rather than half-build; and the rebuild both repairs injected drift and leaves the
 // review accounts' books unwalked.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-demo-rebuild';
+// A dead port, as every other integration suite pins it: queues/connection.js otherwise defaults to
+// 127.0.0.1:6379, and this suite must never reach a developer's own Redis.
+process.env.REDIS_URL = 'redis://127.0.0.1:1';
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -275,4 +278,45 @@ test('the demo link follows the hardened link rules: its fields, its one-year li
   assert.ok(after.passwordHash && after.passwordHash.startsWith('$2'), 'a bcrypt hash, stored as itself');
   assert.equal(after.passwordMeetsRule, false);
   assert.equal(after.credentialVersion, 2);
+});
+
+// docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D: the reset deletes the campaign's reports, so it deletes
+// their one-report links too; and the demo link is always a link to ALL the reports — a seed that finds
+// no active one makes one, never adopting a one-report link that happens to be the only active link.
+test('a link to one report is never the demo link: the reset deletes it, and a seed never adopts it', { skip }, async () => {
+  const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
+  const { ClientReport } = await import('../src/models/ClientReport.js');
+  const seed = (reset) => seedDemoOrg({ apply: true, reset, allowImport: false, syncPasswords: false, requireExisting: true, log: () => {} });
+  const demo = await ReportShareLink.findOne({ campaignId: ctx.campaign._id, isActive: true }).lean();
+  assert.ok(demo && !demo.reportId, 'the demo link opens every report');
+  const oneReport = async (token) => {
+    const report = await ClientReport.findOne({ campaignId: ctx.campaign._id, status: 'published' }).lean();
+    assert.ok(report, 'the demo has a published report');
+    return ReportShareLink.create({
+      organizationId: ctx.org._id, campaignId: ctx.campaign._id, token, label: 'Board', passwordHash: demo.passwordHash,
+      expiresAt: new Date(Date.now() + 5 * 86400e3), isActive: true, reportId: report._id,
+    });
+  };
+
+  // The reset: the report and its one-report link go; the demo link stays, same address.
+  const board = await oneReport('demo-board-link');
+  await seed(true);
+  assert.equal(await ReportShareLink.exists({ _id: board._id }), null, 'deleted with its report');
+  const kept = await ReportShareLink.findById(demo._id).lean();
+  assert.equal(kept.token, demo.token);
+  assert.equal(kept.isActive, true);
+
+  // The demo link disabled, a one-report link the only active link: the seed makes a new link to all
+  // the reports and leaves the one-report link exactly as it was (never renewed, never re-passworded).
+  await ReportShareLink.updateOne({ _id: demo._id }, { $set: { isActive: false } });
+  const donor = (await oneReport('demo-donor-link')).toObject();
+  await seed(false);
+  const untouched = await ReportShareLink.findById(donor._id).lean();
+  assert.equal(untouched.token, 'demo-donor-link');
+  assert.equal(+untouched.expiresAt, +donor.expiresAt);
+  assert.equal(untouched.passwordHash, donor.passwordHash);
+  const active = await ReportShareLink.find({ campaignId: ctx.campaign._id, isActive: true, reportId: null }).lean();
+  assert.equal(active.length, 1, 'a new link to all the reports');
+  assert.notEqual(String(active[0]._id), String(donor._id));
+  assert.equal(active[0].label, 'Client demo link');
 });

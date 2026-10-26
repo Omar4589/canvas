@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { Button, Card, Select, Tabs } from '../components/ui/index.js';
 import { IconChevronRight } from '../components/ui/icons.jsx';
 import { formatWeekRange } from '../lib/datePresets.js';
@@ -22,6 +22,11 @@ import {
 // knocked in each report, and every report newest first. Read later than the report pages, so it
 // names dates ("+412" for "Oct 13 – Oct 19"), never "this week". The tab rides the URL (?tab=), so
 // a report's "All reports" link returns to it.
+//
+// A link to one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) has no hub: the server answers
+// `single` with that report's row alone, and this page opens the report in its place — `replace`, so
+// Back leaves rather than landing here again. A taken-down or removed report (`gone`, or no row)
+// says so, with nowhere else to send anyone.
 
 function DeltaPill({ n }) {
   // text-success-fg on the tint passes contrast (§H3); the bare success green didn't.
@@ -168,6 +173,11 @@ export default function PublicReportListPage() {
         </Button>
       </Card>
     );
+  }
+  if (hubQ.data?.single) {
+    const row = hubQ.data.gone ? null : hubQ.data.reports?.[0];
+    if (row) return <Navigate replace to={`/r/${token}/reports/${row.id}`} />;
+    return <Card className="p-6 text-sm text-fg-muted">{SHARE_COPY.reportGoneSingle}</Card>;
   }
   if (!current) {
     return <Card className="p-6 text-sm text-fg-muted">No reports are available on this link right now.</Card>;

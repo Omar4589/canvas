@@ -510,7 +510,9 @@ test('a walk-list-scoped report freezes only that effort\'s numbers; campaign-wi
   assert.strictEqual(scopedBuilt.stats.cumulative.totals.doorsKnocked, 2, 'only effort-A knocks count');
   assert.strictEqual(scopedBuilt.stats.period.totals.doorsKnocked, 2);
 
-  const wide = await call('POST', '/admin/client-reports', { ...ctx.admin, body });
+  // The whole-campaign tab already has a report for this week (an earlier test's): this one is a
+  // deliberate second one (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E, "Make a second one").
+  const wide = await call('POST', '/admin/client-reports', { ...ctx.admin, body: { ...body, allowDuplicate: true } });
   assert.strictEqual(wide.status, 201, JSON.stringify(wide.json));
   assert.strictEqual(wide.json.report.effortId, null);
   const wideKnocks = (await buildNow(wide.json.report._id)).stats.cumulative.totals.doorsKnocked;
@@ -631,9 +633,11 @@ async function bShare(path) {
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
+// Every B test makes its own report of the same week — a deliberate second one each time
+// (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E), so the duplicate guard lets it in.
 async function bReport(visibility = null) {
   const created = await call('POST', '/admin/client-reports', {
-    ...ctx.admin, body: { campaignId: String(ctx.bCamp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12' },
+    ...ctx.admin, body: { campaignId: String(ctx.bCamp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', allowDuplicate: true },
   });
   assert.strictEqual(created.status, 201, JSON.stringify(created.json));
   const id = created.json.report._id;

@@ -1,6 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
@@ -298,4 +298,183 @@ test('the layout: the gate shows nothing about the campaign; signed in, the head
   } finally {
     delete globalThis.sessionStorage;
   }
+});
+
+// ── Links to all your reports stay exactly as they were (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) ──
+// The hub, a report and the taken-down card on an all-reports link, rendered and compared byte for
+// byte with what these pages rendered before one-report links existed (captured 2026-10-25) — both
+// as the server answers now (`single: false`) and as it answered before (no `single` at all).
+// Regenerate only for an intended change to these pages:
+//   UPDATE_PUBLIC_REPORT_SNAPSHOT=1 node --test src/lib/publicReportRender.smoke.test.js
+const SNAPSHOT = new URL('./publicReportAllLinks.snapshot.json', import.meta.url);
+
+const snapshotReport = () =>
+  baseReport({
+    weekStart: '2026-10-13',
+    weekEnd: '2026-10-19',
+    publishedOn: '2026-10-20',
+    editedOn: null,
+    refreshedOn: '2026-10-22',
+    numbersThrough: null,
+    scope: { kind: 'campaign', label: 'Whole campaign', seriesKey: 'kC', seriesLabel: 'Whole campaign' },
+    earlierTotals: {
+      changes: [
+        { card: 'doorsKnocked', delta: -120 },
+        { card: 'surveysTaken', delta: 3 },
+      ],
+      since: { weekStart: '2026-10-06', weekEnd: '2026-10-12' },
+    },
+    nav: { olderId: 'r0', newerId: 'r2' },
+    goal: { target: 10000, deadline: '2026-11-03', done: 3412, remaining: 6588, percent: 34 },
+    observations: [{ heading: 'Turnout', body: 'Most doors on Elm St asked about the bridge.\nTwo asked for yard signs.' }],
+    stats: {
+      cumulative: {
+        totals: { doorsKnocked: 3412, surveysTaken: 1980, surveyedVoters: 1702, connectionRate: 58 },
+        contactBreakdown: { surveyed: 2000, refused: 300, not_home: 1012, no_soliciting: 40, wrong_address: 60 },
+        surveyBreakdowns: [
+          { questionKey: 'support', questionLabel: 'Support for Smith?', type: 'single_choice', options: [{ option: 'Strong support', count: 30 }, { option: 'Undecided', count: 12 }, { option: 'Oppose', count: 8 }] },
+          { questionKey: 'issues', questionLabel: 'Top issues', type: 'multiple_choice', options: [{ option: 'Schools', count: 20 }, { option: 'Roads', count: 9 }] },
+        ],
+        tagBreakdowns: [{ tag: 'Supporter', identifiedVoters: 400, currentVoters: 380 }],
+      },
+      period: { totals: { doorsKnocked: 412, surveysTaken: 40, surveyedVoters: 38 } },
+    },
+  });
+
+// A report taken down: its read answers 404 REPORT_NOT_FOUND (seeded as an error that renders as one).
+const goneQc = (id) => {
+  const qc = m.qcNew();
+  qc.setQueryDefaults(['share', 'T', 'jwt', 'report', id], { retryOnMount: false });
+  const err = Object.assign(new Error('This report was taken down or removed.'), { status: 404, code: 'REPORT_NOT_FOUND' });
+  qc.getQueryCache().build(qc, { queryKey: ['share', 'T', 'jwt', 'report', id] }).setState({ status: 'error', error: err, fetchStatus: 'idle', data: undefined });
+  return qc;
+};
+
+// `single`: undefined renders today's payloads; false renders the same payloads as the server now
+// sends them for a link to all your reports.
+const allReportsPages = (single) => {
+  const flag = single === undefined ? {} : { single };
+  const hub = {
+    campaignName: 'Fall 2026',
+    orgName: 'Fox Bryant',
+    hasLogo: false,
+    reports: [
+      row('c3', 'campaign', 'kC', 'Whole campaign', '2026-10-13', '2026-10-19', 3412, 412, { editedOn: '2026-10-21', title: 'Final push' }),
+      row('t1', 'team', 'kT', 'Paid team', '2026-10-13', '2026-10-19', 900, 90, { numbersThrough: '2026-10-18' }),
+      row('c2', 'campaign', 'kC', 'Whole campaign', '2026-10-06', '2026-10-12', 3000, 380, { refreshedOn: '2026-10-14' }),
+      row('c1', 'campaign', 'kC', 'Whole campaign', '2026-09-29', '2026-10-05', 2104, 300),
+    ],
+    ...flag,
+  };
+  const listCtx = (h) => ({ token: 'T', hub: h, hubQ: { data: h, isLoading: false, error: null, refetch() {} } });
+  const empty = { ...hub, reports: [] };
+
+  const session = { get: () => new Promise(() => {}), handleError: () => ({}) };
+  const detailCtx = { token: 'T', accessToken: 'jwt', session, hub, hubQ: { data: hub, isLoading: false, error: null }, logo: { url: null, blob: null } };
+  const shown = m.qcNew();
+  shown.setQueryData(['share', 'T', 'jwt', 'report', 'r1'], { report: snapshotReport(), survey: { questions: [] }, ...flag });
+
+  return {
+    hub: m.page('list', listCtx(hub), '/r/T'),
+    hubTeamTab: m.page('list', listCtx(hub), '/r/T?tab=kT'),
+    hubEmpty: m.page('list', listCtx(empty), '/r/T'),
+    report: m.page('detail', detailCtx, '/r/T/reports/r1', shown),
+    reportGone: m.page('detail', detailCtx, '/r/T/reports/r1', goneQc('r1')),
+  };
+};
+
+test('a link to all your reports: the hub, a report and the taken-down card render exactly as before', () => {
+  if (process.env.UPDATE_PUBLIC_REPORT_SNAPSHOT === '1') {
+    const pages = allReportsPages(undefined);
+    const note =
+      'Rendered HTML of the client pages on a link to all your reports, captured before one-report links (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D). Compared byte for byte by publicReportRender.smoke.test.js; regenerate only for an intended change to these pages.';
+    writeFileSync(SNAPSHOT, `${JSON.stringify({ _note: note, ...pages }, null, 2)}\n`);
+  }
+  const saved = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
+  for (const single of [undefined, false]) {
+    const pages = allReportsPages(single);
+    for (const [name, html] of Object.entries(pages)) {
+      assert.equal(html, saved[name], `${name} (single: ${single}) is unchanged`);
+    }
+  }
+  // What the snapshot holds, so a regenerated one can't quietly lose it.
+  assert.match(saved.hub, /Latest · Oct 13 – Oct 19, 2026 · Whole campaign/);
+  assert.match(saved.report, /href="\/r\/T\?tab=kC"[^>]*>‹ All reports/);
+  assert.match(saved.report, /href="\/r\/T\/reports\/r0"[^>]*>‹ Older/);
+  assert.match(saved.report, /href="\/r\/T\/reports\/r2"[^>]*>Newer ›/);
+  assert.ok(saved.report.includes(`Earlier totals were updated by ${MINUS}120 doors and +3 surveys since the Oct 6 – Oct 12 report.`));
+  assert.doesNotMatch(saved.report, /This link opens this report only/);
+  assert.match(saved.reportGone, /This report was taken down or removed(<!-- -->)? —[\s\S]*href="\/r\/T"[^>]*>see all reports/);
+  assert.match(saved.hubEmpty, /No reports are available on this link right now\./);
+});
+
+// ── A link to one report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) ─────────────────────────────────
+const singleHub = (extra = {}) => ({
+  campaignName: 'Fall 2026',
+  orgName: 'Fox Bryant',
+  hasLogo: false,
+  single: true,
+  reportId: 'r9',
+  gone: false,
+  reports: [row('r9', 'campaign', 'kC', 'Whole campaign', '2026-10-19', '2026-10-25', 3412, 412)],
+  ...extra,
+});
+const oneReport = () => ({
+  ...snapshotReport(),
+  id: 'r9',
+  weekStart: '2026-10-19',
+  weekEnd: '2026-10-25',
+  nav: null,
+  earlierTotals: { changes: [{ card: 'doorsKnocked', delta: -120 }], since: null, before: '2026-10-19' },
+});
+const pending = { data: undefined, isLoading: true, error: null };
+const detailCtxOf = (hub, hubQ = { data: hub, isLoading: false, error: null }) => ({
+  token: 'T',
+  accessToken: 'jwt',
+  session: { get: () => new Promise(() => {}), handleError: () => ({}) },
+  hub,
+  hubQ,
+  logo: { url: null, blob: null },
+});
+
+test('a link to one report: the hub opens the report in its place, or says it is gone — never a list', () => {
+  const listCtxOf = (hub) => ({ token: 'T', hub, hubQ: { data: hub, isLoading: false, error: null, refetch() {} } });
+  // With its row: <Navigate replace> draws nothing (publicReportEffects follows where it goes).
+  assert.equal(m.page('list', listCtxOf(singleHub()), '/r/T'), '');
+  for (const hub of [singleHub({ gone: true, reports: [] }), singleHub({ reports: [] }), singleHub({ gone: true })]) {
+    const html = m.page('list', listCtxOf(hub), '/r/T?tab=kC');
+    assert.match(html, /This report was taken down or removed\. Ask the person who sent it\./);
+    assert.doesNotMatch(html, /see all reports|No reports are available|Latest|reports\/r9|tablist/);
+  }
+});
+
+test('a link to one report: its page points at no other report, says so, and words earlier totals without one', () => {
+  const qc = m.qcNew();
+  qc.setQueryData(['share', 'T', 'jwt', 'report', 'r9'], { report: oneReport(), survey: { questions: [] }, single: true });
+  const html = m.page('detail', detailCtxOf(singleHub()), '/r/T/reports/r9', qc);
+  assert.doesNotMatch(html, /All reports|Older|Newer/);
+  assert.match(html, /<p class="mt-1 text-xs text-fg-muted">This link opens this report only\.<\/p>/);
+  assert.ok(html.includes(`Totals from before Oct 19 were updated by ${MINUS}120 doors after they were first reported.`));
+  assert.doesNotMatch(html, /Earlier totals|since the/);
+  assert.match(html, /Week of Oct 19/);
+  assert.match(html, /Download PDF/);
+  assert.match(html, /Canvasser observations/, 'the report itself reads as on any link');
+  // Opened straight from the message's link, the report's own answer is enough before the hub's.
+  assert.equal(m.page('detail', detailCtxOf(null, pending), '/r/T/reports/r9', qc), html);
+});
+
+test('a link to one report, taken down — or given another report\'s id: ask the person who sent it, no "see all reports"', () => {
+  // Its own report taken down; another report's id while its own is still up.
+  for (const hub of [singleHub({ gone: true, reports: [] }), singleHub()]) {
+    const html = m.page('detail', detailCtxOf(hub), '/r/T/reports/r1', goneQc('r1'));
+    assert.match(html, /This report was taken down or removed\. Ask the person who sent it\./);
+    assert.doesNotMatch(html, /see all reports|href="\/r\/T"/);
+  }
+  // Before the hub has said which kind of link this is: neither way out, a moment's Loading….
+  const waiting = m.page('detail', detailCtxOf(null, pending), '/r/T/reports/r1', goneQc('r1'));
+  assert.match(waiting, /Loading…/);
+  assert.doesNotMatch(waiting, /taken down/);
+  // A hub that couldn't load: the all-reports way out, whose page offers Try again.
+  const failed = m.page('detail', detailCtxOf(null, { data: undefined, isLoading: false, error: new Error('offline') }), '/r/T/reports/r1', goneQc('r1'));
+  assert.match(failed, /see all reports/);
 });

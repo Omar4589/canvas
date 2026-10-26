@@ -14,6 +14,12 @@ import { markOpenedToday, wasOpenedToday } from '../lib/shareAccess.js';
 // dates, "Numbers as of …" when they stopped early, the earlier-totals line, Older / Newer within its
 // series, the team note on a team report, the PDF, and the map. A report taken down or removed says
 // so and keeps the session; the map's own answers (no map, a newer snapshot) stay inside the map.
+//
+// On a link to this report only (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) nothing points at
+// another report: no "‹ All reports", no Older / Newer (the server sends `nav: null`), the heading
+// says "This link opens this report only.", the earlier-totals line names no other report (its
+// `before` form, worded in reportDerive), and taken down reads "Ask the person who sent it." with no
+// "see all reports".
 
 const allReportsPath = (token, report) =>
   report?.scope?.seriesKey ? `/r/${token}?tab=${encodeURIComponent(report.scope.seriesKey)}` : `/r/${token}`;
@@ -49,7 +55,7 @@ function SeriesNav({ token, report }) {
   );
 }
 
-function ReportPage({ data, outlet, onReload }) {
+function ReportPage({ data, outlet, onReload, single }) {
   const { token, session, accessToken, hub, logo } = outlet;
   const { report, survey } = data;
   const sections = useMemo(() => deriveReportSections(report), [report]);
@@ -116,7 +122,12 @@ function ReportPage({ data, outlet, onReload }) {
 
   return (
     <div className="space-y-6">
-      <ClientReportHeading report={report} nav={<SeriesNav token={token} report={report} />} actions={pdfButton} />
+      <ClientReportHeading
+        report={report}
+        nav={single ? null : <SeriesNav token={token} report={report} />}
+        note={single ? 'This link opens this report only.' : null}
+        actions={pdfButton}
+      />
       {pdfError && (
         <p role="alert" className="text-sm text-danger-fg">
           {pdfError}
@@ -152,7 +163,7 @@ function ReportPage({ data, outlet, onReload }) {
 export default function PublicReportDetailPage() {
   const { reportId } = useParams();
   const outlet = useOutletContext();
-  const { token, session, accessToken } = outlet;
+  const { token, session, accessToken, hub, hubQ } = outlet;
   const qc = useQueryClient();
 
   const q = useQuery({
@@ -163,6 +174,9 @@ export default function PublicReportDetailPage() {
     refetchOnWindowFocus: true,
   });
   const kind = q.error ? classifyShareError(q.error).kind : null;
+  // Which kind of link this is (§D): the report's read says, and so does the hub — the only one that
+  // can once the report is gone. null until one of them has answered.
+  const single = q.data?.single ?? hub?.single ?? null;
 
   // A report taken down or removed: the hub's list is out of date too.
   useEffect(() => {
@@ -171,6 +185,10 @@ export default function PublicReportDetailPage() {
 
   if (q.isLoading) return <div className="text-sm text-fg-muted">Loading…</div>;
   if (kind === 'report-gone') {
+    // The way out depends on the link, so a moment's Loading… while the hub is still on its way
+    // rather than "see all reports" on a link that has none.
+    if (single === null && hubQ?.isLoading) return <div className="text-sm text-fg-muted">Loading…</div>;
+    if (single) return <Card className="p-6 text-sm text-fg-muted">{SHARE_COPY.reportGoneSingle}</Card>;
     return (
       <Card className="p-6 text-sm text-fg-muted">
         {SHARE_COPY.reportGone} —{' '}
@@ -194,5 +212,5 @@ export default function PublicReportDetailPage() {
     );
   }
   if (!q.data?.report) return null;
-  return <ReportPage key={reportId} data={q.data} outlet={outlet} onReload={() => q.refetch()} />;
+  return <ReportPage key={reportId} data={q.data} outlet={outlet} onReload={() => q.refetch()} single={!!single} />;
 }
