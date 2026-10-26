@@ -120,6 +120,18 @@ export const dateChoices = ({ last = null, s, today, knockedBeforeThisWeek = tru
   return { suggestion: first, choices };
 };
 
+/**
+ * The line at the top of New report's dates (§M): every total runs from the campaign's first door through
+ * the last day picked, for what the report covers — the whole campaign, the tab's name (`label`: "Paid
+ * team", "North"), or neither while its team or walk list isn't picked yet — and the first day only
+ * decides what shows as new, in the words the client's cards use (`phrase`: "this week", "in these 14
+ * days", reportDerive.js periodPhrase).
+ */
+export const totalsSentence = ({ wholeCampaign = false, label = '', phrase }) => {
+  const covers = wholeCampaign ? ' for the whole campaign, from its first door' : `${label ? ` for ${label},` : ''} from the campaign’s first door`;
+  return `Your report shows totals${covers} through the last day you pick. The first day only decides what shows as new, like “+412 ${phrase}”.`;
+};
+
 const article = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
 
 /**

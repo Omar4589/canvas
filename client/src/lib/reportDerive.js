@@ -81,9 +81,13 @@ const wordsFor = (period) => PERIOD_WORDS[period?.noun] || PERIOD_WORDS.period;
 export const periodStrings = (period) => {
   const w = wordsFor(period);
   return {
-    quiet: `${w.quiet} — no new doors were knocked ${period.phrase}. The numbers below are cumulative totals to date.`,
-    pdfQuiet: `${w.pdfQuiet} — no new doors knocked ${period.phrase}. Totals below are cumulative.`,
-    mapEmpty: `No mapped doors for ${period.span}.`,
+    // The line under "Activity at a glance" says the totals run from the campaign's start
+    // (totalsSinceText), so the banner says only what was quiet.
+    quiet: `${w.quiet} — no new doors were knocked ${period.phrase}.`,
+    pdfQuiet: `${w.pdfQuiet} — no new doors knocked ${period.phrase}.`,
+    // The map is every door reached through the report's last day, never only its dates' doors
+    // (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M): "for this week" read as if it were.
+    mapEmpty: 'No mapped doors on this report.',
     title: w.title,
   };
 };
@@ -258,6 +262,17 @@ export const supportSubtitle = (breakdown) => {
 /** "Numbers as of Oct 24 — the period was still running." — only when the numbers stopped early. */
 export const numbersAsOfText = (numbersThrough) =>
   numbersThrough ? `Numbers as of ${shortDate(numbersThrough)} — the period was still running.` : null;
+
+/**
+ * The line under "Activity at a glance" (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M): every number but the
+ * "+412 this week" pills runs from the campaign's first door through the report's last day. "Totals
+ * since the campaign began, through Oct 25." — without the date when the numbers stopped early, where
+ * "Numbers as of" says when.
+ */
+export const totalsSinceText = (report) =>
+  !report?.numbersThrough && /^\d{4}-\d{2}-\d{2}$/.test(report?.weekEnd ?? '')
+    ? `Totals since the campaign began, through ${shortDate(report.weekEnd)}.`
+    : 'Totals since the campaign began.';
 
 // Each count card's noun, singular and plural, for the earlier-totals line.
 const CARD_NOUNS = {
@@ -460,8 +475,9 @@ export function deriveReportSections(report) {
     quietText: strings.quiet,
     pdfQuietText: strings.pdfQuiet,
     mapEmptyText: strings.mapEmpty,
-    // The notes that qualify the numbers (§H3): when they were taken, earlier totals that moved
-    // since they were sent, and the team overlap rule.
+    // The notes that qualify the numbers (§H3): what the totals run over (SIMPLIFY §M), when they were
+    // taken, earlier totals that moved since they were sent, and the team overlap rule.
+    totalsSince: totalsSinceText(report),
     numbersAsOf: numbersAsOfText(report?.numbersThrough),
     earlierTotals: earlierTotalsText(report?.earlierTotals),
     teamNote: isTeamScope(report?.scope?.kind) ? TEAM_NOTE : null,

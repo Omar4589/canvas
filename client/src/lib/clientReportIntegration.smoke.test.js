@@ -214,9 +214,10 @@ test('the builder’s preview map: the client page’s period wording, and MAP_U
   assert.equal(mapProps.length, 1, 'the preview map rendered');
   const props = mapProps[0];
   const expected = m.sectionsOf(shaped).mapEmptyText;
-  assert.equal(expected, 'No mapped doors for this week.');
+  // The map is every door reached through the last day, so the line names no period (SIMPLIFY §M).
+  assert.equal(expected, 'No mapped doors on this report.');
   assert.equal(props.emptyText, expected, 'the same empty line the client reads');
-  assert.ok(text(html).includes('No mapped doors for this week.'));
+  assert.ok(text(html).includes('No mapped doors on this report.'));
   assert.equal(props.mapPath, `/admin/client-reports/${RID}/preview/map`);
   assert.equal(typeof props.onUpdated, 'function', 'a 409 MAP_UPDATED has somewhere to go');
   props.onUpdated();

@@ -24,6 +24,7 @@ On the campaign's **Client Reports** tab, press **New report**, choose **A team*
 
 ## What the numbers mean
 
+- **A team report's totals run from the campaign's first door through the last day you pick**: everything that team's crews have done, not only your dates. The first day only decides what shows as new ("+412 this week"). See [Does a report count only the dates I pick?](report-totals-and-dates)
 - **Each team report counts that team's own work.** If both teams reached the same home or the same voter, it counts in both reports, and each team report says so: "A home both teams visited counts in each team's report."
 - **So team reports don't add up to the whole campaign.** The whole-campaign report counts that home once.
 - **Doors marked at the office don't count toward any team.**

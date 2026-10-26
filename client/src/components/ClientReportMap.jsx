@@ -58,7 +58,8 @@ import {
 // requestOpts — the share page passes `{ public: true, shareToken }`, the builder passes nothing
 // (authed). onError(err) hears every failed fetch (the share page routes it through its one error
 // handler; a MAP_NOT_SHARED answer means hide the map), onUpdated() asks the page to reload the
-// report after a 409 MAP_UPDATED, emptyText names the period ("No mapped doors for this week."), and
+// report after a 409 MAP_UPDATED, emptyText is the report's own empty line ("No mapped doors on this
+// report." — the map is every door reached through the last day, never only the period's), and
 // fullBleedOnPhone runs the map edge to edge inside a page's 16px gutter.
 //
 // mapVersion (optional) is the report's opaque `visibility.mapVersion` (contract C7, PUBUX-1): it

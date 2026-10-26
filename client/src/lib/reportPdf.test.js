@@ -256,6 +256,16 @@ test('a question taller than a page starts where it is, keeping its heading with
   assert.ok(runs.some((r) => r.text === 'Issue 30' && r.page > 1), 'and the rest runs on');
 });
 
+test('the totals line prints right under ACTIVITY AT A GLANCE: since the campaign began, through the last day (SIMPLIFY §M)', async () => {
+  await generateReportPdf({ ...report, numbersThrough: null }, { campaignName: 'Fall 2026' });
+  let runs = textRuns(saved.out);
+  assert.equal(runs[runs.indexOf('ACTIVITY AT A GLANCE') + 1], 'Totals since the campaign began, through Oct 19.', runs.join(' | '));
+  // Numbers taken early: "Numbers as of Oct 18" above says when, so the line names no day.
+  await generateReportPdf(report, { campaignName: 'Fall 2026' });
+  runs = textRuns(saved.out);
+  assert.equal(runs[runs.indexOf('ACTIVITY AT A GLANCE') + 1], 'Totals since the campaign began.', runs.join(' | '));
+});
+
 test('a 14-day report never says "week"; a one-day report names its day', async () => {
   await generateReportPdf({ ...report, weekEnd: '2026-10-26', scope: { kind: 'campaign' }, stats: { ...report.stats, period: { totals: {} } } }, { campaignName: 'Fall 2026' });
   assert.equal(saved.name, 'fall-2026-whole-campaign-report-2026-10-13-to-2026-10-26.pdf');

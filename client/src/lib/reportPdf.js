@@ -243,6 +243,9 @@ export async function generateReportPdf(report, { campaignName = '', orgName = '
   setFont(10.5, 'bold', GRAY);
   doc.text('ACTIVITY AT A GLANCE', MARGIN, y);
   y += 14;
+  // What the totals run over, as on screen (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M).
+  setFont(9, 'normal', SUBTLE);
+  printLines(wrap(sections.totalsSince), 12, 14);
   if (sections.isQuietWeek) {
     setFont(9, 'normal', SUBTLE);
     printLines(wrap(sections.pdfQuietText), 12, 14);

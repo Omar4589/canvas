@@ -4,9 +4,10 @@ import { api } from '../../api/client.js';
 import { Button, Modal, Select } from '../ui/index.js';
 import { ErrorBanner } from './parts.jsx';
 import { formatPeriod, periodDays, todayIn, daysBetween } from './reportDates.js';
-import { dateChoices, dayLabel, duplicateText, periodLabel, weekName, weekNudge } from './newReportChoices.js';
+import { dateChoices, dayLabel, duplicateText, periodLabel, totalsSentence, weekName, weekNudge } from './newReportChoices.js';
 import { seriesKey } from './hooks.js';
 import { quotedNames } from './TeamDialog.jsx';
+import { periodPhrase } from '../../lib/reportDerive.js';
 
 // New report (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G2, §F4, §F10). Covers the whole campaign or a
 // team (one or more crews under a name the client reads), optionally only one walk list. Creating
@@ -21,7 +22,9 @@ import { quotedNames } from './TeamDialog.jsx';
 // admin, use the tab's weeks for the whole organization. Opened with dates (`initial.dates` — Next
 // report's NEXT_GAP_TOO_LONG, the ?new=1 link of contract K10, Continue) it selects the choice with those
 // dates, else Pick dates with them; Next's refusal also hands over its sentence (`initial.notice`), shown
-// at the top of the dates.
+// at the top of the dates. Above the choices, one line says what the dates decide (SIMPLIFY §M): the
+// totals run from the campaign's first door through the last day picked, for the tab named, and the first
+// day only decides what shows as new — the "up to a date" a report already is.
 //
 // The dates come from the series picker read AGAIN each time the dialog opens (code review WEEK-1): its
 // today, the organization's week and whether doors were knocked before this week. The page's copy can
@@ -219,6 +222,15 @@ const NewReportDialog = ({
   const scopeTeam = team || pickedEnded;
   // The tab's own name, as its tab reads ("Whole campaign", "Paid team").
   const scopeLabel = scopeSeries?.label || (scopeTeam ? `${scopeTeam.label}${oneWalkList ? ` · ${efforts.find((e) => String(e._id) === String(effortId))?.name || 'walk list'}` : ''}` : oneWalkList ? efforts.find((e) => String(e._id) === String(effortId))?.name || 'Walk list' : 'Whole campaign');
+  // What the dates decide (SIMPLIFY §M): the totals run from the campaign's first door through the last day
+  // picked, for what the report covers, named once its team or walk list is picked.
+  const wholeCampaign = covers === 'campaign' && !oneWalkList;
+  const coversPicked = covers === 'team' ? !!scopeTeam && (!oneWalkList || !!effortId) : !!effortId;
+  const totalsLine = totalsSentence({
+    wholeCampaign,
+    label: !wholeCampaign && coversPicked ? scopeLabel : '',
+    phrase: periodPhrase(period.weekStart, period.weekEnd).phrase,
+  });
 
   const create = useMutation({
     // The request is the one worked out when Create was pressed (submit, below) — never re-read from a
@@ -451,6 +463,7 @@ const NewReportDialog = ({
             ))}
           {datesReady && (
             <>
+              <p className="mt-1.5 text-xs text-fg-muted">{totalsLine}</p>
               {choices.map((c) => (
                 <div key={c.key} className="mt-1.5">
                   <label className="flex items-start gap-2 text-fg">

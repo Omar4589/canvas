@@ -3552,7 +3552,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       nothing (the guide just shows again). No server collection, no third party; the same `:97` reading as
       above.]*
     - **(m) [v7 2026-10-25 — links to one report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, built 2026-10-25,
-      uncommitted). Narrows what a link holder reaches; collects nothing new.]** A share link can now open
+      committed 07a296a; stamp the deploy date here when it ships). Narrows what a link holder reaches;
+      collects nothing new.]** A share link can now open
       one report instead of every published report of its campaign: `ReportShareLink.reportId`
       (`models/ReportShareLink.js`, null or missing = all reports, as every link made before), set when
       the link is made and never changed, and only for a report the client can see then (published, not

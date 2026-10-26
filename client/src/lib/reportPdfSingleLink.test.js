@@ -39,7 +39,8 @@ test('a one-report link\'s PDF prints "Totals from before …" and never names a
   });
   const runs = textRuns(saved.out);
   assert.ok(runs.some((r) => r.includes('Totals from before Oct 19 were updated by -120 doors and +3 surveys after they were first reported.')), runs.join(' | '));
-  assert.ok(!runs.some((r) => /Earlier totals|since the/.test(r)), runs.join(' | '));
+  // "Totals since the campaign began" (SIMPLIFY §M) names no report; "since the Oct 12 - Oct 18 report" would.
+  assert.ok(!runs.some((r) => /Earlier totals|since the (?!campaign began)/.test(r)), runs.join(' | '));
 });
 
 test('the same report on a link to all your reports keeps its line as before', async () => {

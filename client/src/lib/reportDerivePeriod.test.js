@@ -20,6 +20,7 @@ import {
   seriesHeading,
   supportSubtitle,
   TEAM_NOTE,
+  totalsSinceText,
 } from './reportDerive.js';
 
 // docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F10: a report covers any run of days, so every weekly
@@ -77,27 +78,29 @@ test('every routed string follows the period — and a weekly report reads as it
     weekly.goal.help,
     'Progress toward the campaign\'s door target, counted in the same doors as "Doors knocked" above and measured as of the end of this report\'s week — not today.'
   );
-  assert.equal(weekly.mapEmptyText, 'No mapped doors for this week.');
+  // The map is every door reached through the last day, so its empty line names no period (SIMPLIFY §M).
+  assert.equal(weekly.mapEmptyText, 'No mapped doors on this report.');
   assert.equal(weekly.heading.title.startsWith('Week of '), true);
 
   const quietWeek = deriveReportSections(report({ period: {} }));
   assert.equal(quietWeek.isQuietWeek, true);
-  assert.equal(quietWeek.quietText, 'A quieter week — no new doors were knocked this week. The numbers below are cumulative totals to date.');
-  assert.equal(quietWeek.pdfQuietText, 'Quiet week — no new doors knocked this week. Totals below are cumulative.');
+  // The totals line above the cards says what they run over, so the banner says only what was quiet.
+  assert.equal(quietWeek.quietText, 'A quieter week — no new doors were knocked this week.');
+  assert.equal(quietWeek.pdfQuietText, 'Quiet week — no new doors knocked this week.');
   assert.equal(quietWeek.kpis[0].deltaZeroText, 'No new doors this week');
   assert.equal(quietWeek.kpis[2].deltaZeroText, 'No change this week');
 
   const fortnight = deriveReportSections(report({ weekEnd: '2026-10-26', period: { doorsKnocked: 812 } }));
   assert.equal(fortnight.kpis[0].deltaText, '+812 in these 14 days');
   assert.equal(fortnight.kpis[1].deltaZeroText, 'No new surveys in these 14 days');
-  assert.equal(fortnight.mapEmptyText, 'No mapped doors for these 14 days.');
+  assert.equal(fortnight.mapEmptyText, 'No mapped doors on this report.');
   assert.equal(fortnight.goal.help.includes("the end of this report's period"), true);
   assert.match(fortnight.kpis[2].help, /Each report's figure counts the people surveyed in its dates/);
 
   const oneDay = deriveReportSections(report({ weekStart: '2026-10-24', weekEnd: '2026-10-24', period: {} }));
-  assert.equal(oneDay.quietText, 'A quiet day — no new doors were knocked that day. The numbers below are cumulative totals to date.');
+  assert.equal(oneDay.quietText, 'A quiet day — no new doors were knocked that day.');
   assert.equal(oneDay.kpis[0].deltaZeroText, 'No new doors that day');
-  assert.equal(oneDay.mapEmptyText, 'No mapped doors for that day.');
+  assert.equal(oneDay.mapEmptyText, 'No mapped doors on this report.');
   assert.match(oneDay.kpis[2].help, /A day's figure counts the people surveyed that day, so someone surveyed on two different days appears in both; the daily numbers/);
 
   const litDay = deriveReportSections(report({ campaignType: 'lit_drop', weekStart: '2026-10-24', weekEnd: '2026-10-24', period: { litKnocks: 40 } }));
@@ -117,6 +120,18 @@ test('every routed string follows the period — and a weekly report reads as it
     ].filter(Boolean);
     for (const text of routed) assert.doesNotMatch(text, /week/i, text);
   }
+});
+
+test('the totals line: since the campaign began, through the report’s last day — without the date when the numbers stopped early (SIMPLIFY §M)', () => {
+  assert.equal(deriveReportSections(report({ period: { doorsKnocked: 412 } })).totalsSince, 'Totals since the campaign began, through Oct 19.');
+  assert.equal(deriveReportSections(report({ weekEnd: '2026-10-26', period: {} })).totalsSince, 'Totals since the campaign began, through Oct 26.');
+  assert.equal(deriveReportSections(report({ weekStart: '2026-10-24', weekEnd: '2026-10-24' })).totalsSince, 'Totals since the campaign began, through Oct 24.');
+  // Taken before the period ended: "Numbers as of Oct 17" says when, so this line names no day.
+  const early = deriveReportSections(report({ extra: { numbersThrough: '2026-10-17' } }));
+  assert.equal(early.totalsSince, 'Totals since the campaign began.');
+  assert.equal(early.numbersAsOf, 'Numbers as of Oct 17 — the period was still running.');
+  // No usable last day (an old or damaged row): the line still stands, without one.
+  for (const r of [{}, null, { weekEnd: 'junk' }]) assert.equal(totalsSinceText(r), 'Totals since the campaign began.');
 });
 
 test('the doors and homes help carry the no-tiling caveat (§F10)', () => {

@@ -51,8 +51,9 @@ phones clear it sooner); unticked, only until the tab closes. Once signed in, ev
 **The report hub** comes next: your organization's logo at the top if you've added one, the campaign
 and organization names, and the reports. When the campaign has more than one kind of report, tabs
 separate them: **Whole campaign**, each team, and each walk list (a dropdown on a phone). Each tab
-shows its latest report with its headline numbers, a small chart of the doors knocked in each report,
-and every report newest first. With nothing up, it says "No reports are available on this link right
+shows its latest report with its headline numbers ("Totals since the campaign began. The + figures are
+for Oct 13 – Oct 19."), a small chart of the doors knocked in each report, and every report newest
+first. With nothing up, it says "No reports are available on this link right
 now."
 
 **A link to just one report** skips the hub: it opens straight on its report, with no list of other
@@ -69,8 +70,13 @@ who sent it."
 - **Activity at a glance**: the headline cards (Doors knocked, Surveys taken, Voters surveyed and
   Connection rate; on a lit-drop campaign, Doors knocked, Lit dropped and Homes knocked). The big
   number is the running total. The pill under it is the report's own period: "+412 this week" on a
-  seven-day report, "+812 in these 14 days" on a two-week one, "that day" on a one-day one. A period
-  with no new doors says so plainly above the cards. The weekly figures don't add up to the running
+  seven-day report, "+812 in these 14 days" on a two-week one, "that day" on a one-day one. Right
+  under the heading, one line says what the totals run over: "Totals since the campaign began, through
+  Oct 25." Every number in the report (the cards, the breakdowns, the voter groups, the door goal and
+  the map) runs from the campaign's first door through the report's last day; only the pills are the
+  report's own dates. When the numbers were taken before the period ended, the line drops its date
+  ("Totals since the campaign began.") and the "Numbers as of …" note says when. A period with no new
+  doors says so plainly above the cards ("A quieter week — no new doors were knocked this week."). The weekly figures don't add up to the running
   total (a door knocked twice in one pass across two weeks appears in both weeks), and each card's
   "(i)" says so. The cards sit two across, and four across only when the report itself is wide enough
   (a wide screen, with the report at least 720 px wide), so the builder's narrower preview shows two
@@ -216,6 +222,14 @@ Open the campaign, go to its **Client Reports** tab, and press **New report**:
   so name walk lists accordingly.
 - **Dates:** a list of choices, each with its dates written out, the first one picked. Report dates
   follow **your organization's report week**, Monday to Sunday unless an admin changes it (below).
+  - **A line above the choices says what the dates decide:** "Your report shows totals for the whole
+    campaign, from its first door through the last day you pick. The first day only decides what shows
+    as new, like “+412 this week”." Once a team or walk list is picked it is named ("Your report shows
+    totals for Paid team, from the campaign's first door through the last day you pick. …"), and the
+    example follows the dates picked ("+412 in these 14 days" for two weeks). There is no separate
+    "everything up to a date" choice because every report is one: a weekly report for the paid team is
+    that team's totals since the campaign's first door, through that week's last day, with what it added
+    that week.
   - **The first choice is what comes after the tab's last report.** A report that ran **whole weeks**
     (7, 14, … days) is followed by the next run of the same length, on the same weekday: "Last week ·
     Oct 19 – Oct 25 — the week after your last report", "Oct 25 – Oct 31 — the week after your last
@@ -1410,9 +1424,11 @@ visibility, tags, goal tick and headline, not the title, and answers `201` with 
 
 **Dates.** "Period not over" is `now < rangeEndUtc`; numbers are "stale" after an hour
 (`clientReportChecks.js`). `periodPhrase` in reportDerive.js counts civil days (a DST week is 7) and
-routes every formerly weekly string: the KPI pills and help, the quiet-period banner, the map's empty
-line, the hub heading ("Weekly reports", "Daily reports", "Reports"), and the PDF's title, quiet line
-and filename.
+routes every formerly weekly string: the KPI pills and help, the quiet-period banner, the hub heading
+("Weekly reports", "Daily reports", "Reports"), and the PDF's title, quiet line and filename. The
+map's empty line no longer names the period (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M): the map is every
+door reached through the last day, so it reads "No mapped doors on this report.", where "No mapped
+doors for this week." read as if the map held only that week's doors.
 
 ### Report weeks and the next period
 
@@ -2199,6 +2215,14 @@ Build failures carry their own codes on `build.error` (§E).
   - **A taken-down duplicate** (FRESH-5): when `REPORT_EXISTS` names a taken-down report (`takenDown`),
     the prompt's last line is "Your client sees only the new one; the taken-down one stays hidden unless
     you put it back up." instead of "Your client sees both once both are published."
+  **What the dates decide** (§M, 2026-10-25): above the date choices, `totalsSentence`
+  (newReportChoices.js) says the totals run from the campaign's first door through the last day picked,
+  for the whole campaign or the tab's `scopeLabel` once its team or walk list is picked, with the
+  example in `periodPhrase`'s words for the dates picked. On the client's side the same rule is
+  `totalsSinceText` (reportDerive.js): "Totals since the campaign began, through <weekEnd>." under
+  Activity at a glance in `ClientReportView` and the PDF, dateless when `numbersThrough` is set; the
+  hub's Latest card says "Totals since the campaign began. The + figures are for …". The quiet banner
+  lost its "cumulative totals to date" sentence, which the line now says.
   A row's Next refused `NEXT_GAP_TOO_LONG` opens New report with `suggested` picked and its sentence as
   `initial.notice` (FRESH-3, above); a link to the page carrying `?new=1&seriesId=&weekStart=&weekEnd=`
   opens it with those dates picked (the page then drops those params; nothing in the app sends that
@@ -2399,8 +2423,8 @@ Build failures carry their own codes on `build.error` (§E).
   hatch is drawn over the same ground. Before, a full-strength swatch made a darker class read like a
   lighter one.
 - **Shared:** [ClientReportView.jsx](../client/src/components/ClientReportView.jsx), [reportDerive.js](../client/src/lib/reportDerive.js)
-  (`deriveReportSections`, `periodPhrase`, the earlier-totals line, the team note, the dates line, the
-  hub grouping), [ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) with
+  (`deriveReportSections`, `periodPhrase`, the totals line `totalsSinceText`, the earlier-totals line,
+  the team note, the dates line, the hub grouping), [ClientReportMap.jsx](../client/src/components/ClientReportMap.jsx) with
   [reportMapData.js](../client/src/lib/reportMapData.js), [reportPdf.js](../client/src/lib/reportPdf.js)
   (jsPDF, lazy-loaded; every string folded to printable characters through
   [pdfText.js](../client/src/lib/pdfText.js), which also fixed a dropped en dash; the file named for the
@@ -2561,4 +2585,9 @@ date choices, the week setting and nudge, the duplicate prompt, Share, the links
 wiring), `clientReportBuilderLinks.smoke.test.js` (the builder's link lines) and
 `reportPdfSingleLink.test.js` (the one-report earlier-totals line in a real PDF); a link to all your
 reports renders byte for byte as before, pinned by `publicReportAllLinks.snapshot.json` (regenerate
-only on purpose: `UPDATE_PUBLIC_REPORT_SNAPSHOT=1 node --test src/lib/publicReportRender.smoke.test.js`).
+only on purpose: `UPDATE_PUBLIC_REPORT_SNAPSHOT=1 node --test src/lib/publicReportRender.smoke.test.js`;
+regenerated once for §M, whose only differences are the totals line and the Latest card's sentence).
+The §M wording is pinned in `reportDerivePeriod.test.js` (the totals line, dateless when the numbers
+stopped early), `clientReportsLogic.test.js` and `clientReportsSimplify.smoke.test.js` (New report's line,
+named for a team or walk list, its example following the dates) and `reportPdf.test.js` (the line right
+under ACTIVITY AT A GLANCE).

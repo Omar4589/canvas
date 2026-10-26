@@ -21,7 +21,7 @@ import {
   deleteLinksText,
 } from '../components/clientReports/linkState.js';
 import { copyMessageFor, linkMessageFor, messageReportOf } from '../components/clientReports/copyMessage.js';
-import { choiceText, dateChoices, duplicateText, monthsLabel, weekName, weekNudge } from '../components/clientReports/newReportChoices.js';
+import { choiceText, dateChoices, duplicateText, monthsLabel, totalsSentence, weekName, weekNudge } from '../components/clientReports/newReportChoices.js';
 import { GOT_IT, GUIDE_TITLE, HELP_LINE, HELP_PATH, HOW_IT_WORKS_LINK, INTRO, PHONE_STEPS, STEPS } from '../components/clientReports/howItWorksCopy.js';
 import { rowsFor, toggleChart, toggleMap, setHeadline, showAll, showNone, depsMapOf, closeUnderDeps } from '../components/clientReports/questionRules.js';
 import { clientReportHistoryLine, isClientReportField, earlierTextSummary, labelForField, reportRowName } from './campaignHistory.js';
@@ -148,6 +148,22 @@ test('the week nudge: only a whole-weeks tab on another weekday; Move this tab s
   assert.equal(weekNudge({ last: null, s: 1, today: MON }), null);
   assert.equal(weekNudge({ last: L('2026-02-01', '2026-02-28'), s: 1, today: '2026-03-10' }), null);
   assert.equal(weekNudge({ last: L('2026-10-01', '2026-10-18'), s: 1, today: MON }), null);
+});
+
+test('New report says what the dates decide: totals from the campaign’s first door through the last day picked, for what the report covers (SIMPLIFY §M)', () => {
+  assert.equal(
+    totalsSentence({ wholeCampaign: true, phrase: 'this week' }),
+    'Your report shows totals for the whole campaign, from its first door through the last day you pick. The first day only decides what shows as new, like “+412 this week”.'
+  );
+  assert.equal(
+    totalsSentence({ label: 'Paid team', phrase: 'in these 14 days' }),
+    'Your report shows totals for Paid team, from the campaign’s first door through the last day you pick. The first day only decides what shows as new, like “+412 in these 14 days”.'
+  );
+  // Its team or walk list not picked yet: no name to give.
+  assert.equal(
+    totalsSentence({ phrase: 'that day' }),
+    'Your report shows totals from the campaign’s first door through the last day you pick. The first day only decides what shows as new, like “+412 that day”.'
+  );
 });
 
 test('the duplicate prompt names the tab’s report for those dates, by its state (SIMPLIFY §E)', () => {

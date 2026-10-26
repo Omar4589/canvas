@@ -455,7 +455,8 @@ test('a link to one report: its page points at no other report, says so, and wor
   assert.doesNotMatch(html, /All reports|Older|Newer/);
   assert.match(html, /<p class="mt-1 text-xs text-fg-muted">This link opens this report only\.<\/p>/);
   assert.ok(html.includes(`Totals from before Oct 19 were updated by ${MINUS}120 doors after they were first reported.`));
-  assert.doesNotMatch(html, /Earlier totals|since the/);
+  // "Totals since the campaign began" (SIMPLIFY §M) names no report; "since the Oct 13 – Oct 19 report" would.
+  assert.doesNotMatch(html, /Earlier totals|since the (?!campaign began)/);
   assert.match(html, /Week of Oct 19/);
   assert.match(html, /Download PDF/);
   assert.match(html, /Canvasser observations/, 'the report itself reads as on any link');

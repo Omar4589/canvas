@@ -1,10 +1,11 @@
 # Client Reports — simpler to start, links to one report, your organization's week
 
-**Status:** **Built 2026-10-25; code reviews 1 and 2 done and fixed (§K, §L); ready to commit.** Plan
+**Status:** **Built and committed 2026-10-25 (07a296a); code reviews 1 and 2 done and fixed (§K, §L); the totals
+wording (§M) added after it.** Plan
 revision 3 (2026-10-25), after review rounds 1 (two reviewers: the code, and newcomers + the Monday routine) and 2
 (one reviewer re-running everything; §I); approved by the owner 2026-10-25 ("build it, then 2 code reviews"). Where
-the build differs from or adds to the plan is §J, *As built*, and what the two code reviews changed is §K and §L
-(all at the end); what was built is documented in [CLIENT_PORTAL.md](CLIENT_PORTAL.md). Builds
+the build differs from or adds to the plan is §J, *As built*, what the two code reviews changed is §K and §L, and the
+owner's wording follow-up is §M (all at the end); what was built is documented in [CLIENT_PORTAL.md](CLIENT_PORTAL.md). Builds
 on the shipped upgrade ([PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md)).
 
 ---
@@ -488,7 +489,7 @@ report; the seven "can a link open it" places; no client-version gate; the priva
 
 ### J. As built (2026-10-25)
 
-Five build agents built the plan on 2026-10-25, uncommitted; two code reviews followed (§K, §L). What was built is documented
+Five build agents built the plan on 2026-10-25 (committed as 07a296a); two code reviews followed (§K, §L). What was built is documented
 in [CLIENT_PORTAL.md](CLIENT_PORTAL.md) (Part 1, and Part 2 §B, §F, §I, §K, §Q, §R); the privacy record is
 [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 38(m), with stamps on 38(a), 38(l) and the policy re-check.
 Where the build differs from or adds to the plan, read from the code:
@@ -621,3 +622,42 @@ in brackets.
 
 No privacy change: `report.takenDown` reaches only the admins and leads who read share rows, and it is the report's
 own state, which the same people already see on the reports list.
+
+### M. The totals wording (owner, 2026-10-25)
+
+**The question.** The owner noticed that other pages' date filters let you pick just an end date, and asked for a
+report "up until that date", with all numbers from all dates, for example the paid team's (one coordinator's crew)
+all-time totals in the weekly report. Every report already is that: the snapshot's cumulative window has no start
+(`buildReportSnapshot.js`: `{ name: 'cumulative', from: null, to: rangeEnd }`, surveys `submittedAt < rangeEnd`, the
+map's status rows `timestamp < rangeEnd`), for every scope, a team's included (its crews' rows, `crewsMatch`); only
+the KPI pills use the first day. Nothing said so. The owner chose wording only ("Clearer wording (1 + 2)").
+
+**As built.**
+
+- **New report**, at the top of Dates (above the choices, under Next's notice): `totalsSentence`
+  (newReportChoices.js), "Your report shows totals for the whole campaign, from its first door through the last day
+  you pick. The first day only decides what shows as new, like “+412 this week”." It names a team or walk list once
+  one is picked ("totals for Paid team, from the campaign's first door …", the dialog's `scopeLabel`), no name while
+  none is, and the example follows the dates picked in `periodPhrase`'s words ("+412 in these 14 days"). Beyond the
+  approved sentence: the name, because the owner's case was a team.
+- **The client's report and its PDF**, right under Activity at a glance: `totalsSinceText` (reportDerive.js), "Totals
+  since the campaign began, through Oct 25.", dateless when `numbersThrough` is set (the "Numbers as of" note says
+  when). Same function on screen (`ClientReportView`, so the builder preview too) and in the PDF.
+- **Kept consistent with it** (small, same direction): the hub's Latest card reads "Totals since the campaign began.
+  The + figures are for …"; the quiet banner drops "The numbers below are cumulative totals to date." (PDF: "Totals
+  below are cumulative."), which the line now says; and the map's empty line is "No mapped doors on this report."
+  (ClientReportMap's own default) instead of "No mapped doors for this week.", which read as if the map held only that
+  week's doors.
+- **Help:** a new FAQ, *Does a report count only the dates I pick?* (`faq/report-totals-and-dates.md`, order 80.5,
+  lead), plus lines in the client-reports guide, the page guide and *How do team reports work?*. Docs:
+  CLIENT_PORTAL.md Part 1 (the hub, Activity at a glance, New report's dates) and Part 2 (§F Dates, §Q, §S).
+- **Tests:** `reportDerivePeriod.test.js` (the line, dateless when early; the quiet and map lines),
+  `clientReportsLogic.test.js` and `clientReportsSimplify.smoke.test.js` (New report's line: whole campaign, Paid team,
+  two weeks, a walk list, no team yet; every "Dates …" expectation now reads it first), `reportPdf.test.js` (right
+  under ACTIVITY AT A GLANCE, both forms), `clientReportIntegration.smoke.test.js` (the builder preview's map line).
+  Two "never names another report" checks matched the bare words "since the" and now allow exactly "since the campaign
+  began" (`publicReportRender.smoke.test.js`, `reportPdfSingleLink.test.js`). The all-reports snapshot was regenerated
+  on purpose; its only differences are the Latest card's sentence (both tabs) and the report's new line.
+
+No privacy change: the line restates the report's own last day, which the client already reads in its heading, and
+no number, field or recipient changes.

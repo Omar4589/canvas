@@ -228,6 +228,10 @@ export const guide = (props) => show(() => wrap(newQc(), <HowItWorks onDismiss={
 // ── Reading and driving a screen ──────────────────────────────────────────────────────────────────
 // renderToString escapes quotes; read the text the way a person would.
 const text = (html) => html.replace(/<!-- -->/g, '').replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+// The line above New report's date choices (SIMPLIFY §M), as a whole-campaign tab reads it; the example
+// follows the dates picked, in the client's cards' words.
+const TOTALS_LINE = (phrase = 'this week') =>
+  `Your report shows totals for the whole campaign, from its first door through the last day you pick. The first day only decides what shows as new, like “+412 ${phrase}”.`;
 const handlerFor = (m, pick, what) => {
   const r = m.h().handlers.filter(pick).pop();
   assert.ok(r, `${what} on the screen`);
@@ -431,7 +435,7 @@ test('New report: the dated choices, the first picked; an admin’s week line wi
   // The first choice ends after today: kept, and said right under it — never under Pick dates (WEEK-3).
   assert.ok(
     t.includes(
-      'Dates Oct 21 – Oct 27 — the week after your last report This period isn’t over yet — you can build it now and refresh it later. Last week · Oct 19 – Oct 25 This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends Pick dates'
+      `Dates ${TOTALS_LINE()} Oct 21 – Oct 27 — the week after your last report This period isn’t over yet — you can build it now and refresh it later. Last week · Oct 19 – Oct 25 This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends Pick dates`
     ),
     'the choices, in order'
   );
@@ -534,11 +538,41 @@ test('New report: dates it was opened with pick their choice — or Pick dates w
   assert.equal(disabledButton(html, 'Create draft'), true);
 });
 
+test('New report says what the dates decide: totals from the campaign’s first door through the last day picked, for the tab it names (SIMPLIFY §M)', async () => {
+  const m = await load();
+  m.fresh();
+  // The whole campaign, a week: the example in the client's own words, "+412 this week".
+  let t = text(m.newReport({ seriesData: picker(), reports: [] }));
+  assert.ok(t.includes(`Dates ${TOTALS_LINE()} Last week · Oct 19 – Oct 25`), t);
+  // A team (the paid crew): named as its tab reads, its totals since the campaign's first door.
+  const paid = { id: 't1', kind: 'team', label: 'Paid team', ended: false, coordinators: [], pastCoordinators: [] };
+  const series = [{ id: 'sc', kind: 'campaign', label: 'Whole campaign', ended: false }, paid];
+  m.fresh();
+  t = text(m.newReport({ seriesData: picker({ series }), reports: [], initial: { teamId: 't1' } }));
+  assert.ok(
+    t.includes('Dates Your report shows totals for Paid team, from the campaign’s first door through the last day you pick. The first day only decides what shows as new, like “+412 this week”. Last week'),
+    t
+  );
+  // Two weeks picked: the example follows them.
+  m.fresh();
+  t = text(m.newReport({ seriesData: picker({ series }), reports: [], initial: { teamId: 't1', dates: { weekStart: '2026-10-12', weekEnd: '2026-10-25' } } }));
+  assert.ok(t.includes('totals for Paid team, from the campaign’s first door through the last day you pick. The first day only decides what shows as new, like “+412 in these 14 days”.'), t);
+  // One walk list on the whole campaign: named by the walk list.
+  m.fresh();
+  t = text(m.newReport({ seriesData: picker(), reports: [], efforts: [{ _id: 'e1', name: 'Smith Street' }], initial: { effortId: 'e1' } }));
+  assert.ok(t.includes('Your report shows totals for Smith Street, from the campaign’s first door through the last day you pick.'), t);
+  // A team chosen before there is one: no name to give yet.
+  m.fresh();
+  t = text(m.newReport({ seriesData: picker(), reports: [], initial: { teamId: 'gone' } }));
+  assert.ok(t.includes('No team yet — make one with New team.'), t);
+  assert.ok(t.includes('Your report shows totals from the campaign’s first door through the last day you pick.'), t);
+});
+
 test('New report: a new campaign’s first report starts at This week, not over yet', async () => {
   const m = await load();
   m.fresh();
   const html = m.newReport({ seriesData: picker({ knockedBeforeThisWeek: false }), reports: [] });
-  assert.ok(text(html).includes('Dates This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends Last week · Oct 19 – Oct 25 Pick dates'));
+  assert.ok(text(html).includes(`Dates ${TOTALS_LINE()} This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends Last week · Oct 19 – Oct 25 Pick dates`));
   assert.deepEqual(ticks(html, 'report-dates'), [true, false, false]);
 });
 
@@ -558,7 +592,7 @@ test('New report: the tab already has these dates — Open the draft, or Make a 
   // The list gains that draft while the prompt is up: the dates it names stay picked (WEEK-2).
   reports.push({ id: 'rX', seriesId: 'sc', weekStart: '2026-10-19', weekEnd: '2026-10-25', status: 'draft' });
   html = landPicker(m, qc);
-  assert.ok(text(html).includes('Dates Last week · Oct 19 – Oct 25'));
+  assert.ok(text(html).includes(`Dates ${TOTALS_LINE()} Last week · Oct 19 – Oct 25`));
   assert.deepEqual(ticks(html, 'report-dates'), [true, false, false]);
   click(m, 'Open the draft');
   assert.deepEqual(opened, ['rX']);
@@ -613,7 +647,7 @@ test('New report: two people pressed Create at once — “Ada Admin made the Wh
   html = landPicker(m, qc);
   t = text(html);
   assert.deepEqual(ticks(html, 'report-dates'), [true, false, false], 'the same choice, still picked');
-  assert.ok(t.includes('Dates Last week · Oct 19 – Oct 25 This week, not over yet · Oct 26 – Nov 1'), 'never the week after it');
+  assert.ok(t.includes(`Dates ${TOTALS_LINE()} Last week · Oct 19 – Oct 25 This week, not over yet · Oct 26 – Nov 1`), 'never the week after it');
   assert.ok(!t.includes('Oct 26 – Nov 1 — the week after your last report'));
   assert.match(html, /^[^]*?<fieldset disabled="" class="min-w-0 space-y-5 text-sm">/, 'the form is still');
   click(m, 'Open it');
@@ -685,7 +719,7 @@ test('New report reads the series picker again as it opens: the dates wait for t
   // The answer read now: Monday, Wednesday – Tuesday weeks.
   html = landPicker(m, qc, picker({ today: '2026-10-26', weekStartsOn: 3 }));
   t = text(html);
-  assert.ok(t.includes('Dates Last week · Oct 14 – Oct 20 This week, not over yet · Oct 21 – Oct 27 — refresh it once the week ends Pick dates'), t);
+  assert.ok(t.includes(`Dates ${TOTALS_LINE()} Last week · Oct 14 – Oct 20 This week, not over yet · Oct 21 – Oct 27 — refresh it once the week ends Pick dates`), t);
   assert.ok(t.includes('Report weeks run Wednesday – Tuesday for your organization. Change'));
   assert.equal(disabledButton(html, 'Create draft'), false);
 
@@ -747,7 +781,7 @@ test('New report: dates that start after today say their numbers stay empty unti
   // A Tuesday – Monday tab whose last report ends today, Monday Oct 26: the next one starts tomorrow.
   const tueMon = [{ id: 'rt', seriesId: 'sc', weekStart: '2026-10-20', weekEnd: '2026-10-26', status: 'published' }];
   let t = text(m.newReport({ seriesData: picker(), reports: tueMon }));
-  assert.ok(t.includes('Dates Oct 27 – Nov 2 — the week after your last report Starts Oct 27 — its numbers stay empty until then. Last week · Oct 19 – Oct 25'), t);
+  assert.ok(t.includes(`Dates ${TOTALS_LINE()} Oct 27 – Nov 2 — the week after your last report Starts Oct 27 — its numbers stay empty until then. Last week · Oct 19 – Oct 25`), t);
   assert.ok(!t.includes('isn’t over yet'), 'it hasn’t started — not “isn’t over yet”');
   // Pick dates: the note follows the dates picked, under them.
   t = text(choose(m, 'Pick dates'));
@@ -802,7 +836,7 @@ test('New report follows the tab’s newest report — of two ending the same da
   const fortnight = { id: '6a0000000000000000000a02', seriesId: 'sc', weekStart: '2026-10-06', weekEnd: '2026-10-19', status: 'published', createdAt: '2026-10-21T10:00:00Z' };
   for (const reports of [[week, fortnight], [fortnight, week]]) {
     m.fresh();
-    assert.ok(text(m.newReport({ seriesData: picker(), reports })).includes('Dates Oct 20 – Nov 2 · 2 weeks — the two weeks after your last report'), 'the one made last, whatever the list order');
+    assert.ok(text(m.newReport({ seriesData: picker(), reports })).includes(`Dates ${TOTALS_LINE('in these 14 days')} Oct 20 – Nov 2 · 2 weeks — the two weeks after your last report`), 'the one made last, whatever the list order');
   }
   // Made in the same instant (or rows without createdAt): the higher id.
   const sameTime = [
@@ -811,7 +845,7 @@ test('New report follows the tab’s newest report — of two ending the same da
   ];
   for (const reports of [sameTime, [...sameTime].reverse()]) {
     m.fresh();
-    assert.ok(text(m.newReport({ seriesData: picker(), reports })).includes('Dates Oct 20 – Oct 26 — the week after your last report'));
+    assert.ok(text(m.newReport({ seriesData: picker(), reports })).includes(`Dates ${TOTALS_LINE()} Oct 20 – Oct 26 — the week after your last report`));
   }
 });
 
@@ -1269,7 +1303,7 @@ test('the list page: Next refused NEXT_GAP_TOO_LONG opens New report on the tab 
   const t = text(html);
   assert.ok(t.includes('New report'), 'New report opens');
   // The server's own sentence says why, at the top of the dates (code review round 2, FRESH-3).
-  assert.ok(t.includes(`Dates ${sentence} Last week · Oct 19 – Oct 25 No report covers Sep 10 – Oct 18.`), 'the suggestion, naming the gap');
+  assert.ok(t.includes(`Dates ${sentence} ${TOTALS_LINE()} Last week · Oct 19 – Oct 25 No report covers Sep 10 – Oct 18.`), 'the suggestion, naming the gap');
   assert.deepEqual(ticks(html, 'report-dates'), [true, false, false]);
   assert.ok(!t.includes('Couldn’t start the next report.'), 'not an error');
   // Any other refusal is the banner, as before.

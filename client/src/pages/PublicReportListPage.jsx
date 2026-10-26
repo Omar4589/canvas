@@ -68,7 +68,7 @@ function LatestCard({ token, report, isLit }) {
           )}
         </div>
         <p className="mt-3 text-xs text-fg-muted">
-          {`The + figures are for ${shortRange(report.weekStart, report.weekEnd)}.`}
+          {`Totals since the campaign began. The + figures are for ${shortRange(report.weekStart, report.weekEnd)}.`}
           {report.numbersThrough ? ` Numbers as of ${shortDate(report.numbersThrough)} — the period was still running.` : ''}
         </p>
         <div className="mt-2 text-sm font-medium text-brand-accent">Open the report ›</div>

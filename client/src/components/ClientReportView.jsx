@@ -50,13 +50,16 @@ export function ClientReportHeading({ report, nav = null, actions = null, note =
 }
 
 export default function ClientReportView({ report }) {
-  const { kpis, goal, contact, support, tags, others, isQuietWeek, quietText, numbersAsOf, earlierTotals, teamNote } =
+  const { kpis, goal, contact, support, tags, others, isQuietWeek, quietText, totalsSince, numbersAsOf, earlierTotals, teamNote } =
     deriveReportSections(report);
 
   return (
     <div className="space-y-8">
       <section className="[container-type:inline-size]">
         <SectionHeading>Activity at a glance</SectionHeading>
+        {/* Every total runs from the campaign's first door through the report's last day; only the
+            "+412 this week" pills are its dates' own (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M). */}
+        <p className="-mt-2 mb-3 text-xs text-fg-muted">{totalsSince}</p>
         {/* The numbers stopped before the period ended — say so before anyone reads them. */}
         {numbersAsOf && <Card className="mb-3 bg-info-tint p-3 text-sm text-info-fg">{numbersAsOf}</Card>}
         {isQuietWeek && <Card className="mb-3 bg-info-tint p-3 text-sm text-info-fg">{quietText}</Card>}
