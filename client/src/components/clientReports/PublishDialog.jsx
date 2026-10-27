@@ -1,7 +1,7 @@
 import { Button, Modal } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { errorText } from './parts.jsx';
-import { formatCivil, formatPeriod } from './reportDates.js';
+import { formatCivil, formatPeriod, todayIn } from './reportDates.js';
 import { reportLinksLine } from './linkState.js';
 import { displayStatusOf } from './buildState.js';
 
@@ -86,7 +86,11 @@ const PublishDialog = ({ report, checks, build, shares, tz, previewFresh, mapSta
         )}
         {checks?.periodNotOver && (
           <Warn action={offerRecompute ? recomputeBtn : null}>
-            This period ends {formatCivil(report.weekEnd)} and isn’t over yet ({zoneName(tz)}).
+            {/* An all-time report (SIMPLIFY §N) that runs through today: say what that leaves out. One that
+                runs to a later day reads as any period not over. */}
+            {report.allTime && report.weekEnd <= todayIn(tz)
+              ? `Today isn’t over yet (${zoneName(tz)}): doors knocked after these numbers were built aren’t in them.`
+              : `This period ends ${formatCivil(report.weekEnd)} and isn’t over yet (${zoneName(tz)}).`}
           </Warn>
         )}
         {checks?.numbersStale && asOf && <Warn action={offerRecompute && !checks?.periodNotOver ? recomputeBtn : null}>Numbers are from {asOf}.</Warn>}

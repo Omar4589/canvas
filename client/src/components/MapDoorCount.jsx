@@ -73,7 +73,7 @@ export default function MapDoorCount({
           title={`The map loads at most ${fmtCount(capN)} doors per pull and this area has more, so some doors are not drawn. Zoom in to see every door in an area.`}
           className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-2 py-0.5 font-medium text-warning-fg"
         >
-          ⚠ Map capped at {fmtCount(capN)} doors — zoom in
+          Map capped at {fmtCount(capN)} doors — zoom in
         </span>
       )}
     </span>

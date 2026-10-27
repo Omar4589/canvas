@@ -62,8 +62,8 @@ function TeamBody({ item }) {
       <div className="mt-0.5 text-xs text-fg-muted">{detail}</div>
       {item.restampError && (
         <div className="mt-1 text-xs text-danger-fg">
-          The team was changed but moving their past doors failed — the by-team numbers may not add
-          up until this is re-run. ({item.restampError})
+          The crew was changed but their earlier doors didn't finish moving, so the by-team numbers may
+          not add up yet. Open them on the campaign's Team page and choose Finish it.
         </div>
       )}
     </>

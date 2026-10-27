@@ -14,6 +14,7 @@ import { ConversionStrike } from '../../models/ConversionStrike.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { ClientReportMapPoint } from '../../models/ClientReportMapPoint.js';
 import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
+import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 
 // Door Outcomes writes that land after a delete cascade has swept past them.
 //
@@ -52,6 +53,9 @@ export const LATE_WRITE_MODELS = [
   ClientReportMapPoint, ClientReportAreaCell,
   // An automatic-pause check that finishes after the sweep (docs/PROPOSAL_PACE_PAUSE.md §D.4).
   PacePause,
+  // A crew change still running when the cascade deleted its roster row loses its hold and writes its
+  // record insert-only (services/memberships/setCoordinator.js, which runs inside sweptAfter).
+  CoordinatorChange,
 ];
 
 /** The tenant whose delete cascade is running (or done), as a filter — { organizationId } or { campaignId } — or null. */

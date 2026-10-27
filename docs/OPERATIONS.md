@@ -1075,7 +1075,9 @@ npm run audit:team-counts                               # 4. Prove the numbers a
 
 > **When to run the audit.** After a bulk write (`migrate:activity-coordinator --apply`,
 > `migrate:campaign-coordinators --apply`), after a change to the fold/aggregation code, or if a
-> `CoordinatorChange` row ever carries a `restampError` (a torn write). **NOT** after every ordinary
+> `CoordinatorChange` row ever carries a `restampError` (a torn write; the campaign's History says
+> *Didn't finish*). Since 2026-10-27 it also lists, under each person, rows that don't count for their
+> crew and any crew change left unfinished — the checks that used to live in `repair:team-stamps`. **NOT** after every ordinary
 > coordinator change in the console: the reconciliation identity holds *by construction* —
 > `teamFoldStage` gives every row exactly one `team` and `$group` partitions on it, so a re-stamp
 > changes which team a row lands in, never how many. A routine reassignment cannot break the sum.
@@ -1251,7 +1253,8 @@ fraud audit).
 | `npm run migrate:campaign-coordinators -- --preflight` | **Read-only.** Before the per-campaign crew seed — how many members hold a crew, and who has knocked a campaign they have no roster row for |
 | `npm run migrate:campaign-coordinators -- --apply` | Once, after the release that moves the crew from `Membership.coordinatorId` to `CampaignAssignment.coordinatorId`. Touches **no** ledger row |
 | `npm run audit:team-counts` | **Read-only.** Prints each team's row and checks Σ teams + no-team − cross-team == the campaign billable, column by column, for **every campaign**. Exits **1** if any column of any campaign fails. Narrow with `--org=<slug>` or `--campaign=<id>`. ⚠️ The `doors` column **cannot** fail — [see below](#the-tick-that-cannot-fail-auditteam-counts) |
-| `npm run repair:team-stamps -- --apply --ready-only` | Only sets the `teamAttributionReadyAt` gate flag; examines no ledger rows. **The only mode of this script that still runs** — see [Re-attribution](#re-attribution-repairteamstampsjs) |
+| `npm run repair:team-stamps` | **Read-only.** Lists any organization whose team surfaces are switched off (`teamAttributionReadyAt` unset); `--org=<slug>` scopes it. Since 2026-10-27 that's all the script does — see [Re-attribution](#re-attribution-repairteamstampsjs) |
+| `npm run repair:team-stamps -- --apply --ready-only` | Switches those organizations' team surfaces on; examines no ledger rows. Any other flag (the old `--apply`, `--preflight`) prints where the crew checks went and writes nothing |
 | `npm run repair:orphaned-assignments` | Dry run — finds anyone still holding books on a campaign they're off the roster of |
 | `npm run repair:import-pins` | **Read-only and free** (dry run, cache-only). Finds doors an import pinned in the wrong place — out of state, far from their own street, sharing an exact pin with doors from *other addresses* (vendor placeholder coordinates — different streets, or different house numbers on one street), or knocked from far away by 2+ canvassers — and re-checks each against the address. Narrow with `--campaign=<id>` / `--org=<slug>` |
 | `npm run repair:import-pins -- --geocode` | Same, but lets unconfirmed suspects hit **Geocodio** (costs money; a cache-only dry run first prints exactly how many addresses it would pay for) |
@@ -1395,7 +1398,18 @@ So the `doors` line prints ✓ over completely wrong per-team rows. What it actu
    with their state (`active` / `deactivated` / `REMOVED FROM ORG` / `account deleted`) and their crew
    read off **this campaign's** roster. Somebody who knocked here but is no longer rostered reads
    `off roster` rather than being silently relabelled `no team`, which would look identical to a
-   genuine No-team canvasser.
+   genuine No-team canvasser. Under a rostered person it adds (2026-10-27):
+   - `rows not on their crew: Dana Cruz 12, No team 3 · open Team → Pat Lee → Finish it` — drift. For
+     someone on a real crew the fix is **Finish it** in their panel on the campaign's Team page (the
+     panel offers it on its own), which runs the same crew job as any change. For someone with **no**
+     crew the line says *possibly a departure; check before changing*: rows on a real team under a
+     No-crew row are what every departure leaves (the 104-door rule), and moving them is a decision,
+     not a repair.
+   - `an unfinished crew change · open Team → Pat Lee → Finish it`, or `a crew change is running right
+     now` while its hold lasts.
+
+   Neither line makes the run fail; fixing one moves published team numbers, so each fix is the
+   owner's call.
 
 The audit derives its lead set the same way `leadIdsForScope` does — per campaign, from the ledger —
 and imports the real `teamFoldStage` rather than re-implementing it. That sharing is the point: an
@@ -1405,8 +1419,16 @@ under campaign-wrong labels.
 
 ### Re-attribution (`repairTeamStamps.js`)
 
+> **Since 2026-10-27 the script is gate-only** ([PROPOSAL_PEOPLE_PAGES.md](PROPOSAL_PEOPLE_PAGES.md)
+> §B.8): a bare run lists organizations whose team surfaces are off, `-- --apply --ready-only` switches
+> them on, and every other flag prints a pointer and writes nothing. Its crew checks moved into
+> `npm run audit:team-counts` (read-only, per campaign; see *The tick that cannot fail* above), and a
+> person's drift or unfinished change is fixed with **Finish it** on the campaign's Team page, through
+> the same crew job as every change (`services/memberships/setCoordinator.js`). The note below records
+> why the old script had to go.
+>
 > 🛑 **Out of service since crews became per-campaign — every mode except `--apply --ready-only`
-> now throws.** It scans `Membership`, which is org-wide, and calls `previewRestamp` /
+> threw.** It scans `Membership`, which is org-wide, and calls `previewRestamp` /
 > `restampFilter` **without a `campaignId`**; `restampFilter` now *requires* one and raises
 > `restampCoordinator: campaignId is required` on the first member who has a coordinator. That
 > refusal is the fix working, not a regression to route around: an omitted scope silently meaning
@@ -1416,11 +1438,11 @@ under campaign-wrong labels.
 > `teamAttributionReadyAt` gate flag, which is set above the scan, per org — harmless and idempotent.
 >
 > **What replaces each of its three jobs:** day-one conformance is not needed (the copy in
-> `migrateCampaignCoordinators` seeds the roster and moves nothing); drift repair is re-running the
-> same assignment from the campaign's **Team** tab, which is idempotent and campaign-scoped; the
-> gate fix survives as `--apply --ready-only`, the mode that returns before the scan. Rewriting it
-> for the new model means a per-campaign scan of `CampaignAssignment` — the section below is kept
-> because the traps in it are the ones that rewrite would hit.
+> `migrateCampaignCoordinators` seeds the roster and moves nothing); drift repair is **Finish it** in
+> the person's panel on the campaign's **Team** tab, which `audit:team-counts` points to; the gate fix
+> survives as `--apply --ready-only`. (A rewrite as a per-campaign repair was considered and dropped:
+> its `--apply` would re-stamp with no hold and no check of what the crew was, so it could overwrite a
+> change made while it ran.)
 
 The description that follows is **history**, from when a crew was an org-wide fact.
 

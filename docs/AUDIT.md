@@ -331,9 +331,9 @@ alert.
 - **An email** to each chosen person, one each: *A canvasser was paused for review*. It names no one and
   lists no addresses — its **Review the pause** button opens the details behind sign-in.
 - **A red badge** on the campaign's Audit link and a **banner** on its home page; a **Paused for review**
-  chip on the web Users page and in the person's profile; on the phone, a **Paused for review** section at
-  the top of the GPS audit (across every campaign you manage), a *paused* badge on the Users list, and the
-  pills above.
+  chip on the web Users page and in the person's panel, and a **Paused** filter on the Users and Team
+  pages; on the phone, a **Paused for review** section at the top of the GPS audit (across every campaign
+  you manage), a *paused* badge and a **Paused** filter on the Users list, and the pills above.
 - **The review** (the campaign's Audit page on the web, a summary screen on the phone): who, when, on which
   campaign, and whether the email went out; the 20 visits behind the pause with the failing ones
   highlighted — time, address, result, seconds since the last house, distance, speed, and the seconds the
@@ -347,19 +347,24 @@ alert.
   *Paused for review — an org admin can unpause*.
 
 **Unpausing, and fixing the doors.** Org admins, and the team leads who manage the campaign where it
-happened, unpause with one tap (the phone too); the count starts over, so old fails can't re-pause them.
+happened, unpause — from the review, from the person's panel on the Users or Team page, or on the phone.
+It asks first, because the count starts over, so old fails can't re-pause them.
 **Nothing is removed automatically:** every entry stays in every number, export, report, invoice and
 FbTime count until someone changes it on **Door Outcomes** (web, org admins) — Unknock the fake ones, or
 change a result or an answer. An org admin can delete the record of a resolved pause (a false alarm);
 deleting it never brings old fails back.
 
 **Who gets the email.** The organization's **billing admins** by default. A billing admin can add org
-admins and team leads on the Users page's **Automatic pause** card — a lead only for campaigns they manage,
-and a lead can be your client. *Billing admins (always)* is its own choice, so a billing admin added later
-is included. The paused person is never emailed about their own pause.
+admins and team leads on the **Automatic pause** card of the org **Settings** page (web, org admins; it
+was on the Users page until 2026-10-27) — searching by name under **Also email**, up to 25; a lead only
+hears about campaigns they manage, and a lead can be your client. *Billing admins (always)* is its own
+choice, so a billing admin added later is included. Someone added who has since stopped being an admin or
+team lead shows as *Not emailed: no longer an admin or team lead*, and the next Save by a billing admin
+drops them (their stale entry used to make every Save fail, even turning the switch off). The paused
+person is never emailed about their own pause. The email's last line points to the Settings page.
 
 **On and off.** On for every customer organization by default; a billing admin turns it off on the same
-card, which unpauses anyone paused at once, and turning it back on starts everyone's count fresh. Doorline's
+Settings card, which unpauses anyone paused at once, and turning it back on starts everyone's count fresh. Doorline's
 own internal organizations are never paused. Doorline has a switch of its own that decides whether it runs
 at all ([OPERATIONS.md](OPERATIONS.md)); while it's off nobody is paused, and the settings and review screens
 still work. (An in-product preview, *What automatic pause would have done*, helped decide before go-live; it
@@ -952,7 +957,7 @@ with its evidence frozen at the moment it fired.
 | The phone's state | [routes/mobile/bootstrap.js](../server/src/routes/mobile/bootstrap.js) (`/bootstrap`, `/changes`, `GET /mobile/pace`) |
 | Review, unpause, delete, settings | [routes/admin/pacePauses.js](../server/src/routes/admin/pacePauses.js), mounted at `/admin/pace-pauses` |
 | Console | [migrations/replayPacePause.js](../server/src/migrations/replayPacePause.js), [migrations/resolveOpenPacePauses.js](../server/src/migrations/resolveOpenPacePauses.js) |
-| Web | `components/audit/PacePausePanel.jsx`, `PausedCanvassers.jsx`; `components/users/PacePauseSettingsCard.jsx`, `PacePauseProfileSection.jsx`; `pages/PauseLinkPage.jsx`; wording in `lib/pacePause.js` |
+| Web | `components/audit/PacePausePanel.jsx`, `PausedCanvassers.jsx`; `pages/SettingsPage.jsx` with `components/settings/PacePauseSettingsCard.jsx` and `RecipientPicker.jsx` (since 2026-10-27; the card was on the Users page); `components/users/PacePauseProfileSection.jsx` in the person panel; `pages/PauseLinkPage.jsx`; wording in `lib/pacePause.js` |
 | Phone | rules in `mobile/lib/pace.js`; `setPace` + the local block in `lib/recordAction.js`; `components/PausedBanner.jsx`, `PausedCanvassersSection.jsx`; `app/(app)/admin/pause/[id].jsx`; `lib/pacePauses.js`; wording in `lib/pacePauseText.js` (a MIRROR of the web's, compared by its test) |
 
 ### G.1 The rule (`paceRule.js`)
@@ -1048,7 +1053,7 @@ the body; a legacy one-level snapshot converts on the next save. Same row, same 
 | Route | Who | What |
 |---|---|---|
 | `GET /` | admins: the org; leads: managed campaigns | `?status=paused\|resolved\|all`, `?campaignId`, `?userId` → `{ pauses, rosterLines, enabled, live }`, newest 200. A lead's `rosterLines` name their roster's canvassers blocked on a campaign they don't manage, nothing more. An unmanaged `campaignId` is 403 `FORBIDDEN_ROLE`. |
-| `GET /settings` | org admins | `{ enabled, billingAdmins, alertUserIds, live, changedAt, changedByName, canEdit, eligible, openPauses }` |
+| `GET /settings` | org admins | `{ enabled, billingAdmins, alertUserIds, chosen, live, changedAt, changedByName, canEdit, eligible, openPauses }`; `chosen` is `[{ userId, name, role, eligible }]` for every stored recipient (2026-10-27) |
 | `PATCH /settings` | org admin with billing access, or super admin | zod `.strict()`, dotted paths only; on → off resolves the org's open pauses; off → on resolves leftovers, then stamps `enabledAt`. Alert recipients: active org admins and leads, at most 25. |
 | `GET /:id` | org admins; leads on its campaign | the facts, the redacted `window`, `summary`, `implausible` (a failing hop of over 200 m at over 100 mph), `medianDistanceFromHouseM`, `dayEntries` (the day re-judged live, marked), `canUnpause`, `canDelete`, `doorOutcomesUrl` (admins only), `mapUrl` |
 | `POST /:id/unpause` | same | 409 `NOT_OPEN` when it isn't open |

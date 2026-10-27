@@ -374,7 +374,7 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
             </p>
             {archiveTarget.knockCount > 0 && (
               <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-                ⚠️ {archiveTarget.knockCount.toLocaleString()} knock{archiveTarget.knockCount === 1 ? '' : 's'} already recorded in this pass.
+                {archiveTarget.knockCount.toLocaleString()} knock{archiveTarget.knockCount === 1 ? '' : 's'} already recorded in this pass.
               </div>
             )}
             {archiveTarget.knockCount > 0 && (

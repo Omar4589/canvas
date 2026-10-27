@@ -387,7 +387,7 @@ Resetting pagination/accumulators in a `useEffect` fires one wasted render+query
   export a share target may still be reading (e.g. Gmail attaching lazily on Android) is never
   deleted mid-share.
 - **Feedback timers:** `flash()`/copy-confirm helpers keep their timeout id in a ref, clear it
-  before re-arming, and clear on unmount (UserProfileModal, ClientReportBuilderPage,
+  before re-arming, and clear on unmount (ClientReportBuilderPage,
   ClientReportsPage, mobile users/[id]).
 - **Overlay (`client/src/components/ui/Overlay.jsx`):** the focus-trap/scroll-lock effect is
   mount-once; `onClose` is read through a ref so inline-arrow consumers don't churn listeners or

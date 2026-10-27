@@ -35,6 +35,8 @@ export const ORG_NAV = [
   { to: '/admin/duplicate-surveys', label: 'Duplicate Surveys' },
   { to: '/integrations', label: 'Integrations' },
   { to: '/billing', label: 'Billing' },
+  // Switches that cover every campaign (Automatic pause). Org admins; not leadVisible.
+  { to: '/settings', label: 'Settings' },
 ];
 
 // The campaign nav grew to 18 items, past what one flat list can carry — grouped by what the

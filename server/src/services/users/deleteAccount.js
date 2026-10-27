@@ -256,6 +256,8 @@ const usageHere = async (user, organizationId) => {
     crew.people > 0 ||
     Boolean(await CoordinatorChange.exists({ organizationId, fromCoordinatorId: userId })) ||
     Boolean(await CoordinatorChange.exists({ organizationId, toCoordinatorId: userId })) ||
+    // A move whose doors came from several teams names them in `sources`, not in fromCoordinatorId.
+    Boolean(await CoordinatorChange.exists({ organizationId, 'sources.coordinatorId': userId })) ||
     Boolean(await Membership.exists({ organizationId, coordinatorId: userId }));
   return {
     signedIn: Boolean(user.lastLoginAt),
@@ -911,9 +913,13 @@ export async function releaseAssignedWork(
   // clearing it for one campaign severs supervision in that campaign only, which is exactly right.
   // (It was org/global-only when a crew was one org-wide field and clearing it in campaign scope
   // would have broken a link that had nothing to do with this campaign.)
+  //
+  // The same write clears any crew job on those rows (services/memberships/setCoordinator.js), so a
+  // job on a row always names the row's current crew. A change still running stops at its next
+  // renewal, and the doors stay as the departure found them.
   await CampaignAssignment.updateMany(
     { coordinatorId: userId, ...scope },
-    { $set: { coordinatorId: null } }
+    { $set: { coordinatorId: null }, $unset: { crewJob: '' } }
   );
 
   return {

@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import multer from 'multer';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { uploadIdList } from '../../middleware/idListUpload.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
@@ -19,8 +19,6 @@ import { clearParkedByCanonical } from '../../services/voters/voterIdLookup.js';
 // requireCampaignManager, which admits team leads, and leads must not set DNC.
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -98,7 +96,7 @@ const stateOf = (req) => String(req.body?.state || '').trim().toUpperCase();
 const matchFailure = (res, m) => res.status(400).json({ error: m.error, code: m.code || null, columns: m.columns, states: m.states || [] });
 
 // Dry run — no writes.
-router.post('/preview', upload.single('file'), async (req, res, next) => {
+router.post('/preview', uploadIdList, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
@@ -132,7 +130,7 @@ router.post('/preview', upload.single('file'), async (req, res, next) => {
 });
 
 // Apply — flags voters, recomputes fully-DNC doors, records the upload.
-router.post('/import', upload.single('file'), async (req, res, next) => {
+router.post('/import', uploadIdList, async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });

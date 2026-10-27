@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { foldDeltaVoters, foldDeltaHouseholds, reconcileLocationResponse, changesPath } from './deltaFold.js';
+import { foldDeltaVoters, foldDeltaHouseholds, returningDoorIds, isSuppressedDoor, reconcileLocationResponse, changesPath } from './deltaFold.js';
 
 const V = (_id, householdId, extra = {}) => ({ _id, householdId, fullName: `v${_id}`, ...extra });
 
@@ -108,9 +108,33 @@ test('a door suppressed mid-shift leaves the phone; an empty delta changes nothi
     { _id: 'b', fullyVoted: true },
     { _id: 'c', fullyDnc: true },
     { _id: 'd', doNotKnock: true },
+    { _id: 'e', excludedFromTurf: true },
   ]);
-  assert.deepEqual(out.map((h) => h._id), ['e']);
+  assert.deepEqual(out.map((h) => h._id), []);
   assert.strictEqual(foldDeltaHouseholds(prev, []), prev);
+});
+
+test('isSuppressedDoor: any one flag the bootstrap filters on suppresses; all clear does not', () => {
+  const open = { isActive: true, fullyVoted: false, fullyDnc: false, doNotKnock: false, excludedFromTurf: false };
+  assert.equal(isSuppressedDoor(open), false);
+  assert.equal(isSuppressedDoor({}), false, 'absent flags read as clear, like the server filter');
+  for (const [flag, value] of [['isActive', false], ['fullyVoted', true], ['fullyDnc', true], ['doNotKnock', true], ['excludedFromTurf', true]]) {
+    assert.equal(isSuppressedDoor({ ...open, [flag]: value }), true, flag);
+  }
+});
+
+test('returningDoorIds names a delta door the phone lacks that it should show — and nothing else', () => {
+  const prev = [H('a'), H('b')];
+  const delta = [
+    { _id: 'a', status: 'not_home', fullyVoted: false, location: H('a').location }, // already held: the fold's business
+    { _id: 'r', isActive: true, fullyVoted: false, fullyDnc: false, doNotKnock: false, excludedFromTurf: false, location: H('r').location }, // came back
+    { _id: 'v', fullyVoted: true, location: H('v').location }, // still suppressed
+    { _id: 'x', excludedFromTurf: true, location: H('x').location }, // taken out of books
+    { _id: 'n', fullyVoted: false }, // no pin: the bootstrap would leave it out too
+  ];
+  assert.deepEqual(returningDoorIds(prev, delta), ['r']);
+  assert.deepEqual(returningDoorIds(prev, []), []);
+  assert.deepEqual(returningDoorIds(undefined, [delta[1]]), ['r'], 'no cache yet: everything knockable is new');
 });
 
 test('the pin-fix reconcile: the server state wins, a no-op restores the flag and the stamp', () => {

@@ -9,7 +9,8 @@ import mongoose from 'mongoose';
 // campaign; a padded list against an unpadded Nebraska campaign), letters never zero-matching, the
 // no-ID accounting (idsInFile = matched + notFound), the column override honored by preview AND
 // apply, un-mark by either spelling, parked-ID clearing by canonical ID, the sticky job graduating
-// a parked stripped ID onto a padded voter, and the walk-list-from-CSV route's provenance.
+// a parked stripped ID onto a padded voter, the walk-list-from-CSV route's provenance, and the
+// 50 MB refusal (a 413 that says what to do) on all four upload routes.
 // Uploads are real multipart bodies (Node 20 FormData/Blob) through multer.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-voted-upload';
 
@@ -27,6 +28,7 @@ const { VotedUpload } = await import('../src/models/VotedUpload.js');
 const { VotedPendingId } = await import('../src/models/VotedPendingId.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { reapplyVotedLists } = await import('../src/services/voted/reapplyVotedLists.js');
+const { ID_LIST_MAX_BYTES, ID_LIST_TOO_LARGE } = await import('../src/middleware/idListUpload.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -255,4 +257,18 @@ test('walk list from CSV matches by zeros and records the count in the saved sea
   const doc = await SavedSearch.findOne({ campaignId: ctx.ga._id, name: 'Nancy only' }).lean();
   assert.strictEqual(doc.sourceMeta.matchedViaZeros, 1, 'declared on the strict sub-schema, so it survives the save');
   assert.strictEqual(doc.householdCount, 1);
+});
+
+test('a file that reaches 50 MB is refused on all four upload routes, says what to do, and writes nothing', { skip }, async () => {
+  const wl = (p) => `/admin/campaigns/${ctx.ga._id}/walklists${p}`;
+  const big = Buffer.alloc(ID_LIST_MAX_BYTES, 'a');
+  const uploads = await VotedUpload.countDocuments();
+  const searches = await SavedSearch.countDocuments();
+  for (const [path, fields] of [[voted('/preview')], [voted('/import')], [wl('/from-csv/preview')], [wl('/from-csv'), { name: 'Too big' }]]) {
+    const r = await upload(path, big, fields);
+    assert.strictEqual(r.status, 413, path);
+    assert.deepStrictEqual(r.json, { error: ID_LIST_TOO_LARGE, code: 'file-too-large' }, path);
+  }
+  assert.strictEqual(await VotedUpload.countDocuments(), uploads);
+  assert.strictEqual(await SavedSearch.countDocuments(), searches);
 });

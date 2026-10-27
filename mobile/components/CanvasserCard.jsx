@@ -83,7 +83,7 @@ export default function CanvasserCard({
       <View style={{ flex: 1 }}>
         <Text style={styles.name}>
           {name}
-          {row.inOverlap ? ' ⚠' : ''}
+          {row.inOverlap && <Text style={styles.overlap}> · overlap</Text>}
           {!row.isActive && <Text style={styles.inactive}> · inactive</Text>}
         </Text>
         <Text style={styles.meta}>{row.coordinatorName || '—'}</Text>
@@ -116,7 +116,7 @@ export default function CanvasserCard({
             return ` · ${Math.round(hours * 100) / 100}h${mark} · ${rate.toFixed(1)}/hr`;
           })()}
         </Text>
-        {shift ? <Text style={styles.shift}>🕘 {shift}</Text> : null}
+        {shift ? <Text style={styles.shift}>{shift}</Text> : null}
       </View>
       {!selectable && onPress ? <Text style={styles.chev}>›</Text> : null}
     </Pressable>
@@ -177,6 +177,7 @@ function makeStyles(t) {
     avatarText: { color: colors.brand, fontWeight: '800', fontSize: 14 },
     name: { ...type.bodyStrong, fontSize: 14 },
     inactive: { ...type.caption, color: colors.textMuted, fontWeight: '400' },
+    overlap: { ...type.caption, color: colors.warnFg, fontWeight: '600' },
     meta: { ...type.caption, marginTop: 1 },
     metaSmall: { fontSize: 11, color: colors.textMuted, fontVariant: ['tabular-nums'], marginTop: 2 },
     statsLine: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.xs },

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, daysBetween, periodDays, formatPeriod, gapBetween } from '../components/clientReports/reportDates.js';
+import { addDays, daysBetween, periodDays, formatPeriod, gapBetween, gapsAbove } from '../components/clientReports/reportDates.js';
 import { buildStateOf, displayStatusOf, buildPollInterval, isLiveBuild, freshestBuild } from '../components/clientReports/buildState.js';
 import {
   linkBadges,
@@ -21,7 +21,7 @@ import {
   deleteLinksText,
 } from '../components/clientReports/linkState.js';
 import { copyMessageFor, linkMessageFor, messageReportOf } from '../components/clientReports/copyMessage.js';
-import { choiceText, dateChoices, duplicateText, monthsLabel, totalsSentence, weekName, weekNudge } from '../components/clientReports/newReportChoices.js';
+import { allTimeChoice, choiceText, dateChoices, duplicateText, monthsLabel, totalsSentence, weekName, weekNudge } from '../components/clientReports/newReportChoices.js';
 import { GOT_IT, GUIDE_TITLE, HELP_LINE, HELP_PATH, HOW_IT_WORKS_LINK, INTRO, PHONE_STEPS, STEPS } from '../components/clientReports/howItWorksCopy.js';
 import { rowsFor, toggleChart, toggleMap, setHeadline, showAll, showNone, depsMapOf, closeUnderDeps } from '../components/clientReports/questionRules.js';
 import { clientReportHistoryLine, isClientReportField, earlierTextSummary, labelForField, reportRowName } from './campaignHistory.js';
@@ -424,6 +424,82 @@ test('Delete names the report’s one-report links that still open, which go wit
   // A disabled or expired one already doesn't open; nothing to say without one.
   assert.equal(deleteLinksText([oneReport({ isActive: false }), oneReport({ id: 'e', expiresAt: new Date(NOW - DAY).toISOString() })], NOW), '');
   assert.equal(deleteLinksText([], NOW), '');
+});
+
+test('gap lines: the days no dated report covers, over the whole tab — overlapping reports and all-time ones never make a false gap (SIMPLIFY §N, code review)', () => {
+  const r = (id, weekStart, weekEnd, extra = {}) => ({ id, weekStart, weekEnd, ...extra });
+  // Weekly reports, one week skipped: the line sits above the report before the gap.
+  assert.deepEqual([...gapsAbove([r('w3', '2026-10-19', '2026-10-25'), r('w1', '2026-10-05', '2026-10-11')])], [['w1', { start: '2026-10-12', end: '2026-10-18' }]]);
+  assert.equal(gapsAbove([r('w2', '2026-10-12', '2026-10-18'), r('w1', '2026-10-05', '2026-10-11')]).size, 0, 'back to back: no gap');
+  // Listed by last day, a month with a week inside it: only Sep 28 – Sep 30 is uncovered (row by row, the
+  // week beside Sep 21 – Sep 27 read "Sep 28 – Oct 18").
+  const month = [r('m', '2026-10-01', '2026-10-31'), r('wk', '2026-10-19', '2026-10-25'), r('sep', '2026-09-21', '2026-09-27')];
+  assert.deepEqual([...gapsAbove(month)], [['sep', { start: '2026-09-28', end: '2026-09-30' }]]);
+  // An all-time report covers every day up to its last, but the lines are about the dated reports.
+  assert.deepEqual(
+    [...gapsAbove([r('a', '2026-09-14', '2026-10-28', { allTime: true }), r('w3', '2026-10-19', '2026-10-25'), r('w1', '2026-10-05', '2026-10-11')])],
+    [['w1', { start: '2026-10-12', end: '2026-10-18' }]]
+  );
+  assert.equal(gapsAbove([r('a', '2026-09-14', '2026-10-28', { allTime: true })]).size, 0);
+  assert.equal(gapsAbove([]).size, 0);
+  // Two ending the same day: the line goes above the one listed first (the list's order: last day, then
+  // made last), right under the report after the gap.
+  assert.deepEqual(
+    [...gapsAbove([r('nov', '2026-11-09', '2026-11-15'), r('late', '2026-10-25', '2026-10-31'), r('month', '2026-10-01', '2026-10-31')])],
+    [['late', { start: '2026-11-01', end: '2026-11-08' }]]
+  );
+});
+
+test('Latest progress (SIMPLIFY §N): its choice, its line, its duplicate prompt and its message carry no "+N"', () => {
+  // The choice carries only its last day: the server works out where an all-time report starts.
+  assert.deepEqual(allTimeChoice('2026-10-28'), {
+    key: 'all_time',
+    kind: 'all_time',
+    allTime: true,
+    weekStart: null,
+    weekEnd: '2026-10-28',
+    head: 'Latest progress · all time, through today',
+    tail: null,
+    skipped: null,
+  });
+  assert.equal(
+    totalsSentence({ wholeCampaign: true, phrase: 'in this period', allTime: true, through: 'today' }),
+    'Your report shows totals for the whole campaign, from its first door through today, with no “+412 this week” figures.'
+  );
+  assert.equal(
+    totalsSentence({ label: 'Paid team', phrase: 'in this period', allTime: true, through: 'Oct 18' }),
+    'Your report shows totals for Paid team, from the campaign’s first door through Oct 18, with no “+412 this week” figures.'
+  );
+  assert.equal(
+    totalsSentence({ phrase: 'in this period', allTime: true }),
+    'Your report shows totals from the campaign’s first door through the last day you pick, with no “+412 this week” figures.',
+    'no last day picked yet'
+  );
+  // The duplicate prompt names an all-time report by its last day.
+  const d = { weekStart: '2026-09-14', weekEnd: '2026-10-28', allTime: true, scopeLabel: 'Whole campaign' };
+  assert.equal(duplicateText({ ...d, status: 'draft' }, { today: '2026-10-28' }), 'You already have a draft all-time Whole campaign report through Oct 28.');
+  assert.equal(duplicateText({ ...d, status: 'published', takenDown: true }, { today: '2026-10-28' }), 'You already published an all-time Whole campaign report through Oct 28, taken down.');
+  assert.equal(
+    duplicateText({ ...d, status: 'published', takenDown: false }, { today: '2026-10-28' }),
+    'You already published an all-time Whole campaign report through Oct 28. To bring its numbers up to date, open it and press Refresh numbers.'
+  );
+  // The Share message quotes its totals only.
+  const row = {
+    id: 'r9',
+    weekStart: '2026-09-14',
+    weekEnd: '2026-10-28',
+    allTime: true,
+    scope: { kind: 'campaign', label: 'Whole campaign' },
+    headline: { cumulative: { doorsKnocked: 3412, surveysTaken: 1980, litKnocks: 900 }, period: { doorsKnocked: 3412, surveysTaken: 1980 } },
+  };
+  assert.equal(
+    copyMessageFor({ report: { ...messageReportOf(row), campaignType: 'survey' }, link: link(), origin: 'https://doorline.app' }),
+    'The report through Oct 28 is up: 3,412 doors knocked so far and 1,980 surveys. Open it here: https://doorline.app/r/tok1/reports/r9 — use the password I sent you.'
+  );
+  assert.equal(
+    copyMessageFor({ report: { ...messageReportOf({ ...row, scope: { kind: 'team', label: 'Paid team' }, seriesLabel: 'Paid team' }), campaignType: 'lit_drop' }, link: link(), origin: 'https://doorline.app' }),
+    'The Paid team report through Oct 28 is up: 3,412 doors knocked so far and 900 lit dropped. Open it here: https://doorline.app/r/tok1/reports/r9 — use the password I sent you.'
+  );
 });
 
 test('the copy-ready message ends by its link: all your reports, just this one, or made a moment ago (SIMPLIFY §D)', () => {

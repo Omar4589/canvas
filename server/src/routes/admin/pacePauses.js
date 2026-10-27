@@ -191,11 +191,20 @@ const settingsOf = async (org, req) => {
   const fresh = await Organization.findById(org._id, 'slug isInternal pacePause').lean();
   const s = fresh?.pacePause || {};
   const eligibleMembers = await Membership.find({ organizationId: org._id, isActive: true, role: { $in: ['admin', 'lead'] } }, 'userId role billingAccess').lean();
-  const uMap = await hydrateCanvassers([...eligibleMembers.map((m) => m.userId), s.changedBy].filter(Boolean), org._id);
+  const chosenIds = (s.alertUserIds || []).map(String);
+  const eligibleIds = new Set(eligibleMembers.map((m) => String(m.userId)));
+  // A stored pick who is no longer an admin or team lead (or no longer in the org at all) is still
+  // named, so the Settings page can say "Not emailed: no longer an admin or team lead" and a billing
+  // admin's Save can drop them — before, such a pick was invisible and made every Save fail.
+  const stale = chosenIds.filter((id) => !eligibleIds.has(id));
+  const staleMembers = stale.length ? await Membership.find({ organizationId: org._id, userId: { $in: stale } }, 'userId role').lean() : [];
+  const roleOf = new Map([...eligibleMembers, ...staleMembers].map((m) => [String(m.userId), m.role]));
+  const uMap = await hydrateCanvassers([...eligibleMembers.map((m) => m.userId), ...stale, s.changedBy].filter(Boolean), org._id);
   return {
     enabled: s.enabled !== false,
     billingAdmins: s.billingAdmins !== false,
-    alertUserIds: (s.alertUserIds || []).map(String),
+    alertUserIds: chosenIds,
+    chosen: chosenIds.map((id) => ({ userId: id, name: nameOf(uMap, id) || 'Unknown user', role: roleOf.get(id) || null, eligible: eligibleIds.has(id) })),
     live: switchCovers(fresh),
     changedAt: s.changedAt || null,
     changedByName: nameOf(uMap, s.changedBy),

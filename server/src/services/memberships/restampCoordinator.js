@@ -3,7 +3,7 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { User } from '../../models/User.js';
-import { NOT_BULK, knocksPipeline } from '../reports/aggregations.js';
+import { NOT_BULK, KNOCK_ACTIONS, knocksPipeline } from '../reports/aggregations.js';
 
 // Re-stamp the frozen TEAM tag on a canvasser's ledger history when their crew changes.
 //
@@ -18,9 +18,21 @@ import { NOT_BULK, knocksPipeline } from '../reports/aggregations.js';
 // re-stamp then moved the loser's doors in a race the winner did not manage.
 //
 // The counterpart rule, which is just as load-bearing: DEPARTURE never re-stamps. When a
-// coordinator leaves the org, services/users/deleteAccount.js clears their crew's
-// Membership.coordinatorId but deliberately leaves the ledger alone, so the departed coordinator's
-// team keeps the doors it supervised. That is the 104-door fix; do not "unify" the two paths.
+// coordinator leaves a campaign or the org, services/users/deleteAccount.js (releaseAssignedWork)
+// clears their crew's roster crew but deliberately leaves the ledger alone, so the departed
+// coordinator's team keeps the doors it supervised. That is the 104-door fix; do not "unify" the two
+// paths.
+//
+// INDEX HINTS. A one-person query here is hinted to the person's index, so the planner can't wander
+// onto the org-wide one (restampFilter carries organizationId, and an org-scoped probe can read the
+// whole org — the trap services/users/deleteAccount.js documents). The bulk preview reads many people
+// in one campaign and is hinted to the campaign index instead: the person index would read each
+// person's whole ledger. A hint names an index that must exist, which is why the integration preload
+// builds these first (scripts/testIndexPreload.mjs) and the release dry-runs build-indexes.
+export const PERSON_ACTIVITY_HINT = { userId: 1, timestamp: -1 };
+export const PERSON_SURVEY_HINT = { userId: 1 };
+export const CAMPAIGN_ACTIVITY_HINT = { campaignId: 1, timestamp: -1 };
+export const CAMPAIGN_SURVEY_HINT = { campaignId: 1, submittedAt: -1 };
 //
 // Reversal needs no undo record: the operation is idempotent w.r.t. current state, so setting the
 // coordinator back re-stamps everything back.
@@ -84,9 +96,9 @@ export const previewRestamp = async ({ organizationId, userId, campaignId, coord
   const surveyFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId });
 
   const [activities, surveys, doorAgg] = await Promise.all([
-    CanvassActivity.countDocuments(activityFilter),
-    SurveyResponse.countDocuments(surveyFilter),
-    CanvassActivity.aggregate(knocksPipeline(activityFilter)),
+    CanvassActivity.countDocuments(activityFilter).hint(PERSON_ACTIVITY_HINT),
+    SurveyResponse.countDocuments(surveyFilter).hint(PERSON_SURVEY_HINT),
+    CanvassActivity.aggregate(knocksPipeline(activityFilter)).hint(PERSON_ACTIVITY_HINT),
   ]);
 
   return { activities, surveys, doors: doorAgg[0]?.knocks || 0 };
@@ -124,13 +136,30 @@ const RESTAMP_WARN_ROWS = 50_000;
 // With no transactions available (the test harness is a standalone mongod), splitting the write
 // into _id ranges would multiply the partial-failure states rather than reduce them; one
 // server-side op per collection is the most atomic shape actually on offer.
-export const restampLedgerCoordinator = async ({ organizationId, userId, campaignId, coordinatorId }) => {
+//
+// The crew job (services/memberships/setCoordinator.js) passes:
+//   beforeWrite — renews its hold before EACH write, and throws when the hold was lost, so a run that
+//                 stalled past its hold never writes over a later change;
+//   maxTimeMS   — so mongod abandons a write the server has given up on (it keeps executing an
+//                 updateMany after a client socket timeout). A write cut off this way has moved some
+//                 rows and reports none; the job's planned counts and Finish it cover that.
+export const restampLedgerCoordinator = async ({
+  organizationId,
+  userId,
+  campaignId,
+  coordinatorId,
+  beforeWrite = null,
+  maxTimeMS = undefined,
+}) => {
   const next = coordinatorId ? new mongoose.Types.ObjectId(String(coordinatorId)) : null;
   const activityFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId, bulkAware: true });
   const surveyFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId });
+  const options = (hint) => ({ hint, ...(maxTimeMS ? { maxTimeMS } : {}) });
 
-  const act = await CanvassActivity.updateMany(activityFilter, { $set: { coordinatorId: next } });
-  const srv = await SurveyResponse.updateMany(surveyFilter, { $set: { coordinatorId: next } });
+  if (beforeWrite) await beforeWrite();
+  const act = await CanvassActivity.updateMany(activityFilter, { $set: { coordinatorId: next } }, options(PERSON_ACTIVITY_HINT));
+  if (beforeWrite) await beforeWrite();
+  const srv = await SurveyResponse.updateMany(surveyFilter, { $set: { coordinatorId: next } }, options(PERSON_SURVEY_HINT));
 
   const activities = act.modifiedCount || 0;
   const surveys = srv.modifiedCount || 0;
@@ -141,4 +170,131 @@ export const restampLedgerCoordinator = async ({ organizationId, userId, campaig
     );
   }
   return { activities, surveys };
+};
+
+// Group rows by the team they are stamped with, on BOTH ledgers and every kind of row (knocks,
+// surveys, notes, restricted marks). Each team carries its rows on each ledger, its doors (knocks,
+// deduplicated to (household, pass) within the team — the number a person sees) and its latest row,
+// newest team first. One shape for a person (planSources, historyByTeam) and, keyed by person, for the
+// bulk preview (bulkPlan).
+const activityGroupStages = (byUser) => [
+  {
+    $group: {
+      _id: {
+        ...(byUser ? { u: '$userId' } : {}),
+        from: { $ifNull: ['$coordinatorId', null] },
+        door: { $cond: [{ $in: ['$actionType', KNOCK_ACTIONS] }, { h: '$householdId', p: '$passId' }, null] },
+      },
+      rows: { $sum: 1 },
+      latest: { $max: '$timestamp' },
+    },
+  },
+  {
+    $group: {
+      _id: { ...(byUser ? { u: '$_id.u' } : {}), from: '$_id.from' },
+      activities: { $sum: '$rows' },
+      doors: { $sum: { $cond: [{ $eq: ['$_id.door', null] }, 0, 1] } },
+      latest: { $max: '$latest' },
+    },
+  },
+];
+const surveyGroupStage = (byUser) => ({
+  $group: {
+    _id: { ...(byUser ? { u: '$userId' } : {}), from: { $ifNull: ['$coordinatorId', null] } },
+    surveys: { $sum: 1 },
+    latest: { $max: '$submittedAt' },
+  },
+});
+
+const idKey = (id) => (id ? String(id) : 'none');
+const mergeTeams = (acts, srvs) => {
+  const by = new Map();
+  for (const a of acts) {
+    by.set(idKey(a._id.from), { coordinatorId: a._id.from ?? null, activities: a.activities, surveys: 0, doors: a.doors, latest: a.latest || null });
+  }
+  for (const s of srvs) {
+    const cur = by.get(idKey(s._id.from)) || { coordinatorId: s._id.from ?? null, activities: 0, surveys: 0, doors: 0, latest: null };
+    cur.surveys += s.surveys;
+    if (!cur.latest || (s.latest && new Date(s.latest) > new Date(cur.latest))) cur.latest = s.latest;
+    by.set(idKey(s._id.from), cur);
+  }
+  return [...by.values()].sort((a, b) => new Date(b.latest || 0) - new Date(a.latest || 0));
+};
+
+// What WOULD move for one person, by the team it is stamped with: the crew job's `sources`. Uses the
+// write's own filters, so a team listed here is a team the write takes rows from.
+export const planSources = async ({ organizationId, userId, campaignId, coordinatorId }) => {
+  const activityFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId, bulkAware: true });
+  const surveyFilter = restampFilter({ organizationId, userId, campaignId, coordinatorId });
+  const [acts, srvs] = await Promise.all([
+    CanvassActivity.aggregate([{ $match: activityFilter }, ...activityGroupStages(false)]).hint(PERSON_ACTIVITY_HINT),
+    SurveyResponse.aggregate([{ $match: surveyFilter }, surveyGroupStage(false)]).hint(PERSON_SURVEY_HINT),
+  ]);
+  return mergeTeams(acts, srvs);
+};
+
+// Everything a person has on this campaign, by the team it counts for today — the Add people step's
+// "Pat has 120 doors here from before: 100 on Dana's team, 20 on No team". Desk marks excluded, as
+// everywhere a person's doors are counted. `doors` is the person's own total, deduplicated across
+// teams: a door re-knocked in the same round after a crew change counts once for them, though it
+// counts in each of the two teams' lines.
+export const historyByTeam = async ({ organizationId, userId, campaignId }) => {
+  const match = {
+    organizationId: new mongoose.Types.ObjectId(String(organizationId)),
+    campaignId: new mongoose.Types.ObjectId(String(campaignId)),
+    userId: new mongoose.Types.ObjectId(String(userId)),
+  };
+  const [acts, srvs, doorAgg] = await Promise.all([
+    CanvassActivity.aggregate([{ $match: { ...match, ...NOT_BULK } }, ...activityGroupStages(false)]).hint(PERSON_ACTIVITY_HINT),
+    SurveyResponse.aggregate([{ $match: match }, surveyGroupStage(false)]).hint(PERSON_SURVEY_HINT),
+    CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK })).hint(PERSON_ACTIVITY_HINT),
+  ]);
+  return { teams: mergeTeams(acts, srvs), doors: doorAgg[0]?.knocks || 0 };
+};
+
+// The bulk preview (Move to crew…, up to 500 people): per person, what would move, by source team, on
+// both ledgers, plus the exact deduplicated door total over every mover — one knocksPipeline, so a
+// house two movers both knocked counts once. A person's own `doors` is deduplicated the same way, per
+// person, so it matches their one-person preview (a door they knocked under two teams counts once).
+// Hinted to the CAMPAIGN index (see INDEX HINTS above).
+export const bulkPlan = async ({ organizationId, campaignId, userIds, coordinatorId }) => {
+  const ids = userIds.map((u) => new mongoose.Types.ObjectId(String(u)));
+  if (!ids.length) return { byUser: new Map(), totalDoors: 0 };
+  // restampFilter needs one person; widen it to the set.
+  const activityMatch = { ...restampFilter({ organizationId, userId: ids[0], campaignId, coordinatorId, bulkAware: true }), userId: { $in: ids } };
+  const surveyMatch = { ...restampFilter({ organizationId, userId: ids[0], campaignId, coordinatorId }), userId: { $in: ids } };
+  const [acts, srvs, total, perPerson] = await Promise.all([
+    CanvassActivity.aggregate([{ $match: activityMatch }, ...activityGroupStages(true)]).hint(CAMPAIGN_ACTIVITY_HINT),
+    SurveyResponse.aggregate([{ $match: surveyMatch }, surveyGroupStage(true)]).hint(CAMPAIGN_SURVEY_HINT),
+    CanvassActivity.aggregate(knocksPipeline(activityMatch)).hint(CAMPAIGN_ACTIVITY_HINT),
+    CanvassActivity.aggregate([
+      { $match: { ...activityMatch, actionType: { $in: KNOCK_ACTIONS } } },
+      { $group: { _id: { u: '$userId', h: '$householdId', p: '$passId' } } },
+      { $group: { _id: '$_id.u', doors: { $sum: 1 } } },
+    ]).hint(CAMPAIGN_ACTIVITY_HINT),
+  ]);
+  const doorsOf = new Map(perPerson.map((r) => [String(r._id), r.doors]));
+  const actsBy = new Map();
+  const srvsBy = new Map();
+  for (const a of acts) {
+    const k = String(a._id.u);
+    if (!actsBy.has(k)) actsBy.set(k, []);
+    actsBy.get(k).push(a);
+  }
+  for (const r of srvs) {
+    const k = String(r._id.u);
+    if (!srvsBy.has(k)) srvsBy.set(k, []);
+    srvsBy.get(k).push(r);
+  }
+  const byUser = new Map();
+  for (const id of ids.map(String)) {
+    const sources = mergeTeams(actsBy.get(id) || [], srvsBy.get(id) || []);
+    byUser.set(id, {
+      sources,
+      activities: sources.reduce((n, x) => n + x.activities, 0),
+      surveys: sources.reduce((n, x) => n + x.surveys, 0),
+      doors: doorsOf.get(id) || 0,
+    });
+  }
+  return { byUser, totalDoors: total[0]?.knocks || 0 };
 };

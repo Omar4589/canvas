@@ -44,6 +44,18 @@ test('every sentence reads the same on the phone and the web', () => {
   for (const sec of [null, 0, 8.4, 59.6, 60, 64, 3600, Number.NaN]) assert.equal(phone.secondsText(sec), web.secondsText(sec), String(sec));
   for (const mph of [null, 0, 10.6, Number.POSITIVE_INFINITY]) assert.equal(phone.mphText(mph), web.mphText(mph), String(mph));
   for (const m of [null, 28]) assert.equal(phone.distanceLine(m, String), web.distanceLine(m, String), String(m));
+  const LISTS = [
+    null,
+    {
+      pauses: [
+        { userId: 'u1', status: 'paused', blocking: true },
+        { userId: 'u2', status: 'paused', blocking: false },
+        { userId: 'u3', status: 'resolved', blocking: true },
+      ],
+      rosterLines: [{ userId: 'u4', paused: true }, { userId: 'u5', paused: false }],
+    },
+  ];
+  for (const d of LISTS) assert.deepEqual([...phone.pausedUserIds(d)].sort(), [...web.pausedUserIds(d)].sort(), 'who is paused');
   assert.deepEqual(Object.keys(phone).sort(), Object.keys(web).sort(), 'the same exports');
 });
 

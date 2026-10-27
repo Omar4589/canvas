@@ -18,7 +18,7 @@ import { HOW_IT_WORKS_LINK, INTRO } from '../components/clientReports/howItWorks
 import { ConfirmDialog, ErrorBanner } from '../components/clientReports/parts.jsx';
 import { teamChangedKey } from '../components/clientReports/TeamChangedCard.jsx';
 import { buildKey, historyKey, reportKey, reportsKey, seriesKey, sharesKey } from '../components/clientReports/hooks.js';
-import { formatPeriod, gapBetween } from '../components/clientReports/reportDates.js';
+import { formatPeriod, gapsAbove, todayIn } from '../components/clientReports/reportDates.js';
 import { deleteLinksText, linksFor, linksLine, singleLinksOf, takeDownLinksText } from '../components/clientReports/linkState.js';
 import { messageReportOf } from '../components/clientReports/copyMessage.js';
 
@@ -132,6 +132,8 @@ const ClientReportsPage = () => {
   const tabs = useMemo(() => tabsOf(reports, series), [reports, series]);
   const wanted = params.get('tab');
   const active = tabs.find((t) => t.key === wanted) || tabs.find((t) => t.kind === 'campaign') || tabs[0] || null;
+  // The days the tab's dated reports skipped, each above the report they follow (reportDates.js gapsAbove).
+  const gaps = gapsAbove(active?.reports || []);
   const reportsById = useMemo(() => new Map(reports.map((r) => [r.id, r])), [reports]);
 
   const [newReport, setNewReport] = useState(null); // { initial } while the dialog is open
@@ -299,17 +301,26 @@ const ClientReportsPage = () => {
                 <p className="py-6 text-sm text-fg-muted">No reports for {active.label} yet. New report starts one.</p>
               )}
               <ul className="divide-y divide-border" id={`panel-${active?.key}`} role="tabpanel">
-                {active?.reports.map((row, i) => {
-                  const older = active.reports[i + 1];
-                  const gap = older ? gapBetween(row, older) : null;
+                {active?.reports.map((row) => {
+                  // The days the tab's dated reports skipped, above the report they follow (gapsAbove).
+                  const gap = gaps.get(row.id) || null;
+                  // Next report sits on the newest report of each kind (§N): the tab's newest dated report,
+                  // and its newest all-time one unless that already runs through today (Refresh numbers).
+                  const newestOfKind = active.reports.find((r) => !!r.allTime === !!row.allTime) === row;
+                  const isLatest = newestOfKind && !(row.allTime && row.weekEnd >= todayIn(row.timeZone));
                   return (
                     <Fragment key={row.id}>
+                      {gap && (
+                        <li className="py-2 text-center text-xs text-fg-subtle" aria-label="Gap between reports">
+                          ── {formatPeriod(gap.start, gap.end)} not covered by any report ──
+                        </li>
+                      )}
                       <ReportRow
                         row={row}
                         campaignId={campaignId}
                         campaignType={row.campaignType || campaign?.type}
                         listUpdatedAt={listUpdatedAt}
-                        isLatest={i === 0}
+                        isLatest={isLatest}
                         seriesEnded={active.ended}
                         teamLabel={tabTeam?.label || active.label}
                         // Null until the links list is here, so a row never says "No link yet" while it loads.
@@ -383,11 +394,6 @@ const ClientReportsPage = () => {
                         onChangeCrews={(id) => setTeam({ mode: 'edit', series: teamRowOf(id) })}
                         onEndTeam={(id) => setTeam({ mode: 'edit', series: teamRowOf(id), initialEnding: true })}
                       />
-                      {gap && (
-                        <li className="py-2 text-center text-xs text-fg-subtle" aria-label="Gap between reports">
-                          ── {formatPeriod(gap.start, gap.end)} not covered by any report ──
-                        </li>
-                      )}
                     </Fragment>
                   );
                 })}

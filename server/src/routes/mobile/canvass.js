@@ -36,8 +36,7 @@ import { PACE_PAUSED, paceBlocks, paceStateOf, runPaceCheck } from '../../servic
 import { toWireVoter, stampPerRoundSurvey, MOBILE_VOTER_PROJECTION } from './bootstrap.js';
 import { surveyedVotersFromDoorPass } from '../../services/passes/passStatus.js';
 import { nameSchema, phoneSchema, voterEmailSchema } from '../../utils/validators.js';
-import { recomputeFullyDnc } from '../../services/dnc/recomputeFullyDnc.js';
-import { recomputeHouseholdActive } from '../../services/import/recomputeHouseholdActive.js';
+import { recomputeResidentFlags } from '../../services/households/recomputeResidentFlags.js';
 import { isOutcomeEnabled, outcomeEverEnabled } from '../../services/canvass/outcomeToggles.js';
 
 const router = Router();
@@ -1271,14 +1270,15 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
       return res.status(409).json({ error: 'That id is already in use.', code: 'VOTER_ID_CONFLICT' });
     }
 
-    // Voter-derived household invariants. Near-moot for a door already on a phone (it wouldn't
-    // be there if fullyDnc/inactive), but airtight beats almost: a non-DNC person at an all-DNC
-    // door reopens it, and a person at an emptied door reactivates it. recomputeFullyDnc's
-    // unconditional $set also bumps Household.updatedAt — that is what makes the /changes delta
-    // re-ship this door's full roster to every teammate's phone (track 1); the new voter's own
-    // updatedAt covers track 2 independently.
-    await recomputeFullyDnc([String(household._id)]);
-    await recomputeHouseholdActive(household.campaignId, [household._id]);
+    // Voter-derived household invariants (services/households/recomputeResidentFlags.js). Not moot for a door
+    // already on a phone: the phone can be behind the server — its poll pauses on the door screen, and offline
+    // it can't poll at all — so the door may have dropped meanwhile. A walk-up is on no early-voting list, so
+    // a door that went fully voted re-opens (it used to stay hidden with someone there who hadn't voted); a
+    // non-DNC person at an all-DNC door reopens it; a person at an emptied door reactivates it. The recomputes'
+    // unconditional $set also bumps Household.updatedAt — that is what makes the /changes delta re-ship this
+    // door's full roster to every teammate's phone (track 1, and a phone that had dropped it pulls a fresh
+    // bootstrap); the new voter's own updatedAt covers track 2 independently.
+    await recomputeResidentFlags(household.campaignId, [household._id]);
 
     res.status(201).json({
       voter: await wireVoter(),

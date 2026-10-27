@@ -107,10 +107,13 @@ async function migrateOrg(org) {
   // org-level value. Keying on `null` rather than `$exists:false` is right HERE, unlike the ledger
   // backfill: an unset roster row means "no crew chosen", not "deliberately no crew", because
   // nothing has ever been able to choose one.
+  // It also clears any crew job on the rows it sets (services/memberships/setCoordinator.js): a
+  // No-crew job leaves exactly this row — coordinatorId null — and a job must always name its row's
+  // crew, or its Finish it would move doors away from the crew set here.
   const ops = withCrew.map((m) => ({
     updateMany: {
       filter: { organizationId: org._id, userId: m.userId, coordinatorId: null },
-      update: { $set: { coordinatorId: m.coordinatorId } },
+      update: { $set: { coordinatorId: m.coordinatorId }, $unset: { crewJob: '' } },
     },
   }));
 

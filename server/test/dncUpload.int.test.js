@@ -9,7 +9,8 @@ import mongoose from 'mongoose';
 // per-campaign door-drop breakdown), apply attribution (source:'upload' + uploadId; an
 // admin-set flag is NEVER re-stamped), undo (only the upload's own rows revert, pendings die,
 // 409 on a second undo), sticky-DNC graduation via reapplyDncLists, and undoImport's
-// keep-guards (a DNC voter and its fully-DNC door survive an import undo).
+// keep-guards (a DNC voter and its fully-DNC door survive an import undo), and the 50 MB refusal
+// (a 413 that says what to do) on both upload routes.
 // Uploads are real multipart bodies (Node 20 FormData/Blob) through multer.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-dnc-upload';
 
@@ -27,6 +28,7 @@ const { DncPendingId } = await import('../src/models/DncPendingId.js');
 const { recomputeFullyDnc } = await import('../src/services/dnc/recomputeFullyDnc.js');
 const { reapplyDncLists } = await import('../src/services/dnc/reapplyDncLists.js');
 const { undoImport } = await import('../src/services/import/undoImport.js');
+const { ID_LIST_MAX_BYTES, ID_LIST_TOO_LARGE } = await import('../src/middleware/idListUpload.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -413,4 +415,15 @@ test('17. the sticky job stays exact but honors the declared state; spellings st
   assert.strictEqual(gus.doNotContact.reason, 'asked at the door');
   assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '55555', state: null }), 0, 'the unstamped parking graduated');
   assert.strictEqual(await DncPendingId.countDocuments({ stateVoterId: '55555', state: 'FL' }), 1, 'the Florida parking is untouched');
+});
+
+test('18. a file that reaches 50 MB is refused on both upload routes, says what to do, and writes nothing', { skip }, async () => {
+  const big = Buffer.alloc(ID_LIST_MAX_BYTES, 'a');
+  const uploads = await DncUpload.countDocuments();
+  for (const path of ['/admin/dnc/preview', '/admin/dnc/import']) {
+    const r = await uploadCsv(path, big);
+    assert.strictEqual(r.status, 413, path);
+    assert.deepStrictEqual(r.json, { error: ID_LIST_TOO_LARGE, code: 'file-too-large' }, path);
+  }
+  assert.strictEqual(await DncUpload.countDocuments(), uploads);
 });

@@ -1,31 +1,51 @@
+import { Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
+import { affectedCoordinatorIds } from '../lib/crewChange.js';
 
 // The confirmation an admin (or a team lead) sees before a coordinator change commits.
 //
 // Changing someone's coordinator re-stamps their whole knock history onto the new team, so a
-// number the admin may already have quoted can move. Both assignment surfaces — the org Users
-// modal and the campaign crew panel — render THIS component, so a lead and an admin never see
-// different wording for the same act.
+// number the admin may already have quoted can move. Every crew-change surface — the person panel's
+// crew picker and its Finish it, on the Team page — renders THIS component, so a lead and an admin
+// never see different wording for the same act.
 //
 // The headline unit is DOORS (distinct household+pass), because that is what every by-team figure
 // counts. `activities`/`surveys` are raw ledger rows and are shown only as detail — quoting the row
 // count next to the word "doors" would make the team row move by less than the confirmation
 // promised, and the feature would read as broken.
 //
+// Where the doors come from is the preview's `sources` (every team the moving rows are stamped with,
+// newest first) when the server sends them, so doors from several teams are named team by team — by
+// name only: each team counts its own doors, and a door with work on two teams counts on both, so only
+// the headline (each door once) is exact. That also words Finish it (`finishing`), where the pick IS the
+// current crew and `from` equals `to`: the doors still counted for other teams are what move. An older
+// server's one `from` still works.
+//
 // With `campaignId` and `subjectId` it also names the client-report teams whose numbers move
 // (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §O4): a team covers crews by coordinator, current or
-// past, so it is any team holding the old or the new coordinator — or the person themselves when
-// either side is "No team", because a crew lead's own unstamped doors count in their crew's team.
+// past, so it is any team holding a team the doors leave or the one they join — or the person
+// themselves when either side is "No team", because a crew lead's own unstamped doors count in their
+// crew's team (lib/crewChange.js affectedCoordinatorIds).
 
-// The coordinators whose client-report teams this change moves doors between, sorted (a query key).
-const coordinatorsMoved = (preview, subjectId) => {
-  const from = preview?.from?.id || null;
-  const to = preview?.to?.id || null;
-  return [...new Set([from, to, !from || !to ? subjectId : null].filter(Boolean).map(String))].sort();
-};
 // "Paid team", "Paid team and Volunteer team", "A, B and C".
 const andList = (labels) => (labels.length < 2 ? labels[0] || '' : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`);
+
+// The teams the doors leave.
+const fromTeams = (preview) => {
+  const sources = Array.isArray(preview?.sources) ? preview.sources.filter((s) => s.doors > 0) : [];
+  if (sources.length) return sources.map((s) => ({ id: s.coordinatorId || null, name: s.coordinatorId ? s.name || 'Unknown' : null }));
+  return [{ id: preview?.from?.id || null, name: preview?.from?.name || null }];
+};
+
+const teamLabel = (t) =>
+  t.name ? (
+    <>
+      <strong>{t.name}</strong>’s team
+    </>
+  ) : (
+    <>“No team”</>
+  );
 
 export default function CoordinatorConfirm({
   preview,
@@ -37,14 +57,16 @@ export default function CoordinatorConfirm({
   onConfirm,
   campaignId = null,
   subjectId = null,
+  finishing = false,
 }) {
-  const fromName = preview?.from?.name || null;
   const toName = preview?.to?.name || null;
   const doors = preview?.doors || 0;
   const surveys = preview?.surveys || 0;
+  const teams = fromTeams(preview);
+  const several = teams.length > 1;
   // Only when doors actually move. A failed check just leaves the line out — the move itself is
   // what the confirm is for.
-  const moved = coordinatorsMoved(preview, subjectId);
+  const moved = affectedCoordinatorIds(preview, subjectId);
   const teamsQ = useQuery({
     queryKey: ['admin', 'client-report-affected-teams', campaignId, moved.join(',')],
     queryFn: ({ signal }) =>
@@ -75,13 +97,13 @@ export default function CoordinatorConfirm({
                     {surveys === 1 ? '' : 's'}
                   </>
                 ) : null}{' '}
-                {fromName ? (
-                  <>
-                    from <strong>{fromName}</strong>’s team
-                  </>
-                ) : (
-                  <>from “No team”</>
-                )}{' '}
+                from{' '}
+                {teams.map((t, i) => (
+                  <Fragment key={t.id || 'none'}>
+                    {i > 0 ? (i === teams.length - 1 ? ' and ' : ', ') : null}
+                    {teamLabel(t)}
+                  </Fragment>
+                ))}{' '}
                 {toName ? (
                   <>
                     to <strong>{toName}</strong>’s team?
@@ -89,6 +111,18 @@ export default function CoordinatorConfirm({
                 ) : (
                   <>to “No team”?</>
                 )}
+              </>
+            ) : finishing ? (
+              <>
+                {subjectName}’s doors here already count for{' '}
+                {toName ? (
+                  <>
+                    <strong>{toName}</strong>’s team
+                  </>
+                ) : (
+                  <>“No team”</>
+                )}
+                . Finishing closes off the change, and moves any surveys or notes still left behind.
               </>
             ) : (
               <>
@@ -106,9 +140,9 @@ export default function CoordinatorConfirm({
 
           {doors > 0 ? (
             <p className="mt-1.5 text-xs text-fg-muted">
-              This changes both crews’ totals <strong>in this campaign</strong>, all time. Their
-              work on your other campaigns is not affected. It does not change campaign totals,
-              coverage, or your bill. You can move them back by setting the crew back.
+              This changes {several ? 'these teams’' : 'both crews’'} totals <strong>in this campaign</strong>, all
+              time. Their work on your other campaigns is not affected. It does not change campaign totals,
+              coverage, or your bill.{finishing ? '' : ' You can move them back by setting the crew back.'}
             </p>
           ) : null}
 
@@ -139,7 +173,7 @@ export default function CoordinatorConfirm({
               disabled={busy}
               className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-50"
             >
-              {busy ? 'Moving…' : doors > 0 ? 'Move them' : 'Save'}
+              {busy ? 'Moving…' : finishing ? 'Finish it' : doors > 0 ? 'Move them' : 'Save'}
             </button>
             <button
               type="button"

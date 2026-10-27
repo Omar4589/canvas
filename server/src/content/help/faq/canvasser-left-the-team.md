@@ -15,7 +15,7 @@ The reason is simple: a knock is a record of something that *happened*. Whether 
 
 **Their team stays too.** Their doors keep counting toward the crew they were on, even after they're gone — you don't have to do anything to keep a departed canvasser's work on their team's number.
 
-(The one action that *does* move doors between teams is changing somebody's **coordinator**, which is a deliberate roster decision rather than something that happens when a person leaves. See [Moving someone to another team](move-a-canvasser-to-another-team).)
+(Two things *do* move doors between teams, and both are deliberate roster decisions rather than something that happens when a person leaves: changing somebody's **crew**, and **adding them back**. Someone who comes back to a campaign brings their earlier doors there to the crew they rejoin — or to No team if none is picked. See [Moving someone to another team](move-a-canvasser-to-another-team).)
 
 **If they led a crew in a client report's team** — say Dee ran a crew in your "Paid team" — the next draft of that team's report stops and asks what to do before it builds its numbers. By default, **her crew's past doors stay in the team** while those canvassers have no crew lead; you can also take them out, change the team's crews, or end the team. Reports you already sent don't change. See [How do team reports work?](how-do-team-reports-work)
 

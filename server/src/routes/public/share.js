@@ -200,8 +200,10 @@ router.get('/:token/reports', loadShare, requireShareAccess, async (req, res, ne
   try {
     const only = singleReportOf(req);
     // Under `$and`, so no key of reportScope can be overwritten (§D).
+    // Newest last day first: a Latest progress report (§N) starts on the campaign's first knock, so the
+    // first day would sink it to the bottom. For reports that don't overlap, the same order as before.
     const reports = await ClientReport.find(only ? { ...reportScope(req), $and: [{ _id: only }] } : reportScope(req))
-      .sort({ weekStart: -1, publishedAt: -1 })
+      .sort({ weekEnd: -1, publishedAt: -1 })
       .lean();
     const [campaign, org, labels, logo] = await Promise.all([
       Campaign.findById(req.share.campaignId, { name: 1 }).lean(),

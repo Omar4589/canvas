@@ -7,7 +7,7 @@ import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import IdColumnPicker from '../components/IdColumnPicker.jsx';
 import { saveTextFile } from '../lib/downloadFile.js';
 import { formatInTz } from '../lib/datetime.js';
-import { describeIdsInFile, zeroMatchLine, historySubtitle } from '../lib/idListPreview.js';
+import { describeIdsInFile, zeroMatchLine, historySubtitle, idListTooBig, idListTooBigText } from '../lib/idListPreview.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -82,7 +82,8 @@ export default function EarlyVotingPage() {
     setFile(f);
     setIdColumn('');
     apply.reset();
-    if (f && campaignId) preview.mutate({ file: f, idColumn: '' });
+    // Over the size limit: refused right here, before anything uploads.
+    if (f && campaignId && !idListTooBig(f)) preview.mutate({ file: f, idColumn: '' });
     else preview.reset();
   }
   // Changing the column re-runs the preview on it; the preview's response then owns the value.
@@ -145,6 +146,9 @@ export default function EarlyVotingPage() {
               />
             )}
             {preview.error && !undetected && <p className="mt-1 text-xs text-danger">{preview.error.message}</p>}
+            {idListTooBig(file) && (
+              <p className="mt-1 text-xs text-danger">{idListTooBigText('the voters who have already voted')}</p>
+            )}
           </div>
         </div>
 

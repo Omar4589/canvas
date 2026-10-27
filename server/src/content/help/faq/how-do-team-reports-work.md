@@ -33,13 +33,13 @@ On the campaign's **Client Reports** tab, press **New report**, choose **A team*
 
 If only one canvasser knocked for a team in the period, the builder warns you before you publish: the report then shows one person's work.
 
-**Before you publish** on a team report also lists **Door visits this period**: a row for each team (this report's team first, and "Together" when there are two or more), then the whole campaign's door visits (or the walk list's), how many of them more than one team made (they count in each team's report), and how many no team made (canvassers with no crew in a team, or doors entered in bulk). It's how you see why the teams' numbers and the whole campaign's don't line up. Your client never sees it.
+**Before you publish** on a team report also lists **Door visits this period** (a Latest progress team report shows just how many canvassers have knocked for the team since the campaign began): a row for each team (this report's team first, and "Together" when there are two or more), then the whole campaign's door visits (or the walk list's), how many of them more than one team made (they count in each team's report), and how many no team made (canvassers with no crew in a team, or doors entered in bulk). It's how you see why the teams' numbers and the whole campaign's don't line up. Your client never sees it.
 
 ## When the team changes
 
 - **Edit team** (on the team's tab) renames it, changes its crews, or ends it. Ending a team keeps its published reports exactly as they were sent.
 - **Continue this team** (on an ended team's tab) brings it back: pick the crews it covers from now on, and it takes new reports again.
-- **Moving a canvasser onto another crew moves their past doors with them**, so a team's next report can count differently. On the web, the confirm that moves them names the client report whose numbers change (the phone doesn't show that line yet).
+- **Moving a canvasser onto another crew moves their past doors with them**, and so does adding someone back to the campaign (their earlier doors there move to the crew they rejoin, or to no crew), so a team's next report can count differently. On the web, the confirm that moves them names the client report whose numbers change. The phone says how many doors move, but not which report.
 - **If a crew lead leaves the campaign**, the team's next draft stops and asks what to do. By default her crew's past doors **stay in the team** while those canvassers have no crew. You can also remove them (it shows how many doors that takes out), change the team's crews, or end the team.
 
 **Reports you've already published don't change** when a team does. If you refresh one, it's rebuilt with the same crews it was built with, so a report your client already has never quietly starts covering someone else.

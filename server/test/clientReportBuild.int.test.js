@@ -42,6 +42,7 @@ const { CampaignChange } = await import('../src/models/CampaignChange.js');
 const { AnswerEditRun } = await import('../src/models/AnswerEditRun.js');
 const { ReclassifyRun } = await import('../src/models/ReclassifyRun.js');
 const { computeWindowStats, buildFrozenMapPoints } = await import('../src/services/reports/computeReport.js');
+const { KNOCK_ACTIONS } = await import('../src/services/reports/aggregations.js');
 const { buildReportSnapshot } = await import('../src/services/reports/buildReportSnapshot.js');
 const builds = await import('../src/services/reports/clientReportBuilds.js');
 const { sweepClientReportRows } = await import('../src/services/reports/clientReportSweep.js');
@@ -265,7 +266,11 @@ const optionCounts = (b) => Object.fromEntries((b?.options || []).map((o) => [o.
 const assertWindowParity = (built, oracle, label) => {
   assert.deepStrictEqual(built.totals, oracle.totals, `${label}: totals`);
   assert.deepStrictEqual(built.contactBreakdown, oracle.contactBreakdown, `${label}: contact breakdown`);
-  assert.deepStrictEqual(built.provenance, oracle.provenance, `${label}: provenance`);
+  // provenance.canvassers is the build's own (the builder's one-person check, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md
+  // §N): the oracle never counted it, so it is checked against the ledger in the test itself.
+  const { canvassers, ...provenance } = built.provenance;
+  assert.ok(Number.isInteger(canvassers), `${label}: canvassers counted`);
+  assert.deepStrictEqual(provenance, oracle.provenance, `${label}: provenance`);
   assert.deepStrictEqual(
     built.surveyBreakdowns.map((b) => b.questionKey).sort(),
     oracle.surveyBreakdowns.map((b) => b.questionKey).sort(),
@@ -306,6 +311,16 @@ for (const batch of [undefined, 2]) {
       ]);
       assertWindowParity(built.stats.cumulative, cum, 'cumulative');
       assertWindowParity(built.stats.period, period, 'period');
+      // Who made the knocks each window counts: the ledger's own distinct users for the same rows.
+      const knockers = (range) =>
+        CanvassActivity.distinct('userId', {
+          organizationId: ctx.org._id, campaignId: ctx.camp._id, ...(effortId ? { effortId } : {}),
+          actionType: { $in: KNOCK_ACTIONS }, householdId: { $ne: null }, userId: { $ne: null }, timestamp: range,
+        });
+      const [cumUsers, periodUsers] = await Promise.all([knockers({ $lt: RANGE_END }), knockers({ $gte: RANGE_START, $lt: RANGE_END })]);
+      if (!effortId) assert.ok(cumUsers.length > 1, 'more than one canvasser to count (each walk list here has one)');
+      assert.strictEqual(built.stats.cumulative.provenance.canvassers, cumUsers.length, 'cumulative: canvassers');
+      assert.strictEqual(built.stats.period.provenance.canvassers, periodUsers.length, 'period: canvassers');
 
       const { points } = await buildFrozenMapPoints({ report, campaign, template, mapAnswerKeys: ALL_KEYS });
       const oracle = new Map(points.map((p) => [String(p.householdId), { status: p.status, answers: JSON.stringify(p.answers) }]));

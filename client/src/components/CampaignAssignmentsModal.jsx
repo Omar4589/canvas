@@ -6,24 +6,18 @@ import { useAuth } from '../auth/AuthContext.jsx';
 
 export default function CampaignAssignmentsModal({ campaign, onClose }) {
   const qc = useQueryClient();
-  const { isOrgAdmin } = useAuth();
+  const { isOrgAdmin, user } = useAuth();
   const [search, setSearch] = useState('');
 
-  // This modal opens from the Campaigns page's UNGATED ⋮ action list, so a team lead reaches it —
-  // which made it the SECOND copy of the org-wide directory a lead could see, after the Team page's
-  // picker. It still forks, but the two branches now mean different things: an admin gets the org
-  // directory to assign from, while a lead gets the campaign's own roster (the crew endpoint is
-  // campaign-scoped now — server/src/routes/admin/leadCrew.js), so here they can only take people
-  // OFF. Adding is by email on the Team tab, for both roles.
-  const membersQ = useQuery({
-    queryKey: isOrgAdmin ? ['memberships'] : ['admin', 'campaign-crew', campaign._id],
-    queryFn: () =>
-      api(isOrgAdmin ? '/admin/memberships' : `/admin/campaigns/${campaign._id}/crew`),
-  });
-
+  // This modal opens from the Campaigns page's UNGATED ⋮ action list, so a team lead reaches it too.
+  // It lists the campaign's own team (its roster) and takes people OFF it. Putting people ON a campaign
+  // is the Team page's Add people (docs/PROPOSAL_PEOPLE_PAGES.md §E.6) — by email, or for an org admin
+  // from the organization, with the crew chosen and its door check — so this window's old Assign
+  // buttons became a link there: an Assign here couldn't pick a crew or say what a returning person's
+  // earlier doors would do.
   const assignmentsQ = useQuery({
     queryKey: ['admin', 'campaign-assignments', campaign._id],
-    queryFn: () => api(`/admin/campaigns/${campaign._id}/assignments`),
+    queryFn: ({ signal }) => api(`/admin/campaigns/${campaign._id}/assignments`, { signal }),
   });
 
   useEffect(() => {
@@ -34,55 +28,35 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const assignedSet = useMemo(
-    () => new Set((assignmentsQ.data?.assignments || []).map((a) => a.userId)),
-    [assignmentsQ.data]
-  );
-
-  const assignMut = useMutation({
-    mutationFn: (userIds) =>
-      api(`/admin/campaigns/${campaign._id}/assignments`, {
-        method: 'POST',
-        body: { userIds },
-      }),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaign._id] }),
-  });
-
   const unassignMut = useMutation({
     mutationFn: (userId) =>
       api(`/admin/campaigns/${campaign._id}/assignments/${userId}`, {
         method: 'DELETE',
       }),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaign._id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', campaign._id] });
+      // A lead's Team page reads the crew endpoint too; without this the removed person stays listed.
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', campaign._id] });
+      qc.invalidateQueries({ queryKey: ['memberships'] });
+      qc.invalidateQueries({ queryKey: ['turf-assignments'] });
+      qc.invalidateQueries({ queryKey: ['turfs'] });
+    },
   });
 
-  // Anyone active in the org can be assigned — admins canvass too.
-  const members = (membersQ.data?.members || []).filter(
-    (m) => m.user.isActive && m.isActive
+  const team = useMemo(
+    () =>
+      [...(assignmentsQ.data?.assignments || [])].sort((a, b) =>
+        `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`)
+      ),
+    [assignmentsQ.data]
   );
-
-  const filtered = members.filter((m) => {
+  const filtered = team.filter((a) => {
     if (!search.trim()) return true;
-    const hay = `${m.user.firstName} ${m.user.lastName} ${m.user.email}`.toLowerCase();
-    return hay.includes(search.trim().toLowerCase());
+    return `${a.firstName} ${a.lastName} ${a.email}`.toLowerCase().includes(search.trim().toLowerCase());
   });
-
-  function toggle(userId) {
-    if (assignedSet.has(userId)) {
-      unassignMut.mutate(userId);
-    } else {
-      assignMut.mutate([userId]);
-    }
-  }
-
-  function bulkAssignAll() {
-    const ids = filtered
-      .map((m) => m.user.id)
-      .filter((id) => !assignedSet.has(id));
-    if (ids.length) assignMut.mutate(ids);
-  }
+  // An archived campaign's roster is frozen (the server answers 409); it still lists who walked it.
+  const archived = campaign.isActive === false;
+  const addLink = `/campaigns/${campaign._id}/team?add=${isOrgAdmin ? 'org' : 'email'}`;
 
   return (
     <div
@@ -95,20 +69,20 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
       >
         <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-fg">Assign people</h2>
+            <h2 className="text-lg font-semibold text-fg">Assignments</h2>
             <p className="text-sm text-fg-muted">
               Campaign: <span className="font-medium">{campaign.name}</span>
             </p>
             <p className="mt-1 text-xs text-fg-muted">
-              Only assigned canvassers will see this campaign in the mobile app.
+              Only people on this campaign’s team see it in the mobile app.
             </p>
-            {!isOrgAdmin && (
+            {!archived && (
               <p className="mt-1 text-xs text-fg-muted">
-                This is the campaign’s own team. To add someone,{' '}
-                <Link to={`/campaigns/${campaign._id}/team`} onClick={onClose} className="font-medium text-brand-accent hover:underline">
-                  open the Team tab
-                </Link>{' '}
-                and add them by email.
+                To add people, use{' '}
+                <Link to={addLink} onClick={onClose} className="font-medium text-brand-accent hover:underline">
+                  Add people on the Team page
+                </Link>
+                , where you choose their crew and see what their earlier doors will do.
               </p>
             )}
           </div>
@@ -130,50 +104,55 @@ export default function CampaignAssignmentsModal({ campaign, onClose }) {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search people…"
+              placeholder="Search this team…"
               className="flex-1 rounded-md border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             />
-            <button
-              onClick={bulkAssignAll}
-              className="rounded-md border border-border-strong px-3 py-2 text-xs font-medium text-fg-muted hover:bg-sunken"
-            >
-              Assign all visible
-            </button>
           </div>
 
-          {membersQ.isLoading || assignmentsQ.isLoading ? (
+          {archived && (
+            <p className="mb-3 text-xs text-fg-muted">This campaign is archived, so its team can’t change.</p>
+          )}
+          {unassignMut.error && <p className="mb-3 text-sm text-danger">{unassignMut.error.message}</p>}
+
+          {assignmentsQ.isLoading ? (
             <div className="py-8 text-center text-sm text-fg-muted">Loading…</div>
-          ) : members.length === 0 ? (
+          ) : team.length === 0 ? (
             <div className="rounded border border-dashed border-border bg-sunken px-4 py-6 text-center text-sm text-fg-muted">
-              No members in this org yet. Add one from the Users page.
+              No one is on this campaign yet.
             </div>
           ) : (
             <ul className="max-h-80 overflow-auto divide-y divide-border rounded-md border border-border">
-              {filtered.map((m) => {
-                const u = m.user;
-                const assigned = assignedSet.has(u.id);
+              {filtered.map((a) => {
+                // The server's rule for a lead (assignments.js, item 41): they take off canvassers, people
+                // no longer in the org, and themselves; admins, other leads and staff are an org admin's
+                // to remove.
+                const isSelf = String(a.userId) === String(user?.id);
+                const mayRemove =
+                  isOrgAdmin || isSelf || a.status === 'removed' || (a.role === 'canvasser' && !a.isSuperAdmin);
                 return (
-                  <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <li key={a.userId} className="flex items-center justify-between px-3 py-2 text-sm">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-fg">{u.firstName} {u.lastName}</span>
-                        {m.role === 'admin' && (
-                          <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">admin</span>
+                        <span className="font-medium text-fg">{a.firstName} {a.lastName}</span>
+                        {(a.role === 'admin' || a.role === 'lead') && (
+                          <span className="rounded bg-sunken px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                            {a.role}
+                          </span>
                         )}
                       </div>
-                      <div className="text-xs text-fg-muted">{u.email}</div>
+                      <div className="text-xs text-fg-muted">{a.email}</div>
                     </div>
-                    <button
-                      onClick={() => toggle(u.id)}
-                      disabled={assignMut.isPending || unassignMut.isPending}
-                      className={
-                        assigned
-                          ? 'rounded-md border border-danger/30 bg-danger-tint px-3 py-1 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50'
-                          : 'rounded-md border border-brand-accent/30 bg-brand-tint px-3 py-1 text-xs font-semibold text-brand-accent hover:bg-brand-tint disabled:opacity-50'
-                      }
-                    >
-                      {assigned ? 'Unassign' : 'Assign'}
-                    </button>
+                    {archived ? null : mayRemove ? (
+                      <button
+                        onClick={() => unassignMut.mutate(a.userId)}
+                        disabled={unassignMut.isPending}
+                        className="rounded-md border border-danger/30 bg-danger-tint px-3 py-1 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+                      >
+                        Unassign
+                      </button>
+                    ) : (
+                      <span className="text-xs text-fg-subtle">An org admin manages this one</span>
+                    )}
                   </li>
                 );
               })}

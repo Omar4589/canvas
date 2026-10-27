@@ -20,8 +20,9 @@ import InsetGroup, {
   InsetNavRow,
   InsetNoteRow,
   GroupFooter,
-  RowEmoji,
+  RowIcon,
 } from '../../../components/InsetGroup';
+import { DoorIcon, RouteCheckIcon, ClipboardIcon, VotersIcon } from '../../../components/icons/navIcons';
 
 // Mobile Export Center. Tapping a type opens ExportSheet — what one row is, what's in the
 // file, per-type filters, and a live row-count estimate — and only the sheet's button
@@ -47,6 +48,14 @@ const TYPE_LABEL = {
   // screen renders every job the org has, so a missing key here shows a raw slug on the phone.
   'results-by-voter': 'Results by voter',
   'full-backup': 'Full backup',
+};
+// Each queueable type's row icon, keyed by id here rather than in lib/exportTypes so lib/ stays
+// JSX-free (its tests run under plain node).
+const TYPE_ICONS = {
+  'canvass-activity': DoorIcon,
+  'doors-by-round': RouteCheckIcon,
+  'survey-results': ClipboardIcon,
+  'voter-file': VotersIcon,
 };
 const STATUS_LABEL = {
   pending: 'Queued',
@@ -260,7 +269,7 @@ export default function AdminExports() {
             <InsetNavRow
               key={t.id}
               emphasis="menu"
-              leading={<RowEmoji>{t.emoji}</RowEmoji>}
+              leading={<RowIcon icon={TYPE_ICONS[t.id]} />}
               label={t.label}
               sub={t.sub}
               disabled={!cId}

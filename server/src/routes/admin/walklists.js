@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import multer from 'multer';
 import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { uploadIdList } from '../../middleware/idListUpload.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
@@ -19,8 +19,6 @@ import {
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 function activeOrgId(req) {
   return req.activeOrg?._id;
@@ -149,7 +147,7 @@ async function ownershipBreakdown(campaign, ownership) {
 
 // Dry-run: upload a Voter-ID CSV, match it to this campaign's voters (by stateVoterId),
 // and report the resolved door set + ownership breakdown. No save. Mirrors POST /preview.
-router.post('/from-csv/preview', upload.single('file'), async (req, res, next) => {
+router.post('/from-csv/preview', uploadIdList, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
@@ -189,7 +187,7 @@ router.post('/from-csv/preview', upload.single('file'), async (req, res, next) =
 // Save a frozen walk list from an uploaded Voter-ID CSV (matched by stateVoterId).
 // The result is an ordinary frozen SavedSearch — it seeds/claims efforts via the same
 // path as a filter-built list, so disjointness/claim/re-carve are reused unchanged.
-router.post('/from-csv', upload.single('file'), async (req, res, next) => {
+router.post('/from-csv', uploadIdList, async (req, res, next) => {
   try {
     const { name } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });

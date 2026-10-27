@@ -183,7 +183,7 @@ export default function DayDetail() {
         )}
         {s?.highlights?.firstActivityAt ? (
           <Text style={styles.shiftLine}>
-            🕘 {formatRange(s.highlights.firstActivityAt, s.highlights.lastActivityAt, campaign?.timeZone)}
+            {formatRange(s.highlights.firstActivityAt, s.highlights.lastActivityAt, campaign?.timeZone)}
           </Text>
         ) : null}
 

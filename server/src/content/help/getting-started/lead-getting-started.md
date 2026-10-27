@@ -45,9 +45,14 @@ On any campaign you've been granted, you're as powerful as an admin:
 **More → Users** shows the people on *your* campaigns — never the whole organization. From there you
 can create canvassers onto a campaign (they're assigned automatically, with an optional coordinator),
 set a **temporary password** when someone's locked out, and switch a canvasser's account off and back
-on. Heads-up on the off-switch: an account is on or off for the **whole organization**, so if you
-share a canvasser with another campaign, switching them off reaches that campaign too — the app names
-what it affects before you confirm.
+on. With an app update you can also take canvassers, and yourself, off a campaign there. Heads-up on
+the off-switch: an account is on or off for the **whole organization**, so if you share a canvasser
+with another campaign, switching them off reaches that campaign too — the app names what it affects
+before you confirm.
+
+On the web, your campaign's **Team** page does the same jobs: filters for who never signed in, who's
+deactivated and who's paused, a panel for each person with their login fixes at the top, and **Move to
+crew…** for several people at once. See [The Team page](page-team).
 
 ## Your day to day
 
@@ -58,4 +63,4 @@ what it affects before you confirm.
 
 On your phone, the **Overview** tab works the same way: with one active campaign, it *is* that campaign's screen, and its numbers refresh on their own while you watch. Pull down to refresh them. If you still see a list with just your one campaign in it, your app hasn't picked up this change yet: when it says **A new version of Doorline is ready**, tap **Restart** (or, if it asks you to update from the App Store or Google Play, do that).
 
-> Tip: If you also walk doors yourself, an admin adds you to a campaign's walker roster like any canvasser, and you use the mobile canvassing flow for your own books.
+> Tip: If you also walk doors yourself, take a book on the campaign — that puts you on its team — and use the mobile canvassing flow for your own books. If you worked that campaign before, your earlier doors there move to No team until your crew is set.

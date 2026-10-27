@@ -123,6 +123,11 @@ const clientReportSchema = new mongoose.Schema(
     // aggregations actually used (from zonedDayRange), so the window is reproducible.
     weekStart: { type: String, required: true },
     weekEnd: { type: String, required: true },
+    // Latest progress (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N): an all-time report, whose weekStart
+    // is the day of the campaign's first knock, so its period IS the running total and it shows no "+N"
+    // figures; the weekly chain (New report's first choice, Next's checks, gap lines) ignores it. NO
+    // DEFAULT: absent = a dated report, every report from before. Declared, or strict mode drops it.
+    allTime: { type: Boolean },
     timeZone: { type: String, required: true },
     rangeStartUtc: { type: Date, required: true },
     rangeEndUtc: { type: Date, required: true },
@@ -273,7 +278,7 @@ const clientReportSchema = new mongoose.Schema(
     // The draft Next made from this report — the insert-first CAS that makes a double click return
     // one draft (routes/admin/clientReports.js POST /:id/next).
     nextReportId: { type: mongoose.Schema.Types.ObjectId, default: null },
-    // No accidental doubles (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): true on every report New
+    // No accidental doubles (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): true on every DATED report New
     // report or Next made without "Make a second one", so the unique partial index below
     // (report_period_guard) lets a tab hold ONE such report per period — two Creates pressed at the
     // same moment make one draft. NO DEFAULT on purpose: absent = outside the guard (every report from
@@ -281,6 +286,12 @@ const clientReportSchema = new mongoose.Schema(
     // and strictQuery from filters, and the guard silently holds nothing (round 2 reproduced the drop).
     // Dates never change after creation, so a report's key never moves; deleting it frees the key.
     dupGuard: { type: Boolean },
+    // The same for an ALL-TIME report (Latest progress, §N): its own guard (report_all_time_guard below),
+    // one guarded all-time report per tab and LAST day — never dupGuard, so a dated report and an all-time
+    // one with the same dates (the first week of a campaign whose first knock falls on a week's first day)
+    // never stand for each other. Keyed on the last day alone: the first day is worked out (the campaign's
+    // first knock) and may move. No default and declared, for the reasons dupGuard is.
+    allTimeGuard: { type: Boolean },
     // Bumped by every Erase of this report's History text; a Restore's CAS requires it unchanged, so
     // an Erase landing mid-restore wins (services/reports/clientReportHistory.js).
     eraseEpoch: { type: Number },
@@ -333,5 +344,13 @@ export const REPORT_PERIOD_GUARD = Object.freeze({
   options: Object.freeze({ name: 'report_period_guard', unique: true, partialFilterExpression: Object.freeze({ dupGuard: true }) }),
 });
 clientReportSchema.index(structuredClone(REPORT_PERIOD_GUARD.keys), structuredClone(REPORT_PERIOD_GUARD.options));
+// The all-time reports' guard (allTimeGuard above, §N): one guarded all-time report per tab and last day.
+// Built at boot beside report_period_guard, the same way and for the same reasons; it covers a field no
+// report had before it, so it builds at once.
+export const REPORT_ALL_TIME_GUARD = Object.freeze({
+  keys: Object.freeze({ seriesId: 1, weekEnd: 1 }),
+  options: Object.freeze({ name: 'report_all_time_guard', unique: true, partialFilterExpression: Object.freeze({ allTimeGuard: true }) }),
+});
+clientReportSchema.index(structuredClone(REPORT_ALL_TIME_GUARD.keys), structuredClone(REPORT_ALL_TIME_GUARD.options));
 
 export const ClientReport = mongoose.model('ClientReport', clientReportSchema);

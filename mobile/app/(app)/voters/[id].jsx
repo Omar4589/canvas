@@ -159,7 +159,11 @@ export default function VoterProfile() {
                       <Text style={styles.answerQ}>{a.questionLabel}: </Text>{answerText(a.answer)}
                     </Text>
                   ))}
-                  {s.note ? <Text style={styles.surveyNote}>📝 {s.note}</Text> : null}
+                  {s.note ? (
+                    <Text style={styles.surveyNote}>
+                      <Text style={styles.answerQ}>Note: </Text>{s.note}
+                    </Text>
+                  ) : null}
                 </View>
               ))
             )}

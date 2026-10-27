@@ -6,7 +6,7 @@ import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import IdColumnPicker from '../components/IdColumnPicker.jsx';
 import { saveTextFile } from '../lib/downloadFile.js';
 import { formatInTz } from '../lib/datetime.js';
-import { describeIdsInFile, zeroMatchLine, historySubtitle } from '../lib/idListPreview.js';
+import { describeIdsInFile, zeroMatchLine, historySubtitle, idListTooBig, idListTooBigText } from '../lib/idListPreview.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -71,7 +71,8 @@ export default function DoNotContactPage() {
   });
 
   function runPreview(f, st, col) {
-    if (f && st) preview.mutate({ file: f, state: st, idColumn: col });
+    // Over the size limit: refused right here, before anything uploads.
+    if (f && st && !idListTooBig(f)) preview.mutate({ file: f, state: st, idColumn: col });
     else preview.reset();
   }
   function onPickFile(f) {
@@ -161,6 +162,7 @@ export default function DoNotContactPage() {
               />
             )}
             {preview.error && !undetected && <p className="mt-1 text-xs text-danger">{preview.error.message}</p>}
+            {idListTooBig(file) && <p className="mt-1 text-xs text-danger">{idListTooBigText()}</p>}
           </div>
         </div>
 

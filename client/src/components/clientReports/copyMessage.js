@@ -1,4 +1,4 @@
-import { formatPeriod } from './reportDates.js';
+import { formatCivil, formatPeriod } from './reportDates.js';
 import { reportUrl, shareUrl } from './linkState.js';
 
 // The copy-ready message (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G6, owner ruling 10-23): what the
@@ -47,6 +47,15 @@ export const copyMessageFor = ({ report, link, origin, justMade = false }) => {
     ? `${n(c.litKnocks)} lit dropped (${signed(p.litKnocks)})`
     : `${n(c.surveysTaken)} ${Number(c.surveysTaken) === 1 ? 'survey' : 'surveys'} (${signed(p.surveysTaken)})`;
   const url = reportUrl(origin, link.token, report.id);
+  // An all-time report (Latest progress, SIMPLIFY §N) has nothing new to quote, only its totals: "The
+  // report through Oct 28 is up: 3,412 doors knocked so far and 1,980 surveys. Open it here: …"
+  if (report.allTime) {
+    const total = lit ? `${n(c.litKnocks)} lit dropped` : `${n(c.surveysTaken)} ${Number(c.surveysTaken) === 1 ? 'survey' : 'surveys'}`;
+    return (
+      `${subjectOf(report.scope)} through ${formatCivil(report.weekEnd)} is up: ${n(c.doorsKnocked)} doors knocked so far and ${total}. ` +
+      `Open it here: ${url}${passwordEnding(link, justMade)}.`
+    );
+  }
   return (
     `${subjectOf(report.scope)} for ${formatPeriod(report.weekStart, report.weekEnd)} is up: ` +
     `${n(c.doorsKnocked)} doors knocked so far (${signed(p.doorsKnocked)} in that period) and ${second}. ` +
@@ -66,6 +75,7 @@ export const messageReportOf = (r) => ({
   id: r.id || (r._id ? String(r._id) : ''),
   weekStart: r.weekStart,
   weekEnd: r.weekEnd,
+  allTime: !!r.allTime,
   campaignType: r.campaignType || null,
   scope: r.scope ? { ...r.scope, seriesLabel: r.seriesLabel || r.scope.seriesLabel || r.scope.label } : null,
   cumulative: r.headline?.cumulative || r.stats?.cumulative?.totals || {},

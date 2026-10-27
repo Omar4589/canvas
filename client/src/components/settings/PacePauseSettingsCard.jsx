@@ -4,20 +4,24 @@ import { api } from '../../api/client.js';
 import { Card, Button } from '../ui';
 import Segmented from '../ui/Segmented.jsx';
 import { invalidatePaceCaches } from '../audit/PacePausePanel.jsx';
+import RecipientPicker from './RecipientPicker.jsx';
+import { saveIds, settingsChanged } from '../../lib/recipientPicker.js';
 
-// The Users page's "Automatic pause" card (docs/PROPOSAL_PACE_PAUSE.md §H). Org admins see it; billing admins
-// change it. On for every organization by default. "Billing admins (always)" stays a choice of its own, so a
-// billing admin added later is included without anyone editing the list.
-const ROLE = { admin: 'Org admin', lead: 'Team lead' };
+// The Settings page's "Automatic pause" card (docs/PROPOSAL_PACE_PAUSE.md §H; it lived on the Users page
+// until docs/PROPOSAL_PEOPLE_PAGES.md §C moved it). Org admins see it; billing admins change it. On for every
+// organization by default. "Billing admins (always)" stays a choice of its own, so a billing admin added
+// later is included without anyone editing the list. Who else gets the email is RecipientPicker.
+
+// The settings read, shared with the Settings page (its loading and error states observe the same query).
+export const settingsQuery = {
+  queryKey: ['admin', 'pace-pauses', 'settings'],
+  queryFn: ({ signal }) => api('/admin/pace-pauses/settings', { signal }),
+  retry: false,
+};
 
 export const PacePauseSettingsView = ({ s, draft, setDraft, saving, error, onSave }) => {
-  const changed =
-    draft.enabled !== s.enabled ||
-    draft.billingAdmins !== s.billingAdmins ||
-    [...draft.alertUserIds].sort().join() !== [...s.alertUserIds].sort().join();
+  const changed = settingsChanged(s, draft);
   const turningOff = s.enabled && !draft.enabled;
-  const toggleUser = (id) =>
-    setDraft((d) => ({ ...d, alertUserIds: d.alertUserIds.includes(id) ? d.alertUserIds.filter((x) => x !== id) : [...d.alertUserIds, id] }));
   return (
     <Card className="mb-6 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -38,42 +42,7 @@ export const PacePauseSettingsView = ({ s, draft, setDraft, saving, error, onSav
         />
       </div>
 
-      <div className="mt-4">
-        <p className="text-sm font-medium text-fg">Who gets the email</p>
-        <p className="text-xs text-fg-muted">
-          It names no one and lists no addresses; the details are on the Audit page. A team lead only gets it for
-          campaigns they manage — and a team lead may be your client.
-        </p>
-        <ul className="mt-2 space-y-1.5">
-          <li>
-            <label className="inline-flex items-center gap-2 text-sm text-fg">
-              <input
-                type="checkbox"
-                disabled={!s.canEdit}
-                checked={draft.billingAdmins}
-                onChange={(e) => setDraft((d) => ({ ...d, billingAdmins: e.target.checked }))}
-                className="h-4 w-4 rounded border-border-strong text-brand-accent"
-              />
-              Billing admins (always)
-            </label>
-          </li>
-          {s.eligible.map((p) => (
-            <li key={p.userId}>
-              <label className="inline-flex items-center gap-2 text-sm text-fg">
-                <input
-                  type="checkbox"
-                  disabled={!s.canEdit}
-                  checked={draft.alertUserIds.includes(p.userId)}
-                  onChange={() => toggleUser(p.userId)}
-                  className="h-4 w-4 rounded border-border-strong text-brand-accent"
-                />
-                {p.name}
-                <span className="text-xs text-fg-muted">{ROLE[p.role] || p.role}{p.billingAdmin ? ' · billing admin' : ''}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <RecipientPicker s={s} draft={draft} setDraft={setDraft} />
 
       {turningOff && s.openPauses > 0 && (
         <p className="mt-3 text-sm text-warning-fg">
@@ -99,7 +68,7 @@ export const PacePauseSettingsView = ({ s, draft, setDraft, saving, error, onSav
 
 const PacePauseSettingsCard = () => {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ['admin', 'pace-pauses', 'settings'], queryFn: () => api('/admin/pace-pauses/settings'), retry: false });
+  const q = useQuery(settingsQuery);
   const [draft, setDraft] = useState(null);
   const s = q.data;
   const current = draft ?? (s ? { enabled: s.enabled, billingAdmins: s.billingAdmins, alertUserIds: s.alertUserIds } : null);
@@ -123,7 +92,8 @@ const PacePauseSettingsCard = () => {
         save.mutate({
           ...(current.enabled !== s.enabled ? { enabled: current.enabled } : {}),
           billingAdmins: current.billingAdmins,
-          alertUserIds: current.alertUserIds,
+          // Only picks who can still be emailed: a stale one is dropped, instead of failing the save.
+          alertUserIds: saveIds(s, current.alertUserIds),
         })
       }
     />

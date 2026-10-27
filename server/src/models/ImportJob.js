@@ -110,6 +110,12 @@ const importJobSchema = new mongoose.Schema(
     // Persisted so a BullMQ retry — which would re-read post-move state — still knows
     // which doors to re-check for emptiness. Source of retry-safe orphan deactivation.
     sourceHouseholdIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Household', default: [] },
+    // Both doors of every move this import made (the one an incoming voter left and the one they landed in),
+    // read right after the write. Persisted for the same reason as sourceHouseholdIds: a retry re-reads
+    // post-move state, where nobody looks moved, yet these doors still need their resident-derived flags
+    // (fullyVoted, fullyDnc) recomputed — a voted voter who moved can finish the door they joined or the one
+    // they left (importProcessor.js).
+    movedHouseholdIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Household', default: [] },
     // Exact docs this import INSERTED (net-new), captured from the upsert's upsertedIds.
     // Power the "undo import" — only these, and only if still untouched, can be removed.
     insertedHouseholdIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Household', default: [] },

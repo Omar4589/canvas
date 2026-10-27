@@ -41,13 +41,15 @@ const CARDS = {
   ],
 };
 
-const Row = ({ label, now, after, unit = '', period = null, emphasis = false }) => (
+// `showPeriod` false drops the "In the period" cell: an all-time report's period is its running total
+// (Latest progress, SIMPLIFY §N), so the column would only repeat the totals as "+N".
+const Row = ({ label, now, after, unit = '', period = null, emphasis = false, showPeriod = true }) => (
   <tr className={emphasis ? 'font-medium text-fg' : 'text-fg'}>
     <td className="py-1.5 pr-3 text-fg-muted">{label}</td>
     <td className="py-1.5 pr-3 text-right tabular-nums">{now == null ? '—' : `${n(now)}${unit}`}</td>
     <td className="py-1.5 pr-3 text-right tabular-nums">{after == null ? '—' : `${n(after)}${unit}`}</td>
     <td className="py-1.5 pr-3 text-right tabular-nums text-fg-muted">{now != null && after != null && delta(now, after) ? `(${delta(now, after)})` : ''}</td>
-    <td className="py-1.5 text-right tabular-nums text-fg-muted">{period}</td>
+    {showPeriod && <td className="py-1.5 text-right tabular-nums text-fg-muted">{period}</td>}
   </tr>
 );
 
@@ -301,7 +303,7 @@ const RefreshDialog = ({
                     <th className="py-1 pr-3 text-right font-medium" scope="col">Now</th>
                     <th className="py-1 pr-3 text-right font-medium" scope="col">After</th>
                     <th className="py-1 pr-3 text-right font-medium" scope="col"><span className="sr-only">Change</span></th>
-                    <th className="py-1 text-right font-medium" scope="col">In the period</th>
+                    {!report.allTime && <th className="py-1 text-right font-medium" scope="col">In the period</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -313,10 +315,12 @@ const RefreshDialog = ({
                       after={afterT[key] ?? 0}
                       unit={unit || ''}
                       emphasis={key === 'doorsKnocked'}
+                      showPeriod={!report.allTime}
                       period={unit ? null : (nowP[key] ?? 0) === (afterP[key] ?? 0) ? `+${n(afterP[key])}` : `+${n(nowP[key])} → +${n(afterP[key])}`}
                     />
                   ))}
                   <Row
+                    showPeriod={!report.allTime}
                     label={(result?.mapMode || live.mapMode) === 'area' ? 'Areas on the map' : 'Doors on the map'}
                     now={served ? ((live.mapMode === 'area' ? report.areaCellCount : report.mapPointCount) ?? 0) : null}
                     after={result?.mapShown === false ? null : (result?.mapMode === 'area' ? result?.areaCellCount : result?.mapPointCount) ?? 0}

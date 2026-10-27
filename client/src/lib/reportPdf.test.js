@@ -266,6 +266,27 @@ test('the totals line prints right under ACTIVITY AT A GLANCE: since the campaig
   assert.equal(runs[runs.indexOf('ACTIVITY AT A GLANCE') + 1], 'Totals since the campaign began.', runs.join(' | '));
 });
 
+test('an all-time report (Latest progress, SIMPLIFY §N): "All time" in the header and name, its totals as of a day, no "+" line', async () => {
+  await generateReportPdf(
+    {
+      ...report,
+      weekStart: '2026-09-14',
+      weekEnd: '2026-10-28',
+      allTime: true,
+      numbersThrough: '2026-10-28',
+      earlierTotals: null,
+      scope: { kind: 'campaign' },
+      stats: { ...report.stats, period: { totals: { doorsKnocked: 3412, surveysTaken: 1980 } } },
+    },
+    { campaignName: 'Fall 2026' }
+  );
+  assert.equal(saved.name, 'fall-2026-whole-campaign-all-time-report-2026-09-14-to-2026-10-28.pdf');
+  const runs = textRuns(saved.out);
+  assert.ok(runs.some((r) => r.includes('All time  ·  Sep 14 - Oct 28, 2026  ·  Whole campaign')), runs.join(' | '));
+  assert.equal(runs[runs.indexOf('ACTIVITY AT A GLANCE') + 1], 'Totals since the campaign began, as of Oct 28.', runs.join(' | '));
+  assert.ok(!runs.some((r) => /^\+|in these \d+ days|No new|Numbers as of|Quiet/.test(r)), runs.join(' | '));
+});
+
 test('a 14-day report never says "week"; a one-day report names its day', async () => {
   await generateReportPdf({ ...report, weekEnd: '2026-10-26', scope: { kind: 'campaign' }, stats: { ...report.stats, period: { totals: {} } } }, { campaignName: 'Fall 2026' });
   assert.equal(saved.name, 'fall-2026-whole-campaign-report-2026-10-13-to-2026-10-26.pdf');

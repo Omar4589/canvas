@@ -147,6 +147,26 @@ const teamPeriodFigures = async (report, inputs) => {
   };
 };
 
+// An all-time team report (Latest progress, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N) keeps only the one-person
+// check — its period is the whole campaign, so the door-visit figures would re-read every visit each time
+// the builder opens (6.6 s on a 1M-knock ledger, code review) to compare what its own totals already are.
+// The count is the build's (provenance.canvassers, frozen with the numbers); a report built before the
+// build counted it reads the same distinct the period figures run. `allTime: true` tells the builder.
+const allTimeTeamFigures = async (report, inputs) => {
+  const frozen = report.stats?.cumulative?.provenance?.canvassers;
+  if (Number.isInteger(frozen)) return { allTime: true, canvassers: frozen };
+  const base = {
+    organizationId: report.organizationId,
+    campaignId: report.campaignId,
+    ...(report.effortId ? { effortId: report.effortId } : {}),
+    actionType: { $in: KNOCK_ACTIONS },
+    timestamp: { $lt: report.rangeEndUtc },
+    ...NOT_BULK,
+  };
+  const users = await CanvassActivity.distinct('userId', withTeam(base, crewsMatch(inputs.coordinatorIds || [])));
+  return { allTime: true, canvassers: users.length };
+};
+
 // The link the client would open: is there a usable one — active, unexpired and not locked (G5, G6)
 // — and if not, why, so the last line can name the fix: create one, renew it, unlock or rotate it,
 // enable it. Only links that can open THIS report count (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D,
@@ -201,7 +221,8 @@ const earlierTotalsReason = async ({ report, prev, inputs, team }) => {
     const moved = await CoordinatorChange.exists({
       campaignId: report.campaignId,
       createdAt: { $gt: new Date(from), ...(to ? { $lte: new Date(to) } : {}) },
-      $or: [{ fromCoordinatorId: { $in: crews } }, { toCoordinatorId: { $in: crews } }],
+      // A move whose doors came from several teams names them in `sources`.
+      $or: [{ fromCoordinatorId: { $in: crews } }, { toCoordinatorId: { $in: crews } }, { 'sources.coordinatorId': { $in: crews } }],
     });
     if (moved) return reason('canvassers_changed_teams');
   }
@@ -371,7 +392,8 @@ export const publishChecks = async (report, { template = null, now = new Date() 
     scopedOpenMockFlags(report, inputs),
     earlierTotalsCheck({ report, inputs, team }),
     linkState(report),
-    team && report.snapshotId ? teamPeriodFigures(report, inputs) : null,
+    // An all-time report keeps only the one-person check (allTimeTeamFigures, above).
+    team && report.snapshotId ? (report.allTime ? allTimeTeamFigures(report, inputs) : teamPeriodFigures(report, inputs)) : null,
     areaNarrowing({ report, inputs, inputsOf, labelOf }),
     surveysForConditions().then((surveys) => conditionsUnknownFor({ report, inputs, visibleSet, surveys })),
   ]);

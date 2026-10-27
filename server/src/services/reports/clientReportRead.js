@@ -49,6 +49,12 @@ export const comparedSnapshotMoved = (report, prev) =>
  * `oneReport`: read through a link to one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D), which
  * names no other report — the same counts, with `since: null` and `before: <this report's start>`:
  * "Totals from before Oct 19 were updated by −120 doors after they were first reported."
+ *
+ * An all-time report (Latest progress, §N) starts on the campaign's first knock, so nothing ends before
+ * it starts: its earlier report is the series' latest shown one ending on or before its LAST day (the
+ * build's comparedFor picks the same), and its one-report form says `through: <that report's last day>`
+ * ("Totals through Oct 25 were updated by …") — "before <the day after>" read as before this report's
+ * own last day when both ended the same day (code review).
  */
 export const earlierTotalsLine = async (report, { prev: loaded = undefined, oneReport = false } = {}) => {
   if (!report?.earlierTotals || !report.comparedReportId) return null;
@@ -60,7 +66,7 @@ export const earlierTotalsLine = async (report, { prev: loaded = undefined, oneR
     .map((card) => ({ card, delta: (report.earlierTotals[card] ?? 0) - (sent[card] ?? 0) }))
     .filter((c) => c.delta !== 0);
   if (!changes.length) return null;
-  if (oneReport) return { changes, since: null, before: report.weekStart };
+  if (oneReport) return report.allTime ? { changes, since: null, through: prev.weekEnd } : { changes, since: null, before: report.weekStart };
   let since = null;
   if (!prev.takenDownAt) {
     const latest = await ClientReport.findOne(
@@ -69,7 +75,7 @@ export const earlierTotalsLine = async (report, { prev: loaded = undefined, oneR
         campaignId: report.campaignId,
         _id: { $ne: report._id },
         ...SHOWN,
-        rangeEndUtc: { $lte: report.rangeStartUtc },
+        rangeEndUtc: { $lte: report.allTime ? report.rangeEndUtc : report.rangeStartUtc },
         ...sameSeries(report),
       },
       { _id: 1 }
@@ -83,26 +89,27 @@ export const earlierTotalsLine = async (report, { prev: loaded = undefined, oneR
 
 /**
  * The older and newer shown report in the same series — the client's arrows. Ids only. Ordered the
- * way the hub lists them — by start, then publish time, then id — and compared on that whole tuple,
- * so two reports starting the same day each get an arrow to the other (a strict comparison on the
- * start alone gave both none: PUBUX-6). A draft (the admin preview) reads as published now, where it
- * will sit once published.
+ * way the hub lists them — by last day (a Latest progress report, §N, starts on the campaign's first
+ * knock, so the first day would make it the oldest), then publish time, then id — and compared on that
+ * whole tuple, so two reports ending the same day each get an arrow to the other (a strict comparison
+ * on one day alone gave both none: PUBUX-6). A draft (the admin preview) reads as published now, where
+ * it will sit once published.
  */
 export const seriesNav = async (report) => {
   const scope = { organizationId: report.organizationId, campaignId: report.campaignId, ...SHOWN, ...sameSeries(report), _id: { $ne: report._id } };
-  const start = report.rangeStartUtc;
+  const end = report.rangeEndUtc;
   const at = report.publishedAt || new Date();
   const beside = (op) => [
-    { rangeStartUtc: { [op]: start } },
-    { rangeStartUtc: start, publishedAt: { [op]: at } },
-    { rangeStartUtc: start, publishedAt: at, _id: { [op]: report._id } },
+    { rangeEndUtc: { [op]: end } },
+    { rangeEndUtc: end, publishedAt: { [op]: at } },
+    { rangeEndUtc: end, publishedAt: at, _id: { [op]: report._id } },
   ];
   const [older, newer] = await Promise.all([
     ClientReport.findOne({ ...scope, $or: beside('$lt') }, { _id: 1 })
-      .sort({ rangeStartUtc: -1, publishedAt: -1, _id: -1 })
+      .sort({ rangeEndUtc: -1, publishedAt: -1, _id: -1 })
       .lean(),
     ClientReport.findOne({ ...scope, $or: beside('$gt') }, { _id: 1 })
-      .sort({ rangeStartUtc: 1, publishedAt: 1, _id: 1 })
+      .sort({ rangeEndUtc: 1, publishedAt: 1, _id: 1 })
       .lean(),
   ]);
   return { olderId: older ? String(older._id) : null, newerId: newer ? String(newer._id) : null };

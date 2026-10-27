@@ -66,11 +66,13 @@ On the Users page, "Add member" has two modes:
   This finds a person who *already has an account* (e.g. they canvass for another campaign) and adds
   a membership to your org, without creating a duplicate.
 
-You can also add a **canvasser inline from a campaign's Team page** (the **+ New canvasser** button) —
-it creates (or links) the account and puts them on that campaign in one step, on **both** the web console
-and the mobile admin app. This inline form is available to **team leads** too (a lead owns onboarding), and
-it offers the same **Existing user** link toggle, so a returning canvasser who already has an account can
-be added without a duplicate. (It only makes/links *canvassers*; use the Users page for admins/leads.) The
+You can also add people **from a campaign's Team page** (**Add people** on the web console, **Add a
+canvasser** in the mobile admin app). It creates or links the account and puts them on that campaign, **on
+the crew you pick**, in one step. You type the email first, and Doorline says whether it belongs to a
+colleague in your organization or needs a new account, so a returning canvasser is never duplicated. It is
+available to **team leads** too (a lead owns onboarding). It only *creates* canvassers; use the Users page
+for a new admin or lead. On the Users page, **Add member** with the Canvasser role has an optional
+**Campaign**: picking one hands what you typed to the same Team-page steps, crew choice included. The
 **phone** field is optional and **auto-formats to `(555) 123-4567`** as you type — it won't accept letters.
 
 If you try to create a **new** user with an email that already exists anywhere, you'll get a clear
@@ -115,17 +117,20 @@ below then dragged the first campaign's whole history onto the second lead's tea
 
 ### Where you set it
 
-**One place: a campaign's Team tab, in the web console.** Open the campaign → **Team** → click the
-person → pick their crew. Before anything commits, a confirmation tells you how many of **that
-campaign's** doors the change would move, and what it will not touch; you can cancel. Admins can do this
-on any campaign; a team lead can on the campaigns they were granted. (The mobile admin app can add and
-create people on a campaign, but crews are set on the console.)
+**On the campaign.** In the web console: open the campaign → **Team** → click the person → pick their
+crew in their panel. In the mobile admin app: **More → Users** on that campaign → tap the person. Before
+anything commits, a confirmation tells you how many of **that campaign's** doors the change would move,
+and what it will not touch; you can cancel. To set several people at once, tick them on the Team page and
+choose **Move to crew…** (on the phone, **Move all shown to a crew…** under a filter): the same check,
+totalled for everyone. You can also pick the crew while adding someone (above). Admins can do this on any
+campaign; a team lead can on the campaigns they were granted.
 
-The org **Users** page can no longer *set* a crew — it shows them. Open a member's profile and the
-**Crews** block lists **one row per campaign** they're on, with the crew they're on there, each row
-linking straight to that campaign's Team tab. There is no crew dropdown on the profile, no Coordinator
-column or filter on the Users list, and no coordinator field on "Add member": one value on a person's
-org profile cannot be true for somebody who is on two campaigns.
+The org **Users** page doesn't *set* a crew — it shows them. Open a member and the **Everywhere in your
+organization** section of their panel lists their crew on **each campaign** they're on, each one linking
+to that campaign's Team tab with them open. There is no crew dropdown there, no Coordinator column or
+filter on the Users list, and no coordinator field on the Users page's own "Add member" form: one value on
+a person's org profile cannot be true for somebody who is on two campaigns. (Add member's optional
+Campaign hands off to the Team page's steps, which ask for the crew on that campaign.)
 
 ### A team's numbers follow the crew you have set today
 
@@ -148,13 +153,20 @@ ones you want:
   console shows you the door count before it commits. When either crew belongs to a client-report
   team that has reports, the web confirm also says so: "This also changes the numbers in the Paid team
   client report" (published reports keep their numbers until refreshed; [CLIENT_PORTAL.md](CLIENT_PORTAL.md)
-  → *Team reports*). The phone's member sheet doesn't show that line yet; it needs an app update.
+  → *Team reports*). The phone shows the door count but never that line: it doesn't load client reports.
 - **Someone who leaves keeps their doors on their team.** Deactivate them, take them off the campaign,
   remove them from the org, delete their account — their doors stay where they belong. **Losing a
-  person never moves a number; only a crew change does.** (This used to be broken: the team was read
-  from the campaign roster, so removing someone deleted the row the lookup depended on and their doors
-  fell silently into "No coordinator" — the bucket admins deliberately *exclude*. On a live campaign
-  that under-reported one team by **104 doors**.)
+  person never moves a number; a crew change does, and so does coming back.** (This used to be broken:
+  the team was read from the campaign roster, so removing someone deleted the row the lookup depended on
+  and their doors fell silently into "No coordinator" — the bucket admins deliberately *exclude*. On a
+  live campaign that under-reported one team by **104 doors**.)
+- **Someone who comes back brings their doors with them.** Add a person back to a campaign they worked
+  before, or an admin or team lead joins it again through a book, and all their earlier doors **on that
+  campaign** move to the crew they rejoin, or to "No team" if they rejoin without one. The doors follow
+  the person, whatever their role (the owner's rule, 2026-10-26). The add step says how many doors they
+  have there and which teams those count for, picks their old crew for you when that coordinator can
+  still run one, and shows how many doors move before you confirm. Re-adding someone who is **already**
+  on the campaign changes nothing, crew included: change a crew from their panel instead.
 - **"No coordinator" stays meaningful.** A candidate knocking their own district genuinely has no team,
   and that bucket is theirs — not a dumping ground for anyone the system lost track of.
 
@@ -180,7 +192,8 @@ Two different situations, and the difference is whether they're still on the cam
   one of them is still fixable by setting the crew.
 - **Removed from the campaign.** Their place on that campaign is deleted, so there is no crew there to
   set any more; their doors keep the team frozen on them (the 104-door rule above). If you need to move
-  them, **add them back to the campaign first**, then set the crew.
+  them, **add them back to the campaign on the crew you want**: their earlier doors there move to it as
+  they rejoin (or to "No team" if you pick none).
 
 The **Timeline** shows a **by-team breakdown**: every team's doors, survey doors, surveys taken and
 connection rate, with a Campaign row that the teams add up to. See
@@ -190,8 +203,8 @@ counted (and what happens in the rare case two teams knock the same house).
 **Crews drive book assignment, within the campaign.** Wherever you assign work, people are grouped by
 their crew **on that campaign**:
 
-- The campaign **Team** page groups the roster into crews (a section per coordinator, plus "No
-  coordinator").
+- The campaign **Team** page opens sorted by crew, with a heading per coordinator and "No crew" last,
+  shows each person's crew in its own column, and filters by crew.
 - The **book-assignment** picker (Turf Cutting) has a **crew filter** — pick "Paid Lead" and you see
   only that crew, so you can select the whole team and assign them to the chosen books in one action.
   Each person shows their crew, and a book that ends up with **two crews** flags a "mixed crews" note.
@@ -211,48 +224,59 @@ subset of org members who work it. The team is what:
 - **gates the mobile app** — a canvasser only sees campaigns they're on (admins & super-admins see all); and
 - **gates book assignment** — you can only assign books to people on the team.
 
-Manage it on the campaign's **Team** page (stacked and full-width since 2026-08-09: the roster is the
-page, **+ Add someone** is the header action, and an admin-only **Add from your organization** card
-collapses underneath — the old side-by-side directory pane had shrunk, for a lead, to a button beside
-a mostly empty column). On `md+` the roster rows carry **activity columns** — doors, surveys (survey
-campaigns), last door knocked, last password login — joined client-side from the all-time campaign
-leaderboard (`GET /admin/reports/canvassers?campaignId=`, the same ledger-sourced rows the reports
-pages read) plus the roster's own `lastLoginAt`. `lastSeenAt` stays super-admin-only by design and
-must never be added here.
+Manage it on the campaign's **Team** page (rebuilt 2026-10-27 for three jobs: fixing logins,
+organizing crews and staffing the campaign). Quick filters along the top — **Current team** (where it
+opens), **Never signed in**, **Deactivated**, **Paused** — each carry a count that follows the search and
+the crew and role filters, so a count always equals the rows it shows. The columns are **Member** (with a
+Lead or Admin badge), **Crew**, **Last password login**, **Doors** and **Last door**, 25 people to a page.
+Doors and last door are joined client-side from the all-time campaign leaderboard
+(`GET /admin/reports/canvassers?campaignId=`, the same ledger-sourced rows the reports pages read), last
+password login from the roster's own `lastLoginAt`. `lastSeenAt` stays super-admin-only by design and
+must never be added here. **"Never signed in"** means the account was made on or after May 15, 2026 and
+no password has ever been typed; Doorline didn't record sign-ins before then, so an older account with
+none on record reads **No sign-in recorded** and is left out of that filter and of Resend invites.
 
-Search, sort and paging are all **client-side** over the roster the page already holds — deliberately,
-unlike the super-admin tables which sort and page on the server: this list is one campaign's people,
-and the page needs all of them anyway for the crew grouping and the activity join. **Crew grouping is
-a sort mode, not a separate layout** (`sort.key === 'crew'` orders by coordinator with the unassigned
-last, and the render emits a heading whenever the coordinator changes, including at the top of a page
-so a crew split across a page boundary is labelled on both). Every comparator is written ASCENDING and
-`dir` alone flips it, so a column can never disagree with its own arrow. The page offset is **clamped
-derived state**, never an effect — removing the last member of a page would otherwise leave an empty
-page with a live Prev button. **Click a team member** to open their campaign-scoped **profile panel**: their activity
-in this campaign; their crew/coordinator — this is the only place a crew is set; and, when the viewer
-may manage the account (admin: anyone; lead: canvassers — the `leadMayManageTarget` wall), a
-**Profile** section (name/email/phone, saved through `PATCH /admin/memberships/:userId/user` with the
-multi-org email lock surfaced inline), an **Access** section (temporary password, **Resend invite**
-shown only for someone who has never signed in, and the org-wide on/off switch, whose confirm names
-the other campaigns it reaches via the `/crews` read), and remove-from-campaign. Admins, other leads,
-and Doorline staff render read-only for a lead. A person joins a campaign's team these ways, all
-equivalent:
+Search, filters, sort and paging are all **client-side** over the roster the page already holds —
+deliberately, unlike the super-admin tables which sort and page on the server: this list is one
+campaign's people, and the page needs all of them anyway for the crew headings and the activity join.
+The list logic is one pure module, `client/src/lib/rosterView.js`, copied to the phone and checked by a
+parity test. **Crew grouping is a sort mode, not a separate layout** (sorting by Crew orders by
+coordinator with No crew last, and the list puts a heading wherever the coordinator changes, including at
+the top of a page). The page, filters, sort and the open person live in the page's address, so a link
+reopens the list as it was.
 
-1. **Team page → Add someone**, keyed on their **email address**. One door for every case: an address
+**Click a team member** to open their **panel** (the same one the Users page opens): the buttons for
+their state at the top (Reactivate account, Resend invite, Unpause, Set temporary password), rarer actions
+under **More options ▸**, this campaign's crew and numbers, **Finish it** when an earlier crew change for
+them didn't finish or some of their doors here still count for another team, their recent doors here, and
+for org admins **Everywhere in your organization**. A team lead gets the login fixes for canvassers and
+the crew of anyone on the team; admins, other leads and Doorline staff are read-only for a lead
+(`leadMayManageTarget`). **Tick several** to **Move to crew…**, **Resend invites** (only to people who
+never signed in) or **Remove from campaign** in one go; anyone a step couldn't change is listed with the
+reason and **Retry failed**. A person joins a campaign's team these ways:
+
+1. **Team page → Add people**, keyed on their **email address**. One door for every case: an address
    already belonging to a colleague puts that person on the campaign; an unused one opens a short form and
-   creates the account. An **org admin** additionally gets a searchable directory of the organization
-   alongside it, for bulk-staffing a new campaign; a **team lead** does not, because the Team page shows
-   that campaign's people rather than the organization's (see [ROLES.md](ROLES.md)). Works on the web
-   console **and** the mobile admin app's Users hub.
+   creates the account; either way you pick their **crew** before they're added. An **org admin**
+   additionally gets **From your organization** — search, tick up to 500, one crew for all — for staffing
+   a new campaign; a **team lead** does not, because the Team page shows that campaign's people rather
+   than the organization's (see [ROLES.md](ROLES.md)). Works on the web console **and** the mobile admin
+   app's Users hub (**Add a canvasser**).
 
    **The surprise worth knowing:** if the address turns out to already have a Door Line account —
    including one belonging to another organization — that **existing person is added and anything you
    typed is discarded**. The name you guessed does not overwrite theirs, and a temporary password you
    typed is not applied to an account that is not yours to reset. The confirmation names who actually
    landed; if it is not who you meant, remove them and check the address. A colleague whose account is
-   **switched off** cannot be added until an admin switches it back on, because that flag is org-wide.
-2. **Walk Lists → Manage → Pre-add** — pre-stage someone onto a walk list (also puts them on the team).
-3. **Assigning them a book** — an admin assigning a book adds that person to the team automatically.
+   **switched off** cannot be added until an admin switches it back on, because that flag is org-wide; an
+   org admin is offered **Switch on** right there.
+2. **The Users page → Add member**, with the Canvasser role and a **Campaign** picked: it hands over to
+   the same steps as 1.
+3. **Taking a book**, for **org admins and team leads only** (taking one, or an admin handing them one):
+   they are added to the team at that moment, and like any return their earlier doors on the campaign move
+   to "No team" until their crew is set. A canvasser has to be on the team before they can be given a
+   book. A walk-list pre-add (Walk Lists → Manage → Pre-add) never puts anyone on the team: a canvasser
+   needs to be on it first.
 
 Because assignment is now **team-only**, the everyday flow is: add people on the Team page first, then
 assign their books. **Admins and a campaign's team leads are the exception** — they can be
@@ -350,8 +374,10 @@ column.
 ### Resend invite
 
 **Part 1 — For everyone.** An invitation is emailed once, when the account is created. If the person
-never got it, or let the 72-hour link lapse, open their profile and click **Resend invite** — they get
-a brand-new set-password link, good for another 72 hours. The button appears **only for people who
+never got it, or let the 72-hour link lapse, open them and click **Resend invite** — they get
+a brand-new set-password link, good for another 72 hours. (For several at once: tick them on the Team page
+and choose **Resend invites**, or on the phone **Resend invites to all shown**; each counts only the people
+who never signed in, and says how many emails it will send.) The button appears **only for people who
 have never signed in**, because that is the only situation it helps: anyone who has signed in already
 has a working password and can use *Forgot password* themselves. Resending **replaces** any earlier
 link, so if they were mid-signup on an old email, that one stops working — both clients warn you
@@ -484,16 +510,25 @@ their login email** (that would change how they sign into the *other* orgs). The
 When automatic pause stops a canvasser whose doors came in faster than anyone could knock them
 ([AUDIT.md](AUDIT.md) → *Automatic pause*), the people surfaces say so:
 
-- **Users page (web, org admins):** a red **Paused for review** chip beside the person, and in their
-  profile *Paused for review on {campaign} since {time}* with **Review** (the pause on the campaign's
-  Audit page) and **Unpause**, then their past pauses. A team lead unpauses from the Audit page.
-- **Phone:** a *paused* badge on the Users list (after *deleted* and *inactive*, one badge per row), and a
-  red line on their profile that opens the pause.
-- **The Automatic pause card** at the top of the Users page (org admins see it; **billing admins** change
-  it): on or off for the whole organization (on by default; turning it off unpauses everyone at once), and
-  **who gets the email** — *Billing admins (always)*, plus any org admins and team leads you tick (a lead
-  only hears about campaigns they manage, and a lead may be your client). The email names no one; the card
-  shows who last changed it.
+- **Web:** a red **Paused for review** chip beside the person on the Users page, and a **Paused** filter
+  on the Users page (status) and the Team page (quick filter). Their panel says *Paused for review on
+  {campaign} since {time}* with **Review** (the pause on the campaign's Audit page) and their past pauses,
+  and **Unpause** sits with the buttons at the top. It asks first, because their count starts over. An org
+  admin can unpause anyone; a team lead can, from the Team page, when the pause is on a campaign they
+  manage (never their own). Someone paused on a campaign the viewer doesn't manage shows only *Paused for
+  review — an org admin can unpause.*
+- **Phone:** a *paused* badge on the Users list (after *deleted* and *inactive*, one badge per row), a
+  **Paused** status filter, and a red line on their profile that opens the pause. On a campaign's member
+  sheet, Unpause asks first and the notice has **Review**.
+- **The Automatic pause setting** is on the **Settings** page (web only, org admins; it moved there from
+  the top of the Users page on 2026-10-27, and **billing admins** change it): on or off for the whole
+  organization (on by default; turning it off unpauses everyone at once), and **who gets the email** —
+  *Billing admins (always)*, meaning everyone with billing access, including anyone given it later, plus
+  anyone you add under **Also email** by searching for an org admin or team lead (up to 25; a lead only
+  hears about campaigns they manage, and a lead may be your client). Someone you added who is no longer an
+  admin or team lead shows as *Not emailed: no longer an admin or team lead*, and a billing admin's Save
+  drops them. The email names no one and points to the Settings page; the card shows who last changed
+  it.
 
 **Changing someone's role starts their count over.** Only canvassers are ever judged, and a role change —
 up or down — moves their restart point, so a lead demoted to canvasser can't be paused on doors they
@@ -517,17 +552,19 @@ removed from the org, or their account is deleted. This matters when you report 
 client: before, removing someone from a campaign silently moved their doors into "No coordinator", the
 bucket you exclude, and a real campaign under-reported one team by **104 doors**.
 
-**Losing a person never moves a number. Reassigning one does** — deliberately. Changing someone's crew
-moves *all* of their doors **on that campaign** onto the new team (see
+**Losing a person never moves a number. Reassigning one does, and so does someone coming back** —
+deliberately. Changing someone's crew, or adding them back to a campaign they worked before, moves *all*
+of their doors **on that campaign** onto their team (see
 [A team's numbers follow the crew you have set today](#a-teams-numbers-follow-the-crew-you-have-set-today)),
 which is what lets you fix a crew you forgot to set. The two are different events on purpose: a
-roster change you make moves the numbers; somebody leaving does not. See
+roster change you make (a crew change, or adding someone back) moves the numbers; somebody leaving does
+not. See
 [METRICS.md](METRICS.md#teams-coordinators--the-counting-contract).
 
 **A deactivated person can still be put on a crew; a removed one can't.** Deactivating somebody leaves
 them on the campaign, so their crew is still settable and their doors still move. Removing them from the
-campaign deletes their place on it, and with it the crew field — re-add them to the campaign if you need
-to move their doors.
+campaign deletes their place on it, and with it the crew field — add them back to the campaign, on the
+crew you want, if you need to move their doors: they move as the person rejoins.
 
 **Their name stays, within limits.** Deactivation, campaign-removal and org-removal all keep the
 person's name on reports. **Deleting the account is the exception** — whether the person does it or an
@@ -558,18 +595,18 @@ the book simply returns to the pool as unassigned, ready to give to somebody els
 
 ## Deleting a member's account
 
-**Org admins can delete a member's account** from the person's profile, on the web and in the phone's
-admin app (since 2026-10-24). Team leads never can. It's for a person who asked to be deleted, or an
+**Org admins can delete a member's account** from the person's panel on the web, or their profile in
+the phone's admin app (since 2026-10-24). Team leads never can. It's for a person who asked to be deleted, or an
 account that shouldn't exist at all: a test account, a duplicate, one made with the wrong email, someone
 hired who never started. **Most of the time, Remove from org is what you want**: it ends their access and
 keeps everything your records need, including their name on reports and on a team.
 
 **It's hard to do by accident.**
 
-1. **It's tucked away.** Open the person's profile, then **More options** at the bottom of the Account
-   section. **Delete account…** is in there, next to a reminder that Remove from org is usually what you
-   want. On the web: **Users → the person → Account → More options**. On the phone: **More → Users → the
-   person** (from a campaign's list, tap **Manage profile ›** first) **→ Account → More options**.
+1. **It's tucked away.** **Delete account…** sits behind **More options**, next to a reminder that
+   Remove from org is usually what you want. On the web: **Users → the person → More options ▸** in their
+   panel. On the phone: **More → Users → the person** (from a campaign's list, tap **Manage profile ›**
+   first) **→ Account → More options**.
 2. **First confirmation: a review.** It names the person (name, role, email) and spells out what deleting
    them means, worked out from their own records: how many door results and surveys stay on your
    reports, which books come back and which stay with the other canvassers on them, whether they lead a
@@ -590,7 +627,7 @@ else an admin first), and offers only **Close**.
   you; it keeps their name on its records for 180 days, the same as yours (below).
 - **People with billing access are protected.** Only an admin who also has billing access can delete
   them — or remove them from the organization, which any admin could do before. Without billing access,
-  neither option shows on their profile.
+  neither option shows for them.
 - **Not the only admin, and not the only admin with billing access.**
 - **The demo's app-review logins can't delete anyone.**
 
@@ -617,8 +654,9 @@ else an admin first), and offers only **Close**.
 - **Other screens show "Deleted user" right away:** the rest of the map (the GPS audit's flags on it keep
   the name), a door's history, survey details and other detail screens. They read the account directly; a
   separate fix will bring them in line.
-- **If they lead a crew**, those people have no coordinator until you pick one. The team keeps its numbers,
-  and its name for the same 180 days. Remove from org keeps the name, because the account stays — the
+- **If they lead a crew**, those people have no coordinator until you pick one (tick several on the Team
+  page and use **Move to crew…**). The team keeps its numbers, and its name for the same 180 days, until
+  you move its people: their doors there move with them, like any crew change. Remove from org keeps the name, because the account stays — the
   better choice if you'll keep reporting by that team to a client.
 - **Doors still on their phone.** For any account somebody has used, the review asks you to have them open
   the app with signal first, so their phone sends everything it's holding, and warns more strongly if
@@ -1054,7 +1092,7 @@ clients).
   neither the user nor a super-admin. Name/phone still apply. The roster (`GET /admin/memberships`)
   exposes a per-member `user.isMultiOrg` boolean (a global active-membership count ≥2 — never *which*
   orgs) so the UI can disable the email field with an explanation. Enforced in both
-  [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) and the mobile
+  the web person panel's [PersonProfileForm.jsx](../client/src/components/people/PersonProfileForm.jsx) and the mobile
   [users/[id].jsx](../mobile/app/(app)/admin/users/[id].jsx).
 - **Link vs create intent — the ORG door still asks; the CAMPAIGN door resolves.** They diverged on
   2026-08-08.
@@ -1107,38 +1145,74 @@ campaign removal is safe.
 
 **Endpoints.**
 
-- **Set / clear** — `PATCH /admin/campaigns/:campaignId/crew/:userId/coordinator`
+- **Set / clear** — `PATCH /admin/campaigns/:campaignId/crew/:userId/coordinator`, body
+  `{ coordinatorId: id|null, fromCoordinatorId?: id|null }`
   ([leadCrew.js](../server/src/routes/admin/leadCrew.js)), mounted behind `requireCampaignManager`
   (org admin, super admin, or a lead granted *this* campaign). The `campaignId` comes from the **URL**,
   which is load-bearing: the gate keys on the same param, so a lead physically cannot address a campaign
   they weren't granted. Taking it from the body would reopen exactly that hole. `404` when the person
-  holds no roster row on this campaign — there is no crew there to set.
+  holds no roster row on this campaign — there is no crew there to set. `fromCoordinatorId` is the crew
+  the client previewed (checked with `Object.hasOwn`, so an explicit `null` means No crew): when the
+  roster says something else by now, `409 { code: 'changed-meanwhile', now }` and the client re-previews.
+  Released phones omit it and the server uses the crew it reads. A job still holding the row answers
+  `409 { code: 'busy', retryAfterSeconds }`. **Only a new pick is validated**: repeating the current crew
+  (the open-time preview, **Finish it**) is not, because switching a coordinator off or changing their
+  role leaves their crews in place, and validating would leave those people's unfinished jobs
+  unfinishable. Returns `{ ok, coordinatorId, restamp: { changed, activities, surveys, doors, error },
+  finished }`.
 - **Preview** — `GET …/crew/:userId/coordinator-preview?coordinatorId=<id|none>` returns
-  `{ from, to, doors, activities, surveys, subjectRunsCrew }` from the *same* filter the write uses
+  `{ from, to, doors, activities, surveys, subjectRunsCrew, unfinished, busy, retryAfterSeconds, sources,
+  finishIt }` from the *same* filter the write uses
   ([restampCoordinator.js](../server/src/services/memberships/restampCoordinator.js)). `doors` is the
   deduped `knocksPipeline` count, not the row count — quoting rows next to the word "doors" would move
-  the team row by less than the confirmation promised.
+  the team row by less than the confirmation promised. `sources` names each team the moving rows count
+  for now, newest first (`planSources`, both ledgers). Run with the person's **current** crew, it is what
+  the web panel and the phone's member sheet run when they open someone: `finishIt` is true when an
+  earlier job was left unfinished, or the person is on a real crew and some of their rows here still
+  carry another team. Never for No crew with no job: that is what every departure leaves, and conforming
+  it is the 104-door bug.
+- **Several people** — `POST …/crew/coordinator-bulk/preview` takes `{ userIds (≤ 500 distinct),
+  coordinatorId }` and returns a row per person plus exact, deduplicated `totals` (`bulkPlan`, hinted to
+  the campaign indexes). Rows the write would skip say why: `not-on-campaign` (a lead's id off the
+  roster, with no name or counts), `not-in-org` (no name), `staff`, `is-coordinator`, `same-crew`, `busy`
+  (left out of the totals), and a No-crew pick for someone already on No crew is `same-crew` before
+  anything is counted. An org admin also previews people not on the roster (`onCampaign: false`), which
+  is how the add from the organization and the phone's Assign all shown show what joining does; someone
+  off the roster whose account is deleted or whose membership here is switched off reads `deleted` or
+  `switched-off`. An optional `intent` makes the totals exactly what the next write does: `'move'` (for
+  Move to crew…) reads anyone off the roster as `not-on-campaign`, and `'join'` (for the add from the
+  organization, Assign all shown and the phone's one-person Assign) reads anyone already on it as
+  `already-on-campaign`, so a list that went stale while it was open can't overstate the count; every
+  client sends one. `PATCH …/crew/coordinator-bulk` takes `{ people: [{ userId, from }] (≤ 10),
+  coordinatorId }` and runs them four at a time (`CREW_JOB.sideBySide`); the clients send 10 per request,
+  one request at a time, each person with the `from` their preview showed. **The write never puts anyone
+  on the campaign**: someone without a roster row by then (removed since the preview, say) answers
+  `not-on-campaign`, so a stale list can't undo a removal. Adding is `POST …/assignments`, which checks
+  the membership again. A person's `doors` in the preview are deduplicated across teams, like their
+  one-person preview.
 - **Read-only, org-wide** — `GET /admin/memberships/:userId/crews` returns one row per campaign the
   person is rostered to (`campaignId`, `campaignName`, `campaignIsActive`, `coordinatorId`,
-  `coordinatorName`). This is what replaced the Users page's single dropdown.
+  `coordinatorName`). It feeds the panel's **Everywhere in your organization** section on the web.
 
-**Web UI.** Setting a crew lives in exactly one component:
-[CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx)'s member panel (picker → staged change →
-[CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx) → commit). The panel is **not**
-gated on the member's active state: a deactivated-but-rostered person's crew must stay settable, which is
-what makes the ~1,700 doors sitting in "No team" on a live org — knocked by people since switched off —
+**Web UI.** Setting a crew lives on the campaign Team page: one person in the person panel's campaign
+section ([client/src/components/people/](../client/src/components/people/): picker → staged change →
+[CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx) → commit), several people in
+**Move to crew…** ([client/src/components/team/](../client/src/components/team/)). Neither is gated on
+the member's active state: a deactivated-but-rostered person's crew must stay settable, which is what
+makes the ~1,700 doors sitting in "No team" on a live org — knocked by people since switched off —
 recoverable at all. When doors would move, `CoordinatorConfirm` also asks `GET
-/admin/client-reports/series/affected?campaignId=&coordinatorIds=` (the coordinators the move touches)
-and names the client-report teams it answers, active teams whose current or past crews include them and
-that already have a report: "This also changes the numbers in the Paid team client report(s)." Labels
-only; a failed check just leaves the line out ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §H). The phone's
-member sheet ([MemberSheet.jsx](../mobile/components/MemberSheet.jsx), whose Coordinator dropdown uses the
-same preview and write, [ADMIN_APP.md](ADMIN_APP.md)) doesn't call it yet; that needs an app update.
-[UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) renders the read-only **Crews**
-block from `/crews`; [UsersPage.jsx](../client/src/pages/UsersPage.jsx) lost its Coordinator column,
-coordinator filter and add-member coordinator field. **Mobile** sets a crew from the Users screen's member
-sheet (its Coordinator dropdown, above; the old campaign Team screen, which only added and created
-members, merged into Users).
+/admin/client-reports/series/affected?campaignId=&coordinatorIds=` (every source and target coordinator
+the move touches, so a move out of several teams or a Finish it names each) and names the client-report
+teams it answers, active teams whose current or past crews include them and that already have a report:
+"This also changes the numbers in the Paid team client report(s)." Labels only; a failed check just
+leaves the line out ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §H). The phone's member sheet
+([MemberSheet.jsx](../mobile/components/MemberSheet.jsx)) and the Users hub's **Move all shown to a
+crew…** ([users.jsx](<../mobile/app/(app)/admin/users.jsx>)) use the same previews and writes but never
+call it: the phone doesn't load client reports ([ADMIN_APP.md](ADMIN_APP.md)). The Users page shows crews
+read-only, in the shared panel's **Everywhere** section from `/crews` (the old `UserProfileModal.jsx` and
+its **Crews** block were replaced by the panel on 2026-10-27);
+[UsersPage.jsx](../client/src/pages/UsersPage.jsx) has no Coordinator column, coordinator filter or
+add-member coordinator field.
 
 **Reports ARE team-scoped — but NOT through `baseFilter`.** `?coordinatorId=<id|none>` on
 `/canvasser-timeline`, plus `GET /admin/reports/team-breakdown` (every team at once, with the
@@ -1162,19 +1236,54 @@ one no longer folds onto their own team in B — they land in B's "No team", whi
 per-campaign answer.
 
 **Every write of `CampaignAssignment.coordinatorId` goes through
-[`setMemberCoordinator`](../server/src/services/memberships/setCoordinator.js)**, which updates the roster
-row, re-stamps that person's ledger history *in that campaign* onto the new team, and files a
-`CoordinatorChange` audit row (a no-op re-pick is completely silent — no write, no audit row, or the log
-stops being able to answer "why did this team's number move?"). It writes the roster *first* on purpose:
-if the ledger write fails, the drift is a finite, shrinking set that a retry or `repair:team-stamps`
-closes, whereas the reverse order would have every subsequent knock add more drift.
+[`setCoordinator.js`](../server/src/services/memberships/setCoordinator.js)**, as **one job per change,
+kept on the roster row** (`CampaignAssignment.crewJob: { token, run, until, from, to, sources, activities,
+surveys, doors, byUserId, source }`, `default: undefined`). There is no transaction to lean on (the test
+harness is a standalone mongod), so a change can be cut off halfway and two changes to one person can
+interleave; the job is what makes both safe:
+
+1. **Plan** — what would move toward the new crew, by source team, on both ledgers. No writes.
+2. **Claim** — one conditional `updateOne` on the app clock: the roster still says `from` and no job
+   holds the row (`'crewJob.until': { $not: { $gte: now } }`). It sets the crew and the job (`token` = the
+   `CoordinatorChange` `_id`, `run` = a UUID per attempt, a **150 s** hold). It writes the roster *first*
+   on purpose: knocks from then on stamp the new team, and a failure leaves a finite, shrinking drift
+   rather than one every later knock adds to. A lost claim is the 409 above.
+3. **Ledger** — `restampLedgerCoordinator` on each ledger, every `updateMany` capped at `maxTimeMS`
+   60 s and preceded by a renewal of the hold filtered on `token` and `run`. A renewal that misses, or
+   comes back after more than 30 s, means the job lost its hold and stops without writing. Then a
+   **second pass** ~2 s later catches a knock that read the old crew just before the claim — only when
+   the claim changed the crew and the person has rows (a join skips it unless it joins a real crew and
+   the person is an org admin or staff, the only people who knock off-roster).
+4. **Record and release** — the `CoordinatorChange` upserted on `{ _id: token }` with the planned counts,
+   `doorsMoved` and `sources`; then `$unset crewJob`, matched on `token` and `run`.
+
+A run cut off anywhere leaves the job on the row. Its hold runs out by itself and the person's panel
+then offers **Finish it** (the same PATCH, with the current crew as both pick and `from`), which re-runs
+steps 3-4 under a fresh `run` and closes older open error records with `finishedBy`. A lost hold or an
+interrupted job writes its record **insert-only** (`$setOnInsert`, with `createdAt`/`updatedAt` set
+explicitly and timestamps off), so a late finisher can never overwrite a newer job's record. The web
+server's driver waits at most 30 s for a pooled connection (`waitQueueTimeoutMS` in `server.js`), which
+keeps a renewal, its write and one ledger write inside the hold. A no-op re-pick is completely silent —
+no write, no audit row, or the log stops being able to answer "why did this team's number move?" — and so
+is a bare No-crew repeat.
+
+**Joining a campaign is the same job** (`joinCampaignCrew`): the roster insert *is* the claim, with
+`crewJob` in `$setOnInsert` only when the person has rows to move, so the second of two simultaneous
+adds inserts nothing and moves nothing. If planning throws, it falls back to a plain insert. Its callers
+are the add by email (`POST …/crew`), the add from the organization (`POST /admin/campaigns/:id/assignments`,
+four at a time) and the two book routes (`ensureCampaignAssignments(…, { join: true })`; only org admins,
+the campaign's leads and internal staff get that far without a roster row). Every other writer of a roster row's crew — `releaseAssignedWork`,
+the demo seeder, `migrateCampaignCoordinators` — also clears `crewJob`, so a job on a row always names
+the row's current crew; a job whose row changed under it stops at its next renewal.
+
 `test/coordinatorChokePoint.test.js` asserts structurally which files may write the field:
-`setCoordinator.js`, `leadCrew.js` (create-a-canvasser onto a campaign),
-[`deleteAccount.js`](../server/src/services/users/deleteAccount.js) — **the sanctioned exception**, since
-departure must never touch the ledger or the 104-door bug returns —
+`setCoordinator.js`; [`deleteAccount.js`](../server/src/services/users/deleteAccount.js) — **the
+sanctioned exception**, since departure must never touch the ledger or the 104-door bug returns —
 [`migrateCampaignCoordinators.js`](../server/src/migrations/migrateCampaignCoordinators.js) (roster only,
 never the ledger) and `seedDemoOrg.js` (writes roster and ledger in the same run from one crew map, so
-there is no pre-existing history to re-stamp).
+there is no pre-existing history to re-stamp). `leadCrew.js` came off the list on 2026-10-27: its create
+path now calls `joinCampaignCrew`. Drift and unfinished jobs are listed by `npm run audit:team-counts`
+and fixed with Finish it; `repair:team-stamps` keeps only its switch for an org's team surfaces.
 
 **`restampFilter` REQUIRES a `campaignId` and throws without one.** Required rather than
 optional-with-a-default, because an omitted scope silently meaning "everything" *is* the bug this change
@@ -1184,17 +1293,11 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
 
 **`CoordinatorChange`** ([model](../server/src/models/CoordinatorChange.js)) gained a **nullable**
 `campaignId` (`null` = a row written under the old org-wide model, which must stay readable) and an index
-`{campaignId, createdAt}` — "why did THIS campaign's team move?".
-
-> ⚠️ **Known gap (not part of the design).** `GET /admin/campaigns/:id/assignments`
-> ([assignments.js](../server/src/routes/admin/assignments.js)) still joins the crew label from
-> **`Membership.coordinatorId`**, the legacy org-wide field — it was not moved with the rest. Verified
-> against a live server: with `Membership` → Asa and the campaign roster row → Frank, the endpoint returns
-> Asa. Everything *counted* is unaffected (numbers come from the ledger stamp), but the Team page's crew
-> grouping, its member-panel dropdown default, and the book picker's crew filter / "mixed crews" flag all
-> read through [useCampaignTeam.js](../client/src/lib/useCampaignTeam.js) from this endpoint, so they show
-> the stale value and a crew set on the Team tab appears to revert on refetch. Fix = read
-> `CampaignAssignment.coordinatorId` for the campaign, then delete this note.
+`{campaignId, createdAt}` — "why did THIS campaign's team move?". Since 2026-10-27 a new record's `_id` is
+its job's token, and it carries `sources` (each team the rows came from, with counts), `doorsMoved` (the
+deduped door count the check showed), `run` and `finishedBy` (the later record that finished it); `source`
+adds `campaign_join`. All additive: old records read as before, and the History feed folds them for
+released phones (`fromCoordinator` reads *Several teams* when there was more than one source).
 
 > 🚨 **Do NOT "mirror the effort scoping" by adding the key to `baseFilter()`.** An earlier version of
 > this doc recommended exactly that, and it is a trap: `baseFilter`'s result is spread into **Household**
@@ -1219,8 +1322,14 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
   may be derived from it.
 - **Team page endpoints** ([server/src/routes/admin/assignments.js](../server/src/routes/admin/assignments.js)):
   `GET /admin/campaigns/:id/assignments` returns the roster enriched with each member's `role` +
-  `isSuperAdmin` (joined from `Membership`/`User`) so pickers/Team page can render badges; `POST`
-  (add) / `DELETE /:userId` (remove) manage it.
+  `isSuperAdmin` (joined from `Membership`/`User`) so pickers/Team page can render badges, and the
+  account's `createdAt` (for *Never signed in* vs *No sign-in recorded*); `POST` (add) / `DELETE /:userId`
+  (remove) manage it. `POST` takes `{ userIds, coordinatorId? }` (absent or `null` = No crew; a team lead
+  may send only their own id): it reads the roster once and joins everyone not on it through
+  `joinCampaignCrew`, four at a time, so their earlier doors here move to that crew. It answers `201 {
+  created, total, crew: { set, skipped: [{ userId, reason: 'already-on-campaign'|'unfinished'|'error' }],
+  doors, activities, surveys } }`; someone already on the roster is skipped untouched (an add never
+  re-crews).
 - **Mobile visibility gate** — [bootstrap.js](../server/src/routes/mobile/bootstrap.js) filters a
   canvasser's campaigns to their `CampaignAssignment`s (`assertCampaignAccess`); org admins/super-admins
   bypass and see all.
@@ -1237,9 +1346,12 @@ campaign.* Changing a crew in campaign A moves zero doors in campaign B.
   single-book [turfAssignments.js](../server/src/routes/admin/turfAssignments.js) `POST /` and bulk
   [turfs.js](../server/src/routes/admin/turfs.js) `assign-bulk` — returning `409 { code:'not-on-team',
   notOnTeam }` when nothing is allowed. `EffortMember` pre-staging ([efforts.js](../server/src/routes/admin/efforts.js)
-  `POST /:id/members`) applies the same gate. After a successful assign, `ensureCampaignAssignments`
-  adds any admin assigned on the fly to the roster (a no-op for existing members), so self-assign grants
-  mobile visibility.
+  `POST /:id/members`) applies the same gate but never writes the roster. After a successful assign,
+  `ensureCampaignAssignments(…, { join: true })` adds any admin or lead assigned on the fly to the roster
+  (a no-op for existing members), so self-assign grants mobile visibility — and joins them like any
+  return, so their earlier doors on the campaign move to No team until their crew is set (the owner's
+  rule, 2026-10-26: the doors follow the person, whatever their role). If the join throws, it falls back
+  to a plain upsert so the assignment still lands.
 - **Client** — the three book pickers and the walk-list RosterPanel source their candidate list from
   the shared [useCampaignTeam(campaignId)](../client/src/lib/useCampaignTeam.js) hook (roster + the
   current admin, so self-assign always works; staff count as the current admin only in an internal
@@ -1270,11 +1382,15 @@ object would wipe its siblings. `GET /admin/pace-pauses/settings` (org admins) r
 named, with their billing access); `PATCH` needs the admin role **and** `billingAccess` (or a super admin;
 `billingAccess` isn't cleared on demotion, so the role is checked too) and takes `{ enabled?,
 billingAdmins?, alertUserIds? }` under zod `.strict()` — at most 25 ids, each an active admin or lead.
-Web: [PacePauseSettingsCard.jsx](../client/src/components/users/PacePauseSettingsCard.jsx) on
-`UsersPage.jsx` (read-only without billing access), the chip from `GET /admin/pace-pauses?status=paused`
-(blocking pauses only), and
-[PacePauseProfileSection.jsx](../client/src/components/users/PacePauseProfileSection.jsx) in
-`UserProfileModal.jsx` (`?userId=&status=all`; renders nothing for someone never paused). Phone: the
+Since 2026-10-27 the GET also returns `chosen: [{ userId, name, role, eligible }]`, every stored
+recipient, so someone who stopped being an admin or lead shows by name as *Not emailed* instead of
+vanishing while their stale id made every Save fail; the page saves only eligible ids, which drops them.
+Web: [PacePauseSettingsCard.jsx](../client/src/components/settings/PacePauseSettingsCard.jsx) with its
+`RecipientPicker` on the **Settings** page (`/settings`, org admins, read-only without billing access;
+it moved off `UsersPage.jsx`), the chip from `GET /admin/pace-pauses?status=paused` (blocking pauses
+only), and [PacePauseProfileSection.jsx](../client/src/components/users/PacePauseProfileSection.jsx) in
+the person panel (`?userId=&status=all`; renders nothing for someone never paused; its Unpause moved to
+the panel's state buttons). Phone: the
 shared paused list (`mobile/lib/pacePauses.js`) feeds `admin/users.jsx`'s badge and `admin/users/[id].jsx`'s
 line ([ADMIN_APP.md](ADMIN_APP.md)). No change to `GET /admin/memberships`.
 
@@ -1637,8 +1753,10 @@ way in: the per-person drills still answer only for people the org, or a lead's 
 [deletedUserNames.int.test.js](../server/test/deletedUserNames.int.test.js); the deletion itself by
 [orgAccountDeletion.int.test.js](../server/test/orgAccountDeletion.int.test.js).
 
-**Clients.** Web: [UserProfileModal.jsx](../client/src/components/UserProfileModal.jsx) (**More options**,
-closed on every open; the Escape guard), [DeleteMemberDialog.jsx](../client/src/components/DeleteMemberDialog.jsx)
+**Clients.** Web: the person panel's [PersonActions.jsx](../client/src/components/people/PersonActions.jsx)
+(**More options ▸**, closed on every open) and [PersonPanel.jsx](../client/src/components/people/PersonPanel.jsx)
+(the guarded close: Escape, the scrim and × wait while the delete dialog is open; this replaced
+`UserProfileModal.jsx` on 2026-10-27), [DeleteMemberDialog.jsx](../client/src/components/DeleteMemberDialog.jsx)
 (the two steps) and [UsersPage.jsx](../client/src/pages/UsersPage.jsx) (the Deleted pill, the deletion
 line, the page notice), every sentence built in [lib/memberDeletion.js](../client/src/lib/memberDeletion.js).
 Phone: `admin/users/[id].jsx`, [DeleteMemberSheet.jsx](../mobile/components/DeleteMemberSheet.jsx) and

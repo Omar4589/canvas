@@ -1107,6 +1107,17 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   - Re-verify on any new route that takes a person's id from the client. A user id is not a secret.
     `User.findById` on a client-supplied id, without asking whether this organization (or this lead)
     carries the person, is the exact shape of the leak this closed.
+  - *(v7 2026-10-25)* The same shape on a campaign's team (item 41): a lead puts only themselves on the
+    team, by id (`POST /admin/campaigns/:id/assignments`), by book or by walk-list crew
+    (`partitionAssignable` `selfOnlyFor`), so a lead can't add an org member and read back their email and
+    phone. Pinned by `test/leadUserManagement.int.test.js` test 12, `test/partitionAssignable.int.test.js`
+    and `test/leadWalkthrough.int.test.js` steps 4-5. Re-verify on any new way onto a team.
+    *[v7 2026-10-27, item 42: re-verified for the new ways onto a team. **Move to crew…** for several
+    people never puts anyone on a team (`test/crewJobEdges.int.test.js`, its first test); for a lead, an
+    id off this campaign's roster answers `{ skip: 'not-on-campaign' }` with no name or counts, the same
+    for a member and a made-up id (`test/crewJob.int.test.js`, the bulk preview test). **From your organization** is `POST
+    …/assignments`, where a lead still sends only their own id. The book routes' join admits only who
+    `partitionAssignable` already allowed. The line above still holds.]*
   - The other direction (item 36): a customer's admin or lead can't put Doorline staff on a book, a
     crew or their team unless the staffer holds a membership there (`internalStaffIdSet`,
     `services/campaignRoster.js`), pinned by `test/staffRosterScope.int.test.js`. Re-verify on any new
@@ -1156,6 +1167,24 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     campaign, distance or needed seconds (`shapeWindowVisit`, `routes/admin/pacePauses.js`).
   - `:122`: `PacePause` is in `CAMPAIGN_SCOPED`, `ORG_SCOPED` and `LATE_WRITE_MODELS`.
   A change that adds a field to `PacePause`, the email or a lead's view re-verifies here.
+  *[v7 2026-10-27, item 42: the setting moved to the org Settings page (org admins; billing admins change
+  it). The email's last line now names that page, and still names no one (`test/peoplePagesUnits.test.js`).
+  `GET /settings` gained `chosen`, the stored recipients by name through the org-scoped `hydrateCanvassers`.
+  The lines above still hold.]*
+- *(v7 2026-10-25)* **What a person's profile tells a team lead (item 40).** privacy.html `:105`
+  ("according to their role") and the Help Center's "Outside them you see almost nothing" hold for the
+  per-person drills on `/admin/memberships` only because every one of them narrows a lead to the
+  campaigns they manage (`leadCampaignScope`): totals, recent doors, the campaign list, crews (names
+  only elsewhere, for the switch-off warning) and a fellow lead's grants. Owner of the line:
+  `test/leadUserManagement.int.test.js` test 11. A new drill, a new field on one of these, or a new
+  lead-facing screen that shows a person's work re-verifies here.
+  *[v7 2026-10-27, item 42: re-verified for the person panel that replaced the web profile. On a
+  campaign's Team page a lead's panel reads that campaign's doors
+  (`/admin/reports/canvassers/:id/activities?campaignId=`) and numbers (`…/summary?campaignId=`), never
+  `/stats` (the organization-wide section is for org admins only: `personAccess.showEverywhere` in
+  `client/src/lib/personAccess.js`), and `/crews` only for the switch-off warning. The phone's member
+  sheet reads the same campaign-scoped routes, and its profile labels a lead's totals **On your
+  campaigns** without miles. The line above still holds.]*
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -3676,7 +3705,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       door). A lead also learns, through a **roster line**, that a canvasser on their roster is blocked by a
       pause on a campaign they don't manage — the name only, nothing about the other campaign: the one fact
       `memberships.js` otherwise withholds, disclosed because that canvasser can't work the lead's campaign
-      either. A lead may be the client ([ROLES.md](ROLES.md)). The paused canvasser sees only that they are
+      either. *[v7 2026-10-25: "the one fact" is the pause. `memberships.js` does give a lead the NAMES of a
+      shared canvasser's other campaigns, for the switch-off warning (`/crews`, item 40), and nothing else
+      about them.]* A lead may be the client ([ROLES.md](ROLES.md)). The paused canvasser sees only that they are
       paused, never the evidence. Doorline staff: under a support grant, like any of the organization's pages
       (E12, stamped).
     - **(e) The preview** (org admins, in the product): every moment, over up to 120 days, when the rule would
@@ -3742,7 +3773,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
         termination of the Service) isn't engaged — a pause stops one canvasser's recording, not the Service —
         and §15 (changes to the Terms) has nothing to do.
       - DPA §2 — on by default rests on the customer's "use and configuration of the Service's features" (the
-        Off switch on the Users page is that configuration) plus the owner's notice to both customers; §6 — no
+        Off switch on the Users page is that configuration; *[v7 2026-10-27, item 42: the same switch, under the
+        same billing-admin gate, now on the org Settings page]*) plus the owner's notice to both customers; §6 — no
         new subprocessor (i); §7 — a pause sits in the organization's records like its door rows, reachable by
         the same deletion paths (the campaign, the organization; an admin's delete of a resolved one); §9 —
         retention follows the campaign and the organization, and the account-deletion name window applies.
@@ -3757,6 +3789,237 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `client/src/lib/pacePause.test.js` (2), `pacePauseRender.smoke.test.js` (5), `mobile/lib/pace.test.js` (7)
       and `mobile/lib/pacePauseText.test.js` (2).
     - **Watchlist:** the 2026-10-24 automatic-pause bullet in *New policy sentences to keep true*.
+40. **[v7 2026-10-25 — A team lead's view of a person reached that person's work on campaigns the lead
+    doesn't manage. FIXED 2026-10-25, shipped alone ahead of the people-pages plan; deploy pending (stamp
+    the deploy date here when it ships).]**
+    - **Found** while planning the people-pages upgrade (review round 1, 2026-10-25) and reproduced over
+      HTTP on a throwaway mongod: a lead granted Campaign A, and a canvasser who works both A and B.
+    - **The exposure.** The per-person drills on `/admin/memberships` check *who* a lead may look at
+      (`leadMaySeeTarget`: anyone rostered on a campaign the lead manages), but what they returned was
+      org-wide:
+      - `GET /:userId/recent-activity`: that person's latest doors on **every** campaign in the
+        organization, with each door's street address, city, outcome, time and campaign name;
+      - `GET /:userId/stats`: their totals across every campaign (doors, surveys, lit drops, miles,
+        campaigns worked, last activity);
+      - `GET /:userId/crews`: every campaign they are on, with the coordinator's name and whether the
+        campaign is live;
+      - `GET /:userId/campaigns`: the ids of every campaign they are on, the set `GET /` already cuts for
+        a lead;
+      - `GET /` (the Users list): each listed lead's `managedCampaignIds`, so a lead learned which other
+        campaigns a fellow lead runs.
+
+      A lead may be the paying client (owner ruling 2026-09-23), and one organization can run several
+      clients' campaigns with the same canvassers. So a client could see another client's door
+      addresses and campaign names.
+    - **It was on screen, not only in the API.** The read drills opened to leads on 2026-07-23
+      (`5a4a335`). From 2026-08-09 (`fca1cf4`) the phone's member sheet links a lead to **Manage
+      profile ›**, which loads `/stats` and `/recent-activity?limit=20` for any viewer and lists each
+      door as `address, city · campaign` (`users/[id].jsx`). The web never showed it to a lead: the org
+      Users page is admin-only.
+    - **Published text that was untrue for this data until the fix deploys:**
+      - privacy.html `:105`: information is available to authorized users "according to their role";
+        a lead's role covers the campaigns granted to them;
+      - Help Center `guides/roles-and-team.md:38`: a lead can't "see any campaign you didn't hand them";
+      - Help Center `getting-started/lead-getting-started.md:14`: "Outside them you see almost nothing."
+
+      Tenant isolation (privacy.html `:105` "other customer organizations", `:115`, DPA §4) was not
+      broken: every row stayed inside the reader's own organization.
+    - **The fix** (`server/src/routes/admin/memberships.js`, `leadCampaignScope`). For a lead, every
+      drill now returns only the campaigns the lead manages; admins and Doorline staff are unchanged:
+      - `/stats` and `/recent-activity` add `campaignId: { $in: <managed> }` to the ledger queries, so
+        the totals, the miles and the door list stop at the lead's campaigns;
+      - `/crews` keeps every campaign's **name** (the switch-off warning has to say which campaigns an
+        org-wide switch reaches, the disclosure ruled with `1a4d855`, 2026-07-21) and nulls the
+        coordinator and the live flag on the rest;
+      - `/campaigns` returns managed campaigns only;
+      - `GET /` narrows each row's `managedCampaignIds` to the reader's own grants.
+
+      The gates are unchanged (who a lead may open), so a lead with no grants still gets 403, and the
+      response shapes are unchanged, so released phones keep working: a lead simply sees smaller
+      numbers. On released phones those numbers still sit under "Activity (lifetime)" until the people-
+      pages update relabels them for leads. *[v7 2026-10-27: that update (item 42) labels them **On your
+      campaigns** for a lead and leaves out miles walked; it ships over the air.]*
+    - **Pinned by** `test/leadUserManagement.int.test.js`, test 11: for one canvasser on two campaigns,
+      the admin gets all five doors, three surveys and both campaigns from every drill, and the lead gets
+      Camp A's two doors and one survey, no Camp B address or campaign name, Camp B's crew row with its
+      name only, `/campaigns` = Camp A, and a fellow lead's Camp B grant hidden. Against the unfixed code
+      the same test fails (the lead got all five doors). Seven related suites (leads, the lead
+      walkthrough, not-a-target, crews, both deletion suites; 126 tests) stay green.
+    - **No policy, Terms or DPA text change:** the fix makes the sentences above true as written, with
+      one exception that predates this item and is ruled: a lead still sees the NAMES of a shared
+      canvasser's other campaigns in the switch-off warning (`1a4d855`, 2026-07-21). The Help Center line
+      in `roles-and-team.md:38` now says so.
+    - **The record of use** has the same limits as item 35:
+      - `AccessLog` covers staff access only;
+      - production's request log (`morgan('combined')`, `app.js:86`) records each request's path, which
+        carries the person's id, plus its status and IP address, but not who made the request;
+      - those lines survive only as far back as Heroku's log retention, or any log drain if one exists.
+
+      Unlike item 35, this was visible on an ordinary phone screen, so a lead who opened a shared
+      canvasser's profile saw it.
+    - **Owner decision (2026-10-25):** no DPA §5 notice. Asked with the difference from item 35 spelled
+      out (visible in normal use since 2026-08-09, not only reachable through the API), the owner chose
+      no notice. The record limits above stand.
+    - **Watchlist:** the 2026-10-25 bullet in *New policy sentences to keep true*.
+41. **[v7 2026-10-25 — On a campaign, a team lead could put an organization member on their team and
+    read back their email and phone, and could remove anyone from the team, admins and Doorline staff
+    included. FIXED 2026-10-25 in the same ship-alone patch as item 40; deploy pending (stamp the deploy
+    date here when it ships).]**
+    - **Found** by the people-pages plan's review rounds 2 and 3 (2026-10-25) and reproduced over HTTP on a
+      throwaway mongod, as a lead who manages one campaign.
+    - **Putting someone on the team, three ways.** `GET .../assignments` returns each team member's name,
+      email and phone to a lead, so whoever a lead can put on the team, they can read:
+      - **by id**: `POST /admin/campaigns/:id/assignments` checked only that each id was an active member of
+        the organization, so a lead could add anyone, including another client's staff. A request mixing a
+        real member's id with a made-up one answered 400 naming only the made-up id, so it also told the
+        caller who is a member;
+      - **by book**: `partitionAssignable` (book assignment, bulk assignment) let anyone give a book to any
+        active org admin or any lead granted on this campaign who wasn't on the team, and that rostered
+        them;
+      - **by walk-list crew**: the same check on `POST .../efforts/:id/members`, whose crew list then
+        showed the person's email.
+
+      User ids are not secrets (item 35), and the crew endpoint already gives a lead the ids and names of
+      every admin and lead in the organization, as the coordinator picker. Leads never browse the directory
+      by design ([ROLES.md](ROLES.md); the 2026-08-08 rescoping). Adding by email goes through a lookup that
+      names the person (`POST .../crew/resolve`), limited to 30 an hour per person (in memory, per dyno);
+      the add itself is not limited, and neither is recorded for a customer's own staff (`AccessLog` covers
+      support-grant access only). *[v7 2026-10-27: since item 42, two counts per person: 60 an hour for
+      lookups that find nobody, 30 for lookups that name somebody (owner ruling); the phone's add now goes
+      through the lookup too.]* No screen did any of the three: every lead picker lists only the team
+      plus the lead, and every lead call site in the apps adds by id only the lead themself.
+    - **The remove.** `DELETE /admin/campaigns/:id/assignments/:userId` had no rule on the target: a lead
+      could take an org admin, a fellow lead or a Doorline staff account off a shared campaign, which also
+      clears the crew of everyone that person coordinates there (`releaseAssignedWork`). **This was on
+      screen**: since `208c08b` (2026-07-12) the web Team panel offered every viewer, leads included,
+      **Remove from campaign** for anyone, and the Campaigns page's Assignments window offered **Unassign**
+      on every team row a lead sees. A removal writes no record, so whether a lead ever did it can't be
+      read from anything.
+    - **Published text** that was untrue for this until the fix deploys: privacy.html `:105` ("according to
+      their role"); Help Center `faq/team-lead-vs-admin.md:29` (a lead "can't touch admins or fellow leads at
+      all — the server refuses, not just the app") and `guides/roles-and-team.md:38` ("admins and fellow
+      leads are entirely out of their reach"). Both Help lines now name the walls exactly. A lead still sets
+      the crew of anyone on their campaign's team, which is how crews are organized. Tenant isolation was
+      not broken; every row stayed inside the reader's own organization.
+    - **The fix**, by owner rulings 2026-10-25:
+      - **by id** (`assignments.js`): a lead's request may name only the lead themself, so self-assigning a
+        book keeps working. Any other id is refused with one plain-message 403, given before the membership
+        check, so the answer is the same for a member and a made-up id. This narrows the 2026-08-08 ruling
+        never to role-filter this route, whose reason was the lead's self-assign;
+      - **by book or crew** (`partitionAssignable`'s new `selfOnlyFor`, passed by `turfAssignments.js`,
+        `turfs.js` and `efforts.js` as the caller's id when the caller is a lead): the off-the-team
+        exceptions cover only the lead themself; people already on the team are unaffected, and an org
+        admin calling is exactly as before;
+      - **remove** (`assignments.js`): a lead may remove canvassers, people with no membership here any
+        more, and themselves; an org admin, another lead or a Doorline staff account on the team is refused
+        with a plain-message 403. Someone the organization and campaign don't have answers like a made-up
+        id, so the answer never confirms an id is staff;
+      - **web**: the Team page's panel and the Assignments window stop offering a lead what the server now
+        refuses, and the window refreshes its list after a removal. The phone already offered neither.
+
+      Org admins and staff are unchanged.
+    - **Pinned by**:
+      - `test/leadUserManagement.int.test.js` test 12: a lead's add of another member, of a made-up id, or of
+        a mix with their own id is refused, the first two with identical answers, and nothing is written;
+        their self-add answers 201; their removal of an admin, a fellow lead or a staff account on the team
+        is refused and leaves the row; a staff account elsewhere answers exactly like a made-up id; their
+        removal of a canvasser and of themselves answers 200; an admin still adds and removes anyone;
+      - `test/partitionAssignable.int.test.js`: with `selfOnlyFor`, the lead and the team are assignable and
+        an off-team admin and co-lead are not; without it, everyone as before;
+      - `test/leadWalkthrough.int.test.js`: step 4, the lead's book and walk-list-crew assignment of the
+        off-team admin is refused with `not-on-team` and rosters no one; step 5, the lead adds an existing
+        canvasser by email and the same add by id is refused.
+
+      Against the unfixed code each of these fails (the lead's add of another member, and the book for the
+      off-team admin, answered 201).
+    - **No policy, Terms or DPA text change:** the fix makes the sentences above true as written.
+    - **The record of use** has item 35's limits: `AccessLog` covers staff only; production's request log
+      (`morgan('combined')`, `app.js:86`) keeps each request's path, status and IP address but not who made
+      it, and only as far back as Heroku's log retention. The three ways onto the team took a hand-made API
+      call. The remove did not: it was on screen.
+    - **Owner decisions (2026-10-25):** no DPA §5 notice for putting someone on the team (found by review;
+      reachable only through the API), as with item 35. Asked again for the remove with the corrected facts
+      above (on screen since 2026-07-12; no record of removals exists), the owner chose no notice for that
+      too. The record limits above stand.
+    - **Watchlist:** the tenant-isolation bullet's 2026-10-25 line in *New policy sentences to keep true*.
+42. **[v7 2026-10-27 — The people pages: an org Settings page, one person panel for the Users and Team
+    pages, a rebuilt Team page (filters, several people at once, adding with a crew) and the phone to
+    match; and coming back to a campaign moves the person's earlier doors there. BUILT 2026-10-27,
+    uncommitted; deploy pending (stamp the date here when it ships). Privacy-affecting in one small way: a
+    control loosens (the email lookup's hourly limit, by owner decision), and the record corrects a false
+    sentence. No new field about a person, no retention change, no new subprocessor, no new export, report
+    or share link, and no published Privacy Policy, Terms or DPA sentence becomes false.]** Plan, owner
+    rulings and six review rounds: [PROPOSAL_PEOPLE_PAGES.md](PROPOSAL_PEOPLE_PAGES.md) (§K is this item's
+    source). Everything below was read from the code.
+    - **(a) The lookup limit loosens (owner ruling 2026-10-26).** `POST /admin/campaigns/:id/crew/resolve`
+      counted every lookup toward 30 an hour per actor. It now keeps two counts
+      (`middleware/crewResolveLimit.js`): **60 an hour for lookups that find nobody** (`outside`) and **30 an
+      hour for lookups that name somebody**. Once either is spent every lookup waits, so a refusal can't say
+      which kind a lookup was. The cost: an address can be tried against the `outside` answer 60 times an
+      hour instead of 30. That answer is byte-identical whether or not the address has an account elsewhere,
+      and the membership query now runs either way (`resolveEmailInOrg`), which narrows the small timing
+      difference the code names. The phone's **Add a canvasser** now goes through the lookup too, so phone
+      adds are limited for the first time. In memory, per dyno, as before.
+    - **(b) Correction: lookups were never written to `AccessLog` for a customer's own staff.** ROLES.md, the
+      2026-08-08 stamp under EXCEPTION 3 and three code comments (`crewResolveLimit.js`, `createMember.js`,
+      `leadCrew.js`) said every answer that names somebody writes an `AccessLog` subject line. The route does
+      add the person to the record-level audit subjects, but `AccessLog` keeps those only for Doorline staff
+      working under a support grant (`middleware/accessLog.js`), as item 41 already said. All five now say
+      so. No published sentence depended on it (privacy.html `:112` describes staff access only).
+    - **(c) What a lookup tells.** A named answer (`in-org`, `in-org-inactive`, `on-campaign`) now also
+      carries `history`: the person's door count on this campaign and the teams those count for, each with
+      whether its coordinator can still lead — this campaign only, about someone the organization already
+      shows the viewer, and the same counts the campaign's Team page and Timeline show. `in-org-inactive`
+      adds `onCampaign`. An `outside` answer carries nothing more. The add's can't-be-your-own-coordinator
+      check runs only for named answers: for an `outside` address it would have answered for the account
+      behind it.
+    - **(d) Several people at once, with no new reach.** `POST …/crew/coordinator-bulk/preview` and `PATCH
+      …/crew/coordinator-bulk` do what the one-person crew routes do, for up to 500 people (10 per write).
+      For a team lead, an id not on this campaign's roster answers `{ skip: 'not-on-campaign' }` with no name
+      or counts, the same for a member and a made-up id, checked before anything else; only an org admin's
+      preview names someone off the roster, and the write never puts anyone on a campaign (adding is
+      `POST …/assignments`, which checks the membership; a stale list can't undo a removal). The Team page's
+      bulk **Resend invites** and **Remove from campaign** call the existing single routes, one person at a
+      time, under their existing rules (item 41's for a lead).
+    - **(e) Coming back moves doors (owner ruling 2026-10-26, "the doors follow the person").** Adding
+      someone back to a campaign — by email, from the organization, or an admin or lead joining it through
+      a book — moves their earlier doors on that campaign to the crew they join, or to No team. It changes
+      which of the organization's own teams a door counts for; nothing leaves the organization, and the
+      campaign's totals, coverage and bill don't move. Each move is a `CoordinatorChange` (source
+      `campaign_join`) on the campaign's History, like a crew change.
+    - **(f) The Settings page** (org admins) names the organization's own admins and leads, which the Users
+      page already shows them, and now also a stored alert recipient who is no longer an admin or lead
+      (`chosen` on `GET /admin/pace-pauses/settings`, named through the org-scoped `hydrateCanvassers`, the
+      reader every report uses), so a billing admin can drop them. That entry used to be invisible and made
+      every Save fail.
+    - **(g) Unchanged.** The person panel shows what the old profile and the Team page's member panel showed,
+      to the same viewers: a lead never gets Role, Remove from org, Delete account or the organization-wide
+      section, and on the Team page their panel reads only that campaign's doors (item 40). The Paused badge
+      and filter come from the lead-scoped pause list (item 39(d)). `lastSeenAt` stays super-admin-only. No
+      new email: the automatic-pause alert's last line now names the Settings page.
+    - **(h) Retention, kept true.** A crew change still running when an organization's or campaign's delete
+      cascade removes its roster row loses its hold and writes its record (ids and counts, no name). That
+      record is now swept with the tenant: `CoordinatorChange` is in `LATE_WRITE_MODELS`, and the job runs
+      inside `sweptAfter` (`services/platform/lateWriteSweep.js`), so privacy.html `:122` (deletion removes
+      the organization's canvassing records) holds. Found by the build's code review, before anything
+      shipped: crew jobs are new in this build.
+    - **(i) Claims checked:** privacy.html `:105` ("according to their role"; never other customer
+      organizations) — true: every new route sits behind `requireCampaignManager` or `requireAdminRole`,
+      filters by `organizationId`, and (d) keeps a lead to their campaign's roster. `:115` (access controls
+      by organization) and DPA §4 (tenant isolation) — true. `:106` and DPA §6 — no new subprocessor; no
+      DPA §6 notice event. Nothing in the Policy, the Terms or the DPA speaks to lookup limits or to which of
+      an organization's teams a door counts for.
+    - **Owner decisions:** the limits (N.1.21) and the return rule (N.1.19), both 2026-10-26. Nothing was
+      exposed, so no DPA §5 question arises.
+    - **Pinned by** `server/test/crewResolve.int.test.js` (6: both limits, a mistyped address, the
+      identical `outside` body, `history`, `onCampaign`), `crewJob.int.test.js` (23, including the lead's
+      `not-on-campaign` skip and the named-only coordinator check), `crewJobEdges.int.test.js` (18, including
+      a bulk write that never puts anyone on a team, the preview's `deleted` and `switched-off` skips, and a
+      crew record swept with an organization being deleted), `crewJobCrash.int.test.js` (6),
+      `crewConsoleTools.int.test.js` (2) and `peoplePagesUnits.test.js` (2); on the clients
+      `client/src/lib/rosterView.test.js`, `rosterView.parity.test.js` and `mobile/lib/rosterView.test.js`.
+    - **Watchlist:** the tenant-isolation bullet's 2026-10-27 line (item 41's sub-bullet) in *New policy
+      sentences to keep true*.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -4916,6 +5179,17 @@ One human has **one** `User` row (name, email, phone, password hash) with a **gl
   > and passwords are per-USER. Item 14 stands.
   > **Direction: narrows.** No new field, no new retention rule, no new subprocessor, no published-policy
   > sentence affected. The new audit line records a `userId` we already hold.
+  > **(v7 stamp 2026-10-27, item 42) One correction and one loosening.** *Correction:* "every answer that
+  > names somebody writes an `AccessLog` subject line" was never true for a customer's own staff. The
+  > route adds the person to the record-level audit subjects, but `AccessLog` keeps those only for Doorline
+  > staff working under a support grant (`middleware/accessLog.js`), so an org admin's or lead's lookup
+  > leaves no access record; the per-actor limit is the defence (item 41 already said so). *Loosening, by
+  > owner decision (2026-10-26):* the one 30-an-hour limit is now two per actor — **60 an hour for lookups
+  > that find nobody** (`outside`), **30 an hour for lookups that name somebody** — and once either is spent
+  > every lookup waits, so a refusal can't say which kind a lookup was. The `outside` body is still
+  > byte-identical, and the membership query now runs whether or not an account exists, which narrows the
+  > timing difference named in `createMember.js`. **Direction: loosens** (more `outside` probes an hour);
+  > no published-policy sentence speaks to lookup rates.
   **And it is a takeover path.** *[v3: reviewed and left unprevented by decision — admin reset is the
   product's only password-recovery mechanism, so blocking it would strand multi-org users entirely;
   the reset now issues a visible forced-change temp password (misuse locks the victim out loudly, not

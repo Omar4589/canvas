@@ -165,7 +165,7 @@ export default function SuperAdminHome() {
           />
         }
       >
-        <Text style={styles.greeting}>Hi {user?.firstName || 'super'} 🌐</Text>
+        <Text style={styles.greeting}>Hi {user?.firstName || 'super'}</Text>
         <Text style={styles.subtitle}>
           Platform control room. Active-now = activity in the last 15 min.
         </Text>

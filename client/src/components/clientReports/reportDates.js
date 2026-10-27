@@ -81,6 +81,31 @@ export const gapBetween = (newer, older) => {
   return daysBetween(start, end) >= 0 ? { start, end } : null;
 };
 
+/**
+ * The days no dated report of a tab covers, as a Map of report id → { start, end }: each gap keyed by the
+ * report whose days run up to it, so the list draws the line just above that report's row. Worked out
+ * over all the tab's dated reports in start order, against the furthest last day so far — never row by
+ * row: listed by last day, a report beside another isn't always what covers the days before it (a month
+ * with a week inside it). All-time reports (SIMPLIFY §N) never make or close a gap: the lines are about
+ * the days the dated reports skipped.
+ */
+export const gapsAbove = (reports = []) => {
+  const out = new Map();
+  // Where each report sits in the list: of two that end the same day, the line goes above the one listed
+  // first, so it sits right under the reports after the gap (code review).
+  const at = new Map(reports.map((r, i) => [r, i]));
+  const dated = reports
+    .filter((r) => !r.allTime && r.weekStart && r.weekEnd)
+    .sort((a, b) => (a.weekStart < b.weekStart ? -1 : a.weekStart > b.weekStart ? 1 : 0));
+  let coverer = null;
+  for (const r of dated) {
+    const gap = coverer ? gapBetween(r, coverer) : null;
+    if (gap) out.set(coverer.id, gap);
+    if (!coverer || r.weekEnd > coverer.weekEnd || (r.weekEnd === coverer.weekEnd && at.get(r) < at.get(coverer))) coverer = r;
+  }
+  return out;
+};
+
 /** Today's civil day in a zone. */
 export const todayIn = (tz, now = new Date()) => dayInTz(now, tz) || `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
 

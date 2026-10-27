@@ -18,8 +18,26 @@ import ThemeToggle from '../../../components/ThemeToggle';
 import InsetGroup, {
   InsetNavRow,
   InsetActionRow,
-  RowEmoji,
+  RowIcon,
 } from '../../../components/InsetGroup';
+import {
+  UserIcon,
+  AlertShieldIcon,
+  NoteIcon,
+  DownloadIcon,
+  OverlapIcon,
+  DuplicateIcon,
+  VotersIcon,
+  DoorIcon,
+  UploadIcon,
+  BallotIcon,
+  ScissorsIcon,
+  PlugIcon,
+  HelpIcon,
+  GaugeIcon,
+  BuildingIcon,
+  SignOutIcon,
+} from '../../../components/icons/navIcons';
 import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { radius, spacing } from '../../../lib/theme';
@@ -89,7 +107,7 @@ const doorsNote = (doors) => {
 
 // This screen is a MENU, not a data list — every row is a destination you tap, so the rows carry
 // `emphasis="menu"` (15/600 labels) under small ALL-CAPS `caption` headers, and the shared
-// `RowEmoji` slot keeps every label starting at the same x. The card, the interleaved hairlines and
+// `RowIcon` slot keeps every label starting at the same x. The card, the interleaved hairlines and
 // the a11y labels still come from InsetGroup; only the typography is menu-flavoured. The
 // super-admin More tab and the canvasser drawer render the identical shape — change it in
 // InsetGroup and all three move together.
@@ -201,10 +219,10 @@ export default function AdminMore() {
 
         <SectionHeader caption title="Manage" />
         <InsetGroup>
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>👥</RowEmoji>} label="Users" onPress={() => router.push('/(app)/admin/users')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={UserIcon} />} label="Users" onPress={() => router.push('/(app)/admin/users')} />
           <InsetNavRow
             emphasis="menu"
-            leading={<RowEmoji>🚩</RowEmoji>}
+            leading={<RowIcon icon={AlertShieldIcon} />}
             label="GPS audit"
             sub={
               openPauseTotal > 0
@@ -216,12 +234,12 @@ export default function AdminMore() {
             badge={openPauseTotal > 0 ? { text: String(openPauseTotal) } : openMockTotal > 0 ? { text: String(openMockTotal) } : null}
             onPress={() => router.push('/(app)/admin/audit')}
           />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>📝</RowEmoji>} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>📥</RowEmoji>} label="Exports" sub="Download your campaign data" onPress={() => router.push('/(app)/admin/exports')} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>👯</RowEmoji>} label="Duplicate surveys" sub="Voters surveyed more than once" onPress={() => router.push('/(app)/admin/duplicate-surveys')} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔍</RowEmoji>} label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>🚪</RowEmoji>} label="Switch to canvass mode" onPress={onCanvassMode} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={NoteIcon} />} label="Notes" sub="Door, survey & admin notes" onPress={() => router.push('/(app)/admin/notes')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={DownloadIcon} />} label="Exports" sub="Download your campaign data" onPress={() => router.push('/(app)/admin/exports')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={OverlapIcon} />} label="Overlaps" sub="Doors two canvassers both knocked" onPress={() => router.push('/(app)/admin/overlaps')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={DuplicateIcon} />} label="Duplicate surveys" sub="Voters surveyed more than once" onPress={() => router.push('/(app)/admin/duplicate-surveys')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={VotersIcon} />} label="Voter search" sub="Look up any voter in this campaign" onPress={() => router.push('/(app)/voters')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={DoorIcon} />} label="Switch to canvass mode" onPress={onCanvassMode} />
         </InsetGroup>
 
         {/* InsetNavRow, deliberately — and yes, these open a MODAL rather than push a screen. The
@@ -233,12 +251,12 @@ export default function AdminMore() {
             Don't change them back. */}
         <SectionHeader caption title="On the web" />
         <InsetGroup>
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>📤</RowEmoji>} label="CSV import" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.import)} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>🗳️</RowEmoji>} label="Early voting" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>✂️</RowEmoji>} label="Turf cutting" sub="Drawing is web-only" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.turf)} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={UploadIcon} />} label="CSV import" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.import)} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={BallotIcon} />} label="Early voting" sub="Manage on the web" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.earlyVoting)} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={ScissorsIcon} />} label="Turf cutting" sub="Drawing is web-only" hint="Explains where to do this" onPress={() => setWebNote(WEB_NOTES.turf)} />
           <InsetNavRow
             emphasis="menu"
-            leading={<RowEmoji>⏱️</RowEmoji>}
+            leading={<RowIcon icon={PlugIcon} />}
             label="FbTime hours"
             sub={fbtimeSub}
             badge={fbtime?.status === 'errored' || doorsNeedAttention(doors) ? { text: '!' } : null}
@@ -258,7 +276,7 @@ export default function AdminMore() {
 
         <SectionHeader caption title="Support" />
         <InsetGroup>
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={HelpIcon} />} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
         </InsetGroup>
 
         <SectionHeader caption title="Appearance" />
@@ -272,12 +290,12 @@ export default function AdminMore() {
         <SectionHeader caption title="Account" />
         <InsetGroup>
           {user?.isSuperAdmin && (
-            <InsetNavRow emphasis="menu" leading={<RowEmoji>🌐</RowEmoji>} label="Platform view" sub="All organizations" onPress={onPlatformView} />
+            <InsetNavRow emphasis="menu" leading={<RowIcon icon={GaugeIcon} />} label="Platform view" sub="All organizations" onPress={onPlatformView} />
           )}
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Switch organization" onPress={onSwitchOrg} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={BuildingIcon} />} label="Switch organization" onPress={onSwitchOrg} />
           {/* Acts in place (ends the session) — danger tone, no chevron. The `leading` slot is what
               keeps its label aligned with every row above it. */}
-          <InsetActionRow tone="danger" leading={<RowEmoji>↩︎</RowEmoji>} label="Sign out" onPress={onLogout} />
+          <InsetActionRow tone="danger" leading={<RowIcon icon={SignOutIcon} tone="danger" />} label="Sign out" onPress={onLogout} />
         </InsetGroup>
       </ScrollView>
 

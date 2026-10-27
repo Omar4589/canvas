@@ -70,9 +70,9 @@ you can tick several rows to link or unlink them together.
 
 Unlinking one person happens straight away, with **Undo**; unlinking several at once asks first — and when it's someone whose account was deleted (by them or by an admin), or Doorline has sent door counts for them, it always asks (see *Unlinking: was the link right?* below). A canvasser who's already linked can't be moved straight to a different FbTime person — unlink them first, then link them to the right one.
 
-To check one person without coming here, open them from Users or a campaign's Team page — their
-profile says **FbTime linked** or **FbTime not linked**, with a shortcut back to this page. Team
-leads can see that too, even though they can't open the Integrations page themselves.
+To check one person without coming here, open them from Users or a campaign's Team page: under
+**Everywhere in your organization**, their panel says **FbTime linked** or **FbTime not linked**,
+with a shortcut back to this page. That section is for org admins only.
 
 ## When a timesheet fix shows up
 

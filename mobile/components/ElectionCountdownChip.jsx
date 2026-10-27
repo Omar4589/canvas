@@ -46,7 +46,7 @@ export default function ElectionCountdownChip({
           <View style={styles.dateRow}>
             <View style={styles.electionChip}>
               <Text style={styles.electionChipText}>
-                🗳 Election Day · {formatDay(electionDay, { weekday: 'short' })}
+                Election Day · {formatDay(electionDay, { weekday: 'short' })}
               </Text>
             </View>
             <Text style={[styles.countdown, edUrgent && styles.urgent]}>

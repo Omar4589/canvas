@@ -1,7 +1,7 @@
 # Client Reports — simpler to start, links to one report, your organization's week
 
 **Status:** **Built and committed 2026-10-25 (07a296a); code reviews 1 and 2 done and fixed (§K, §L); the totals
-wording (§M) added after it.** Plan
+wording (§M, committed 24d25e5) and Latest progress, all-time reports (§N), built after it.** Plan
 revision 3 (2026-10-25), after review rounds 1 (two reviewers: the code, and newcomers + the Monday routine) and 2
 (one reviewer re-running everything; §I); approved by the owner 2026-10-25 ("build it, then 2 code reviews"). Where
 the build differs from or adds to the plan is §J, *As built*, what the two code reviews changed is §K and §L, and the
@@ -661,3 +661,174 @@ the KPI pills use the first day. Nothing said so. The owner chose wording only (
 
 No privacy change: the line restates the report's own last day, which the client already reads in its heading, and
 no number, field or recipient changes.
+
+### N. Latest progress — all-time reports (designed and built 2026-10-25)
+
+**The ask.** After §M the owner asked for Timeline-style choices (Today, Yesterday, 7 days, All time) and said the
+main thing is "making a new report with the latest progress and all time counts", because clients ask how many doors,
+how much support, how many surveys (and which pass). The owner chose **List + Latest progress**: keep New report's
+dated list (its first choice follows the tab's last report, the Monday routine) and add an all-time choice; Pick
+dates may leave the first day empty. **Pass progress: not now** (owner).
+
+#### Part 1 — what changes
+
+New report, Dates (the line above the choices follows the pick):
+
+```
+Dates
+Your report shows totals for the whole campaign, from its first door through the last day you pick.
+The first day only decides what shows as new, like “+412 this week”.
+
+(•) Last week · Oct 19 – Oct 25 — the week after your last report
+( ) Latest progress · all time, through today
+( ) This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends
+( ) Pick dates
+      [ (empty)    ] – [ Oct 18, 2026 ]      ← first day optional
+      Leave the first day empty to count everything up to the last day.
+```
+
+With Latest progress (or an empty first day) picked, the line reads "Your report shows totals for the whole campaign,
+from its first door through today (or Oct 18), with no “+412 this week” figures." Latest progress is the second choice
+whatever the first one is (after a Move this tab catch-up when that is added).
+
+What the client reads (screen; the PDF matches):
+
+```
+All time
+Sep 14 – Oct 28, 2026 · Whole campaign
+Published Oct 28
+
+ACTIVITY AT A GLANCE
+Totals since the campaign began, as of Oct 28.
+ Doors knocked 3,412 | Surveys taken 1,980 | Voters surveyed 1,702 | Connection rate 58%
+ (no "+N" pills; the rest of the report as on any report)
+```
+
+The client's list: the Latest card reads "Latest · Sep 14 – Oct 28, 2026 · Whole campaign", then "All time", the
+two figures without pills, and "Totals since the campaign began, as of Oct 28."; a row reads "Sep 14 – Oct 28, 2026 ·
+All time" with its doors and no pill. Reports are listed by their last day, newest first (the same order as today
+for reports that don't overlap), so a Latest progress report made today sits on top.
+
+The reports list (admin): the row reads "All time · Sep 14 – Oct 28". **Next report** sits on the newest all-time
+report of a tab AND on its newest dated report: on the all-time one it makes a new Latest progress report through
+today with the settings and notes copied (the weekly "latest progress" routine in one click); on the dated one it makes
+the period after it, as today. The "not covered by any report" lines between reports ignore all-time reports.
+
+The Share message: "The report through Oct 28 is up: 3,412 doors knocked so far and 1,980 surveys. Open it here: …"
+(no "+N in that period").
+
+#### Part 2 — how
+
+- **Model:** `ClientReport.allTime` (Boolean, declared, no default; absent = a dated report, so every report made
+  before reads as before).
+- **Create** (`POST /admin/client-reports`): `allTime: true` with `weekEnd` (any `weekStart` sent is ignored). The
+  server sets `weekStart` to the day of the campaign's first knock in its zone (the earliest `CanvassActivity` knock,
+  read on the `{ campaignId, timestamp }` index — to be confirmed with `explain()`), or today when nobody has knocked,
+  and never after `weekEnd`. So every existing date label reads truthfully ("Sep 14 – Oct 28") with no change. Same
+  series, same duplicate guard (`{ seriesId, weekStart, weekEnd }`), `REPORT_EXISTS` and the race answer carry
+  `allTime` ("You already have a draft all-time Whole campaign report through Oct 28.").
+- **The build:** unchanged. Its period runs from the first knock to the last day, so it equals the running total and
+  there is nothing new to show.
+- **Words** (reportDerive.js): a period noun `all`, with no pills, no quiet banner, no "Numbers as of … the period was
+  still running" note (the totals line says "as of Oct 28" instead, "through Oct 28" when the numbers were taken after
+  the day ended), card help without the period sentence, the door goal "as of this report's last day", the title
+  fallback "All time", the PDF title "All time" and file name "…-all-time-report-<start>-to-<end>.pdf". The hub
+  heading counts it as "Reports".
+- **Order:** the admin list (`weekEnd`, then `createdAt`), the client hub (`weekEnd`, then `publishedAt`) and the
+  client's Older / Newer arrows (`seriesNav`, by `rangeEndUtc`, then `publishedAt`, then `_id`) all go by the last
+  day. Small per-campaign sets; no index.
+- **The weekly chain ignores all-time reports:** New report's first choice and the week nudge (the dialog's last
+  report), the gap lines, Next's "a later report exists" check on a dated report (`allTime: { $ne: true }`), and
+  `npm run report:tab-weeks`.
+- **Next on an all-time report:** a new all-time report through today (the first-knock start worked out again),
+  settings and notes copied, `nextReportId` and the guard as on any Next. Refused with `409 ALREADY_THROUGH_TODAY`
+  ("This report already runs through today — press Refresh numbers to bring it up to date.") when it ends today or
+  later, and `NOT_LATEST_REPORT` when a newer all-time report exists in the tab. No `NEXT_PERIOD_MISMATCH` or
+  `NEXT_GAP_TOO_LONG` (all-time periods overlap by design).
+- **Earlier totals:** an all-time report compares with the tab's newest shown report ending on or before its own last
+  day (a dated report keeps "ending on or before its first day"), in the build (`comparedFor`) and in the line
+  (`earlierTotalsLine`); on a link to just this report it reads "Totals from before <the day after that report's
+  end> were updated by …".
+- **Before you publish:** "a period that isn't over yet" reads, for an all-time report, "Today isn't over: doors
+  knocked after these numbers were built aren't in them."
+- **Privacy:** the same numbers, to the same people, through the same links; no new data, field about a person,
+  recipient or retention. Not privacy-affecting.
+- **Ship:** server and web together (Heroku manual deploy from main); no console step, no config var, no index, no
+  phone update (the phone calls none of these routes; `npm run audit:mobile-api` to confirm).
+- **Tests:** create (first-knock start, the empty-ledger and future clamps, the guard), Next (the all-time branch and
+  its two refusals; a dated report's Next ignores all-time reports), the three orders, the earlier-totals branch; the
+  dialog (the choice, an empty first day, the request body, the line), the words (no pills, the totals line, the
+  title), the PDF, the hub card and rows, the admin rows (Next on both, gap lines), the Share message; the
+  all-reports snapshot regenerated only if its fixture changes.
+- **Docs and Help:** CLIENT_PORTAL.md Part 1 and 2, the client-reports guide and page guide, and the FAQ *Does a
+  report count only the dates I pick?* (now: pick Latest progress for everything through today).
+
+#### As built (2026-10-25)
+
+The owner approved the design as written ("Build it, then a code review"). The build follows it; what it
+adds:
+
+- **Pick dates:** the first-day box is labelled "First day (optional)"; with it empty, "All time" takes
+  the place of the day count, and an empty last day reads "Pick a last day." (Create held).
+- **No Next that would only be refused:** the reports list leaves Next off an all-time report that
+  already runs through today (today worked out in the report's own zone, `todayIn(row.timeZone)`); the
+  server still refuses it (`ALREADY_THROUGH_TODAY`). Next on an older all-time report answers the newer one
+  when that one runs through today (Next's existing exact-match rule), else `NOT_LATEST_REPORT`.
+- **Staff labels:** the builder's heading and the links panel's report picker say "All time · Sep 14 –
+  Oct 28", and the builder's Title box shows "All time" as its placeholder, as New report's does.
+- **The Publish confirm** names the zone, as its dated warning does: "Today isn't over yet (Central
+  Time): doors knocked after these numbers were built aren't in them."
+- **Verified:** server unit 634; `clientReportAllTime.int.test.js` 5/5, and a mutation check (the hub's
+  old first-day sort and the build's old compare rule put back) fails it; client 971/971 (7 new); web
+  build OK. Docs: CLIENT_PORTAL.md Part 1 (New report's dates, a *Latest progress* section, Next) and
+  Part 2 (§B `allTime`, §F create and Next, §I, nav, endpoints, error codes, §Q, §S); Help: the
+  client-reports guide (a *Latest progress* section), the page guide and the FAQ *Does a report count
+  only the dates I pick?*.
+
+#### Code review (2026-10-25)
+
+One fresh reviewer, everything reproduced or measured where it could be. All fixed and pinned by tests:
+
+- **[HIGH, reproduced] A dated report and an all-time one with the same dates stood for each other.**
+  The guard's key had no kind: in a campaign's first week (first knock on the week's first day) "This
+  week" and Latest progress through Sunday shared `{ seriesId, weekStart, weekEnd }`, so New report
+  answered REPORT_EXISTS across kinds and Next could answer the other kind's draft. Fixed: all-time reports
+  have their own guard, `allTimeGuard` / `report_all_time_guard` on `{ seriesId, weekEnd }`, built and
+  healed at boot by `ensureAllTimeGuard` (and nightly); the look-first, the create race answer and Next's
+  exact match and race answer all look at the same kind only. Tests: the same dates both ways, six
+  simultaneous Latest progress presses → one draft, the index and its self-heal; the test fails with the
+  old lookup.
+- **[MEDIUM] "+N" on all-time reports in the reports list (`kpiLine`) and Refresh numbers' "In the
+  period" column.** Fixed: dropped for all-time reports.
+- **[MEDIUM, measured] The team "Door visits this period" figures read the whole ledger** on every builder
+  open of a team all-time report (6.6 s on 1M knocks vs 0.46 s for a week). Fixed: not computed for
+  all-time reports (their period is the whole campaign).
+- **[LOW, reproduced] Gap lines row by row.** Listed by last day, a month with a week inside it read
+  "Sep 28 – Oct 18 not covered" (true: Sep 28 – Sep 30). Fixed: `gapsAbove` sweeps the dated reports in
+  start order against the furthest last day, each line above the report whose days run up to it. Next on
+  overlapping dated reports now sits on the one ending last, as New report's "last report" already read it.
+- **[LOW] Docs**: the "no separate choice" sentence, "pressed on an older one, it opens the newer one"
+  (only when that one runs through today, else NOT_LATEST_REPORT), the page guide's choices and Next, and
+  "as of" vs "through" on a Latest progress report — all corrected.
+- **[LOW] Minor:** an all-time report running to a later day now gets the dated "isn't over yet" wording;
+  a half-typed first day (which a date input reads as '') holds Create ("Finish the first day, or clear it
+  to count everything up to the last day.") instead of quietly meaning all time; and the one-report
+  earlier-totals line on an all-time report names the earlier report's last day ("Totals through Oct 25
+  were updated by …") instead of "before" the day after it, which read wrong when both ended the same day.
+
+**Verification round (the same reviewer, re-running its reproductions on the fixed tree):** every finding
+fixed except two it caught in the fixes, now fixed too, with two small gaps:
+
+- **[MEDIUM, reproduced] Skipping the team figures lost the one-person warning** on all-time team reports
+  (the Help says the builder warns; the upgrade's privacy reasoning leans on it). Fixed: the build counts
+  each window's distinct canvassers as it walks (`provenance.canvassers`, internal), and an all-time team
+  report's check reads that frozen count (else the period figures' distinct, for a report built before it):
+  "N canvassers have knocked for this team since the campaign began." with the warning.
+- **[LOW] The half-typed first day was only partly held:** React fires onChange on a date input only when
+  its value changes, so typing into an empty box never reached it. Fixed: the box is read on every key, on
+  blur, and at Create.
+- **[LOW] A gap line one row low** when two dated reports end the same day. Fixed: on a tie, the one
+  listed first.
+- **[LOW] Development-only all-time rows with `dupGuard`** (from the build before the separate guard) could
+  500 a dated create of the same dates. Fixed: `ensureAllTimeGuard` takes `dupGuard` off all-time reports
+  each time it runs, and Next's dated race lookup skips all-time reports as create's does.

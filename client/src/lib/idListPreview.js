@@ -1,6 +1,6 @@
-// Wording for the Voter-ID list previews (Early Voting, Do Not Contact, walk list from CSV) and
-// the import review's zero gate. Pure, so the sentences the three pages share are written once and
-// tested once. Counts come straight from the server's preview response.
+// Wording for the Voter-ID list previews (Early Voting, Do Not Contact, walk list from CSV), their
+// 50 MB refusal, and the import review's zero gate. Pure, so the sentences the three pages share are
+// written once and tested once. Counts come straight from the server's preview response.
 
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const plural = (n, one, many = `${one}s`) => (Number(n) === 1 ? one : many);
@@ -53,3 +53,19 @@ export const historySubtitle = ({ idColumn = null, matchedViaZeros = 0, state = 
   if (outsideState > 0) parts.push(`${fmt(outsideState)} outside ${state || 'the state'}`);
   return parts.join(' · ') || null;
 };
+
+// The three uploads refuse a file over 50 MB (server/src/middleware/idListUpload.js says why). The
+// pages check the moment a file is picked: the server only answers once the whole file has arrived,
+// so a big state file would otherwise upload in full just to be turned away.
+export const ID_LIST_MAX_BYTES = 50 * 1024 * 1024;
+
+// At, not just over: multer's parser (busboy) refuses a file the moment it reaches the cap.
+export const idListTooBig = (file) => !!file && file.size >= ID_LIST_MAX_BYTES;
+
+// The refusal, worded as the server's 413 is. `keeping` names the only rows worth keeping, for the
+// page whose files usually carry people it doesn't want: a state's early-voting file can list every
+// ballot sent out, returned or not, and the Early Voting page wants only the people who voted.
+export const idListTooBigText = (keeping = null) =>
+  `This file is over the 50 MB limit. Only the Voter ID column is used, so save a copy with just that column${
+    keeping ? `, keeping only ${keeping},` : ''
+  } and upload it.`;

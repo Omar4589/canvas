@@ -14,8 +14,9 @@ import { useBuildPoll } from './hooks.js';
 //   Opened via Candidate: about 2 visits
 //   [Open] [Next report] [Share] [⋮]
 //
-// Its build is polled while live (useBuildPoll). Next report appears only on the latest report of its
-// tab; Share on every report the client can see (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) — it
+// Its build is polled while live (useBuildPoll). Next report appears only on the latest report of each
+// kind in its tab — the newest dated one, and the newest all-time one (Latest progress, SIMPLIFY §N)
+// unless it already runs through today; Share on every report the client can see (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) — it
 // offers to make a link when none opens the report, and the row then says why, counting only the links
 // that can open THIS report (linksFor, in linkState.js reportLinkReason). `shares` is null until the links
 // list is here: no line meanwhile.
@@ -36,12 +37,16 @@ export const editedNotes = (r) =>
     r.numbersRefreshedAt ? `Numbers refreshed ${formatDayOf(r.numbersRefreshedAt, r.timeZone)}` : null,
   ].filter(Boolean);
 
-/** "3,412 doors (+412) · 1,980 surveys (+260)" — lit-drop campaigns count lit dropped instead. */
+/**
+ * "3,412 doors (+412) · 1,980 surveys (+260)" — lit-drop campaigns count lit dropped instead. An all-time
+ * report (Latest progress, SIMPLIFY §N) has nothing new to show: "3,412 doors · 1,980 surveys".
+ */
 export const kpiLine = (r, campaignType) => {
   const c = r.headline?.cumulative || {};
   const p = r.headline?.period || {};
-  const second = campaignType === 'lit_drop' ? `${n(c.litKnocks)} lit dropped (${plus(p.litKnocks)})` : `${n(c.surveysTaken)} surveys (${plus(p.surveysTaken)})`;
-  return `${n(c.doorsKnocked)} doors (${plus(p.doorsKnocked)}) · ${second}`;
+  const added = (v) => (r.allTime ? '' : ` (${plus(v)})`);
+  const second = campaignType === 'lit_drop' ? `${n(c.litKnocks)} lit dropped${added(p.litKnocks)}` : `${n(c.surveysTaken)} surveys${added(p.surveysTaken)}`;
+  return `${n(c.doorsKnocked)} doors${added(p.doorsKnocked)} · ${second}`;
 };
 
 const ReportRow = ({
@@ -86,7 +91,8 @@ const ReportRow = ({
     <li className="py-3.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <button type="button" onClick={() => onOpen(row)} className="text-sm font-semibold text-fg hover:underline">
-          {formatPeriod(row.weekStart, row.weekEnd)}
+          {/* An all-time report (Latest progress, SIMPLIFY §N) says so: its dates alone read like a long period. */}
+          {row.allTime ? `All time · ${formatPeriod(row.weekStart, row.weekEnd)}` : formatPeriod(row.weekStart, row.weekEnd)}
         </button>
         <Badge variant={status.variant} dot>
           {status.label}

@@ -57,7 +57,8 @@ campaign that day shows as *a door on another campaign*, with no address, result
 canvasser is paused on a campaign they don't manage learns only that much (*Paused for review — an org
 admin can unpause*), because the canvasser can't work the lead's campaign either. Org admins see every
 pause and alone delete a resolved one and fix the doors on Door Outcomes; only a
-billing admin changes the setting and who gets the alert email. **Only canvassers are ever judged or
+billing admin changes the setting and who gets the alert email, on the org **Settings** page (org admins
+only; it lived on the Users page until 2026-10-27). **Only canvassers are ever judged or
 paused:** admins and team leads review and unpause, and they are the ones who enter paper results door by
 door, which would otherwise pause them.
 
@@ -134,17 +135,21 @@ door, which would otherwise pause them.
   **canvasser accounts only** — never an admin, another lead, or Doorline staff (the server refuses,
   not just the UI). Identity edits ride the same guards an admin's do: a deleted account is
   untouchable, and the **login email of anyone who also belongs to another organization is locked**
-  (only that person or Doorline can change it). Changing roles, creating org-level accounts, and
-  deleting remain admin-only.
+  (only that person or Doorline can change it). A lead can also **set the crew of anyone on their
+  campaign's team**, one person or several at once (the Team page's **Move to crew…**, the phone's **Move
+  all shown to a crew…**), **resend invites** to canvassers who never signed in, and **take canvassers,
+  people no longer in the organization, and themselves off the campaign** — on the web, and since
+  2026-10-27 on the phone too. Changing roles, creating org-level accounts, and deleting remain
+  admin-only.
 
   **The off-switch caveat is a real one:** deactivation is *not* campaign-scoped — an account is
   either on or off for the whole organization, so switching off someone a lead shares with another
   campaign takes them out of that campaign too. The app says which campaigns it reaches before you
   confirm, and the lead can reverse it.
 - **Grant the team-lead role** or change anyone's grants — only admins do that.
-- **Remove anyone from the organization, or delete anyone's account.** Both are org-admin actions on
-  the person's profile on the web and the phone: **Remove from org**, and **Delete account** — tucked
-  behind **More options**, with two confirmations — for an account that belongs only to this
+- **Remove anyone from the organization, or delete anyone's account.** Both are org-admin actions, in
+  the person's panel on the web and on their profile on the phone: **Remove from org**, and **Delete
+  account** — tucked behind **More options**, with two confirmations — for an account that belongs only to this
   organization (since 2026-10-24; see [USERS.md](USERS.md) → *Deleting a member's account*). A lead never
   sees either, and the server refuses them (`ADMIN_ONLY`). Even among admins, **billing access protects
   its holder**: only an admin who has billing access too can remove or delete someone who has it.
@@ -176,9 +181,11 @@ until an admin grants one.
   scoped to that campaign just like the web tab. **People management is one surface: More → Users**
   (the old standalone campaign
   Team screen merged into it). A campaign's **Team** tile opens Users pre-filtered to that campaign.
-  There a lead sees their campaigns' people, creates canvassers (born assigned, with an optional
-  coordinator), sets temporary passwords, and switches canvasser accounts off/on — and never sees
-  assignment controls (their creations auto-assign; rostering is admin work). If a lead also walks
+  There a lead sees their campaigns' people, adds canvassers by email (**Add a canvasser** asks who the
+  address belongs to first, then the crew), sets temporary passwords, switches canvasser accounts off/on,
+  sets crews (one person, or **Move all shown to a crew…**), resends invites, and takes canvassers, people
+  no longer in the organization and themselves off a campaign — and never sees assignment controls
+  (**Assign all shown** is for admins; their adds land on the campaign; rostering others is admin work). If a lead also walks
   doors, that's a separate thing: they're added to a campaign's walker roster like any canvasser and
   use the canvassing flow for their own books. When a lead switches into canvass mode, the drawer's
   **Admin dashboard** row brings them straight back.
@@ -290,7 +297,8 @@ redact for a lead (`shapeWindowVisit`: another campaign's visit is `{ at, fail, 
 hop whose other end is hidden keeps only its seconds and verdict), and add `rosterLines` — the one fact
 about another campaign a lead gets, a roster canvasser blocked there. `POST /:id/unpause` follows the
 pause's campaign (403 `FORBIDDEN_ROLE` once the lead no longer manages it). Org admins only: `DELETE /:id`,
-`GET /settings`; `PATCH /settings` additionally needs `billingAccess` (or a super admin) —
+`GET /settings` (which the Settings page reads, with `chosen` naming every stored recipient and whether
+they can still be emailed); `PATCH /settings` additionally needs `billingAccess` (or a super admin) —
 403 `billing-access-required`. The live check and the gate judge **canvassers only** (`judgedMember`: role
 `canvasser`, active), and any role change moves the member's restart point (`memberships.js`), so a
 demotion or promotion never carries old fails.
@@ -464,7 +472,12 @@ cliff, live).
   a plain-message 403, deliberately not `ADMIN_ONLY` (leads sometimes may) and never
   `FORBIDDEN_ROLE` (the mobile shell treats that as a role-recovery signal).
 - `GET /:userId/{crews,campaigns,stats,recent-activity}` — read drills allowed for any *visible*
-  target (`leadMaySeeTarget`), 403 outside the scope.
+  target (`leadMaySeeTarget`), 403 outside the scope. What they **return** to a lead covers only the
+  campaigns the lead manages (`leadCampaignScope`, 2026-10-25, PRIVACY_VERIFICATION item 40): the
+  totals and recent doors come from those campaigns' ledger rows, `/campaigns` lists those campaigns,
+  and `/crews` keeps every campaign's name (for the switch-off warning) but nulls the coordinator and
+  the live flag on the others. They used to answer org-wide, which showed a client-lead another
+  client's door addresses for a shared canvasser.
 - `POST /`, `PATCH /:userId` (role/grants/billing), `DELETE /:userId` — walled by
   `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`. So are the two account-deletion routes added
   2026-10-24, `GET /:userId/deletion-check` and `DELETE /:userId/account` ([USERS.md](USERS.md) → *The org
@@ -510,9 +523,10 @@ surface, so even org admins don't reach it (the web mounts it under `RoleGate re
 >   leadCrew writes (create, coordinator, deactivate, reactivate);
 > - the response carries **`alsoAffects`** — the other campaigns this reaches. The clients disclose
 >   the reach **before** committing by reading `GET /admin/memberships/:userId/crews` into the
->   confirm dialog (mobile MemberSheet + member detail, web UserProfileModal): `/crews` resolves
+>   confirm dialog (mobile MemberSheet + member detail, the web person panel): `/crews` resolves
 >   campaign *names* and is deliberately **not grant-filtered**, so the list names campaigns the
->   acting lead doesn't manage — which is the point. (Never resolve ids against `GET
+>   acting lead doesn't manage — which is the point. (Only the names, since 2026-10-25: on campaigns
+>   the lead doesn't manage, the coordinator and the live flag come back null, item 40.) (Never resolve ids against `GET
 >   /admin/campaigns` for this — that list is lead-scoped and drops exactly the campaigns the
 >   warning exists to name.)
 >
@@ -573,15 +587,28 @@ by [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
 - **`POST /resolve`** `{email}` → `{ outcome, person }`. The lookup behind the add box. `on-campaign` /
   `in-org` / `in-org-inactive` name the person; **`outside` is one indistinguishable answer** covering *no
   account anywhere*, *an account in another organization*, and *an address released by a deleted account* —
-  no name, no role, no account status, nothing to compare. POST rather than GET so an address never enters
-  a URL or a proxy log; rate-limited per actor ([crewResolveLimit.js](../server/src/middleware/crewResolveLimit.js),
-  30/hour) and every answer that names somebody writes an `AccessLog` subject line — a lookup is a
-  single-record read, so it is recorded like one.
+  no name, no role, no account status, nothing to compare (the body is byte-identical, and the membership
+  query runs whether or not an account exists). A named answer also carries `history: { doors, sources:
+  [{ coordinatorId, name, doors, canLead }] }` — this campaign's doors and the teams they count for, newest
+  first, so the add step can pre-pick a returning person's old crew — and, for `in-org-inactive` only,
+  `onCampaign`. POST rather than GET so an address never enters a URL or a proxy log. **Rate-limited per
+  actor** ([crewResolveLimit.js](../server/src/middleware/crewResolveLimit.js)) with two counts since
+  2026-10-27 (the owner's call: an add of many new people in an hour is plausible, a probe of many
+  colleagues is not): **60 an hour** for lookups that find nobody, **30 an hour** for lookups that name
+  somebody. Once either runs out every lookup waits, so the 429 (`code: 'rate-limited'`,
+  `retryAfterSeconds`) can't tell the two apart. The limits are the defence: an `AccessLog` row is written
+  only for Doorline staff working under a support grant (`middleware/accessLog.js`), as for every other
+  read, never for a customer's own staff. (This bullet used to say every named answer writes an
+  `AccessLog` subject line; it never did — corrected 2026-10-27.)
 - **`POST /`** — resolve-then-branch. `linkExisting` is still **accepted and ignored** (released mobile
   binaries send it); what the address resolves to decides. Free address → create + set-password invite
   (`outcome:'created'`). Colleague in this org → **claim**: roster row only, **no membership write**, so a
   lead can never silently promote or demote anyone (`'in-org'`, `addedToCampaign`). Already on the campaign
-  → idempotent no-op (`'on-campaign'`, no email). Address that turns out to hold an account **elsewhere** →
+  → idempotent no-op (`'on-campaign'`, no email, crew included). Every add takes `coordinatorId` (absent or
+  `null` = No crew) and joins through `joinCampaignCrew`, so a returning person's earlier doors here move to
+  that crew, and the 201's `restamp` says how many and from which teams (`sources`). The can't-be-your-own-
+  coordinator check gets the person's id only for a **named** outcome: for `outside` it would answer for
+  the account behind the address, and its 400 would say the address has one. Address that turns out to hold an account **elsewhere** →
   attach that real person, **discard the typed name and password** (`'attached'`, `attached:true`,
   `addedToOrg`) — overwriting a stranger's name would be a lie, and setting their password is the takeover
   path in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 14. Switched-off colleague →
@@ -590,14 +617,30 @@ by [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
   server asking the client to retry with different intent. `POST /admin/memberships` (org Users page,
   admin-only) is unchanged and still uses them.
 - **`PATCH /:userId/coordinator`** + **`GET /:userId/coordinator-preview`** — both scoped to this
-  campaign's roster.
+  campaign's roster. The PATCH takes `fromCoordinatorId` (the crew the client previewed) and answers
+  `409 changed-meanwhile` or `409 busy` instead of moving anyone twice; only a new pick is validated, so
+  Finish it works for a crew whose coordinator was switched off ([USERS.md](USERS.md) → *Crews*).
+- **`POST /coordinator-bulk/preview`** + **`PATCH /coordinator-bulk`** (since 2026-10-27) — Move to crew
+  for up to 500 people (preview) and 10 per write. For a lead, anyone not on this campaign's roster comes
+  back `skip: 'not-on-campaign'` with no name or counts, so the preview can't be used to look people up.
+  An org admin's preview also reads off-roster people (for the add checks), but the write never puts
+  anyone on a campaign: adding is `POST …/assignments`. The preview's `intent` (`'move'` or `'join'`)
+  matches its totals to the write that follows. Other skips: `not-in-org`, `deleted`, `switched-off`,
+  `already-on-campaign`, `staff`, `is-coordinator`, `same-crew`, `busy`.
 
 `POST /` and the coordinator write refuse on an **archived** campaign (409 `campaign-archived`); the crew
 door used to bypass that read-only promise while `.../assignments` honoured it. `/resolve` is exempt (writes
 nothing), and so are deactivate/reactivate — org-wide acts that merely arrive through a campaign URL.
 
 This is how a lead builds a crew without the org Users admin. Removing *existing* members and reading the
-roster still go through `.../assignments`.
+roster still go through `.../assignments`, with two lead rules since 2026-10-25 (PRIVACY_VERIFICATION item
+41): a lead's `POST` there takes **only their own id** (the phone's self-assign when they take a book),
+and books and walk-list crews take only the lead themself off the team (`partitionAssignable`
+`selfOnlyFor`), so the team can't be used to read another member's email and phone; and a lead's `DELETE`
+reaches **canvassers and themselves**, never an org admin, another lead or Doorline staff. Both refusals
+are a plain-message 403, never `FORBIDDEN_ROLE`; the add refusal is the same for every other id, and a
+removal of someone the org and campaign don't have answers like a made-up id, so neither says who is a
+member or who is staff.
 
 **A lead's coordinator change is confined to the campaign in the URL — structurally, not by
 convention.** A crew lives on `CampaignAssignment.coordinatorId` (unique `{campaignId, userId}`), so
@@ -620,17 +663,19 @@ exists so they see the door count before committing — now **this campaign's** 
 Member creation + validation is shared in
 [services/memberships/createMember.js](../server/src/services/memberships/createMember.js)
 (`createOrgMember`, `resolveCoordinatorId` — now accepts admin **or** lead coordinators —,
-`resolveManagedCampaigns`), reused by both `memberships` and `leadCrew`. `createOrgMember` takes an
-optional `campaignId`, which the lead's crew path supplies and the plain org-Users add does not: joining
-an **org** carries no crew, so with no campaign the create-time re-stamp is skipped entirely — there is
-no race whose history the call has authority over.
+`resolveManagedCampaigns`), reused by both `memberships` and `leadCrew`. Since 2026-10-27
+`createOrgMember` takes no campaign and no crew at all: joining an **org** carries no crew, and putting
+the person on a campaign — with the move of any earlier doors there — is the caller's
+`joinCampaignCrew`, the same join every way onto a roster uses.
 
 ## Granting (admins only)
 
 `POST/PATCH /admin/memberships` accept `managedCampaignIds[]` when the role is/becomes `lead`;
 `resolveManagedCampaigns` validates every id is a campaign in the org, and the route reconciles
 `CampaignManager` rows (upsert the set, delete the rest). Leaving the `lead` role clears all grants;
-`DELETE /:userId` clears them too. `GET /admin/memberships` returns each member's `managedCampaignIds`.
+`DELETE /:userId` clears them too. `GET /admin/memberships` returns each member's `managedCampaignIds`,
+narrowed for a lead reader to the reader's own grants (2026-10-25): a fellow lead's grants on other
+campaigns are another client's campaigns.
 It also returns each member's **`campaignIds`** — the campaigns they are ROSTERED on
 (`CampaignAssignment`), which is a different fact from the grant set above. That list is
 **scoped for a lead** to campaigns they actually manage: the member list is already narrowed by
@@ -749,7 +794,8 @@ plain `/login`, so the sign-in page never sends the next person back to the page
   affordances (New/Edit/Duplicate) via `canManage = isOrgAdmin || managedCampaignIds.includes(campaignId)`,
   with the server's `canManageSurvey` as the per-survey authority;
   [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) adds people **by email address** for
-  both roles, and is the **one** place a crew is set (the org Users page shows crews read-only).
+  both roles, crew picked before the add, and is where a crew is set on the web — one person in their
+  panel, several with **Move to crew…** (the org Users page shows crews read-only).
   Login/select-org land a lead on `/campaigns` (they have no `/admin` Overview), or inside their one
   active campaign when they have exactly one (`homeCampaignId`, above).
 - **The `/admin/memberships` fork** — that route is admin-only, so any *campaign* page that reads it for
@@ -761,15 +807,15 @@ plain `/login`, so the sign-in page never sends the next person back to the page
   mobile one was reported.
   **Since 2026-08-08 the fork is mostly gone, because the endpoint it forked to was the leakier of the
   two** (see the crew surface above). Where each page landed:
-  - `CampaignTeamPage` — **no fork**. Both roles read the campaign-scoped `crew` list; adding is the
-    email-keyed modal. An **org admin** additionally gets the org directory from `/admin/memberships` for
-    bulk staffing (typing twenty addresses would be worse than the picker it replaced); a lead never
-    fetches it.
+  - `CampaignTeamPage` — **no fork**. Both roles read the campaign-scoped `crew` list; adding is **Add
+    people → By email**. An **org admin** additionally gets **From your organization**, which reads
+    `/admin/memberships`, for bulk staffing (typing twenty addresses would be worse than the picker it
+    replaced); a lead never fetches it.
   - [CampaignAssignmentsModal.jsx](../client/src/components/CampaignAssignmentsModal.jsx) — opened from the
     Campaigns page's **ungated** action list, so a lead reaches it; it was therefore the *second* copy of
-    the org directory. It still forks, but the branches now differ in meaning: an admin assigns from the org
-    directory, a lead sees only this campaign's roster (so they can take people **off**) and is pointed at
-    the Team tab to add.
+    the org directory. Since 2026-10-27 it only lists and removes (item 41's rule for a lead): its Assign
+    branch is retired for a link to the Team page's **Add people**, so there is one way to add someone,
+    with the crew and the door check.
   - [EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) (the "assigned by" labels) — **no fork**: names
     now resolve from `.../assignments`, which keeps a row for someone since removed from the campaign.
     Resolving them against the crew list would have reintroduced the exact blank-name failure above.
@@ -805,8 +851,9 @@ plain `/login`, so the sign-in page never sends the next person back to the page
   `/admin/memberships` call 403'd and the hub rendered the failure as **"No users yet"** — the app
   stating as fact that the organization is empty to somebody simply not allowed to look.) The member
   sheet ([MemberSheet.jsx](../mobile/components/MemberSheet.jsx)) carries a coordinator picker
-  (staged pick → `coordinator-preview` door count → confirm) wired to the campaign-scoped `crew`
-  endpoints, so crews are settable from mobile as well as from
+  (staged pick → `coordinator-preview` door count → confirm, sending `fromCoordinatorId`, with **Finish
+  it** when the open-time preview says so) wired to the campaign-scoped `crew` endpoints, and the hub's
+  **Move all shown to a crew…** uses the bulk pair, so crews are settable from mobile as well as from
   [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) on web. The **canvasser** flow is
   untouched — a lead who walks is scoped as a canvasser via `CampaignAssignment` exactly like anyone
   else.

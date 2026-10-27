@@ -42,6 +42,9 @@ like the Early Voting upload:
    import under the same ID, they're flagged automatically. (If the later import spells the ID
    differently — zeros added or dropped — upload the list again afterwards; it will match then.)
 
+A list can be up to 50 MB. Only the Voter ID column is used, so if yours is bigger, save a copy with
+just that column and upload that.
+
 **Why the state matters.** Two states can issue the same digits, so the app only looks inside the
 campaigns of the state you picked. If the file names voters in other states' campaigns, the preview
 says so and offers those IDs as a download; nothing outside the state is flagged. A list that covers

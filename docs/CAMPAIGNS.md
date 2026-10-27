@@ -95,7 +95,7 @@ they start knocking: it's in the header of the canvasser's **Books** screen (no 
 glanceable over the map) and on the mobile **admin campaign detail** screen (with the note, for
 leads/admins working from their phone).
 
-The chip always names the **actual date**, never a bare countdown: *"🗳 Election Day · Wed, Nov 4"*
+The chip always names the **actual date**, never a bare countdown: *"Election Day · Wed, Nov 4"*
 with *in 12 days* beside it (*tomorrow* / *today* turn brand-red as it lands; once it's behind you,
 *"Election Day was Wed, Nov 4"*). Early voting likewise always names **both** bounds — *"Early
 voting Oct 20–Nov 1"* — including before the window opens, which is when canvassers are most often

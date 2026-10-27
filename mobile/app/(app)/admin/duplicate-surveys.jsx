@@ -292,7 +292,7 @@ export default function AdminDuplicateSurveys() {
                 ? 'No duplicate surveys match these filters.'
                 : `No duplicate surveys${
                     range.preset !== 'all' ? ` in ${labelForRange(range)}` : ''
-                  } — every surveyed voter has exactly one response. 🎉`}
+                  } — every surveyed voter has exactly one response.`}
             </InsetNoteRow>
           ) : null}
 

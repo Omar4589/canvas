@@ -91,7 +91,7 @@ export default function ActivityRow({ activity, onPress, showDate = false }) {
                 a.distanceFromHouseMeters > FAR_WARN_M && styles.metaWarn,
               ]}
             >
-              📍 {formatDistance(a.distanceFromHouseMeters)}
+              {formatDistance(a.distanceFromHouseMeters)} from the house
             </Text>
           ) : null}
           {a.wasOfflineSubmission ? (

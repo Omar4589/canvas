@@ -745,26 +745,35 @@ test('the empty roster’s hint names the button as it reads now', async () => {
   assert.match(html.off, /then press Refresh hours on the status bar\./);
 });
 
+// The profile is the person panel now (components/people/, docs/PROPOSAL_PEOPLE_PAGES.md §D), as the
+// Users page opens it; the FbTime line lives in its Everywhere section, which the Users page shows open.
+// The panel rides the Drawer, so the Overlay is stubbed.
 test('a kept earlier account’s profile says its hours still count — no "Link them" nag', async () => {
   const html = await render(
     (h) => `${PRELUDE}
-  import UserProfileModal from '${join(h, '../components/UserProfileModal.jsx')}';
+  import PersonPanel from '${join(h, '../components/people/PersonPanel.jsx')}';
+  import { personFromMember } from '${join(h, './personAccess.js')}';
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const membership = { membershipId: 'm9', role: 'canvasser', isActive: true, managedCampaignIds: [],
     user: { id: 'u9', firstName: 'Maria', lastName: 'Old', email: 'maria.old@org.test', isActive: true } };
+  const person = personFromMember(membership);
   const draw = (fbtime) => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(['admin', 'membership-stats', 'u9', tz], {
       doorsKnocked: 12, surveysSubmitted: 0, litDropped: 0, distanceMeters: 0, campaignsWorked: 1, lastActivityAt: null, fbtime,
     });
     return renderToString(
-      <QueryClientProvider client={qc}><MemoryRouter><UserProfileModal membership={membership} onClose={noop} /></MemoryRouter></QueryClientProvider>
+      <QueryClientProvider client={qc}><MemoryRouter>
+        <PersonPanel personId="u9" ids={['u9']} place={() => null} lookup={(id) => (id === 'u9' ? person : null)} loaded
+          scope={{ kind: 'org', pausedIds: new Set(), rosterLines: [] }} onStep={noop} onClose={noop} />
+      </MemoryRouter></QueryClientProvider>
     );
   };
   export const html = {
     kept: draw({ connected: true, linked: true, kept: true, personName: 'Maria D.', source: null }),
     unlinked: draw({ connected: true, linked: false, kept: false, personName: null, source: null }),
-  };`
+  };`,
+    { overlay: true }
   );
   assert.match(html.kept, /FbTime earlier account/);
   assert.match(

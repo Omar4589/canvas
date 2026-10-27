@@ -107,17 +107,25 @@ export function isNotable(item) {
 
 // One sentence for a team-reassignment row. The doors-moved count is the point: a by-team number
 // can move without anyone knocking a door, and this is what explains it.
+//
+// `doorsMoved` is doors (knocks, deduplicated); a server that predates it sends only activitiesMoved,
+// which it folds the doors into. A move of surveys or notes alone says so rather than "0 doors". A
+// change that didn't finish says what it was moving, and one a later change finished says that.
 export function teamMoveSummary(item) {
   const from = item.fromCoordinator?.name || 'No coordinator';
   const to = item.toCoordinator?.name || 'No coordinator';
-  const moved = (item.activitiesMoved || 0) + (item.surveysMoved || 0);
-  const doors = item.activitiesMoved || 0;
-  return {
-    headline: `${item.user?.name || 'Someone'}: ${from} → ${to}`,
-    detail: moved
-      ? `${doors.toLocaleString()} ${doors === 1 ? 'door' : 'doors'} moved to ${to === 'No coordinator' ? 'no team' : to}`
-      : 'No recorded work moved with them',
-  };
+  const toTeam = to === 'No coordinator' ? 'no team' : to;
+  const doors = item.doorsMoved ?? item.activitiesMoved ?? 0;
+  const surveys = item.surveysMoved || 0;
+  const rows = item.rowsMoved ?? item.activitiesMoved ?? 0;
+  const count = (k, one, many) => `${k.toLocaleString()} ${k === 1 ? one : many}`;
+  const what = doors ? count(doors, 'door', 'doors') : surveys ? count(surveys, 'survey', 'surveys') : rows ? 'notes and marks' : null;
+  let detail;
+  if (!what) detail = 'No recorded work moved with them';
+  else if (item.restampError) detail = `Didn't finish moving ${what} to ${toTeam}`;
+  else detail = `${what.charAt(0).toUpperCase()}${what.slice(1)} moved to ${toTeam}`;
+  if (item.finishedBy) detail += ' · Finished by a later change';
+  return { headline: `${item.user?.name || 'Someone'}: ${from} → ${to}`, detail };
 }
 
 // One sentence for an answer-edit row (and its undo), instead of "changed from … to …": the

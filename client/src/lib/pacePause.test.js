@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summarySentence, alertLine, statusLine, markLabel, secondsText, mphText, distanceLine } from './pacePause.js';
+import { summarySentence, alertLine, statusLine, markLabel, secondsText, mphText, distanceLine, pausedUserIds } from './pacePause.js';
+// Cross-tree on purpose: the web badge and the phone's must agree on who is paused.
+import { pausedUserIds as phonePausedUserIds } from '../../../mobile/lib/pace.js';
 
 test('the summary sentence names what kind of fast it was', () => {
   assert.equal(
@@ -30,4 +32,18 @@ test('the alert line, the status line and the marks', () => {
   assert.equal(mphText(10.6), '11 mph');
   assert.equal(distanceLine(null, String), null);
   assert.match(distanceLine(28, (m) => `${m} m`), /median 28 m from each house/);
+});
+
+test('who is paused right now: blocking pauses, and a team lead’s roster lines — the phone agrees', () => {
+  const data = {
+    pauses: [
+      { userId: 'u1', status: 'paused', blocking: true },
+      { userId: 'u2', status: 'paused', blocking: false },
+      { userId: 'u3', status: 'resolved', blocking: false },
+    ],
+    rosterLines: [{ userId: 'u4', paused: true, elsewhere: true }],
+  };
+  assert.deepEqual([...pausedUserIds(data)].sort(), ['u1', 'u4']);
+  assert.deepEqual([...pausedUserIds(data)].sort(), [...phonePausedUserIds(data)].sort());
+  assert.equal(pausedUserIds(undefined).size, 0);
 });

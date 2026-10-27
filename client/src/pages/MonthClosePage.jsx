@@ -196,7 +196,7 @@ export default function MonthClosePage() {
                               }`}
                             >
                               {m.month.slice(2)}
-                              {m.drift?.material ? ' ⚠' : ''}
+                              {m.drift?.material ? ' · drifted' : ''}
                             </span>
                           ))}
                         </span>

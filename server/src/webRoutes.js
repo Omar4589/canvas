@@ -43,6 +43,7 @@ export const WEB_SEGMENTS = new Set([
   'tags',
   'integrations', // /integrations — the org-admin FbTime (measured hours) page
   'billing',
+  'settings', // /settings — the org-wide switches page (automatic pause)
   'profile',
   'help',
   'super-admin',

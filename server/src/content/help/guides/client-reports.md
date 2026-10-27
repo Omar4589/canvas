@@ -6,7 +6,7 @@ kind: guide
 order: 21
 sourceDoc: CLIENT_PORTAL.md
 summary: Build a report for your organization's week (or any dates), publish exactly what you previewed, change it later with Edit or Refresh numbers, and share it on a password-protected link to all your reports or just one.
-tags: client reports, totals, all time, through a date, share, share link, client link, link to one report, just this report, publish, refresh numbers, edit, take down, next report, last week, this week, report week, how it works, duplicate report, team reports, continue this team, area view, password, expire, logo, history, PDF, map, doors near here, weekly report, walk list, contact breakdown, not a target voter, keep mine, use theirs, changed elsewhere
+tags: client reports, latest progress, all time, totals, through a date, up to date, share, share link, client link, link to one report, just this report, publish, refresh numbers, edit, take down, next report, last week, this week, report week, how it works, duplicate report, team reports, continue this team, area view, password, expire, logo, history, PDF, map, doors near here, weekly report, walk list, contact breakdown, not a target voter, keep mine, use theirs, changed elsewhere
 ---
 
 ## What a client report is
@@ -32,6 +32,7 @@ Under the **Client Reports** title, the page says what it's for: "Make reports f
 - **Tabs** when you have more than one kind of report: Whole campaign, each team, each walk list. Each tab shows its latest report ("Totals since the campaign began. The + figures are for Oct 13 – Oct 19."), a small chart of doors knocked in each report, and every report newest first.
 - **Each report** reads top to bottom: the headline cards with "+412 this week" (or "+812 in these 14 days" on a two-week report), door-goal progress if you ticked it, the voter-contact breakdown, the support breakdown, voter groups, survey breakdowns, your observations, and the map. It shows when it was published and last edited or refreshed, as dates.
 - **Every number runs from the campaign's first door through the report's last day**, and the report says so under **Activity at a glance**: "Totals since the campaign began, through Oct 25." Only the "+" figures are the report's own dates. See [Does a report count only the dates I pick?](report-totals-and-dates)
+- **A Latest progress report** reads "All time" above its dates and "Totals since the campaign began, as of Oct 28." ("through Oct 28" once its numbers are refreshed after that day), with no "+" figures anywhere, on the page, the list and the PDF.
 - **Download PDF** gives them the same report as a PDF, with your logo and without the map.
 - **On a link to just one report**, none of the above but that report: it opens straight on it, with no list of other reports, no "‹ All reports" and no Older or Newer, and says "This link opens this report only." If you take that report down, the link says "This report was taken down or removed. Ask the person who sent it." until you put it back up. If you delete the report, the link is deleted with it and says "This link isn't available. It may have been replaced or switched off — ask the person who sent it."
 
@@ -43,13 +44,13 @@ The map keeps up with the report. When your client comes back to the tab, or ope
 
 Your client can also use the map **from the keyboard**: Tab to it, move it with the arrow keys and zoom with + and −. A red ring marks the centre; **Enter** shows the doors inside it (or the area under it) and **Escape** closes them again. A screen reader explains this and reads out what was opened.
 
-A report can also carry a short note when it applies: **"Numbers as of Oct 24 — the period was still running"** when you built it before the period ended, and **"Earlier totals were updated by −120 doors since the Oct 13 – Oct 19 report"** when the previous report's totals changed after you sent it (a late knock, an edited answer, a canvasser moved between teams). That line never says why. If you refresh the earlier report's numbers after this one was built, the line disappears rather than compare two different sets of numbers; building this report's numbers again compares afresh. On a link to just this report, which names no other report, the same line reads **"Totals from before Oct 19 were updated by −120 doors after they were first reported."**
+A report can also carry a short note when it applies: **"Numbers as of Oct 24 — the period was still running"** when you built it before the period ended, and **"Earlier totals were updated by −120 doors since the Oct 13 – Oct 19 report"** when the previous report's totals changed after you sent it (a late knock, an edited answer, a canvasser moved between teams). That line never says why. If you refresh the earlier report's numbers after this one was built, the line disappears rather than compare two different sets of numbers; building this report's numbers again compares afresh. On a link to just this report, which names no other report, the same line reads **"Totals from before Oct 19 were updated by −120 doors after they were first reported."** On a Latest progress report it names the earlier report's last day instead: **"Totals through Oct 25 were updated by −120 doors after they were first reported."**
 
 ## Build a report
 
 1. Open the campaign and go to its **Client Reports** tab, then press **New report**.
 2. Choose what it **covers**: the **Whole campaign**, **A team**, and optionally **Only one walk list**. A walk list's name shows on your client's report, so a colorful internal name is worth a second look.
-3. Pick the **dates**. A line above them says what they decide: "Your report shows totals for Paid team, from the campaign's first door through the last day you pick. The first day only decides what shows as new, like “+412 this week”." (it names the whole campaign, or your team or walk list). The choices are listed with their dates, the first one picked: what comes after the tab's last report, then **Last week**, then **This week, not over yet** (refresh it once the week ends), then **Pick dates** for anything else. They're worked out fresh each time you open New report ("Loading the dates…" for a moment), so a page left open overnight still suggests today's dates. Dates that haven't begun say so: "Starts Oct 26 — its numbers stay empty until then." See *Report dates* below.
+3. Pick the **dates**. A line above them says what they decide: "Your report shows totals for Paid team, from the campaign's first door through the last day you pick. The first day only decides what shows as new, like “+412 this week”." (it names the whole campaign, or your team or walk list). The choices are listed with their dates, the first one picked: what comes after the tab's last report, then **Latest progress · all time, through today** (see *Latest progress* below), then **Last week**, then **This week, not over yet** (refresh it once the week ends), then **Pick dates** for anything else. Leave Pick dates' first day empty to count everything up to the last day. They're worked out fresh each time you open New report ("Loading the dates…" for a moment), so a page left open overnight still suggests today's dates. Dates that haven't begun say so: "Starts Oct 26 — its numbers stay empty until then." See *Report dates* below.
 4. Press **Create draft**. The numbers build in the background ("Building the first numbers…"), and you can leave the page while they do.
 
 If the tab already has a report for exactly those dates, New report asks first, right under the dates, for example "You already have a draft Whole campaign report for Oct 19 – Oct 25." with **Open the draft** or **Make a second one** ("Your client sees both once both are published."). For a published one it says how to bring its numbers up to date: open it and press **Refresh numbers**. For one you've taken down, it says "Your client sees only the new one; the taken-down one stays hidden unless you put it back up." **Make a second one** makes exactly what you pressed **Create draft** for. If someone else pressed **Create draft** for the same dates at the same moment, only one draft is made, and you read "Ada Lovelace made the Whole campaign report for Oct 19 – Oct 25 a moment ago — you're both in it." with **Open it**.
@@ -80,6 +81,17 @@ In the builder, the left side is your settings and the right side is the **previ
 
 The header shows **Numbers as of** with a time, and **Recompute** builds the numbers again from today's records. If someone is fixing answers, changing or removing door entries, or re-cutting a round on the campaign, the build waits for them to finish and says so. Changing the map after the numbers were built (turning it on, adding a map question, switching between exact doors and areas) needs a Recompute before you can publish; taking something off never does.
 
+## Latest progress
+
+When your client asks "how many doors have we knocked? how many surveys? how much support?", make a **Latest progress** report: in **New report**, pick **Latest progress · all time, through today**. It counts everything from the campaign's first door through today, so it has no "+412 this week" figures. Pick it for a team (say your paid team) and it's everything that team has done.
+
+- It starts on the day of the campaign's first door, so it shows dates like "Sep 14 – Oct 28", and your reports list says "All time · Sep 14 – Oct 28".
+- For everything up to an earlier day, use **Pick dates** with the first day left empty.
+- It sits at the top of your client's list, since reports are listed by their last day, newest first.
+- Your weekly reports aren't affected: their suggested dates, Next report and the "not covered by any report" lines ignore Latest progress reports.
+- Doing it every week? Press **Next report** on your newest Latest progress report: it makes a new one through today with your settings and notes copied.
+- Before you publish, it reminds you that "Today isn't over yet: doors knocked after these numbers were built aren't in them."
+
 ## Before you publish
 
 The builder lists what's worth a look before the report goes out. Nothing here stops you publishing:
@@ -92,7 +104,7 @@ The builder lists what's worth a look before the report goes out. Nothing here s
 - no link your client could open, and how to fix it;
 - notes copied from last week that you haven't reviewed;
 - an earlier report whose totals changed since you sent it, and why (or, if that report's numbers were refreshed after these were built, that the "earlier totals" line is hidden, with **Recompute** to compare again);
-- on a team report, **Door visits this period**: a row for each team, this report's team first, and "Together" when there are two or more; then the door visits in the whole campaign (or the walk list) this period, how many of them more than one team made (they count in each team's report), and how many no team made (canvassers with no crew in a team, or doors entered in bulk); and how many canvassers knocked for the team (it warns when it's one, since the report then shows one person's work);
+- on a team report, **Door visits this period** (on a Latest progress team report, just how many canvassers have knocked for the team since the campaign began, with the same one-person warning): a row for each team, this report's team first, and "Together" when there are two or more; then the door visits in the whole campaign (or the walk list) this period, how many of them more than one team made (they count in each team's report), and how many no team made (canvassers with no crew in a team, or doors entered in bulk); and how many canvassers knocked for the team (it warns when it's one, since the report then shows one person's work);
 - how many surveys an admin edited after they were recorded, or entered at the office instead of at a door. They count like any other answer.
 
 None of this is ever shown to your client.
@@ -141,6 +153,8 @@ A published report never goes back to being a draft. Instead:
 ## Next report
 
 On the newest report of each tab, **Next report** makes the next draft in one click, starting the day after the last one ended and following the same rules as New report's first choice (see *Report dates*). It copies your notes (marked as copied until you tick **I've reviewed the copied notes**), your question choices, the map, your voter groups and the goal tick, and starts building the numbers right away. Pressed twice, it still makes one draft.
+
+On a **Latest progress** report, Next report makes a new one through today instead, with the same settings and notes; it isn't offered on one that already runs through today (press **Refresh numbers** on that one). Your weekly reports keep their own Next report.
 
 After a long gap, Next report fills the gap from the day after your last report, while New report suggests the most recent full week. One click never makes a catch-up longer than two weeks, though: Next report then opens **New report** with **Last week** picked, and the top of its dates says "More than two weeks have passed since this report. Choose the next report's dates in New report."
 

@@ -17,7 +17,7 @@ test('the server copy wins, and the outcome-naming form rides along', () => {
   assert.equal(byId['canvass-activity'].desc, 'plain');
   assert.equal(byId['canvass-activity'].descNotTargetInUse, 'named');
   assert.equal(byId['voter-file'].descNotTargetInUse, null, 'a type whose copy never names it');
-  assert.equal(byId['canvass-activity'].emoji, EXPORT_TYPE_META[0].emoji, 'mobile-only fields stay local');
+  assert.equal(byId['canvass-activity'].sub, EXPORT_TYPE_META[0].sub, 'mobile-only fields stay local');
 });
 
 test('before the server answers, and from an older server, no type has a naming form', () => {

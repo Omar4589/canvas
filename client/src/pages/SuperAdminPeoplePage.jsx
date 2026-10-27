@@ -138,7 +138,7 @@ export default function SuperAdminPeoplePage() {
                     <div className="flex flex-wrap gap-1">
                       {p.hasOpenCandidate && <span className="rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-warning-fg">merge?</span>}
                       {p.hasPendingProposal && <span className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-accent">proposal</span>}
-                      {(p.lockedFields || []).length > 0 && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">🔒 {p.lockedFields.length}</span>}
+                      {(p.lockedFields || []).length > 0 && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">{p.lockedFields.length} locked</span>}
                     </div>
                   </td>
                 </tr>

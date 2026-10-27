@@ -457,18 +457,46 @@ export async function processImportJob(job) {
       );
     }
 
+    // Moves: incoming voters whose door changed, from the same campaign-scoped before/after pair the
+    // re-house cleanup below counts with — read right after the write, and only the doors kept, so the
+    // whole-file read isn't held through the list re-applies below. Both doors of every move get their
+    // resident-derived flags recomputed with the swept ones: a voter who voted early and moved can finish
+    // the door they joined (often brand-new) or the one they left, and the same for do-not-contact; before
+    // this, those doors stayed up until a later upload named someone there. Persisted (grow-only), like the
+    // source doors: a BullMQ retry re-reads post-move state, where nobody looks moved, so a crash in the
+    // recomputes below is recovered from the job's list.
+    let movedVoters = 0;
+    const movedHhIds = new Set((importJob.movedHouseholdIds || []).map(String));
+    const movedBefore = movedHhIds.size;
+    {
+      const postVoters = await findInChunks(
+        Voter, { campaignId: campaign._id }, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1 }
+      );
+      for (const v of postVoters) {
+        const prior = priorHhBySvid.get(v.stateVoterId);
+        if (prior && prior !== String(v.householdId)) {
+          movedVoters += 1;
+          movedHhIds.add(prior);
+          movedHhIds.add(String(v.householdId));
+        }
+      }
+    }
+    if (movedHhIds.size > movedBefore) {
+      await ImportJob.updateOne({ _id: importJobId }, { $set: { movedHouseholdIds: [...movedHhIds] } });
+    }
+
     // Denormalize cut attributes onto households (modal voter value + conflict
     // flags) so attribute-cut turf generation can group by them.
     await recomputeCutAttributesForCampaign(campaign._id);
 
     // Early voting (sticky): first re-apply prior voted-list ids to voters that have only now
-    // been imported, then recompute fullyVoted for those doors plus any currently-dropped door.
-    // Net effect: a genuinely-new un-voted voter re-opens its door, but a voter who was already on
-    // a voted list stays marked — so the door doesn't wrongly re-open, and brand-new all-voted
-    // households drop.
+    // been imported, then recompute fullyVoted for those doors plus any currently-dropped door and
+    // both doors of every move. Net effect: a genuinely-new un-voted voter re-opens its door, but a
+    // voter who was already on a voted list stays marked — so the door doesn't wrongly re-open, and
+    // brand-new all-voted households drop, including one a voter who voted early just moved into.
     const { householdIds: reappliedHh } = await reapplyVotedLists(campaign._id);
     const droppedDoors = await Household.find({ campaignId: campaign._id, fullyVoted: true }).distinct('_id');
-    const toRecompute = [...new Set([...droppedDoors.map(String), ...reappliedHh])];
+    const toRecompute = [...new Set([...droppedDoors.map(String), ...reappliedHh, ...movedHhIds])];
     if (toRecompute.length) await recomputeFullyVoted(campaign._id, toRecompute);
 
     // Do-not-contact (sticky): the same reopen mechanics, org-wide. Graduate prior DNC-list ids
@@ -476,10 +504,11 @@ export async function processImportJob(job) {
     // any currently-suppressed door in this campaign — a genuinely-new contactable resident
     // re-opens an all-DNC door; a resident who was on a DNC list stays flagged. Doors that
     // gained an import-SEEDED flag (a person flagged in a sibling campaign arriving here —
-    // csvImporter 2.6) join the recompute so an all-DNC door drops now, not next nightly.
+    // csvImporter 2.6) join the recompute so an all-DNC door drops now, not next nightly, and so
+    // do both doors of every move (a flagged person moving in, or a contactable one moving out).
     const { householdIds: reappliedDncHh } = await reapplyDncLists(orgId);
     const dncDropped = await Household.find({ campaignId: campaign._id, fullyDnc: true }).distinct('_id');
-    const dncRecompute = [...new Set([...dncDropped.map(String), ...reappliedDncHh, ...(counts.seededDncHouseholdIds || [])])];
+    const dncRecompute = [...new Set([...dncDropped.map(String), ...reappliedDncHh, ...(counts.seededDncHouseholdIds || []), ...movedHhIds])];
     if (dncRecompute.length) await recomputeFullyDnc(dncRecompute);
 
     // Do-not-knock (address-level): catches what csvImporter's $setOnInsert cannot — an address
@@ -490,18 +519,9 @@ export async function processImportJob(job) {
     // file are not consent. Only an explicit admin clear lifts it (services/dnc/doNotKnock.js).
     await reapplyDoNotKnock(orgId, campaign._id);
 
-    // Re-house cleanup: count voters that changed doors, then deactivate doors this
-    // import emptied (and reactivate any refilled) — bounded to the touched households.
-    // Same campaign scope as the prior capture, so the before/after pair compares the
-    // same rows.
-    const postVoters = await findInChunks(
-      Voter, { campaignId: campaign._id }, 'stateVoterId', svids, { stateVoterId: 1, householdId: 1 }
-    );
-    let movedVoters = 0;
-    for (const v of postVoters) {
-      const prior = priorHhBySvid.get(v.stateVoterId);
-      if (prior && prior !== String(v.householdId)) movedVoters += 1;
-    }
+    // Re-house cleanup: deactivate doors this import emptied (and reactivate any refilled) —
+    // bounded to the touched households. The voters that changed doors were counted with the
+    // moves above.
     const destHouseholds = await findInChunks(
       Household, { campaignId: campaign._id }, 'normalizedAddress', [...householdMap.keys()], { _id: 1 }
     );

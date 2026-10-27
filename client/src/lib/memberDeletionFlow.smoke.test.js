@@ -6,7 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
 
 // FLOW tests for deleting a member's account: the REAL profile and dialog, a real QueryClient, real
-// effects and subscriptions, with the API answering in whatever order a test chooses. The render
+// effects and subscriptions, with the API answering in whatever order a test chooses. The profile is the
+// person panel now (components/people/, docs/PROPOSAL_PEOPLE_PAGES.md §D), opened as the Users page opens
+// it; its guarded close (Escape, the scrim, ×) is what a close behind the delete has to get past. The render
 // smoke tests (renderToString) can't see any of this: they never mount, so they missed a review that
 // hung on "Checking…" for good when the stats refetch landed, unchanged, before the check did. Each
 // test below is a bug a review found (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md, §D):
@@ -19,7 +21,8 @@ import esbuild from 'esbuild';
 // touches, plus event bubbling and the browser's "focus falls to body when its element goes" rule.
 // node --test runs each file in its own process, so these globals never meet another test. Overlay
 // is stubbed (its portal and focus trap aren't under test) with a scrim button that calls its onClose,
-// standing in for Escape and a scrim click; auth and the API client are stubbed too.
+// standing in for Escape and a scrim click — the panel's Drawer gets one and the delete dialog gets
+// one; auth and the API client are stubbed too.
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 // Inside the client tree on purpose: dependencies stay external to the bundle, so node resolves
@@ -49,13 +52,21 @@ writeFileSync(
    import { createRoot } from 'react-dom/client';
    import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
    import { MemoryRouter } from 'react-router-dom';
-   import UserProfileModal from '${join(here, '../components/UserProfileModal.jsx')}';
-   // The Users page's part: it unmounts the profile on onClose and shows the notice it is handed.
+   import PersonPanel from '${join(here, '../components/people/PersonPanel.jsx')}';
+   import { personFromMember } from '${join(here, './personAccess.js')}';
+   // The Users page's part: it unmounts the panel on onClose and shows the notice it is handed.
    const Host = ({ membership, log }) => {
      const [open, setOpen] = useState(true);
+     const person = personFromMember(membership);
      return open ? (
-       <UserProfileModal
-         membership={membership}
+       <PersonPanel
+         personId={person.userId}
+         ids={[person.userId]}
+         place={() => null}
+         lookup={(id) => (id === person.userId ? person : null)}
+         loaded
+         scope={{ kind: 'org', pausedIds: new Set(), rosterLines: [] }}
+         onStep={() => {}}
          onClose={() => { log.push('close'); setOpen(false); }}
          onDeleted={(notice) => log.push('notice: ' + notice)}
        />
@@ -350,6 +361,7 @@ const route = (method, path) => {
   if (path.includes('/recent-activity')) return { activities: [] };
   if (path.includes('/crews')) return { crews: [] };
   if (path === '/admin/campaigns') return { campaigns: [] };
+  if (path.startsWith('/admin/pace-pauses')) return { pauses: [] };
   if (path.endsWith('/deletion-check')) return CHECK;
   if (method === 'DELETE' && path.endsWith('/account')) return { ok: true, deletedAt: '2026-10-24T18:00:00Z', kind: 'used', released: {} };
   throw new Error(`unmocked ${method} ${path}`);
@@ -436,18 +448,25 @@ test('two submits in one burst send one DELETE, and a close right behind them is
   await toStepTwo();
   answer = (method, path) => (method === 'DELETE' ? HOLD : route(method, path));
   const submit = button('Delete permanently');
-  // One task, no render in between: the second click, the scrim (Escape's stand-in) and a third click
-  // all land before react-query has reported anything pending.
+  // One task, no render in between: the second click, the scrims (Escape's stand-in — the panel's, then
+  // the dialog's) and a third click all land before react-query has reported anything pending.
+  const [panelScrim, dialogScrim] = elements().filter((e) => e.hasAttribute('data-scrim'));
   click(submit);
   click(submit);
-  click(elements().find((e) => e.hasAttribute('data-scrim')));
+  click(panelScrim);
+  click(dialogScrim);
   click(submit);
   await tick(30);
   assert.equal(deletes(), 1, 'one DELETE');
   assert.match(screen(), /Deleting…/, 'still open, still deleting');
   assert.equal(button('Back').hasAttribute('disabled'), true);
-  const dialog = elements().find((e) => e.hasAttribute('data-overlay'));
+  const dialog = elements().filter((e) => e.hasAttribute('data-overlay')).at(-1);
   assert.ok(!elements(dialog).some((e) => e.getAttribute('aria-label') === 'Close'), 'no close button while it is out');
+  assert.ok(
+    elements().filter((e) => e.getAttribute('aria-label') === 'Close').every((e) => e.hasAttribute('disabled')),
+    'the panel’s own × waits too'
+  );
+  assert.ok(!view.log.includes('close'), 'nothing closed');
 
   settle((h) => h.method === 'DELETE', { ok: true, kind: 'used' });
   await waitFor(() => view.log.includes('close'), 'everything to close');

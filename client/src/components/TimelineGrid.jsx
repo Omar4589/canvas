@@ -127,8 +127,11 @@ function Row({ c, columns, bucketKey, metric, cellBg, frozen }) {
             {c.firstName} {c.lastName}
           </span>
           {c.inOverlap && (
-            <span title="Knocked an overlapping door in this range" className="text-warning-fg">
-              ⚠
+            <span
+              title="Knocked an overlapping door in this range"
+              className="rounded bg-warning-tint px-1 text-[10px] font-medium text-warning-fg"
+            >
+              overlap
             </span>
           )}
           {c.isActive === false && (

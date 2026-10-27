@@ -18,3 +18,10 @@ export const KNOCKABLE_DOOR_FILTER = Object.freeze({
   doNotKnock: { $ne: true },
   excludedFromTurf: { $ne: true },
 });
+
+// The same flags as a projection, for the one read that must let a PHONE apply the rule: the /changes delta
+// (routes/mobile/bootstrap.js). The phone's fold (mobile/lib/deltaFold.js isSuppressedDoor) drops a door that
+// fails a flag and pulls a fresh bootstrap for a door it lacks that passes them all — so it must see every
+// flag. The delta used to project four of the five by hand; excludedFromTurf was missing. Derived, so a 6th
+// flag rides the delta with no edit there; server/test/knockableDoorParity.test.js holds the phone to it.
+export const KNOCKABLE_DOOR_FLAGS = Object.freeze(Object.fromEntries(Object.keys(KNOCKABLE_DOOR_FILTER).map((k) => [k, 1])));

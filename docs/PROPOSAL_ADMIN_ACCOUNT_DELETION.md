@@ -6,6 +6,12 @@
 > phone clean-up of a deleted account's unsent doors) is not built and ships after Election Day. Release
 > steps: §I2.
 >
+> **Later (2026-10-27, [PROPOSAL_PEOPLE_PAGES.md](PROPOSAL_PEOPLE_PAGES.md)):** on the web, the profile
+> (`UserProfileModal.jsx`) was replaced by the person panel the Users and Team pages share. **More
+> options ▸** now sits at the end of the panel's state buttons, and Delete account… is inside it, with the
+> same reminder and the same two confirmations (`DeleteMemberDialog`). The phone's path is unchanged. Where
+> this plan says *Account → More options* on the web, read *More options ▸* in the panel.
+>
 > **As built, where it differs from the text below:**
 > - Desk marks (`via: 'bulk'`) are left out of the ledger orgs that widen the name record (step 6) and out
 >   of `fieldRecordsHere`, the same rule as `orgCarriesUser`: their `userId` is whoever pressed the button.

@@ -136,6 +136,8 @@ Two jobs the filter builder can't do:
 - **IDs not yet imported won't match.** A Voter ID that isn't in this campaign's universe lands in
   "not in this campaign." Import those voters first (they then appear in Intake), or download the
   unmatched IDs from the preview, fix the file, and re-upload.
+- **Files can be up to 50 MB.** Only the Voter ID column is used, so for a bigger file save a copy with
+  just that column. A file over the limit is turned away the moment you pick it.
 - **Doors with no map coordinates are left out** of a saved search (they can't be cut). The preview reports how
   many were skipped.
 - **Deleting a saved search** only removes the saved selection — it never changes which walk list owns a door.
@@ -248,7 +250,8 @@ Mounted at `/admin/campaigns/:campaignId/walklists`, admin-only.
 | `GET /:id` · `DELETE /:id` | — | fetch / delete a saved search (delete never touches door ownership) |
 
 Preview and save each upload the file (stateless re-parse, cheap) — the same two-call pattern the Early
-Voting page uses.
+Voting page uses. Both go through `uploadIdList` (50 MB cap; a 413 `file-too-large` that says what to do
+— [EARLY_VOTING.md](EARLY_VOTING.md) §C), and the page refuses an oversized file as soon as it's picked.
 
 **Route order matters.** `GET /:id/export.csv` is registered **before** `GET /:id` so the literal
 `export.csv` segment isn't swallowed by the `:id` param route.

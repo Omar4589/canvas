@@ -8,7 +8,7 @@ import AnswerFilters from '../components/AnswerFilters.jsx';
 import IdColumnPicker from '../components/IdColumnPicker.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { describeIdsInFile, zeroMatchLine } from '../lib/idListPreview.js';
+import { describeIdsInFile, zeroMatchLine, idListTooBig, idListTooBigText } from '../lib/idListPreview.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
 
 const STATUSES = ['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'wrong_address', 'lit_dropped'];
@@ -238,7 +238,8 @@ export default function WalkListsPage() {
     setCsvFile(file);
     setIdColumn('');
     csvSave.reset();
-    if (file && campaignId) csvPreview.mutate({ file });
+    // Over the size limit: refused right here, before anything uploads.
+    if (file && campaignId && !idListTooBig(file)) csvPreview.mutate({ file });
     else csvPreview.reset();
   }
 
@@ -503,6 +504,7 @@ export default function WalkListsPage() {
                 />
               )}
               {csvPreview.error && !colError && <p className="mt-2 text-xs text-danger">{csvPreview.error.message}</p>}
+              {idListTooBig(csvFile) && <p className="mt-2 text-xs text-danger">{idListTooBigText()}</p>}
 
               {csvPreview.data && (
                 <div className="mt-3 rounded border border-border bg-sunken p-4 text-sm">

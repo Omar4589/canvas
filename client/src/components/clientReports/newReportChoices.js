@@ -127,10 +127,28 @@ export const dateChoices = ({ last = null, s, today, knockedBeforeThisWeek = tru
  * decides what shows as new, in the words the client's cards use (`phrase`: "this week", "in these 14
  * days", reportDerive.js periodPhrase).
  */
-export const totalsSentence = ({ wholeCampaign = false, label = '', phrase }) => {
+export const totalsSentence = ({ wholeCampaign = false, label = '', phrase, allTime = false, through = null }) => {
   const covers = wholeCampaign ? ' for the whole campaign, from its first door' : `${label ? ` for ${label},` : ''} from the campaign’s first door`;
+  // Latest progress, or Pick dates with no first day (§N): everything counts, so nothing shows as new.
+  if (allTime) return `Your report shows totals${covers} through ${through || 'the last day you pick'}, with no “+412 this week” figures.`;
   return `Your report shows totals${covers} through the last day you pick. The first day only decides what shows as new, like “+412 ${phrase}”.`;
 };
+
+/**
+ * Latest progress (§N): the choice for everything from the campaign's first knock through today. It
+ * carries only its last day — the server works out where an all-time report starts (allTimeStartOf) —
+ * and comes second in the list, whatever the first choice is.
+ */
+export const allTimeChoice = (today) => ({
+  key: 'all_time',
+  kind: 'all_time',
+  allTime: true,
+  weekStart: null,
+  weekEnd: today,
+  head: 'Latest progress · all time, through today',
+  tail: null,
+  skipped: null,
+});
 
 const article = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
 
@@ -141,10 +159,11 @@ const article = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
  */
 export const duplicateText = (d, { today, scopeLabel }) => {
   const label = d.scopeLabel || scopeLabel || 'Whole campaign';
-  const period = periodLabel(d.weekStart, d.weekEnd, today);
-  if (d.status === 'draft') return `You already have a draft ${label} report for ${period}.`;
-  if (d.takenDown) return `You already published ${article(label)} ${label} report for ${period}, taken down.`;
-  return `You already published ${article(label)} ${label} report for ${period}. To bring its numbers up to date, open it and press Refresh numbers.`;
+  // An all-time report (§N) is named by its last day: "an all-time Whole campaign report through Oct 28".
+  const what = d.allTime ? `all-time ${label} report through ${dayLabel(d.weekEnd, today)}` : `${label} report for ${periodLabel(d.weekStart, d.weekEnd, today)}`;
+  if (d.status === 'draft') return `You already have a draft ${what}.`;
+  if (d.takenDown) return `You already published ${article(what)} ${what}, taken down.`;
+  return `You already published ${article(what)} ${what}. To bring its numbers up to date, open it and press Refresh numbers.`;
 };
 
 /**

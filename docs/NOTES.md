@@ -41,7 +41,7 @@ about this campaign?" without clicking through voters and doors one by one.
 **On the web:** inside a campaign, alongside Timeline, Map, and Audit — the **Notes** tab. It opens
 showing **today's** notes; widen the date range for more.
 
-**On mobile:** admins/leads get a **Notes** screen reached two ways — the **📝 Notes** row in the
+**On mobile:** admins/leads get a **Notes** screen reached two ways — the **Notes** row in the
 **More** menu, and a **Notes** tile on a campaign's page. Same three sources, same filters. A phone
 has no address bar to hold the campaign, so the screen carries a **campaign chip** at the top: tap
 it to switch, and your pick carries across the other admin screens. Coming in from a campaign's own

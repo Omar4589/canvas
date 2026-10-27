@@ -8,6 +8,11 @@ import { Membership } from '../models/Membership.js';
 import { CampaignAssignment } from '../models/CampaignAssignment.js';
 import { CanvassActivity } from '../models/CanvassActivity.js';
 import { SurveyResponse } from '../models/SurveyResponse.js';
+import {
+  restampFilter,
+  PERSON_ACTIVITY_HINT,
+  PERSON_SURVEY_HINT,
+} from '../services/memberships/restampCoordinator.js';
 // teamFoldStage is the EXACT fold /team-breakdown uses. Sharing it is the point: an audit that can
 // be wrong in the same way as the thing it audits is worth nothing.
 import {
@@ -48,6 +53,31 @@ const CAMPAIGN_ID = (process.argv.find((a) => a.startsWith('--campaign=')) || ''
 const ORG_SLUG = (process.argv.find((a) => a.startsWith('--org=')) || '').split('=')[1] || null;
 
 const n = (v) => (v || 0).toLocaleString();
+
+// The crew checks that used to live in repair:team-stamps (docs/PROPOSAL_PEOPLE_PAGES.md §B.8): under a
+// person on the roster, any rows that don't count for their crew, and a crew change left unfinished on
+// their row. Informational — neither makes the run fail; only a column that doesn't reconcile does.
+// With no crew, rows on a real team are what every departure leaves, so the line suggests no fix.
+const crewLines = async ({ campaign, uid, who, crew }) => {
+  const crewId = crew.coordinatorId ?? null;
+  const f = { organizationId: campaign.organizationId, userId: uid, campaignId: campaign._id, coordinatorId: crewId };
+  const [offA, offS] = await Promise.all([
+    CanvassActivity.aggregate([{ $match: restampFilter({ ...f, bulkAware: true }) }, { $group: { _id: '$coordinatorId', rows: { $sum: 1 } } }]).hint(PERSON_ACTIVITY_HINT),
+    SurveyResponse.aggregate([{ $match: restampFilter(f) }, { $group: { _id: '$coordinatorId', rows: { $sum: 1 } } }]).hint(PERSON_SURVEY_HINT),
+  ]);
+  const off = new Map();
+  for (const r of [...offA, ...offS]) off.set(String(r._id ?? 'none'), (off.get(String(r._id ?? 'none')) || 0) + r.rows);
+  if (off.size) {
+    const offIds = [...off.keys()].filter((x) => x !== 'none');
+    const names = new Map((await User.find({ _id: { $in: offIds } }, 'firstName lastName').lean()).map((x) => [String(x._id), `${x.firstName} ${x.lastName}`.trim()]));
+    const parts = [...off.entries()].map(([id, rows]) => `${id === 'none' ? 'No team' : names.get(id) || id} ${n(rows)}`).join(', ');
+    console.log(`      rows not on their crew: ${parts}  ·  ${crewId ? `open Team → ${who} → Finish it` : 'possibly a departure; check before changing'}`);
+  }
+  if (crew.crewJob?.token) {
+    const running = new Date(crew.crewJob.until).getTime() >= Date.now();
+    console.log(`      ${running ? 'a crew change is running right now' : `an unfinished crew change  ·  open Team → ${who} → Finish it`}`);
+  }
+};
 const pad = (s, w) => String(s).padEnd(w);
 const padL = (s, w) => String(s).padStart(w);
 
@@ -229,7 +259,7 @@ async function auditCampaign(campaign) {
   // relabelled "no team", which would look identical to a genuine No-team canvasser.
   const roster = await CampaignAssignment.find(
     { campaignId: campaign._id, userId: { $in: userIds } },
-    'userId coordinatorId'
+    'userId coordinatorId crewJob'
   ).lean();
   const crewById = new Map(roster.map((r) => [String(r.userId), r]));
   // Names for coordinators who hold a crew on the roster but have NO doors of their own in this
@@ -264,6 +294,7 @@ async function auditCampaign(campaign) {
     console.log(
       `  ${pad(u ? `${u.firstName} ${u.lastName}` : uid, 20)}${padL(n(k?.knocks), 8)} doors ${padL(n(surveys), 6)} surveys  ·  ${pad(team, 14)} ${state}`
     );
+    if (crew) await crewLines({ campaign, uid, who: u ? `${u.firstName} ${u.lastName}`.trim() : uid, crew });
   }
 
   console.log(

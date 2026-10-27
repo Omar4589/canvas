@@ -21,6 +21,7 @@ import {
   supportSubtitle,
   TEAM_NOTE,
   totalsSinceText,
+  periodOf,
 } from './reportDerive.js';
 
 // docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F10: a report covers any run of days, so every weekly
@@ -134,6 +135,52 @@ test('the totals line: since the campaign began, through the report’s last day
   for (const r of [{}, null, { weekEnd: 'junk' }]) assert.equal(totalsSinceText(r), 'Totals since the campaign began.');
 });
 
+test('an all-time report (Latest progress, SIMPLIFY §N): no "+N", no quiet banner, "All time", and the totals line says when', () => {
+  // Its period runs from the campaign's first knock, so period totals equal the running totals.
+  const all = (over = {}) => report({ weekStart: '2026-09-14', weekEnd: '2026-10-28', period: { doorsKnocked: 3412, surveysTaken: 1980, surveyedVoters: 1702 }, extra: { allTime: true, ...over } });
+  const s = deriveReportSections(all());
+  assert.deepEqual(
+    s.kpis.map((k) => [k.key, k.value, k.delta, k.deltaText, k.deltaZeroText, k.hint]),
+    [
+      ['doorsKnocked', '3,412', null, null, null, null],
+      ['surveysTaken', '1,980', null, null, null, null],
+      ['surveyedVoters', '1,702', null, null, null, null],
+      ['rate', '58%', null, null, null, 'Share of doors where we surveyed someone'],
+    ],
+    'the totals alone — nothing reads as new'
+  );
+  assert.equal(s.isQuietWeek, false);
+  assert.equal(s.heading.title, 'All time');
+  assert.equal(s.heading.range, 'Sep 14 – Oct 28, 2026');
+  assert.equal(s.totalsSince, 'Totals since the campaign began, through Oct 28.');
+  assert.equal(s.numbersAsOf, null);
+  // Built before today ended: the line says when, and no "the period was still running" note.
+  const early = deriveReportSections(all({ numbersThrough: '2026-10-28' }));
+  assert.equal(early.totalsSince, 'Totals since the campaign began, as of Oct 28.');
+  assert.equal(early.numbersAsOf, null);
+  // Help without the period sentence; the goal as of its last day.
+  assert.equal(s.kpis[0].help, 'Every door we knocked, counted once per pass. Going back in a later pass counts again.');
+  assert.equal(s.kpis[2].help, 'How many distinct people we surveyed — counted once each, however many passes we surveyed them in. Not how many forms were filled out.');
+  assert.equal(s.goal.help, 'Progress toward the campaign\'s door target, counted in the same doors as "Doors knocked" above and measured as of this report\'s last day — not today.');
+  // A campaign that began six days ago is still "All time", never "Week of …"; even with no doors.
+  const young = deriveReportSections(report({ weekStart: '2026-10-22', weekEnd: '2026-10-28', period: {}, extra: { allTime: true } }));
+  assert.equal(young.heading.title, 'All time');
+  assert.equal(young.isQuietWeek, false);
+  assert.equal(young.kpis[0].deltaZeroText, null);
+  const lit = deriveReportSections(report({ campaignType: 'lit_drop', weekStart: '2026-09-14', weekEnd: '2026-10-28', period: { litKnocks: 900 }, extra: { allTime: true } }));
+  assert.ok(lit.kpis.every((k) => k.deltaText === null), 'lit drop too');
+  assert.equal(periodOf({ allTime: true, weekStart: '2026-10-22', weekEnd: '2026-10-28' }).noun, 'all');
+  assert.equal(periodOf({ weekStart: '2026-10-22', weekEnd: '2026-10-28' }).noun, 'week', 'a dated week is still a week');
+  // The hub's heading and the PDF's name.
+  assert.equal(seriesHeading([{ weekStart: '2026-09-14', weekEnd: '2026-10-28', allTime: true }]), 'Reports');
+  assert.equal(seriesHeading([{ weekStart: '2026-10-19', weekEnd: '2026-10-25' }, { weekStart: '2026-09-14', weekEnd: '2026-10-28', allTime: true }]), 'Reports');
+  assert.equal(seriesHeading([{ weekStart: '2026-10-19', weekEnd: '2026-10-25' }]), 'Weekly reports', 'a weekly tab reads as before');
+  assert.equal(
+    reportPdfFileName({ weekStart: '2026-09-14', weekEnd: '2026-10-28', allTime: true, scope: { kind: 'campaign' } }, { campaignName: 'Fall 2026' }),
+    'fall-2026-whole-campaign-all-time-report-2026-09-14-to-2026-10-28.pdf'
+  );
+});
+
 test('the doors and homes help carry the no-tiling caveat (§F10)', () => {
   const weekly = deriveReportSections(report({ campaignType: 'lit_drop', period: { doorsKnocked: 1 } }));
   assert.match(weekly.kpis[0].help, /A week's figure counts the doors knocked that week: a door knocked in two different weeks during one pass appears in both but once in the running total, so the weekly numbers may not add up to it\.$/);
@@ -209,6 +256,13 @@ test('on a link to one report the earlier-totals line names no other report: "To
     before([{ card: 'doorsKnocked', delta: -5 }], { since: { weekStart: '2026-10-12', weekEnd: '2026-10-18' } }),
     `Totals from before Oct 19 were updated by ${MINUS}5 doors after they were first reported.`
   );
+  // An all-time report's form (Latest progress, SIMPLIFY §N) names the earlier report's last day — even
+  // when that is this report's own last day too, where "before <the day after>" read wrong.
+  assert.equal(
+    earlierTotalsText({ changes: [{ card: 'doorsKnocked', delta: 3 }], since: null, through: '2026-10-25' }),
+    'Totals through Oct 25 were updated by +3 doors after they were first reported.'
+  );
+  assert.equal(earlierTotalsText({ changes: [{ card: 'doorsKnocked', delta: 3 }], since: null, through: 'soon' }), 'Earlier totals were updated by +3 doors.');
   // Anything but a day falls back to the line that names nothing.
   for (const junk of [null, '', 'soon', '2026-10-19T05:00:00.000Z', 20261019]) {
     assert.equal(before([{ card: 'doorsKnocked', delta: -5 }], { before: junk }), `Earlier totals were updated by ${MINUS}5 doors.`, String(junk));

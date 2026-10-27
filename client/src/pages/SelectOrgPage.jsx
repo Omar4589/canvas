@@ -133,7 +133,7 @@ export default function SelectOrgPage() {
             onClick={pickPlatform}
             className="mb-3 flex w-full items-center justify-between rounded-xl border border-brand-accent/30 bg-brand-tint px-4 py-3 text-left text-sm font-semibold text-brand-accent transition-colors hover:bg-brand-tint"
           >
-            <span>🌐 Platform view</span>
+            <span>Platform view</span>
             <span className="text-[10px] uppercase tracking-wide text-brand-accent/70">
               all orgs
             </span>

@@ -567,9 +567,15 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
   code), so one odd value never nags. A council district such as `ATLANTA CITY` reads as a city name;
   the sample line is the check for that one. A required field blank in every peeked row reads in the warning color.
   Display only: the `sample` rows were already in the preview-headers response.
-- **On apply**, `importProcessor` captures each incoming voter's prior household, then after `applyImport`
-  runs `recomputeHouseholdActive` over the touched (source ∪ destination) households and stamps
-  `movedVoters`/`deactivatedDoors` onto the `ImportJob` (shown in the Recent-imports history).
+- **On apply**, `importProcessor` captures each incoming voter's prior household, then right after
+  `applyImport` reads where they live now: a voter whose door changed is a **move**, and both doors of every
+  move join the early-voting and do-not-contact recomputes (`fullyVoted`, `fullyDnc`) with the swept doors —
+  a voted or flagged voter who moved can finish the door they joined (often brand-new) or the one they left
+  (2026-10-27; before, those doors stayed up until a later upload named someone there). The moved doors are
+  persisted grow-only as `ImportJob.movedHouseholdIds`, like `sourceHouseholdIds`, because a retry re-reads
+  post-move state where nobody looks moved. Last it runs `recomputeHouseholdActive` over the touched
+  (source ∪ destination) households and stamps `movedVoters`/`deactivatedDoors` onto the `ImportJob` (shown
+  in the Recent-imports history).
 - **Forecast vs. actual:** the preview is a forecast against current data; the apply re-parses the same
   file and computes the authoritative counts. The CLI `runImport` path skips the worker's post-apply
   step (no deactivation), same as it skips the other post-apply recomputes.
@@ -591,7 +597,7 @@ unchanged `POST /csv`** (parse → `applyImport` upsert → the worker's post-ap
   `ImportTooLargeError` carries the count and the split-by-county remedy, and the worker marks it
   unrecoverable instead of burning the retry schedule (§E, §G).
 - **The `GET /:importId` poll projects out the big arrays**
-  (`insertedHouseholdIds`/`insertedVoterIds`/`sourceHouseholdIds`/`duplicateStateVoterIds` — ~5 MB of
+  (`insertedHouseholdIds`/`insertedVoterIds`/`sourceHouseholdIds`/`movedHouseholdIds`/`duplicateStateVoterIds` — ~5 MB of
   JSON on a 100k-row import that the 1.5s poller must not re-download every tick; undo reads them from
   the DB), validates the ObjectId, and runs the lazy stale-job expiry (§E).
 
@@ -689,8 +695,12 @@ idempotent retry inserts nothing). Undo
 still untouched: a voter is **kept** if it has a `VotedVoter`/`SurveyResponse`/`CanvassActivity`; a
 household is **kept** if `effortId`/`turfId` is set, `status != 'unknocked'`, `fullyVoted`, it has any
 household-level activity/survey/voted, or it holds a voter not from this import. It deletes voters, then
-the now-empty deletable households, then runs `recomputeHouseholdActive` over existing doors that lost a
-voter. **Conservative — it only ever deletes net-new, untouched records and never reverts updates.**
+the now-empty deletable households, then runs
+[`recomputeResidentFlags`](../server/src/services/households/recomputeResidentFlags.js) (`isActive`,
+`fullyVoted`, `fullyDnc`) over every surviving door that lost a voter — an existing door, or an inserted one
+kept for a resident who stays (a do-not-contact request). Until 2026-10-27 it re-checked `isActive` alone,
+on existing doors only, so a door the import had re-opened (an un-voted or contactable newcomer at an
+all-voted or all-DNC door) stayed open after the undo. **Conservative — it only ever deletes net-new, untouched records and never reverts updates.**
 Idempotent: `undone` blocks a second run. The result
 (`doorsDeleted`/`doorsSkipped`/`votersDeleted`/`votersSkipped`) is stored on the `ImportJob` and shown in
 the Recent-imports history. Undo also tears down any **Person** this import created that now has

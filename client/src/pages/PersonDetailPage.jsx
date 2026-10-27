@@ -123,7 +123,7 @@ export default function PersonDetailPage() {
   }, [pickerText]);
 
   const detailQ = useQuery({ queryKey: key, queryFn: () => api(`/super-admin/persons/${personId}`) });
-  // Invalidate the detail AND the directory list — the list's merge?/🔒 pills and the needsReview
+  // Invalidate the detail AND the directory list — the list's merge?/locked pills and the needsReview
   // filter are derived from the same state every mutation below changes; hitting only the singular
   // key left them stale (phantom pills after a dismiss/merge).
   const invalidate = () => {
@@ -238,7 +238,7 @@ export default function PersonDetailPage() {
                         title={locked ? 'Locked — propagation/imports will not overwrite. Click to unlock.' : 'Lock this field against propagation'}
                         className={'rounded px-1 text-[11px] ' + (locked ? 'text-amber-600' : 'text-fg-subtle hover:text-fg-muted')}
                       >
-                        {locked ? '🔒' : '🔓'}
+                        {locked ? 'Locked' : 'Lock'}
                       </button>
                     )}
                   </dt>

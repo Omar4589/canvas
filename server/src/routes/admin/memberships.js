@@ -107,6 +107,16 @@ async function leadMaySeeTarget(req, userId) {
   return visible.has(String(userId));
 }
 
+// The guard above decides WHO a lead may look at; this decides how much of that person comes
+// back. A team lead may be the CLIENT for their campaign (owner ruling 2026-09-23), and one
+// canvasser can work several clients' campaigns, so a person's work (totals, recent doors, crews,
+// campaign list) reaches a lead only from the campaigns that lead manages. The drills used to
+// answer org-wide, and the phone profile showed a lead another client's door addresses
+// (docs/PRIVACY_VERIFICATION.md item 40). null = an admin or staff: no narrowing. An empty grant
+// set narrows to nothing (default-deny).
+const leadCampaignScope = async (req) => (isOrgAdmin(req) ? null : managedCampaignIds(req));
+const inLeadScope = (scope) => (scope ? { campaignId: { $in: scope } } : {});
+
 // Hand copy of KNOCK_ACTIONS (services/reports/aggregations.js) — every knock outcome must be here.
 const DOOR_ACTIONS = ['not_home', 'wrong_address', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting', 'not_target'];
 
@@ -235,7 +245,9 @@ router.get('/', async (req, res, next) => {
     const orgCount = new Map(counts.map((c) => [String(c._id), c.count]));
 
     // The campaigns each team lead is granted (CampaignManager), so the Users page
-    // can show + edit a lead's scope without a per-row fetch.
+    // can show + edit a lead's scope without a per-row fetch. Narrowed for a LEAD reader
+    // below, like the assignment set: a fellow lead's grants on campaigns this lead doesn't
+    // manage are another client's campaigns.
     const grants = await CampaignManager.find({ organizationId: activeOrgId(req) })
       .select('userId campaignId')
       .lean();
@@ -252,7 +264,7 @@ router.get('/', async (req, res, next) => {
     // ships in that response's separate deletingCampaigns array by design, so an id
     // resolving to nothing there is correct rather than missing.
     //
-    // SCOPED FOR LEADS, unlike the grants block it mirrors. The member LIST is already
+    // SCOPED FOR LEADS, like the grants block it mirrors. The member LIST is already
     // narrowed by leadVisibleUserIds, but an assignment SET is not: unfiltered, a lead
     // would learn every campaign each of their canvassers is on, including campaigns
     // the lead holds no grant for at all. That is an access widening, so it is cut here.
@@ -323,7 +335,9 @@ router.get('/', async (req, res, next) => {
         addedAt: m.createdAt,
         deletion: deletionByUser.get(String(m.userId._id)) || null,
         billingAccess: !!m.billingAccess,
-        managedCampaignIds: managedByUser.get(String(m.userId._id)) || [],
+        managedCampaignIds: (managedByUser.get(String(m.userId._id)) || []).filter(
+          (cid) => !leadScope || leadScope.has(cid)
+        ),
         campaignIds: campaignsByUser.get(String(m.userId._id)) || [],
         // null when the org has no FbTime connection, or the reader is a lead —
         // the client renders the column only when the field is present.
@@ -463,9 +477,18 @@ router.get('/:userId/crews', async (req, res, next) => {
       { userId: req.params.userId, organizationId: orgId },
       'campaignId coordinatorId'
     ).lean();
+    // Every campaign keeps its NAME for every reader: the switch-off warning has to say which
+    // campaigns an org-wide switch reaches (ROLES.md, the deactivate disclosure). For a lead, the
+    // rest of a campaign they don't manage stays out: who runs that crew, and whether the
+    // campaign is live. Those rows come back with nulls, which no lead screen renders.
+    const scope = await leadCampaignScope(req);
+    const managed = scope && new Set(scope.map(String));
+    const shown = (cid) => !managed || managed.has(String(cid));
 
     const campaignIds = [...new Set(rows.map((r) => String(r.campaignId)))];
-    const coordIds = [...new Set(rows.map((r) => r.coordinatorId).filter(Boolean).map(String))];
+    const coordIds = [
+      ...new Set(rows.filter((r) => shown(r.campaignId)).map((r) => r.coordinatorId).filter(Boolean).map(String)),
+    ];
     const [campaigns, coords] = await Promise.all([
       campaignIds.length ? Campaign.find({ _id: { $in: campaignIds } }, 'name isActive').lean() : [],
       coordIds.length ? User.find({ _id: { $in: coordIds } }, 'firstName lastName').lean() : [],
@@ -478,6 +501,15 @@ router.get('/:userId/crews', async (req, res, next) => {
     res.json({
       crews: rows.map((r) => {
         const c = campaignById.get(String(r.campaignId));
+        if (!shown(r.campaignId)) {
+          return {
+            campaignId: String(r.campaignId),
+            campaignName: c?.name || 'Unknown campaign',
+            campaignIsActive: null,
+            coordinatorId: null,
+            coordinatorName: null,
+          };
+        }
         const coordinatorId = r.coordinatorId ? String(r.coordinatorId) : null;
         return {
           campaignId: String(r.campaignId),
@@ -1019,8 +1051,9 @@ router.get('/:userId/campaigns', async (req, res, next) => {
     if (!isOrgAdmin(req) && !(await leadMaySeeTarget(req, req.params.userId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
+    // A lead gets only the campaigns they manage, the same cut GET / makes on campaignIds.
     const rows = await CampaignAssignment.find(
-      { userId: req.params.userId, organizationId: activeOrgId(req) },
+      { userId: req.params.userId, organizationId: activeOrgId(req), ...inLeadScope(await leadCampaignScope(req)) },
       { campaignId: 1 }
     ).lean();
     res.json({ campaignIds: rows.map((r) => String(r.campaignId)) });
@@ -1059,6 +1092,8 @@ router.get('/:userId/stats', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid tz' });
     }
     const dayStr = (date) => dayFormatter.format(date);
+    // A lead's totals cover the campaigns they manage only (leadCampaignScope).
+    const scope = inLeadScope(await leadCampaignScope(req));
 
     const [activities, surveysSubmitted, fbtimeConn, fbtimeLink] = await Promise.all([
       CanvassActivity.find({
@@ -1066,11 +1101,12 @@ router.get('/:userId/stats', async (req, res, next) => {
         organizationId: orgId,
         actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
         via: { $ne: 'bulk' }, // admin bulk marks aren't this user's field work
+        ...scope,
       })
         .sort({ timestamp: 1 })
         .select('timestamp location actionType campaignId')
         .lean(),
-      SurveyResponse.countDocuments({ userId, organizationId: orgId }),
+      SurveyResponse.countDocuments({ userId, organizationId: orgId, ...scope }),
       // Whether THIS person's hours are measured — answerable only here, because the
       // Integrations page is admin-only and a lead had no way to find out at all.
       FbTimeConnection.findOne({ organizationId: orgId, status: 'connected' })
@@ -1172,14 +1208,26 @@ router.get('/:userId/recent-activity', async (req, res, next) => {
     const limit = Number.isFinite(requested)
       ? Math.min(Math.max(requested, 1), 100)
       : 20;
+    // Show more pages with `skip`. There is no total: a client stops when a page comes back short or
+    // adds no new ids, because a server that predates `skip` answers page one again.
+    const skipped = parseInt(req.query.skip, 10);
+    const skip = Number.isFinite(skipped) ? Math.min(Math.max(skipped, 0), 10_000) : 0;
 
+    // Door addresses and campaign names: for a lead, from the campaigns they manage only
+    // (leadCampaignScope). Desk marks (via: 'bulk') are left out, as in /stats and every report.
     const activities = await CanvassActivity.find({
       userId,
       organizationId: orgId,
       actionType: { $in: [...DOOR_ACTIONS, 'restricted'] },
+      via: { $ne: 'bulk' },
+      ...inLeadScope(await leadCampaignScope(req)),
     })
       .sort({ timestamp: -1 })
+      .skip(skip)
       .limit(limit)
+      // One person's ledger: the person index, so the org-scoped filter can't send the planner to the
+      // organization's (services/memberships/restampCoordinator.js INDEX HINTS).
+      .hint({ userId: 1, timestamp: -1 })
       .populate('householdId', 'addressLine1 city state zipCode')
       .populate('campaignId', 'name')
       .lean();

@@ -160,7 +160,7 @@ export default function DuplicateSurveysPage() {
         <Card className="p-6 text-sm text-fg-muted">
           {filtered
             ? 'No duplicate surveys match these filters.'
-            : 'No duplicate surveys in this range. Every surveyed voter has exactly one response. 🎉'}
+            : 'No duplicate surveys in this range. Every surveyed voter has exactly one response.'}
         </Card>
       ) : (
         <>

@@ -95,7 +95,7 @@ export default function OrgSwitcher() {
                     : 'hover:bg-sunken',
                 ].join(' ')}
               >
-                <span>🌐 Platform view</span>
+                <span>Platform view</span>
                 <span className="ml-2 text-[10px] uppercase tracking-wide text-fg-subtle">
                   all orgs
                 </span>

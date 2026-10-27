@@ -2,8 +2,8 @@
 //
 // formatRelative previously existed as six drifted copies (day cutoff 7 vs 30 vs uncapped, NaN
 // guard present/absent, 'Never' vs ''). The options preserve each surface's deliberate choices —
-// UserProfileModal keeps its 7-day cutoff via { cutoffDays: 7 } — while the accidents (no NaN
-// guard, '730d ago' forever) are fixed everywhere.
+// the person panel (components/people/) keeps its 7-day cutoff via { cutoffDays: 7 } — while the
+// accidents (no NaN guard, '730d ago' forever) are fixed everywhere.
 
 export function formatDate(d) {
   if (!d) return '—';

@@ -76,7 +76,7 @@ const ReportSettings = ({
             value={settings.title}
             disabled={!editable}
             maxLength={200}
-            placeholder={formatPeriod(report.weekStart, report.weekEnd)}
+            placeholder={report.allTime ? 'All time' : formatPeriod(report.weekStart, report.weekEnd)}
             onChange={(e) => set({ title: e.target.value })}
           />
         </label>

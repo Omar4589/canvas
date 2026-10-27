@@ -70,7 +70,7 @@ Nothing you've done is ever lost, and access winds down gently:
 - **Past due.** You keep full access. You'll just see a reminder banner while an invoice is outstanding — a nudge, not a lockout.
 - **Read-only.** If an account stays unresolved, it can switch to read-only: you and your team can still view everything you've built, but recording knocks, importing voters, and cutting turf pause until it's sorted. Canvassers already in the field get a short grace window, so a day's work is never interrupted.
 
-While you're read-only you can still **export** your data, and you can still **switch someone's access off** — **Deactivate**, **Remove from org**, or [delete their account](delete-an-account) — so a person who leaves doesn't keep their access while billing is sorted out. Switching someone back on waits until it is.
+While you're read-only you can still **export** your data, and you can still **switch someone's access off** — **Deactivate**, **Remove from org**, or [delete their account](delete-an-account) — so a person who leaves doesn't keep their access while billing is sorted out. Switching someone back on waits until it is, and so do adding people, crew changes and taking someone off a campaign.
 
 As soon as billing is squared away, everything switches back on — nothing is deleted.
 

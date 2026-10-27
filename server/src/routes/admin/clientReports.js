@@ -17,6 +17,7 @@ import { Effort } from '../../models/Effort.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
 import { nextPeriod, suggestPeriod, weekStartOf, reportWeekStartsOnOf } from '../../services/reports/reportPeriods.js';
+import { allTimeStartOf } from '../../services/reports/allTimeStart.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { shapeReportForClient, mapFilterSurvey } from '../../services/reports/clientReportView.js';
@@ -85,6 +86,7 @@ import {
   mapServed,
   servedMapKeys,
   periodLabelOf,
+  dayLabelOf,
 } from '../../services/reports/reportVisibility.js';
 
 // Admin report BUILDER (docs/CLIENT_PORTAL.md; the upgrade in docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md).
@@ -134,8 +136,11 @@ const dateRe = /^\d{4}-\d{2}-\d{2}$/;
 const idString = z.string().refine((v) => mongoose.isValidObjectId(v), { message: 'Invalid id' });
 const createSchema = z.object({
   campaignId: z.string(),
-  weekStart: z.string().regex(dateRe),
+  // Required unless `allTime`: Latest progress (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N) sends only
+  // its last day, and the server sets the start (allTimeStartOf) — any weekStart sent with it is ignored.
+  weekStart: z.string().regex(dateRe).optional(),
   weekEnd: z.string().regex(dateRe),
+  allTime: z.boolean().optional(),
   title: z.string().max(200).optional(),
   // The series this report continues — or, without one, the scope that names it: a walk list
   // (effortId), a team (teamSeriesId), or both (a team on one walk list). None = the whole campaign.
@@ -241,6 +246,7 @@ function adminListRow(r) {
     scope,
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
+    allTime: !!r.allTime,
     timeZone: r.timeZone,
     status: r.status,
     takenDownAt: r.takenDownAt || null,
@@ -660,14 +666,16 @@ const insertDraftWithBuild = async ({ _id = new mongoose.Types.ObjectId(), doc, 
 const openFirst = (r) => (r.status === 'draft' ? 0 : r.status === 'published' && !r.takenDownAt ? 1 : 2);
 const existingOf = (list) => [...list].sort((a, b) => openFirst(a) - openFirst(b) || new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
 const aOrAn = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
-// 409 REPORT_EXISTS: what New report needs to name that report and open it, or make a second one.
+// 409 REPORT_EXISTS: what New report needs to name that report and open it, or make a second one. An
+// all-time report (§N) is named by its last day: "an all-time Whole campaign report through Oct 28, 2026".
 const REPORT_EXISTS = (r, scopeLabel) => {
   const period = periodLabelOf(r);
-  const kind = `${aOrAn(scopeLabel)} ${scopeLabel} report for ${period}`;
+  const what = r.allTime ? `all-time ${scopeLabel} report through ${dayLabelOf(r.weekEnd)}` : `${scopeLabel} report for ${period}`;
+  const kind = `${aOrAn(what)} ${what}`;
   return {
     error:
       r.status === 'draft'
-        ? `You already have a draft ${scopeLabel} report for ${period}.`
+        ? `You already have a draft ${what}.`
         : r.takenDownAt
           ? `You already published ${kind}, taken down.`
           : `You already published ${kind}. To bring its numbers up to date, open it and press Refresh numbers.`,
@@ -677,6 +685,7 @@ const REPORT_EXISTS = (r, scopeLabel) => {
     takenDown: !!r.takenDownAt,
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
+    allTime: !!r.allTime,
     scopeLabel,
   };
 };
@@ -692,7 +701,10 @@ router.post('/', async (req, res, next) => {
     if (!ensureOrgScoped(req, res)) return;
     const orgId = activeOrgId(req);
     const data = createSchema.parse(req.body);
-    if (data.weekStart > data.weekEnd) {
+    if (!data.allTime && !data.weekStart) {
+      return res.status(400).json({ error: 'weekStart is required' });
+    }
+    if (!data.allTime && data.weekStart > data.weekEnd) {
       return res.status(400).json({ error: 'weekStart must be on or before weekEnd' });
     }
     const campaign = await loadCampaignInOrg(orgId, data.campaignId);
@@ -703,7 +715,10 @@ router.post('/', async (req, res, next) => {
     }
 
     const tz = campaign.timeZone || 'America/New_York';
-    const range = zonedDayRange(data.weekStart, data.weekEnd, tz);
+    const today = zonedDayStr(new Date(), tz);
+    // Latest progress (§N): an all-time report starts on the day of the campaign's first knock.
+    const weekStart = data.allTime ? await allTimeStartOf({ campaignId: campaign._id, tz, weekEnd: data.weekEnd, today }) : data.weekStart;
+    const range = zonedDayRange(weekStart, data.weekEnd, tz);
     if (!range.$gte || !range.$lt) {
       return res.status(400).json({ error: 'Invalid week range' });
     }
@@ -713,9 +728,15 @@ router.post('/', async (req, res, next) => {
     // No accidental doubles (§E): look first — organizationId and campaignId keep this on the campaign
     // index ({seriesId, …} alone was a collection scan) — and name the report that's there, unless the
     // operator chose "Make a second one".
-    const key = { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, weekStart: data.weekStart, weekEnd: data.weekEnd };
+    // Of the same KIND only (§N): a dated report and an all-time one with the same dates never stand for
+    // each other. An all-time report is keyed on its tab and last day — its first day is worked out — and
+    // guarded by report_all_time_guard (allTimeGuard), a dated one by report_period_guard (dupGuard).
+    const key = data.allTime
+      ? { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, weekEnd: data.weekEnd, allTime: true }
+      : { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, weekStart, weekEnd: data.weekEnd, allTime: { $ne: true } };
+    const guard = data.allTime ? 'allTimeGuard' : 'dupGuard';
     if (!data.allowDuplicate) {
-      const there = existingOf(await ClientReport.find(key, { status: 1, takenDownAt: 1, weekStart: 1, weekEnd: 1, createdAt: 1 }).lean());
+      const there = existingOf(await ClientReport.find(key, { status: 1, takenDownAt: 1, weekStart: 1, weekEnd: 1, allTime: 1, createdAt: 1 }).lean());
       if (there) return res.status(409).json(REPORT_EXISTS(there, label));
     }
     const template = await resolveTemplate(orgId, campaign);
@@ -739,15 +760,16 @@ router.post('/', async (req, res, next) => {
           effortName: effort ? effort.name : null,
           seriesId: series._id,
           scope: { kind: series.kind, label },
-          weekStart: data.weekStart,
+          weekStart,
           weekEnd: data.weekEnd,
+          ...(data.allTime ? { allTime: true } : {}),
           timeZone: tz,
           rangeStartUtc: range.$gte,
           rangeEndUtc: range.$lt,
           status: 'draft',
           supportQuestionKey: null,
           visibility: defaultVisibility(template),
-          ...(data.allowDuplicate ? {} : { dupGuard: true }),
+          ...(data.allowDuplicate ? {} : { [guard]: true }),
           createdBy: req.user._id,
         },
       });
@@ -756,7 +778,7 @@ router.post('/', async (req, res, next) => {
       made = await insert();
     } catch (err) {
       if (!isReportPeriodGuardError(err)) throw err;
-      const winner = await ClientReport.findOne({ ...key, dupGuard: true }).lean();
+      const winner = await ClientReport.findOne({ ...key, [guard]: true }).lean();
       if (winner) {
         return res.json({ report: winner, build: buildView(winner.build), existing: true, createdByName: await creatorNameOf(winner) });
       }
@@ -768,15 +790,17 @@ router.post('/', async (req, res, next) => {
     await writeReportHistory(report, REPORT_FIELDS.created, { by: req.user._id }).catch(() => {});
     const fresh = await ClientReport.findById(report._id).lean();
     // A period that starts after today in the campaign's zone says so, as Next's answer does, and the
-    // builder opens on its "hasn't started yet" note (code review round 1, WEEK-3).
-    const today = zonedDayStr(new Date(), tz);
-    res.status(201).json({ report: fresh, build: buildView(fresh.build), warnings: data.weekStart > today ? ['STARTS_AFTER_TODAY'] : [] });
+    // builder opens on its "hasn't started yet" note (code review round 1, WEEK-3). An all-time report
+    // never starts after today (allTimeStartOf).
+    res.status(201).json({ report: fresh, build: buildView(fresh.build), warnings: weekStart > today ? ['STARTS_AFTER_TODAY'] : [] });
   } catch (err) {
     fail(res, next)(err);
   }
 });
 
-// List reports (optionally for one campaign), newest week first.
+// List reports (optionally for one campaign), newest last day first: a Latest progress report (§N)
+// starts on the campaign's first knock, so ordering by the first day would sink it to the bottom. For
+// reports that don't overlap, the same order as by the first day.
 router.get('/', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -796,7 +820,7 @@ router.get('/', async (req, res, next) => {
     }
     if (req.query.seriesId && mongoose.isValidObjectId(req.query.seriesId)) filter.seriesId = new mongoose.Types.ObjectId(req.query.seriesId);
     const reports = await ClientReport.find(filter, { 'stats.cumulative.surveyBreakdowns': 0, 'stats.period.surveyBreakdowns': 0, 'build.result': 0 })
-      .sort({ weekStart: -1, createdAt: -1 })
+      .sort({ weekEnd: -1, createdAt: -1 })
       .lean();
     const labels = await currentSeriesLabels(reports);
     res.json({
@@ -1510,24 +1534,41 @@ router.post('/:id/next', async (req, res, next) => {
     const tz = source.timeZone || campaign.timeZone || 'America/New_York';
     const today = zonedDayStr(new Date(), tz);
     const weekStartsOn = reportWeekStartsOnOf(req.activeOrg);
-    const period = nextPeriodOf(source, weekStartsOn, today);
+    // Latest progress (§N): after an all-time report comes the next all-time report — the campaign's
+    // first knock through today, its settings and notes copied — never the period after it. One that
+    // already runs through today is brought up to date by Refresh numbers instead.
+    if (source.allTime && source.weekEnd >= today) {
+      return res.status(409).json({
+        error: 'This report already runs through today — press Refresh numbers to bring it up to date.',
+        code: 'ALREADY_THROUGH_TODAY',
+      });
+    }
+    const period = source.allTime
+      ? { weekStart: await allTimeStartOf({ campaignId: campaign._id, tz, weekEnd: today, today }), weekEnd: today, kind: 'all_time' }
+      : nextPeriodOf(source, weekStartsOn, today);
     const range = zonedDayRange(period.weekStart, period.weekEnd, tz);
-    if (!range.$gte || range.$gte.getTime() !== new Date(source.rangeEndUtc).getTime()) {
+    if (!range.$gte || (!source.allTime && range.$gte.getTime() !== new Date(source.rangeEndUtc).getTime())) {
       return res.status(409).json({ error: 'The next period does not start where this one ends.', code: 'NEXT_PERIOD_MISMATCH' });
     }
-    // Offered only on the latest report of each series. A later report for exactly the next period is
-    // the one Next would make — a double click's second request, or the same dates made in New report —
-    // so it is answered, not refused (§C); any other later report still is. ONE read decides both: a
-    // sibling click's draft is either in it or meets this request at the guard below. (Two reads — the
-    // exact one, then "any later" — let a draft landing between them be seen only by the second, and a
-    // double click got NOT_LATEST_REPORT: 2 runs in 5 of ten concurrent clicks.)
+    // Offered only on the latest report of each kind in a series: its newest dated report, and its newest
+    // all-time one. The two kinds never block each other: a dated report's "later" reports are dated
+    // ones starting after it, an all-time report's are all-time ones ending after it. A later report for
+    // exactly the next period is the one Next would make — a double click's second request, or the same
+    // dates made in New report — so it is answered, not refused (§C); any other later report still is.
+    // ONE read decides both: a sibling click's draft is either in it or meets this request at the guard
+    // below. (Two reads — the exact one, then "any later" — let a draft landing between them be seen only
+    // by the second, and a double click got NOT_LATEST_REPORT: 2 runs in 5 of ten concurrent clicks.)
+    const laterOfKind = source.allTime
+      ? { allTime: true, rangeEndUtc: { $gt: source.rangeEndUtc } }
+      : { allTime: { $ne: true }, rangeStartUtc: { $gte: source.rangeEndUtc } };
     const later = await ClientReport.find(
-      { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, _id: { $ne: source._id }, rangeStartUtc: { $gte: source.rangeEndUtc } },
+      { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, _id: { $ne: source._id }, ...laterOfKind },
       { weekStart: 1, weekEnd: 1 }
     )
       .sort({ createdAt: 1 })
       .lean();
-    const exactId = later.find((r) => r.weekStart === period.weekStart && r.weekEnd === period.weekEnd)?._id;
+    // An all-time report is the same report by its last day alone (its first day is worked out).
+    const exactId = later.find((r) => r.weekEnd === period.weekEnd && (source.allTime || r.weekStart === period.weekStart))?._id;
     if (exactId) {
       const exact = await ClientReport.findOne({ _id: exactId, organizationId: orgId }).lean();
       if (!exact) return res.status(409).json({ error: 'Try again.', code: 'NEXT_RACE' });
@@ -1575,6 +1616,7 @@ router.post('/:id/next', async (req, res, next) => {
           scope: { kind: series.kind, label: label || scopeOf(source).label || CAMPAIGN_LABEL },
           weekStart: period.weekStart,
           weekEnd: period.weekEnd,
+          ...(source.allTime ? { allTime: true } : {}),
           timeZone: tz,
           rangeStartUtc: range.$gte,
           rangeEndUtc: range.$lt,
@@ -1592,7 +1634,7 @@ router.post('/:id/next', async (req, res, next) => {
             visibleTags: sv.visibleTags || [],
             showGoal: !!sv.showGoal,
           },
-          dupGuard: true,
+          ...(source.allTime ? { allTimeGuard: true } : { dupGuard: true }),
           createdBy: req.user._id,
         },
       });
@@ -1601,13 +1643,14 @@ router.post('/:id/next', async (req, res, next) => {
       made = await insert();
     } catch (err) {
       if (!isReportPeriodGuardError(err)) throw err;
+      // The draft that got in — of this kind only (§N): its own guard, and an all-time one by its last day.
       const theirs = await ClientReport.findOne({
         organizationId: orgId,
         campaignId: campaign._id,
         seriesId: series._id,
-        weekStart: period.weekStart,
-        weekEnd: period.weekEnd,
-        dupGuard: true,
+        ...(source.allTime
+          ? { weekEnd: period.weekEnd, allTimeGuard: true }
+          : { weekStart: period.weekStart, weekEnd: period.weekEnd, dupGuard: true, allTime: { $ne: true } }),
       }).lean();
       if (theirs) return res.json({ report: theirs, build: buildView(theirs.build), existing: true });
       // Deleted between its insert and this read: the key is free again.

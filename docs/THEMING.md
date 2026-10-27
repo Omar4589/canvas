@@ -260,6 +260,6 @@ Map **chrome** themes normally (top bars use `chromeBar`; sheets/legends/chips u
 - [mobile/lib/ThemeContext.jsx](../mobile/lib/ThemeContext.jsx) — provider/hook, persistence, `Appearance.setColorScheme`.
 - [mobile/lib/useThemedStyles.js](../mobile/lib/useThemedStyles.js) — the `makeStyles(t)` factory helper.
 - [mobile/lib/cache.js](../mobile/lib/cache.js) — `loadThemePreference` / `saveThemePreference`.
-- [mobile/components/ThemeToggle.jsx](../mobile/components/ThemeToggle.jsx) — the Light/Dark/System control housed by all three menus (admin More, super-admin More, canvasser drawer). It also exports a compact sun/moon `ThemeIconButton`, which currently has **no call sites** — every surface uses the segmented control.
+- [mobile/components/ThemeToggle.jsx](../mobile/components/ThemeToggle.jsx) — the Light/Dark/Auto control housed by all three menus (admin More, super-admin More, canvasser drawer). Words only, no emoji. The compact sun/moon `ThemeIconButton` it used to export had no call sites and was removed with the app's emoji (2026-10-27).
 - [mobile/app/_layout.jsx](../mobile/app/_layout.jsx) — `ThemeProvider` mount + `ThemedStatusBar`; [mobile/app/index.jsx](../mobile/app/index.jsx) — first-paint gate.
 - [mobile/lib/mapStyles.js](../mobile/lib/mapStyles.js) — theme-aware base map default.

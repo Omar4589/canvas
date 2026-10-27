@@ -183,7 +183,7 @@ function HouseholdDoNotKnockControl({ household, voterId }) {
   if (household.doNotKnock) {
     return (
       <div className="mt-3 rounded border border-danger/30 bg-danger-tint p-3 text-sm">
-        <p className="font-medium text-danger">⛔ Do not knock — nobody visits this address</p>
+        <p className="font-medium text-danger">Do not knock — nobody visits this address</p>
         <p className="mt-1 text-xs text-fg-muted">
           Applies in every campaign and does not reopen on its own, even when new residents are
           imported here. Residents keep their own do-not-contact status.
@@ -288,7 +288,7 @@ function DncSection({ dnc, onFlag, onUnflag, busy, canEdit, tz }) {
     <Section title="Do not contact">
       <div className="rounded border border-danger/30 bg-danger-tint p-4 text-sm">
         <p className="font-medium text-danger">
-          ⛔ Flagged do-not-contact{dnc.source === 'upload' ? ' via list upload' : ''}
+          Flagged do-not-contact{dnc.source === 'upload' ? ' via list upload' : ''}
         </p>
         <p className="mt-1 text-fg">{dnc.reason}</p>
         <p className="mt-1 text-xs text-fg-muted">
@@ -378,7 +378,7 @@ function SurveyCard({ survey, onSave, onDelete, busy, canEdit, tz }) {
               </div>
             ))}
           </dl>
-          {survey.note && <p className="mt-2 rounded bg-sunken p-2 text-sm text-fg-muted">📝 {survey.note}</p>}
+          {survey.note && <p className="mt-2 rounded bg-sunken p-2 text-sm text-fg-muted"><span className="font-medium text-fg">Note:</span> {survey.note}</p>}
           {survey.edited && (
             <p className="mt-2 text-xs text-warning-fg">
               Edited {fmtDate(survey.edited.at, tz)}{survey.edited.by ? ` by ${survey.edited.by.name}` : ''}
@@ -543,7 +543,7 @@ function OverwrittenSurveyCard({ survey, onRestore, onErase, busy, canRestore, t
           </div>
         ))}
       </dl>
-      {survey.note && <p className="mt-2 rounded bg-card p-2 text-sm text-fg-muted">📝 {survey.note}</p>}
+      {survey.note && <p className="mt-2 rounded bg-card p-2 text-sm text-fg-muted"><span className="font-medium text-fg">Note:</span> {survey.note}</p>}
       {survey.editedAt && (
         <p className="mt-2 text-xs text-fg-subtle">
           Edited {fmtDate(survey.editedAt, tz)}{survey.editedBy ? ` by ${survey.editedBy.name}` : ''} (before it was overwritten)
@@ -771,7 +771,7 @@ export default function VoterDetailPage() {
           {v.surveyStatus === 'surveyed' ? 'Surveyed' : 'Not surveyed'}
         </span>
         {p.voted?.isVoted && <span className="rounded-full bg-teal-500/15 px-2 py-0.5 text-xs font-medium text-teal-600">✓ Voted</span>}
-        {v.doNotContact?.flagged && <span className="rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger">⛔ Do not contact</span>}
+        {v.doNotContact?.flagged && <span className="rounded-full bg-danger-tint px-2 py-0.5 text-xs font-medium text-danger">Do not contact</span>}
       </div>
 
       {err && <div ref={errRef} className="mb-4 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{err}</div>}
@@ -803,7 +803,7 @@ export default function VoterDetailPage() {
               Campaign: {h.campaign ? <Link to={`/campaigns/${h.campaign.id}`} className="text-brand-accent hover:underline">{h.campaign.name}</Link> : '—'}
               {h.fullyVoted && <span className="ml-2 text-teal-600">· fully voted</span>}
               {h.fullyDnc && <span className="ml-2 text-danger">· fully do-not-contact</span>}
-              {h.doNotKnock && <span className="ml-2 font-semibold text-danger">· ⛔ do not knock</span>}
+              {h.doNotKnock && <span className="ml-2 font-semibold text-danger">· do not knock</span>}
             </p>
             <HouseholdDoNotKnockControl household={h} voterId={voterId} />
             {/* The same person's record in each other campaign of this org (sibling rows). In

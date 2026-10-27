@@ -53,7 +53,7 @@ export default function SupportAccessGate() {
   // the URL. (Found in production verification, right after ending a session and clicking Voters.)
   //
   // So declining does what declining means: drop the org context and go back to the platform view. Same
-  // path the switcher's "🌐 Platform view" takes. You said no, so you are no longer in the customer's
+  // path the switcher's "Platform view" takes. You said no, so you are no longer in the customer's
   // organization — which is also the honest state to be in.
   function decline() {
     setOrg(null);

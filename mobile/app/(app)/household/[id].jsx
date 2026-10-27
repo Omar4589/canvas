@@ -119,7 +119,7 @@ function VoterCard({ voter, onPress }) {
           <Text style={styles.voterName}>{voter.fullName}</Text>
           {dnc ? (
             <View style={styles.dncPill}>
-              <Text style={styles.dncPillText}>⛔ Do not contact</Text>
+              <Text style={styles.dncPillText}>Do not contact</Text>
             </View>
           ) : voter.voted ? (
             <View style={styles.votedPill}>
@@ -337,7 +337,7 @@ export default function HouseholdDetail() {
                 address — Directions — is the way there. */}
             {household.pinSuspect ? (
               <View style={styles.noSpotCard}>
-                <Text style={styles.noSpotTitle}>⚠ No exact map spot — use Directions.</Text>
+                <Text style={styles.noSpotTitle}>No exact map spot — use Directions.</Text>
                 <Text style={styles.noSpotBody}>
                   This home's coordinate was shared with other addresses, so its pin isn't on the house.
                 </Text>

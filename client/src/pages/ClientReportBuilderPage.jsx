@@ -1211,7 +1211,9 @@ const ClientReportBuilderPage = () => {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold text-fg">{formatPeriod(report.weekStart, report.weekEnd)}</h1>
+              <h1 className="text-xl font-semibold text-fg">
+                {report.allTime ? `All time · ${formatPeriod(report.weekStart, report.weekEnd)}` : formatPeriod(report.weekStart, report.weekEnd)}
+              </h1>
               <Badge variant={status.variant} dot>
                 {[status.label, ...notes].join(' · ')}
               </Badge>

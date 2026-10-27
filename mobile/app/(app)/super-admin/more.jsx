@@ -15,8 +15,9 @@ import ThemeToggle from '../../../components/ThemeToggle';
 import InsetGroup, {
   InsetNavRow,
   InsetActionRow,
-  RowEmoji,
+  RowIcon,
 } from '../../../components/InsetGroup';
+import { MailIcon, HelpIcon, BuildingIcon, SignOutIcon } from '../../../components/icons/navIcons';
 import SectionHeader from '../../../components/SectionHeader';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { spacing } from '../../../lib/theme';
@@ -78,7 +79,7 @@ export default function SuperAdminMore() {
         <InsetGroup>
           <InsetNavRow
             emphasis="menu"
-            leading={<RowEmoji>✉️</RowEmoji>}
+            leading={<RowIcon icon={MailIcon} />}
             label="Emails"
             sub="Transactional send log"
             onPress={() => router.push('/(app)/super-admin/emails')}
@@ -87,7 +88,7 @@ export default function SuperAdminMore() {
 
         <SectionHeader caption title="Support" />
         <InsetGroup>
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={HelpIcon} />} label="Help center" sub="Guides, FAQ & tips" onPress={() => router.push('/(app)/help')} />
         </InsetGroup>
 
         <SectionHeader caption title="Appearance" />
@@ -98,8 +99,8 @@ export default function SuperAdminMore() {
 
         <SectionHeader caption title="Account" />
         <InsetGroup>
-          <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Switch into an organization" sub="Leave platform view" onPress={onSwitchOrg} />
-          <InsetActionRow tone="danger" leading={<RowEmoji>↩︎</RowEmoji>} label="Sign out" onPress={onLogout} />
+          <InsetNavRow emphasis="menu" leading={<RowIcon icon={BuildingIcon} />} label="Switch into an organization" sub="Leave platform view" onPress={onSwitchOrg} />
+          <InsetActionRow tone="danger" leading={<RowIcon icon={SignOutIcon} tone="danger" />} label="Sign out" onPress={onLogout} />
         </InsetGroup>
       </ScrollView>
     </SafeAreaView>

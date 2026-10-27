@@ -14,7 +14,7 @@ import { SavedSearch } from '../../models/SavedSearch.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
-import { canManageSurvey } from '../../services/authz/campaignManagement.js';
+import { canManageSurvey, isOrgAdmin } from '../../services/authz/campaignManagement.js';
 import { resolveClaimTargets, previewClaimConflicts } from '../../services/walklist/claimDoors.js';
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { deriveEffortSetup } from '../../services/reports/effortSetupSteps.js';
@@ -451,6 +451,7 @@ router.post('/:id/members', loadEffort, async (req, res, next) => {
       campaignId: req.campaign._id,
       organizationId: req.campaign.organizationId,
       userIds: [userId],
+      selfOnlyFor: isOrgAdmin(req) ? null : req.user._id,
     });
     if (!allowed.length) return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team' });
     const doc = await EffortMember.findOneAndUpdate(

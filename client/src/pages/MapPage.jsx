@@ -1541,7 +1541,7 @@ export default function MapPage() {
               <>
                 <span className="text-fg-subtle" aria-hidden="true">·</span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger-tint px-2 py-0.5 font-medium text-danger">
-                  ⚠ {flagSummary.totals.open.toLocaleString()} flagged
+                  {flagSummary.totals.open.toLocaleString()} flagged
                 </span>
               </>
             )}
@@ -1556,7 +1556,7 @@ export default function MapPage() {
                   aria-expanded={showOverlapList}
                   className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-2 py-0.5 font-medium text-warning-fg hover:opacity-80"
                 >
-                  ⚠ {overlapDoorsQ.data.total.toLocaleString()} overlaps — review
+                  {overlapDoorsQ.data.total.toLocaleString()} overlaps — review
                 </button>
               </>
             )}

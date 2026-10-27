@@ -470,6 +470,7 @@ const IMPORT_DETAIL_PROJECTION = {
   insertedHouseholdIds: 0,
   insertedVoterIds: 0,
   sourceHouseholdIds: 0,
+  movedHouseholdIds: 0,
   duplicateStateVoterIds: 0,
 };
 

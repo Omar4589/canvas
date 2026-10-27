@@ -5,6 +5,11 @@ import { formatInTz } from './datetime.js';
 // web and another on the phone; change one, change both (pacePauseText.test.js compares the two). Pure, so
 // node tests it, and the screens only lay the sentences out.
 
+// Who is paused right now (the Users list's badge and Paused pill). It lives in pace.js with the rest of the
+// phone's pause state; the web keeps its copy in pacePause.js, so it is re-exported here to keep the two
+// files' faces the same, and pacePauseText.test.js checks the two answer alike.
+export { pausedUserIds } from './pace.js';
+
 const plural = (n, one, many) => (n === 1 ? one : many);
 const TIME_ONLY = { hour: 'numeric', minute: '2-digit' };
 

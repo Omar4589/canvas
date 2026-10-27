@@ -3,18 +3,14 @@ import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { radius, spacing } from '../lib/theme';
 
-// The appearance control, mirroring the web's light/dark toggle. Two variants
-// share one stylesheet:
-//   <ThemeToggle />        — a Light / Dark / System segmented control for
-//                            settings surfaces (admin More; the future canvasser
-//                            drawer). Drives `preference` via setScheme().
-//   <ThemeIconButton />    — a compact sun/moon button that flips light↔dark for
-//                            chrome with no room for the full control (map top bar).
+// The appearance control, mirroring the web's light/dark toggle: a Light / Dark / Auto
+// segmented control for settings surfaces (both More tabs and the canvasser drawer). Drives
+// `preference` via setScheme(). Words only — the segments carried emoji once.
 
 const OPTIONS = [
-  { key: 'light', label: 'Light', icon: '☀️' },
-  { key: 'dark', label: 'Dark', icon: '🌙' },
-  { key: 'system', label: 'Auto', icon: '⚙️' },
+  { key: 'light', label: 'Light' },
+  { key: 'dark', label: 'Dark' },
+  { key: 'system', label: 'Auto' },
 ];
 
 export default function ThemeToggle() {
@@ -30,28 +26,11 @@ export default function ThemeToggle() {
             onPress={() => setScheme(o.key)}
             style={[styles.option, active && styles.optionActive]}
           >
-            <Text style={[styles.optionText, active && styles.optionTextActive]}>
-              {o.icon} {o.label}
-            </Text>
+            <Text style={[styles.optionText, active && styles.optionTextActive]}>{o.label}</Text>
           </Pressable>
         );
       })}
     </View>
-  );
-}
-
-export function ThemeIconButton({ style }) {
-  const { isDark, toggle } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-  return (
-    <Pressable
-      onPress={toggle}
-      hitSlop={8}
-      accessibilityLabel={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.85 }, style]}
-    >
-      <Text style={styles.iconText}>{isDark ? '☀️' : '🌙'}</Text>
-    </Pressable>
   );
 }
 
@@ -79,17 +58,5 @@ function makeStyles(t) {
     },
     optionText: { fontSize: 13, fontWeight: '600', color: t.colors.textSecondary },
     optionTextActive: { color: t.colors.textPrimary },
-
-    iconBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: radius.pill,
-      backgroundColor: t.colors.card,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    iconText: { fontSize: 18 },
   });
 }

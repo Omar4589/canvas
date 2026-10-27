@@ -227,9 +227,9 @@ export default function CanvasserSummaryTable({ rows, tz, singleDay, litMode = f
             <div className="flex items-center gap-1.5 font-medium text-fg">
               {r.firstName} {r.lastName}
               {r.inOverlap ? (
-                <span title="Knocked an overlapping door in this range" className="text-warning-fg">
-                  ⚠
-                </span>
+                <Badge variant="warning" title="Knocked an overlapping door in this range">
+                  Overlap
+                </Badge>
               ) : null}
               {!r.isActive ? <Badge variant="neutral">Inactive</Badge> : null}
             </div>

@@ -295,3 +295,8 @@ export const periodLabelOf = (report) => {
   const b = civil(report?.weekEnd);
   return a.y === b.y ? `${a.label} – ${b.label}, ${b.y}` : `${a.label}, ${a.y} – ${b.label}, ${b.y}`;
 };
+// "Oct 28, 2026": one civil day, as periodLabelOf words its end (an all-time report is named by it, §N).
+export const dayLabelOf = (day) => {
+  const c = civil(day);
+  return c.y ? `${c.label}, ${c.y}` : c.label;
+};

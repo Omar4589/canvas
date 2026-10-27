@@ -190,7 +190,7 @@ export default function FixPinModal({ visible, household, qc, siblingCount = 0, 
 
           <Pressable onPress={useMyLocation} disabled={busy} style={[styles.locBtn, { borderColor: colors.border }]}>
             <Text style={{ color: colors.textPrimary, fontWeight: '600' }}>
-              {busy ? 'Locating…' : '📍  Use my current location'}
+              {busy ? 'Locating…' : 'Use my current location'}
             </Text>
           </Pressable>
           {source === 'gps' && accuracy != null && (

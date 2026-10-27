@@ -31,8 +31,8 @@ came from. Hover it for the full explanation.
 If your organization hasn't connected FbTime, there's no marker on any row at all.
 
 You can also check one person without going to the Integrations page: open them from Users (or a
-campaign's Team page) and their profile says **FbTime linked** or **FbTime not linked**. Team leads
-see this too.
+campaign's Team page), and under **Everywhere in your organization** their panel says **FbTime
+linked** or **FbTime not linked**. That section is for org admins only.
 
 Three things people ask next:
 

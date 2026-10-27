@@ -36,6 +36,7 @@ const HelpPage = lazy(() => import('./pages/HelpPage.jsx'));
 const HelpArticlePage = lazy(() => import('./pages/HelpArticlePage.jsx'));
 const DuplicateSurveysPage = lazy(() => import('./pages/DuplicateSurveysPage.jsx'));
 const BillingPage = lazy(() => import('./pages/BillingPage.jsx'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage.jsx'));
 const ImportPage = lazy(() => import('./pages/ImportPage.jsx'));
 const EarlyVotingPage = lazy(() => import('./pages/EarlyVotingPage.jsx'));
@@ -239,6 +240,9 @@ export default function App() {
             <Route element={<RoleGate require="billing" />}>
               <Route path="/billing" element={<BillingPage />} />
             </Route>
+            {/* Switches that cover every campaign (Automatic pause). Every org admin sees it; only a
+                billing admin can change it, which the page and the server both enforce. */}
+            <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Route>
         {/* ── Console shell B: ORG-AGNOSTIC. Reachable without an active org — the shared

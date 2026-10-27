@@ -17,16 +17,17 @@ const DANGER_BOX = 'rounded-md border border-danger/30 bg-danger-tint px-3 py-2 
 const WARN_BOX = 'rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-warning-fg';
 const BUTTONS = 'flex flex-wrap gap-2 pt-1';
 
-// Profile → Account → More options → Delete account… (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md, Part 1
-// "What you'll see", and §D). Two confirmations, so it is hard to do by accident: a review worked
-// out from the person's own records, then their email typed back. The server decides everything; a
-// blocked review lists the server's reasons, each naming its remedy, and offers only Close.
+// The person panel → More options ▸ → Delete account… (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md, Part 1
+// "What you'll see", and §D; the panel is docs/PROPOSAL_PEOPLE_PAGES.md §D). Two confirmations, so it
+// is hard to do by accident: a review worked out from the person's own records, then their email typed
+// back. The server decides everything; a blocked review lists the server's reasons, each naming its
+// remedy, and offers only Close.
 //
-// `statsQuery` is the profile's stats query (its options), refetched by the profile as this opens;
-// this dialog observes it itself. `flowRef` is the profile's deleteFlowRef: set while this dialog is
-// mounted, so the profile's Escape leaves it alone. While the DELETE is in flight nothing closes (no
-// close button, scrim or Escape; Back disabled): its answer has to land here. `onDeleted` and `onGone`
-// close everything with the matching notice.
+// `statsQuery` is the panel's stats query (its options), refetched by the panel as this opens; this
+// dialog observes it itself. `flowRef` is the panel's dialogRef: set while this dialog is mounted, so
+// the panel's guarded close (Escape, the scrim, ×) leaves it alone. While the DELETE is in flight
+// nothing closes (no close button, scrim or Escape; Back disabled): its answer has to land here.
+// `onDeleted` and `onGone` close everything with the matching notice.
 const DeleteMemberDialog = ({ membership, statsQuery, flowRef, onClose, onDeleted, onGone }) => {
   const user = membership.user;
   const name = fullName(user);
@@ -100,6 +101,15 @@ const DeleteMemberDialog = ({ membership, statsQuery, flowRef, onClose, onDelete
   const del = useMutation({
     mutationKey: deleteAccountMutationKey(user.id),
     mutationFn: (body) => api(`/admin/memberships/${user.id}/account`, { method: 'DELETE', body }),
+    onSettled: () => {
+      deletingRef.current = false;
+      setDeleting(false);
+    },
+  });
+  // What the answer does here — close everything, or show the review again — rides the mutate call
+  // (onSubmit, below), never the hook: TanStack v5 runs the hook's callbacks even after this dialog is
+  // gone (Back pressed mid-delete), and a close from there would rewrite whatever page is on screen.
+  const afterDelete = {
     onSuccess: () => finish('deleted'),
     onError: (err) => {
       const next = afterFailedDelete(err);
@@ -112,11 +122,7 @@ const DeleteMemberDialog = ({ membership, statsQuery, flowRef, onClose, onDelete
       if (next === 'review' || next === 'unconfirmed') reloadReview(reloadNote(err));
       // 'refused': stays on this step, in the server's words.
     },
-    onSettled: () => {
-      deletingRef.current = false;
-      setDeleting(false);
-    },
-  });
+  };
   const busy = deleting || del.isPending;
 
   // Step 2 opens empty, with the cursor in the box. Coming back to step 1 puts focus on the review,
@@ -165,7 +171,7 @@ const DeleteMemberDialog = ({ membership, statsQuery, flowRef, onClose, onDelete
     if (!matches || deletingRef.current) return;
     deletingRef.current = true;
     setDeleting(true);
-    del.mutate({ confirmEmail: typed.trim(), expectKind: reviewed.kind });
+    del.mutate({ confirmEmail: typed.trim(), expectKind: reviewed.kind }, afterDelete);
   };
 
   const closeOnly = (

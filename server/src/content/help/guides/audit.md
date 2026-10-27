@@ -78,7 +78,7 @@ Flags wait for someone to open the Audit page. **Automatic pause** doesn't wait:
 - **It pauses canvassers only.** An org admin's or a team lead's account is never paused; their doors still show in the flags like everyone's.
 - **Where you see it:** the red badge on **Audit**, a banner on the campaign home, a **Paused canvassers** panel at the top of the Audit page, and on the phone a **Paused for review** section at the top of the GPS audit.
 - **The review** says what kind of fast it was — at vehicle speed, saved from one spot, or at walking pace — and lists every door behind it.
-- **Unpausing** is one tap for an org admin, or for a team lead on the campaign where it happened. Fixing the doors is an org admin's job, on Door Outcomes.
+- **Unpausing** is for an org admin, or a team lead on the campaign where it happened, here or from the person's panel on the Users or Team page. It asks first, because their count starts over. Fixing the doors is an org admin's job, on Door Outcomes.
 
 Step by step: [A canvasser was paused for review — what do I do?](a-canvasser-was-paused)
 

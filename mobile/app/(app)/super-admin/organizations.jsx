@@ -202,7 +202,7 @@ export default function OrganizationsScreen() {
                     )}
                     {o.activeNowCount > 0 && (
                       <View style={[styles.pill, styles.pillSuccess]}>
-                        <Text style={[styles.pillText, styles.pillTextSuccess]}>🟢 {o.activeNowCount} active</Text>
+                        <Text style={[styles.pillText, styles.pillTextSuccess]}>{o.activeNowCount} active</Text>
                       </View>
                     )}
                     {/* How you get in. `internal` and `member` need no grant (orgContext.js

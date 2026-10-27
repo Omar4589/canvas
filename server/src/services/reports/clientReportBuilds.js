@@ -15,6 +15,7 @@ import { UnknockRun } from '../../models/UnknockRun.js';
 import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
+import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { getQueue, QUEUE_NAMES, queueOp } from '../../queues/index.js';
 import { otherChangeRunning, answerEditBusy } from '../canvass/answerEditRuns.js';
 import { deletionRequested, sweptAfter } from '../platform/lateWriteSweep.js';
@@ -382,8 +383,22 @@ const waitingWords = async (campaignId, blocked) => {
   const msg = String(blocked?.error || '');
   if (/conversion/i.test(msg)) return { kind: 'conversion', text: 'for the survey conversion on this campaign to finish' };
   if (/unknock/i.test(msg)) return { kind: 'unknock', text: 'for the unknock on this campaign to finish' };
+  if (blocked?.code === 'CREW_CHANGE_RUNNING') return { kind: 'crew_change', text: 'for a crew change on this campaign to finish' };
   return { kind: 'recut', text: 'for a round on this campaign to finish being re-cut' };
 };
+
+// A crew change still moving doors on this campaign (a crew job held on a roster row,
+// services/memberships/setCoordinator.js) is a change in flight, so a TEAM build waits for it. It
+// wraps the build's own two calls rather than living in otherChangeRunning, which the answer-edit
+// routes share: an answer edit has no reason to wait on a crew change. It also covers a change killed
+// mid-write, which leaves no record and rows stamped before the fence, until its hold passes. A
+// whole-campaign or walk-list build never waits on one: a crew change moves no number of theirs.
+const crewChangeRunning = async (campaignId) =>
+  (await CampaignAssignment.exists({ campaignId, 'crewJob.until': { $gte: new Date() } }))
+    ? { error: 'A crew change is still moving doors on this campaign.', code: 'CREW_CHANGE_RUNNING' }
+    : null;
+const changeRunning = async (campaignId, team) =>
+  (await otherChangeRunning(campaignId)) || (team ? await crewChangeRunning(campaignId) : null);
 
 // The rows of every change source within the clock-skew window of the fence (§F2 step 7, §O9's
 // fenceSeen): id + version, so the later check counts only what is new or changed since.
@@ -399,7 +414,10 @@ const sourcesNear = async ({ campaignId, fenceAt, team }) => {
       { campaignId, clearedKnocks: true, $or: [{ createdAt: { $gte: since } }, { restoredAt: { $gte: since } }] },
       { updatedAt: 1, restoredAt: 1 }
     ).lean(),
-    team ? CoordinatorChange.find({ campaignId, createdAt: { $gte: since } }, { createdAt: 1 }).lean() : [],
+    // By updatedAt, not createdAt: Finish it completes a crew change by updating its record in place,
+    // and an updateMany stamps every row it moves with the time it was SENT — so a Finish it whose write
+    // straddles the fence would otherwise be seen by neither check.
+    team ? CoordinatorChange.find({ campaignId, updatedAt: { $gte: since } }, { updatedAt: 1 }).lean() : [],
   ]);
   const v = (d) => new Date(d || 0).getTime();
   return [
@@ -408,7 +426,7 @@ const sourcesNear = async ({ campaignId, fenceAt, team }) => {
     ...unknocks.map((r) => ({ m: 'UnknockRun', id: String(r._id), v: v(r.updatedAt) })),
     ...relabels.map((r) => ({ m: 'ReclassifyRun', id: String(r._id), v: v(r.updatedAt) })),
     ...snapshots.map((r) => ({ m: 'TurfSnapshot', id: String(r._id), v: Math.max(v(r.updatedAt), v(r.restoredAt)) })),
-    ...crews.map((r) => ({ m: 'CoordinatorChange', id: String(r._id), v: v(r.createdAt) })),
+    ...crews.map((r) => ({ m: 'CoordinatorChange', id: String(r._id), v: v(r.updatedAt) })),
   ];
 };
 
@@ -428,6 +446,9 @@ const changedSinceFence = async ({ campaignId, fenceAt, fenceSeen, team }) => {
 // descending, then _id). Its cards are recounted as of its own cut-off: rows timed before its
 // period's end that it had received by the cut-off, or timed before it (NUM-3, buildReportSnapshot).
 // Its live snapshot is frozen with the recount, so a refresh of that report hides the line (NUM-1).
+// An all-time report (Latest progress, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N) starts on the campaign's
+// first knock, so nothing ends before it starts: it compares with the latest ending on or before its
+// LAST day instead (clientReportRead.js earlierTotalsLine names the same one).
 const comparedReportFor = async (report) => {
   const series = report.seriesId
     ? { seriesId: report.seriesId }
@@ -439,7 +460,7 @@ const comparedReportFor = async (report) => {
       _id: { $ne: report._id },
       status: 'published',
       takenDownAt: null,
-      rangeEndUtc: { $lte: report.rangeStartUtc },
+      rangeEndUtc: { $lte: report.allTime ? report.rangeEndUtc : report.rangeStartUtc },
       ...series,
     },
     { rangeEndUtc: 1, statsComputedAt: 1, publishedAt: 1, snapshotId: 1 }
@@ -717,7 +738,7 @@ const runAttempt = async ({ job, token, jobId, kind, claimStatus, pre, tenant, s
 
   if (kind !== 'remap') {
     // Step 2: wait outside the slot while another change holds the campaign.
-    const blocked = await otherChangeRunning(report.campaignId);
+    const blocked = await changeRunning(report.campaignId, team);
     if (blocked) {
       const outcome = await waitOrFail({ job, token, report, jobId, snapshotId: ctx.snapshotId, blocked, waitingSince: pre.build.waitingSince });
       return { stopped: outcome };
@@ -817,7 +838,7 @@ const runAttempt = async ({ job, token, jobId, kind, claimStatus, pre, tenant, s
       });
 
       // Step 7: did anything change the campaign's records during the build?
-      const blocked = await otherChangeRunning(report.campaignId);
+      const blocked = await changeRunning(report.campaignId, team);
       if (blocked) {
         // A change still in flight: back to waiting (rows deleted, delayed), not a rebuild.
         hb.stop();

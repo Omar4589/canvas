@@ -10,7 +10,7 @@ import { PersonMergeCandidate } from '../../models/PersonMergeCandidate.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
 import { PersonMergeLog } from '../../models/PersonMergeLog.js';
 import { ImportJob } from '../../models/ImportJob.js';
-import { recomputeHouseholdActive } from './recomputeHouseholdActive.js';
+import { recomputeResidentFlags } from '../households/recomputeResidentFlags.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const CHUNK = 5000;
@@ -194,13 +194,21 @@ export async function undoImport(importJob) {
     doorsDeleted += r.deletedCount || 0;
   }
 
-  // Existing doors that lost a net-new voter may now be empty → re-check isActive.
+  // Every door that lost a voter here and still stands gets its resident-derived flags recomputed: an existing
+  // door that lost a net-new voter, an inserted door kept because a resident stayed (a do-not-contact request,
+  // which undo never destroys), and an emptied one a delete guard spared. Any of them may now be empty
+  // (isActive), all-voted (fullyVoted) or all do-not-contact (fullyDnc) — this used to re-check isActive alone,
+  // on existing doors only, so a door the import had re-opened stayed open after the undo. The doors deleted
+  // above are left out (one indexed read), not handed to the recomputes as no-op writes: this runs inside the
+  // undo request, and a big file's undo deletes tens of thousands.
+  const emptyHhSet = new Set(emptyHh);
+  const spared = await presentIds(Household, '_id', emptyHh);
   const affected = new Set();
   for (const vid of finalV) {
     const hh = curHhByVoter.get(vid);
-    if (hh && !deletableHhSet.has(hh)) affected.add(hh);
+    if (hh && (!emptyHhSet.has(hh) || spared.has(hh))) affected.add(hh);
   }
-  if (affected.size) await recomputeHouseholdActive(campaignId, [...affected]);
+  await recomputeResidentFlags(campaignId, [...affected]);
 
   return {
     doorsDeleted,

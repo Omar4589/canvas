@@ -117,7 +117,9 @@ report was published and last changed ("Published Oct 20 · Edited Oct 21", "Num
   disappears, since the two no longer compare like for like, until this report's numbers are built
   again. On a link to just this report, which names no other report, the same counts read "**Totals
   from before Oct 19 were updated by −120 doors after they were first reported.**" (Oct 19 being this
-  report's first day), on the page and in the PDF.
+  report's first day), on the page and in the PDF. On a Latest progress report they read "**Totals
+  through Oct 25 were updated by −120 doors after they were first reported.**" (Oct 25 being the last day
+  of the report they were first sent in).
 - "**A home both teams visited counts in each team's report.**" on a team report.
 
 **Older** and **Newer** step through the reports in the same tab, in the hub's order (two reports
@@ -226,10 +228,17 @@ Open the campaign, go to its **Client Reports** tab, and press **New report**:
     campaign, from its first door through the last day you pick. The first day only decides what shows
     as new, like “+412 this week”." Once a team or walk list is picked it is named ("Your report shows
     totals for Paid team, from the campaign's first door through the last day you pick. …"), and the
-    example follows the dates picked ("+412 in these 14 days" for two weeks). There is no separate
-    "everything up to a date" choice because every report is one: a weekly report for the paid team is
-    that team's totals since the campaign's first door, through that week's last day, with what it added
-    that week.
+    example follows the dates picked ("+412 in these 14 days" for two weeks). Every report counts
+    everything up to its last day: a weekly report for the paid team is that team's totals since the
+    campaign's first door, through that week's last day, with what it added that week. For the totals
+    alone, with nothing marked as new, there is Latest progress (next).
+  - **Latest progress · all time, through today** is always the second choice, never the one picked on
+    opening. It makes an **all-time report**: everything from the campaign's first door through today,
+    with no "+412 this week" figures, for when the client asks "how many doors have we knocked, how many
+    surveys, how much support?". **Pick dates** can leave its first day empty for the same thing up to any
+    day ("Leave the first day empty to count everything up to the last day."). The line above the
+    choices then reads "Your report shows totals for the whole campaign, from its first door through
+    today (or Oct 18), with no “+412 this week” figures."
   - **The first choice is what comes after the tab's last report.** A report that ran **whole weeks**
     (7, 14, … days) is followed by the next run of the same length, on the same weekday: "Last week ·
     Oct 19 – Oct 25 — the week after your last report", "Oct 25 – Oct 31 — the week after your last
@@ -378,7 +387,9 @@ publishing:
   more), then "1,204 door visits in the whole campaign this period" (or the walk list), how many of
   those more than one team made (counted in each team's report), and how many no team made
   (canvassers with no crew in a team, or doors entered in bulk); and how many canvassers knocked for
-  this team (with a warning when it's one: the report then shows one person's work);
+  this team (with a warning when it's one: the report then shows one person's work). A **Latest
+  progress** team report, whose period is the whole campaign, shows only "3 canvassers have knocked for
+  this team since the campaign began." and the same one-person warning;
 - how many of the surveys behind the numbers an admin **edited** after they were recorded, or
   **entered on Door Outcomes** instead of a canvasser collecting them at a door. Both count like any
   other answer.
@@ -594,7 +605,8 @@ the client, marked "Numbers refreshed".
 ## Next report
 
 On the latest report of each tab, **Next report** makes the next draft in one click, starting the day
-after the last one ended, by the same rules as New report's first choice: whole weeks are followed by
+after the last one ended, by the same rules as New report's first choice (on a **Latest progress**
+report it works differently: see *Latest progress* below): whole weeks are followed by
 the same number of weeks on the same weekday, whole months by the same number of months, and any other
 length by the catch-up to the end of last week (or of this week), so the report after it is a normal
 week. It copies the observations, marked "Copied from Oct 6 – Oct 12" until you tick **I've reviewed
@@ -612,6 +624,39 @@ builder says so.
   report for exactly the next dates (made in New report, or by another press), Next opens that one
   instead of making another; any other later report in the tab means this isn't the latest report any
   more: "A later report of this series already exists — open it instead."
+
+## Latest progress
+
+An **all-time report** answers "where are we?": the campaign's totals from its first door through the
+day it runs to, with nothing marked as new. Make one with **Latest progress · all time, through today**
+in New report, or with **Pick dates** and no first day.
+
+- **Its dates** start on the day of the campaign's first door, so it reads "Sep 14 – Oct 28" wherever
+  dates are shown; the reports list says "All time · Sep 14 – Oct 28".
+- **What your client reads:** "All time" as its title (unless you gave it one), the dates and scope, then
+  under **Activity at a glance** "Totals since the campaign began, as of Oct 28." (or "through Oct 28"
+  when its numbers were built after that day ended). The headline cards show the totals with no "+N"
+  pill; everything else (contact breakdown, support, survey charts, voter groups, door goal, map) reads
+  as on any report. There is no "Numbers as of … the period was still running" note and no quiet-week
+  note. The PDF matches, named "…-all-time-report-2026-09-14-to-2026-10-28.pdf". On the client's list it
+  shows "All time" beside its dates, with no "+" figure, and the Latest card says "Totals since the
+  campaign began, as of Oct 28."
+- **Your weekly reports carry on unaffected**, even when both kinds share dates (in a campaign's first
+  week, "This week" and Latest progress can): each kind's "you already have this report" check and
+  double-press guard look only at its own kind. New report's first choice, the week nudge, the "not
+  covered by any report" lines and Next report on your newest dated report all ignore all-time reports.
+- **Next report** sits on the newest all-time report too: it makes a new all-time report through today,
+  with the questions, map settings, voter groups, goal tick, headline and observations copied, so a
+  weekly "latest progress" routine is one click. It isn't offered on one that already runs through today
+  (press **Refresh numbers** to bring that up to date). Pressed on an older one, it opens the newest one
+  if that already runs through today, and otherwise says a later report already exists.
+- **Before you publish** says what "through today" leaves out: "Today isn't over yet: doors knocked
+  after these numbers were built aren't in them."
+- **Lists go by the last day**, newest first — the reports list, the client's list and its Older /
+  Newer — so today's Latest progress report sits on top. For reports that don't overlap, that's the same
+  order as before.
+- The Share message quotes its totals only: "The report through Oct 28 is up: 3,412 doors knocked so far
+  and 1,980 surveys. Open it here: …"
 
 ## Team reports
 
@@ -834,6 +879,7 @@ reportVisibility.js).
 | `title`, `campaignType` | Optional label; the campaign type, denormalized so the client hides lit-drop or survey rows without a live lookup. |
 | `effortId`, `effortName` | Walk-list scope (`null` = not a walk-list report). `effortName` is frozen at creation. |
 | `weekStart`, `weekEnd`, `timeZone`, `rangeStartUtc`, `rangeEndUtc` | The period: civil days in the campaign's zone, and the half-open UTC range the build reads (`zonedDayRange`). Any run of days, despite the names. |
+| `allTime` | `true` on an all-time report (Latest progress, 2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N): its `weekStart` is the day of the campaign's first knock (`allTimeStartOf`), so its period equals its running total and it reads with no "+N". **Declared with no default**: absent = a dated report, every report from before. The weekly chain (New report's first choice and nudge, the gap lines, Next's later-report check on a dated report, `report:tab-weeks`) ignores it. |
 | `status` | `draft` or `published` (`archived` is in the enum and unused). |
 | `observations` | `[{ heading, body }]`. |
 | `stats.cumulative`, `stats.period` | Each `{ totals, contactBreakdown, coverage, surveyBreakdowns, tagBreakdowns, provenance }` (§D). `coverage` is `{}` on everything built since October 2026. |
@@ -849,6 +895,7 @@ reportVisibility.js).
 | `seriesId`, `scope` | The series and the frozen `{ kind: campaign \| walk_list \| team \| team_walk_list, label }`. |
 | `takenDownAt/By`, `contentEditedAt/By`, `numbersRefreshedAt/By` | Take down; an accepted edit or a remap ("Edited"); an applied refresh ("Numbers refreshed"). |
 | `copiedFrom`, `copiedNotesReviewed`, `nextReportId` | Next report: `{ reportId, weekStart, weekEnd }` of the copied notes, the review tick (`null` when nothing was copied), and the draft Next made from this report. |
+| `allTimeGuard` | `true` on every all-time report New report or Next made without "Make a second one" (§N; an all-time report from a development build before this guard carried `dupGuard`, which `ensureAllTimeGuard` removes every time it runs): it puts the report inside `report_all_time_guard`, unique on `{ seriesId, weekEnd }` (an all-time report is the same report by its last day; its first day is worked out and may move), partial on this flag, built at boot by `ensureAllTimeGuard` exactly as `report_period_guard` is (and healed the same way). An all-time report never carries `dupGuard`, so a dated report and an all-time one with the same dates never stand for each other. Declared, no default. |
 | `dupGuard` | `true` on every report New report or Next made without "Make a second one" (2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): it puts the report inside the unique partial index `report_period_guard` (below), one guarded report per tab and period. **Declared with no default** on purpose: absent means outside the guard (every report from before the field, and every deliberate second one); undeclared, strict mode would drop it on create and `strictQuery` from filters, and the guard would hold nothing. Dates never change after creation, so a report's key never moves; deleting it frees the key. |
 | `eraseEpoch` | Bumped by every Erase; Restore's CAS requires it unchanged (§M). |
 | `views` | `{ byLink: Map<shareId, { opens, firstOpenedAt, lastOpenedAt }>, members: { admins, leads, others, staff } }` (§L). A Map of a declared subschema, because a plain nested object would be stripped. |
@@ -927,7 +974,10 @@ collections (`ClientReportAreaCell`, `ClientReportSeries`, `OrgBranding`) when t
 it too. Their definitions are final: once the collections hold data, a changed partial filter would
 make the boot-time sync drop and rebuild a unique index on a live collection. The same boot step
 (`ensureReportPeriodGuard`) builds the duplicate guard on `ClientReport`, `report_period_guard`:
-`{ seriesId: 1, weekStart: 1, weekEnd: 1 }`, unique, `partialFilterExpression: { dupGuard: true }`.
+`{ seriesId: 1, weekStart: 1, weekEnd: 1 }`, unique, `partialFilterExpression: { dupGuard: true }`
+(dated reports), and `ensureAllTimeGuard` builds all-time reports' `report_all_time_guard`: `{ seriesId:
+1, weekEnd: 1 }`, unique, `partialFilterExpression: { allTimeGuard: true }` (§N), each built, healed and
+retried on its own as below; the nightly sweep checks both.
 It uses an explicit `ClientReport.collection.createIndex` (never `syncIndexes` on that collection,
 which would drop the indexes production built by hand); `createIndex` never drops anything, and the
 index covers only guarded reports (none before this release), so it builds at once, before the first
@@ -1316,7 +1366,16 @@ visibility and a `recompute` already claimed, enqueues it and answers `201 { rep
 zone, as Next's does (the list page then opens the builder with `?ahead=1`, "This period hasn't
 started yet."), else `[]`. The period is any `weekStart ≤ weekEnd`; the dates New report suggests
 come from the week math below. Since 2026-10-25 it guards against accidental doubles (*No accidental
-doubles*, below); its race answer carries no `warnings`.
+doubles*, below); its race answer carries no `warnings`. **An all-time report** (`allTime: true`, §N of
+the simplify proposal) sends only `weekEnd` (`weekStart` is then optional and ignored; without
+`allTime` it is required, `400 weekStart is required`): the server sets `weekStart` with
+`allTimeStartOf` ([allTimeStart.js](../server/src/services/reports/allTimeStart.js)) — the campaign
+zone's day of the earliest `KNOCK_ACTIONS` row (one sorted read on `{ campaignId, timestamp }`), today
+when nobody has knocked, never after `weekEnd` — so it never starts after today. Same series; its own
+look-first (`{ seriesId, weekEnd, allTime: true }`) and guard (`allTimeGuard`, `report_all_time_guard`),
+while a dated create looks only at dated reports (`allTime: { $ne: true }`); `REPORT_EXISTS` carries
+`allTime` and names it by its last day ("You already have a draft
+all-time Whole campaign report through Jul 19, 2026.").
 
 **Edit** (`PATCH /:id`) writes only the fields sent (of `visibility`, only the keys sent: §C), with a
 targeted pipeline `$set` and `editVersion + 1`; a build never blocks it. Every removal goes through
@@ -1422,6 +1481,17 @@ visibility, tags, goal tick and headline, not the title, and answers `201` with 
 ['STARTS_AFTER_TODAY']` when the period starts after today in the campaign's zone. Next never answers
 `REPORT_EXISTS`.
 
+**Next on an all-time report** (§N of the simplify proposal) makes the next all-time report, never the
+period after it: `{ weekStart: allTimeStartOf(…, weekEnd: today), weekEnd: today, allTime: true }`,
+the same copying, guard and CAS. A source ending today or later is refused first, `409
+ALREADY_THROUGH_TODAY` (Refresh numbers brings it up to date). There is no `NEXT_PERIOD_MISMATCH` or
+`NEXT_GAP_TOO_LONG` check (all-time periods overlap by design). The two kinds never block each other:
+a dated source's later reports are dated ones starting at or after its end (`allTime: { $ne: true }`,
+so an all-time report made before anyone knocked, starting today, is not one), and an all-time
+source's are all-time ones ending after it; an exact match is answered, any other is `409
+NOT_LATEST_REPORT`. The reports list offers Next on the newest report of each kind, and not on an
+all-time one that already runs through today (`todayIn(row.timeZone)`).
+
 **Dates.** "Period not over" is `now < rangeEndUtc`; numbers are "stale" after an hour
 (`clientReportChecks.js`). `periodPhrase` in reportDerive.js counts civil days (a DST week is 7) and
 routes every formerly weekly string: the KPI pills and help, the quiet-period banner, the hub heading
@@ -1523,7 +1593,9 @@ Built 2026-10-25 (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E). A tab is its `series
   / "…, taken down."
 - **The race** is closed by the database, not by comparing ids (round 1 of the plan's review showed id
   order isn't arrival order): every create without `allowDuplicate`, and Next's insert, sets
-  `dupGuard: true`, and `report_period_guard` (§B) lets one guarded report per tab and period in. A
+  `dupGuard: true`, and `report_period_guard` (§B) lets one guarded report per tab and period in (an
+  all-time report sets `allTimeGuard` instead, and `report_all_time_guard` lets one per tab and last day
+  in; the winner is looked up by the same kind). A
   create that loses there (`isReportPeriodGuardError`: `E11000` naming the index, or its key pattern)
   answers `200 { report, build, existing: true, createdByName }`, the winner and its creator's first and
   last name; if the winner was deleted in between, it inserts once more. The guarded insert comes
@@ -1674,7 +1746,12 @@ unchanged. The old figure counted crews and "No team" rather than teams (code re
 Each build of a report with a comparison report recounts that report's cards up to its cut-off. The
 comparison report (`comparedReportFor`) is the same series' published, shown report with the latest
 `rangeEndUtc` on or before this report's `rangeStartUtc` (tie-break `publishedAt` descending, then
-`_id`); a report from before series matches `seriesId: null` and the same `effortId`. The build freezes
+`_id`); a report from before series matches `seriesId: null` and the same `effortId`. An all-time
+report (§N) starts on the campaign's first knock, so nothing ends before it starts: it compares with
+the latest ending on or before its own `rangeEndUtc` instead (itself excluded), in the build and in
+`earlierTotalsLine`'s "since" check alike; its one-report form says `through: <that report's weekEnd>`
+("Totals through Oct 25 were updated by −120 doors after they were first reported." — "before <the day
+after>" read as before this report's own last day when both ended the same day, code review). The build freezes
 `earlierTotals` (`doorsKnocked`, `homesKnocked`, `litKnocks`, `surveysTaken`, `surveyedVoters`),
 `comparedReportId` and `comparedSnapshotId` (that report's live `snapshotId` at the build, `null` for
 a report from before snapshots).
@@ -1712,7 +1789,9 @@ P-2; round 1 computed it there but never showed it).
 oneReport: true })` returns the same `changes` with `since: null` and `before: <this report's
 weekStart>`, and reportDerive.js words it "Totals from before Oct 19 were updated by −120 doors after
 they were first reported." (the same nouns as the usual line), on the page and in the PDF (which
-prints what reportDerive returns, folding − to -).
+prints what reportDerive returns, folding − to -). An all-time report (§N) returns `through: <the earlier
+report's weekEnd>` instead of `before`: "Totals through Oct 25 were updated by −120 doors after they were
+first reported."
 
 ## J. The client's payload and the map readers
 
@@ -1736,9 +1815,10 @@ public routes and the admin preview alike, so the preview is what the client get
   at once. The admin preview shapes the on-screen overlay but passes `mapSource: report`, so its version
   is the saved report's, which is what its map endpoints read.
 - `nav` (`seriesNav`, clientReportRead.js): the older and newer shown report of the same series,
-  ordered the way the hub lists them (`rangeStartUtc`, then `publishedAt`, then `_id`) and compared on
-  that whole tuple, so two reports starting the same day each get an arrow to the other (code review
-  PUBUX-6; a comparison on the start alone gave both none). A draft in the preview reads as published
+  ordered the way the hub lists them (`rangeEndUtc`, then `publishedAt`, then `_id`; by the last day
+  since §N, as an all-time report starts on the campaign's first knock — the same order as before for
+  reports that don't overlap) and compared on that whole tuple, so two reports ending the same day each
+  get an arrow to the other (code review PUBUX-6; a comparison on one day alone gave both none). A draft in the preview reads as published
   now, where it will sit once published. On a link to one report, `nav` is `null` (§K).
 - `GET /share/:token/reports/:id` answers `{ report, survey, single }`: `single` is true on a link to one
   report, which also gets `nav: null` and the earlier-totals line's `before` form (§I).
@@ -2059,7 +2139,7 @@ for any campaign id (§H):
 | `PATCH /series/:seriesId` | `{ label?, confirmLabel?, coordinatorIds?, keepPast?, removePast?, makeCurrent?, end?, continue?, deleteOpenDrafts? }` |
 | `GET /series/:seriesId/team-changed?reportId=` | The team-changed card's data, counted against that report (optional; §H) |
 | `GET /series/affected?campaignId=&coordinatorIds=` | The campaign's active teams with a report whose crews (current or past) include those coordinators, as `{ teams: [{ seriesId, label }] }`: labels only. The coordinator-change confirm on the Team tab ([CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx)) names them: "This also changes the numbers in the Paid team client report." |
-| `POST /` | Create a draft `{ campaignId, weekStart, weekEnd, title?, seriesId?, effortId?, teamSeriesId?, seriesLabel?, confirmLabel?, allowDuplicate? }` and claim its first build: `201 { report, build, warnings }` (`['STARTS_AFTER_TODAY']` when it starts after today in the campaign's zone, else `[]`); `409 REPORT_EXISTS` when the tab has a report for those dates (unless `allowDuplicate`), `200 { report, build, existing: true, createdByName }` when a simultaneous create got in first (§F) |
+| `POST /` | Create a draft `{ campaignId, weekStart, weekEnd, title?, seriesId?, effortId?, teamSeriesId?, seriesLabel?, confirmLabel?, allowDuplicate?, allTime? }` (with `allTime: true`, `weekEnd` alone: the server sets `weekStart`, §F) and claim its first build: `201 { report, build, warnings }` (`['STARTS_AFTER_TODAY']` when it starts after today in the campaign's zone, else `[]`); `409 REPORT_EXISTS` when the tab has a report for those dates (unless `allowDuplicate`), `200 { report, build, existing: true, createdByName }` when a simultaneous create got in first (§F) |
 | `GET /?campaignId=&seriesId=` | The list (no breakdowns, no build result), with each row's series key, current series label, `campaignType` (null on a report from before the field), build view, views and dates |
 | `GET /:id` | The report, campaign and org names, current series label, scoped `openMockFlags`, the build (with `live` and `queuePosition`), `checks` (*Before you publish*) and `liveInputs: { showMap, mapMode, areaSize, mapKeys, questionDeps }`, what the live snapshot was built with as the server reads it (`mapContextFor`, so a legacy published report's comes through every survey its answers can have come from; code review contract C4). The builder's question table, map ticks, Refresh dialog and preview map follow it instead of guessing from the stored settings |
 | `PATCH /:id` | Edit (§F), with optional `ifStatus` (`409 STATUS_CHANGED` on a mismatch) and `ifEditVersion` (`409 CHANGED_ELSEWHERE` with `{ editVersion, report }` on a mismatch; contract C8) |
@@ -2071,7 +2151,7 @@ for any campaign id (§H):
 | `POST /:id/take-down` (alias `/unpublish`) · `/put-back-up` | |
 | `GET /:id/preview` · `POST /:id/preview` | The client payload; POST overlays the on-screen settings; plus internal `provenance` |
 | `GET /:id/preview/map` · `/preview/map/doors` · `/preview/areas` | The live snapshot's map, as the client reads it |
-| `POST /:id/next` | The next period's draft (`nextPeriod`, §F), idempotent: `201 { report, build, warnings? }` new; `200 { …, existing: true }` for the draft it already made, an exact later report or a lost race; `409 NEXT_GAP_TOO_LONG { catchUp, suggested }`, `409 NOT_LATEST_REPORT` |
+| `POST /:id/next` | The next period's draft (`nextPeriod`, §F; on an all-time report, the next all-time report through today), idempotent: `201 { report, build, warnings? }` new; `200 { …, existing: true }` for the draft it already made, an exact later report or a lost race; `409 NEXT_GAP_TOO_LONG { catchUp, suggested }`, `409 NOT_LATEST_REPORT`, `409 ALREADY_THROUGH_TODAY` |
 | `DELETE /:id` | Delete; `?eraseHistory=1` (admins) erases its earlier text |
 
 **Admin links**, `/admin/client-reports/shares`, the same gate:
@@ -2094,7 +2174,7 @@ for any campaign id (§H):
 |---|---|
 | `GET /:token` | `{ requiresPassword }` |
 | `POST /:token/unlock` | `{ password, remember }` → `{ accessToken }` (rate-limited per IP + token, budgeted per link) |
-| `GET /:token/reports` | `{ campaignName, orgName, hasLogo, reports, single }`: published, not taken down, newest first; on a one-report link that report alone, plus `reportId` and `gone` (§K) |
+| `GET /:token/reports` | `{ campaignName, orgName, hasLogo, reports, single }`: published, not taken down, newest last day first (`weekEnd`, then `publishedAt`; since §N); on a one-report link that report alone, plus `reportId` and `gone` (§K) |
 | `GET /:token/reports/:id` | `{ report, survey, single }`; a one-report link answers another report's id `404 REPORT_NOT_FOUND` (§K) |
 | `GET /:token/reports/:id/map` · `/map/doors` · `/areas` | §J |
 | `POST /:token/reports/:id/opened` | `204` (§L) |
@@ -2138,6 +2218,7 @@ its current `cv`, else `401 password-required`; legacy open links pass), and rep
 | `ALREADY_PUBLISHED`, `RECOMPUTE_NEEDED`, `SNAPSHOT_CHANGED`, `SAVING` | 409 | Publish |
 | `NOTHING_TO_APPLY`, `NOTHING_TO_DISCARD`, `NOT_PUBLISHED` | 409 | Apply, Discard, Take down, Put back up |
 | `NEXT_PERIOD_MISMATCH`, `NOT_LATEST_REPORT`, `NEXT_RACE`, `NEXT_GAP_TOO_LONG` | 409 | Next (`NEXT_GAP_TOO_LONG` carries `{ catchUp, suggested }`) |
+| `ALREADY_THROUGH_TODAY` | 409 | Next on an all-time report that already ends today or later: "This report already runs through today — press Refresh numbers to bring it up to date." (§N) |
 | `HISTORY_NOT_FOUND` · `NOT_RESTORABLE` · `NOT_ERASABLE` · `HISTORY_ERASED` | 404 · 400 · 400 · 409 | History |
 | `LOGO_REQUIRED`, `LOGO_NOT_PNG`, `LOGO_INVALID` · `LOGO_TOO_LARGE`, `LOGO_UPLOAD_REFUSED` | 400 · 413 | Branding |
 
@@ -2223,6 +2304,35 @@ Build failures carry their own codes on `build.error` (§E).
   Activity at a glance in `ClientReportView` and the PDF, dateless when `numbersThrough` is set; the
   hub's Latest card says "Totals since the campaign began. The + figures are for …". The quiet banner
   lost its "cumulative totals to date" sentence, which the line now says.
+  **Latest progress** (§N, 2026-10-25): `allTimeChoice(today)` (newReportChoices.js) is always the second
+  choice, after Move this tab's catch-up when that was added; Pick dates' first day is optional (aria
+  label "First day (optional)", the line "Leave the first day empty to count everything up to the last
+  day.", "All time" in place of the day count, "Pick a last day." when the last day is empty). Either way
+  `allTime` is true and the request is `{ campaignId, allTime: true, weekEnd, … }`; `totalsSentence` reads
+  "…through today (or Oct 18), with no “+412 this week” figures."; the title placeholder is "All time";
+  the dialog's last report (first choice, nudge) skips `allTime` rows. In reportDerive.js `periodOf`
+  gives an all-time report the `ALL_TIME` period (noun `all`, whatever its length): count cards with
+  `delta: null` and no hint, help without the period sentence, no quiet banner, `numbersAsOf: null`
+  (`totalsSinceText` says "as of <numbersThrough>"), title fallback "All time", PDF title and file word
+  `all-time-report`, hub heading "Reports". The reports list labels a row "All time · …", with no "+N"
+  in its figures (`kpiLine`), and offers Next on the newest row of each kind (not on an all-time row
+  already through today, `todayIn(row.timeZone)`); its gap lines come from `gapsAbove` (reportDates.js):
+  the dated reports in start order against the furthest last day so far, each line above the report whose
+  days run up to it (of two ending the same day, the one listed first) — never row by row, which, listed by
+  last day, read a month with a week inside it as a false gap (code review). The client's list gives an all-time row "All time" and no pill, and its Latest
+  card no "+" figures and the totals line; the Share message is "The report through Oct 28 is up: … so far
+  and …"; Refresh numbers drops its "In the period" column; Publish and Before you publish say "Today
+  isn't over yet: doors knocked after these numbers were built aren't in them." (one running to a later
+  day reads as any period not over); the links panel's report picker and the builder's heading say "All
+  time · …". A half-typed first day in Pick dates reads '' as an empty one does, and React fires onChange
+  only when the value changes (typing into an EMPTY date input leaves it '' until the day is whole), so the
+  dialog reads the box's `validity.badInput` on change, on every key and on blur, and once more as Create
+  is pressed (a ref), and holds Create: "Finish the first day, or clear it to count everything up to the
+  last day." On an all-time team report the server keeps only the one-person check (`allTimeTeamFigures`,
+  clientReportChecks.js): the build's frozen `provenance.canvassers` (it counts each window's distinct
+  users as it walks; `provenance` never reaches the client), else, for a report built before that count,
+  the period figures' own distinct; the builder says "N canvassers have knocked for this team since the
+  campaign began." — the door-visit figures would re-read every visit (6.6 s on a 1M-knock ledger).
   A row's Next refused `NEXT_GAP_TOO_LONG` opens New report with `suggested` picked and its sentence as
   `initial.notice` (FRESH-3, above); a link to the page carrying `?new=1&seriesId=&weekStart=&weekEnd=`
   opens it with those dates picked (the page then drops those params; nothing in the app sends that
@@ -2590,4 +2700,11 @@ regenerated once for §M, whose only differences are the totals line and the Lat
 The §M wording is pinned in `reportDerivePeriod.test.js` (the totals line, dateless when the numbers
 stopped early), `clientReportsLogic.test.js` and `clientReportsSimplify.smoke.test.js` (New report's line,
 named for a team or walk list, its example following the dates) and `reportPdf.test.js` (the line right
-under ACTIVITY AT A GLANCE).
+under ACTIVITY AT A GLANCE). All-time reports (§N): server `clientReportAllTime.int.test.js` (the first-knock
+start in the campaign's zone whatever first day is sent, the clamps, the guard's wording, Next's
+all-time branch and its refusals, a dated Next ignoring all-time reports, a real build whose period
+equals its running total and whose comparison report ends by its last day, the hub, admin list and
+Older / Newer by last day, the one-report `before`); client `reportDerivePeriod.test.js`,
+`clientReportsLogic.test.js`, `clientReportsSimplify.smoke.test.js` (the choice, an empty first day, the
+request, the list's Next per kind and gap lines), `clientReportsRender.smoke.test.js` (the publish
+warning), `publicReportRender.smoke.test.js` (the page and the hub) and `reportPdf.test.js`.

@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import multer from 'multer';
 import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { uploadIdList } from '../../middleware/idListUpload.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { Household } from '../../models/Household.js';
@@ -17,8 +17,6 @@ import { findVotersByVoterIds, clearParkedByCanonical } from '../../services/vot
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 async function loadCampaign(req, res, next) {
   try {
@@ -80,7 +78,7 @@ async function previewDrops(campaign, affected, newlyVoterIds) {
 }
 
 // Dry run — no writes.
-router.post('/preview', upload.single('file'), async (req, res, next) => {
+router.post('/preview', uploadIdList, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
@@ -110,7 +108,7 @@ router.post('/preview', upload.single('file'), async (req, res, next) => {
 });
 
 // Apply — marks voters voted, recomputes fully-voted doors, records the upload.
-router.post('/import', upload.single('file'), async (req, res, next) => {
+router.post('/import', uploadIdList, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);

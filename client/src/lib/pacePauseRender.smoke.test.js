@@ -126,7 +126,7 @@ test('the settings card is read-only for an admin without billing access', async
     entry: (h) =>
       wrap(
         h,
-        (x) => `import { PacePauseSettingsView } from '${join(x, '../components/users/PacePauseSettingsCard.jsx')}';`,
+        (x) => `import { PacePauseSettingsView } from '${join(x, '../components/settings/PacePauseSettingsCard.jsx')}';`,
         `<PacePauseSettingsView s={${JSON.stringify(s)}} draft={{ enabled: true, billingAdmins: true, alertUserIds: ['u2'] }} setDraft={() => {}} saving={false} error="" onSave={() => {}} />`
       ),
   });

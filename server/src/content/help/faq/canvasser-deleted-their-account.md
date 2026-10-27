@@ -43,7 +43,9 @@ when the account is deleted, so no doors are stranded with someone who's gone. B
 the other canvassers on them. Reassign the rest as normal. They're also removed from every campaign roster.
 
 **If they coordinated a crew**, those people have no coordinator until you set one on the campaign's
-**Team** tab. The team keeps its numbers, and shows their name for the same 180 days.
+**Team** tab (tick several and use **Move to crew…** for all of them at once). The team keeps its
+numbers, and shows their name for the same 180 days, until you move its people: their doors move with
+them, like any crew change.
 
 **Doors left on their phone.** Someone deleting their own account has to let the app send everything
 first. When an admin deletes it, anything still on their phone goes up under whoever signs in on that phone

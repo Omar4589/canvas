@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
-  Alert,
   AccessibilityInfo,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -20,6 +19,7 @@ import { api } from '../../../lib/api';
 import PasswordInput from '../../../components/PasswordInput';
 import SectionHeader from '../../../components/SectionHeader';
 import MemberSheet from '../../../components/MemberSheet';
+import AllShownSheet from '../../../components/AllShownSheet';
 import InsetGroup, {
   InsetNavRow,
   InsetActionRow,
@@ -35,33 +35,29 @@ import { DELETED_ACCOUNT_LABEL, deletionLine } from '../../../lib/memberDeletion
 import { takeDeletionNotice } from '../../../lib/deletionNotice';
 import { usePausedList } from '../../../lib/pacePauses';
 import { pausedUserIds } from '../../../lib/pace';
+import {
+  STATUS_PILLS,
+  memberRow,
+  campaignRows,
+  filterHubRows,
+  crewOptions,
+  sortHubRows,
+  sortOptionsFor,
+  rowBadge,
+  pagingFor,
+  pagingReducer,
+  limitOf,
+  pageOfRows,
+  moveTargets,
+  resendTargets,
+  assignTargets,
+  allShownLabel,
+} from '../../../lib/usersHub';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 
-const SORT_OPTIONS = [
-  { key: 'name-asc', label: 'Name A–Z' },
-  { key: 'name-desc', label: 'Name Z–A' },
-  { key: 'recent-joined', label: 'Recently joined' },
-  { key: 'recent-signin', label: 'Recent password login' },
-];
-
-function compareName(a, b, dir) {
-  const an = `${a.lastName} ${a.firstName}`.toLowerCase();
-  const bn = `${b.lastName} ${b.firstName}`.toLowerCase();
-  if (an < bn) return dir === 'asc' ? -1 : 1;
-  if (an > bn) return dir === 'asc' ? 1 : -1;
-  return 0;
-}
-
-function compareDate(a, b, key) {
-  const av = a[key] ? new Date(a[key]).getTime() : 0;
-  const bv = b[key] ? new Date(b[key]).getTime() : 0;
-  if (av === 0 && bv === 0) return 0;
-  if (av === 0) return 1;
-  if (bv === 0) return -1;
-  return bv - av;
-}
+const ALL_CREWS = { key: 'all', label: 'All crews' };
 
 function initials(name) {
   return (name || '')
@@ -87,7 +83,8 @@ const Avatar = ({ name, role }) => {
 };
 
 // The old pill strip (role / assigned / coordinator / active) collapsed into one quiet meta
-// line — the grammar allows ONE badge, and it's reserved for the exceptional state (deleted, inactive, paused).
+// line — the grammar allows ONE badge, and it's reserved for the exceptional state (deleted, not in
+// the org, inactive, paused, never signed in: lib/usersHub.js rowBadge).
 // No 'assigned' / 'not assigned' word: campaign-scoped rows now live under a section header that
 // already says which side they are on, and restating it on every row is exactly the noise this
 // single line was written to kill.
@@ -98,6 +95,9 @@ const userMeta = ({ role, coordinatorName }) =>
   ]
     .filter(Boolean)
     .join(' · ');
+
+// A row's name on screen: a deleted account reads "Deleted account", never its scrubbed name.
+const rowName = (r) => (r.status === 'deleted' ? DELETED_ACCOUNT_LABEL : `${r.firstName} ${r.lastName}`.trim() || r.email);
 
 function FilterPill({ active, label, onPress }) {
   const styles = useThemedStyles(makeStyles);
@@ -129,6 +129,9 @@ export default function AdminUsers() {
   const viewerRole = useConsoleRole(); // 'super' | 'admin' | 'lead'
   const roleLabel = useConsoleRoleLabel();
   const isLead = viewerRole === 'lead';
+  // The positive form: useConsoleRole is undefined while it reads the cache, and an admin-only row must
+  // never flash at a lead for that frame.
+  const isAdminViewer = viewerRole === 'admin' || viewerRole === 'super';
   const [showCreate, setShowCreate] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -136,14 +139,25 @@ export default function AdminUsers() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortMode, setSortMode] = useState('name-asc');
   const [sortPickerOpen, setSortPickerOpen] = useState(false);
+  // The campaign view's Crew filter: 'all', 'none' (No crew) or a coordinator's id, with the label
+  // it showed so a crew everyone has left can still be named and cleared.
+  const [crewFilter, setCrewFilter] = useState(ALL_CREWS);
+  const [crewPickerOpen, setCrewPickerOpen] = useState(false);
 
   // ── The people hub's campaign filter (the old campaign Team page merged in here). ──
   // '' = all campaigns (org view). Seeded from ?campaignId= (a campaign's "Team" quick
   // action lands pre-filtered). Leads land on their first managed campaign by default so
   // create/coordinator actions are always available to them.
-  const [campaignFilter, setCampaignFilter] = useState(() =>
-    typeof params.campaignId === 'string' ? params.campaignId : ''
-  );
+  const paramCampaignId = typeof params.campaignId === 'string' ? params.campaignId : '';
+  const [campaignFilter, setCampaignFilter] = useState(paramCampaignId);
+  // This screen stays mounted once visited (a Tabs sibling), so a later push with a different
+  // ?campaignId= — the campaign page's Team tile, a profile's campaign row — has to be adopted here,
+  // or it lands on whatever campaign was picked last.
+  const [prevParamCampaignId, setPrevParamCampaignId] = useState(paramCampaignId);
+  if (prevParamCampaignId !== paramCampaignId) {
+    setPrevParamCampaignId(paramCampaignId);
+    if (paramCampaignId) setCampaignFilter(paramCampaignId);
+  }
   const campaignsQ = useQuery({ queryKey: ['admin', 'campaigns'], queryFn: () => api('/admin/campaigns') });
   const activeCampaigns = useMemo(
     () => (campaignsQ.data?.campaigns || []).filter((c) => c.isActive),
@@ -155,6 +169,15 @@ export default function AdminUsers() {
     }
   }, [isLead, campaignFilter, activeCampaigns]);
   const cId = campaignFilter || null;
+  // A crew is a fact of ONE campaign: switching campaigns clears the Crew filter, and leaving
+  // campaign scope drops the Crew sort. Reset in RENDER (never an effect), so no frame filters the
+  // new campaign by the old one's crew.
+  const [prevCid, setPrevCid] = useState(cId);
+  if (prevCid !== cId) {
+    setPrevCid(cId);
+    setCrewFilter(ALL_CREWS);
+    if (!cId && sortMode === 'crew') setSortMode('name-asc');
+  }
   // Resolve against ALL campaigns, not just active ones: the campaign page's Team tile can hand
   // over an archived ?campaignId=, and matching only actives left cId set with no
   // selectedCampaign — the roster queries fired while the campaign context UI never rendered.
@@ -176,38 +199,39 @@ export default function AdminUsers() {
     queryKey: ['admin', 'memberships'],
     queryFn: () => api('/admin/memberships'),
   });
-  // Who is paused for review right now (automatic pause) — the row's badge after deleted and inactive.
+  // Who is paused for review right now (automatic pause) — the row's badge and the Paused pill.
   const pausedQ = usePausedList();
   const pausedIds = useMemo(() => pausedUserIds(pausedQ.data), [pausedQ.data]);
 
-  // Campaign context: the roster (assigned state + coordinator) + who can BE a coordinator.
+  // Campaign context: the roster (each person's crew and standing here) …
   const assignmentsQ = useQuery({
     queryKey: ['admin', 'campaign-assignments', cId],
     queryFn: () => api(`/admin/campaigns/${cId}/assignments`),
     enabled: !!cId,
   });
-  const rosterByUser = useMemo(() => {
-    const m = new Map();
-    for (const a of assignmentsQ.data?.assignments || []) {
-      m.set(String(a.userId), {
-        coordinatorId: a.coordinatorId ? String(a.coordinatorId) : null,
-        coordinatorName: a.coordinatorName || null,
-        status: a.status,
-      });
-    }
-    return m;
-  }, [assignmentsQ.data]);
+  // … and who can BE a coordinator: the crew endpoint's `coordinators`, the rule the write enforces
+  // (active admins and leads). For a lead this is the only right list — their own member list is
+  // scoped to their campaigns, so building it from that left out coordinators they don't share one with.
+  const crewQ = useQuery({
+    queryKey: ['admin', 'campaign-crew', cId],
+    queryFn: () => api(`/admin/campaigns/${cId}/crew`),
+    enabled: !!cId,
+  });
   const coordinators = useMemo(
     () =>
-      (usersQ.data?.members || [])
-        .filter((m) => (m.role === 'admin' || m.role === 'lead') && m.user.isActive && m.isActive)
-        .map((m) => ({ id: String(m.user.id), name: `${m.user.firstName} ${m.user.lastName}`.trim() })),
-    [usersQ.data]
+      (crewQ.data?.coordinators || [])
+        .map((c) => ({ id: String(c.id), name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Unknown' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [crewQ.data]
   );
 
   const [sheetUserId, setSheetUserId] = useState(null);
+  const openSheetTimer = useRef(null);
+  useEffect(() => () => clearTimeout(openSheetTimer.current), []);
   // The "not on this campaign" section starts collapsed — see the render.
   const [offOpen, setOffOpen] = useState(false);
+  // An "all shown" run: { mode: 'move' | 'assign' | 'resend', people: [{ userId, name }] }.
+  const [allShown, setAllShown] = useState(null);
 
   // "Sam Rivera's account was deleted." — left by the profile that deleted it, which pops back here.
   // Read on focus, shown until dismissed.
@@ -228,118 +252,116 @@ export default function AdminUsers() {
       setShowCreate(false);
     },
   });
-  // Campaign-scoped create (auto-assigns; accepts coordinatorId) — admins pass
-  // requireCampaignManager too, so BOTH roles create through here when a campaign is picked.
-  const createOnCampaign = useMutation({
-    mutationFn: (body) => api(`/admin/campaigns/${cId}/crew`, { method: 'POST', body }),
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
-      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
-      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
-      setShowCreate(false);
-      // The address already had an account, so the server attached that REAL person and dropped the
-      // typed name. Say so, or the operator goes looking for someone who was never created.
-      if (data?.attached) {
-        const who = `${data.user.firstName} ${data.user.lastName}`;
-        Alert.alert(
-          'Added an existing account',
-          `That email already had a Door Line account, so ${who} was added rather than a new person. They keep their own password. If that isn't who you meant, remove them and check the address.`
-        );
-      }
-    },
-  });
-  const assignAll = useMutation({
-    mutationFn: (userIds) => api(`/admin/campaigns/${cId}/assignments`, { method: 'POST', body: { userIds } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] }),
-  });
+  // Everything a change to this campaign's people touches: the lists, the roster, the crews, and any
+  // crew check a member sheet holds.
+  const refreshPeople = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'coordinator-preview', cId] });
+  };
 
-  const users = useMemo(
-    () =>
-      (usersQ.data?.members || []).map((m) => ({
-        ...m.user,
-        role: m.role,
-        isActive: m.isActive && m.user.isActive,
-        membershipActive: m.isActive,
-        addedAt: m.addedAt,
-        // A deleted account's who-and-when (null: no record yet); user.isDeleted is already above.
-        deletion: m.deletion || null,
-      })),
-    [usersQ.data]
+  // The rows, in rosterView's shape (lib/usersHub.js). Campaign scoped → this campaign's roster (a
+  // roster row whose person has left the organization included, so it can be taken off) and the rest
+  // of the org; the org view → one list.
+  const { onRows, offRows } = useMemo(() => {
+    const members = usersQ.data?.members || [];
+    if (!cId) return { onRows: [], offRows: members.map(memberRow) };
+    const { on, off } = campaignRows(members, assignmentsQ.data?.assignments || []);
+    return { onRows: on, offRows: off };
+  }, [cId, usersQ.data, assignmentsQ.data]);
+
+  const sortOptions = sortOptionsFor(!!cId);
+  const effectiveSort = sortOptions.some((o) => o.key === sortMode) ? sortMode : 'name-asc';
+  const sortLabel = sortOptions.find((s) => s.key === effectiveSort)?.label;
+
+  // Search, role and status cover everyone; the Crew filter, only the campaign's own people. One sort
+  // orders each section. In the org view the one list rides `offShownAll` (nobody is "on" a campaign).
+  const { onShownAll, offShownAll, onOtherwise } = useMemo(() => {
+    const base = { q: search, role: roleFilter, status: statusFilter, pausedIds };
+    const otherwise = cId ? filterHubRows(onRows, base) : [];
+    return {
+      onOtherwise: otherwise,
+      onShownAll: cId ? sortHubRows(filterHubRows(otherwise, { crew: crewFilter.key }), effectiveSort) : [],
+      offShownAll: sortHubRows(filterHubRows(offRows, base), effectiveSort),
+    };
+  }, [cId, onRows, offRows, search, roleFilter, statusFilter, crewFilter.key, pausedIds, effectiveSort]);
+  const crewOpts = useMemo(
+    () => (cId ? crewOptions(onRows, onOtherwise, crewFilter) : []),
+    [cId, onRows, onOtherwise, crewFilter]
   );
 
-  const visibleUsers = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    let list = users.filter((u) => {
-      if (roleFilter !== 'all' && u.role !== roleFilter) return false;
-      if (statusFilter === 'active' && !u.isActive) return false;
-      if (statusFilter === 'inactive' && u.isActive) return false;
-      if (term) {
-        // A deleted row matches on the label it shows, "Deleted account" — never on its scrubbed name
-        // ("Deleted user") or its email, the tombstone address, neither of which is on screen.
-        const hay = (u.isDeleted ? DELETED_ACCOUNT_LABEL : `${u.firstName} ${u.lastName} ${u.email}`).toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
-      return true;
-    });
-    list = list.slice();
-    if (sortMode === 'name-asc') list.sort((a, b) => compareName(a, b, 'asc'));
-    else if (sortMode === 'name-desc')
-      list.sort((a, b) => compareName(a, b, 'desc'));
-    else if (sortMode === 'recent-joined')
-      list.sort((a, b) => compareDate(a, b, 'addedAt'));
-    // Sorts lastLoginAt, and says so — it used to be labeled "Recently active", which it never was.
-    // "Password login" because a used sign-in is extended without one (docs/PROPOSAL_SESSION_EXPIRY.md).
-    // Can't be repointed either: lastSeenAt is super-admin-only and absent from /admin/memberships.
-    else if (sortMode === 'recent-signin')
-      list.sort((a, b) => compareDate(a, b, 'lastLoginAt'));
-    return list;
-  }, [users, search, roleFilter, statusFilter, sortMode]);
+  // 50 rows a section, then "Show 50 more". New filters start every section at 50 again.
+  const filterKey = [cId || '', search.trim().toLowerCase(), roleFilter, statusFilter, crewFilter.key, effectiveSort].join('|');
+  const [paging, dispatchPaging] = useReducer(pagingReducer, filterKey, pagingFor);
+  // Reset in RENDER the moment the filters change, so going back to an earlier filter starts at 50
+  // too; limitOf ignores the stale state for the one render in between.
+  if (paging.key !== filterKey) dispatchPaging({ type: 'reset', key: filterKey });
+  const showMore = (section) => dispatchPaging({ type: 'more', key: filterKey, section });
+  const onPage = pageOfRows(onShownAll, limitOf(paging, filterKey, 'on'));
+  const offPage = pageOfRows(offShownAll, limitOf(paging, filterKey, cId ? 'off' : 'org'));
 
-  // Campaign scoped → two sections: this campaign's people, then the rest of the org. ONE pass over
-  // the already-sorted list, so the chosen sort still orders each section — the property the old
-  // stable partition existed to protect. `rosterByUser` membership IS the answer, so no row needs an
-  // `assigned` tag any more (which also drops an object copy per user per render).
-  const [onCampaign, offCampaign] = useMemo(() => {
-    if (!cId) return [visibleUsers, []];
-    const on = [];
-    const off = [];
-    for (const u of visibleUsers) (rosterByUser.has(String(u.id)) ? on : off).push(u);
-    return [on, off];
-  }, [visibleUsers, cId, rosterByUser]);
+  // The "all shown" rows act on the rows actually rendered, never one further down, and their labels
+  // carry that count (lib/usersHub.js). None on an archived campaign: it is read-only.
+  const moveList = cId && canWrite ? moveTargets(onPage.shown) : [];
+  const resendList = cId
+    ? canWrite
+      ? resendTargets(onPage.shown, { pausedIds, lead: isLead })
+      : []
+    : resendTargets(offPage.shown, { pausedIds, lead: isLead });
+  const assignList = cId && canWrite && isAdminViewer && offOpen ? assignTargets(offPage.shown) : [];
+  const openAllShown = (mode, rows) =>
+    setAllShown({ mode, people: rows.map((r) => ({ userId: r.userId, name: rowName(r) })) });
 
-  const sortLabel = SORT_OPTIONS.find((s) => s.key === sortMode)?.label;
+  const sheetRow = sheetUserId
+    ? onRows.find((x) => x.userId === String(sheetUserId)) || offRows.find((x) => x.userId === String(sheetUserId)) || null
+    : null;
+  const listsSettled = !usersQ.isFetching && !assignmentsQ.isFetching;
+  useEffect(() => {
+    if (sheetUserId && !sheetRow && listsSettled) setSheetUserId(null);
+  }, [sheetUserId, sheetRow, listsSettled]);
+
+  const visibleCount = cId ? onShownAll.length + offShownAll.length : offShownAll.length;
+  const totalCount = cId ? onRows.length + offRows.length : offRows.length;
+  const rosterLoading = !!cId && assignmentsQ.isLoading;
+  // A roster that failed to load would read as nobody on the campaign — and put the whole organization
+  // under "Not on this campaign", where Assign all shown would offer to add them all. Say so instead.
+  const rosterError = !!cId && assignmentsQ.isError;
 
   // One row renderer for both sections and for the flat org view, so a row can never drift
-  // between them. Keyed on u.id, so a re-sort re-orders instead of remounting.
-  const userRow = (u) => {
+  // between them. Keyed on the user id, so a re-sort re-orders instead of remounting.
+  const userRow = (r) => {
     // A deleted account's row reads "Deleted account" and who deleted it — never its email, which
     // is the tombstone address (deleted+<id>@deleted.doorline.invalid), nobody's real one.
-    const name = u.isDeleted ? DELETED_ACCOUNT_LABEL : `${u.firstName} ${u.lastName}`.trim();
+    const name = rowName(r);
+    const badge = rowBadge(r, pausedIds);
     return (
       <InsetNavRow
-        key={u.id}
-        leading={<Avatar name={name} role={u.role} />}
-        label={name || u.email}
-        sub={u.isDeleted ? (u.deletion ? deletionLine(u.deletion) : null) : u.email}
-        unit={userMeta({
-          role: u.role,
-          coordinatorName: cId ? rosterByUser.get(String(u.id))?.coordinatorName : undefined,
-        })}
-        // One badge, the most exceptional state: deleted, then inactive, then paused for review.
-        badge={
-          u.isDeleted
-            ? { text: 'deleted' }
-            : !u.isActive
-              ? { text: 'inactive' }
-              : pausedIds.has(String(u.id))
-                ? { text: 'paused' }
-                : null
-        }
+        key={r.userId}
+        leading={<Avatar name={name} role={r.role} />}
+        label={name || r.email}
+        sub={r.status === 'deleted' ? (r.deletion ? deletionLine(r.deletion) : null) : r.email}
+        unit={userMeta({ role: r.role, coordinatorName: r.onCampaign ? r.coordinatorName : undefined })}
+        // One badge, the most exceptional state. Never signed in reads amber, not alarm red.
+        badge={badge ? (badge.tone === 'warn' ? { text: badge.text, bg: colors.warnBg, fg: colors.warnFg } : { text: badge.text }) : null}
         // Campaign scoped → the member sheet (campaign actions); org view → full page.
-        onPress={() => (cId ? setSheetUserId(u.id) : router.push(`/(app)/admin/users/${u.id}`))}
+        onPress={() => {
+          clearTimeout(openSheetTimer.current);
+          if (cId) setSheetUserId(r.userId);
+          else router.push(`/(app)/admin/users/${r.userId}`);
+        }}
       />
     );
   };
+  // "Show 50 more" under a section that has more.
+  const moreRow = (page, section) =>
+    page.left > 0 ? (
+      <InsetActionRow
+        key="more"
+        label={`Show ${page.next.toLocaleString()} more`}
+        onPress={() => showMore(section)}
+      />
+    ) : null;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -422,33 +444,37 @@ export default function AdminUsers() {
             onPress={() => setRoleFilter('canvasser')}
           />
           <View style={styles.filterDivider} />
-          <FilterPill
-            active={statusFilter === 'all'}
-            label="All status"
-            onPress={() => setStatusFilter('all')}
-          />
-          <FilterPill
-            active={statusFilter === 'active'}
-            label="Active"
-            onPress={() => setStatusFilter('active')}
-          />
-          <FilterPill
-            active={statusFilter === 'inactive'}
-            label="Inactive"
-            onPress={() => setStatusFilter('inactive')}
-          />
+          {/* Status: the phone's Active / Inactive, plus the Team page's Paused and Never signed in
+              (lib/usersHub.js STATUS_PILLS). */}
+          {STATUS_PILLS.map((p) => (
+            <FilterPill
+              key={p.key}
+              active={statusFilter === p.key}
+              label={p.label}
+              onPress={() => setStatusFilter(p.key)}
+            />
+          ))}
         </ScrollView>
         <View style={styles.sortRow}>
-          <Pressable
-            onPress={() => setSortPickerOpen(true)}
-            style={styles.sortButton}
-          >
-            <Text style={styles.sortButtonText}>Sort: {sortLabel}</Text>
-            <Text style={styles.sortChevron}>▾</Text>
-          </Pressable>
+          <View style={styles.sortButtons}>
+            {/* The Crew control: this roster's coordinators and No crew, in a sheet. */}
+            {cId ? (
+              <Pressable onPress={() => setCrewPickerOpen(true)} style={styles.sortButton}>
+                <Text style={styles.sortButtonText} numberOfLines={1}>Crew: {crewFilter.label}</Text>
+                <Text style={styles.sortChevron}>▾</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => setSortPickerOpen(true)}
+              style={styles.sortButton}
+            >
+              <Text style={styles.sortButtonText}>Sort: {sortLabel}</Text>
+              <Text style={styles.sortChevron}>▾</Text>
+            </Pressable>
+          </View>
           {!usersQ.isError && (
             <Text style={styles.countText}>
-              {visibleUsers.length} of {users.length}
+              {visibleCount} of {totalCount}
             </Text>
           )}
         </View>
@@ -471,7 +497,7 @@ export default function AdminUsers() {
           </View>
         ) : null}
         <ArchivedCampaignBanner campaignId={cId} />
-        {usersQ.isLoading || usersQ.isError || visibleUsers.length === 0 ? (
+        {usersQ.isLoading || usersQ.isError || (visibleCount === 0 && !rosterLoading) ? (
           <InsetGroup>
             {usersQ.isLoading ? (
               <InsetNoteRow loading />
@@ -487,109 +513,221 @@ export default function AdminUsers() {
               </InsetNoteRow>
             ) : (
               <InsetNoteRow>
-                {users.length === 0
+                {totalCount === 0
                   ? 'No users yet. Tap "+ New" to add one.'
                   : 'No users match your filters.'}
               </InsetNoteRow>
             )}
+          </InsetGroup>
+        ) : rosterError ? (
+          <InsetGroup>
+            <InsetNoteRow>Couldn't load this campaign's people. Check your connection and try again.</InsetNoteRow>
+            <InsetActionRow key="retry-roster" label="Try again" onPress={() => assignmentsQ.refetch()} />
           </InsetGroup>
         ) : cId ? (
           /* Campaign scoped → the campaign's people lead, and the rest of the org sits behind a
              reveal. Picking a campaign should answer "who is on this campaign"; the remainder is a
              means to an end (assigning someone), not the default view. */
           <>
-            <SectionHeader caption title={`On this campaign (${onCampaign.length})`} />
+            <SectionHeader caption title={`On this campaign (${onShownAll.length})`} />
             <InsetGroup>
-              {onCampaign.length === 0 ? (
+              {rosterLoading ? (
+                <InsetNoteRow loading />
+              ) : onShownAll.length === 0 ? (
                 <InsetNoteRow>Nobody on this campaign matches these filters.</InsetNoteRow>
               ) : (
-                onCampaign.map(userRow)
+                onPage.shown.map(userRow)
               )}
+              {rosterLoading ? null : moreRow(onPage, 'on')}
+              {/* "All shown": the rows above, as rendered. The server skips anyone it must and says
+                  why; the sheet shows what moves before anything does. */}
+              {moveList.length ? (
+                <InsetActionRow
+                  key="move-all"
+                  label={allShownLabel('Move all shown to a crew…', moveList.length)}
+                  onPress={() => openAllShown('move', moveList)}
+                />
+              ) : null}
+              {resendList.length ? (
+                <InsetActionRow
+                  key="resend-all"
+                  label={allShownLabel('Resend invites to all shown', resendList.length)}
+                  onPress={() => openAllShown('resend', resendList)}
+                />
+              ) : null}
             </InsetGroup>
 
-            <SectionHeader caption title={`Not on this campaign (${offCampaign.length})`} />
+            <SectionHeader caption title={`Not on this campaign (${offShownAll.length})`} />
             <InsetGroup>
               {/* A reveal, not a navigation — action row, no chevron (same idiom as the archived
                   campaigns list on admin/index.jsx). */}
               <InsetActionRow
-                label={offOpen ? 'Hide' : `Show ${offCampaign.length} not on this campaign`}
+                key="reveal"
+                label={offOpen ? 'Hide' : `Show ${offShownAll.length} not on this campaign`}
                 onPress={() => setOffOpen((v) => !v)}
-                disabled={offCampaign.length === 0}
+                disabled={offShownAll.length === 0}
               />
-              {offOpen ? offCampaign.map(userRow) : null}
+              {offOpen ? offPage.shown.map(userRow) : null}
+              {offOpen ? moreRow(offPage, 'off') : null}
               {/* Bulk assign lives HERE, and only while the section is open: "all shown" must mean a
-                  set the reader can actually see — it used to be able to fire against dozens of
-                  people who were never on screen. Every row in this section is unassigned by
-                  construction, so the section IS the predicate; no per-row filter is needed. */}
-              {offOpen && !isLead && canWrite && offCampaign.length > 0 ? (
+                  set the reader can actually see. It covers the rows rendered whose account is on,
+                  and asks for the crew they join, with what their earlier doors here do. */}
+              {assignList.length ? (
                 <InsetActionRow
-                  label={assignAll.isPending ? 'Assigning…' : `Assign all shown (${offCampaign.length})`}
-                  onPress={() => assignAll.mutate(offCampaign.map((u) => u.id))}
-                  disabled={assignAll.isPending}
+                  key="assign-all"
+                  label={allShownLabel('Assign all shown', assignList.length)}
+                  onPress={() => openAllShown('assign', assignList)}
                 />
               ) : null}
             </InsetGroup>
           </>
         ) : (
-          /* Org view — one flat list, exactly as before. */
-          <InsetGroup>{visibleUsers.map(userRow)}</InsetGroup>
+          /* Org view — one flat list, 50 at a time. */
+          <InsetGroup>
+            {offPage.shown.map(userRow)}
+            {moreRow(offPage, 'org')}
+            {resendList.length ? (
+              <InsetActionRow
+                key="resend-all"
+                label={allShownLabel('Resend invites to all shown', resendList.length)}
+                onPress={() => openAllShown('resend', resendList)}
+              />
+            ) : null}
+          </InsetGroup>
         )}
       </ScrollView>
 
       {/* Member sheet — campaign-scoped actions for the tapped person. */}
-      {sheetUserId && selectedCampaign
+      {sheetRow && selectedCampaign
         ? (() => {
-            const u = users.find((x) => String(x.id) === String(sheetUserId));
-            if (!u) return null;
-            const roster = rosterByUser.get(String(u.id));
+            const r = sheetRow;
             return (
               <MemberSheet
+                key={r.userId}
                 member={{
-                  role: u.role,
-                  isActive: u.isActive,
-                  status: roster?.status || (u.membershipActive ? 'active' : 'deactivated'),
-                  coordinatorId: roster?.coordinatorId || null,
-                  coordinatorName: roster?.coordinatorName || null,
-                  assigned: !!roster,
-                  // lastLoginAt gates the resend-invite action (never-signed-in only) — MemberSheet has no
-                  // way to fetch it itself, so it has to be threaded through here. So do isDeleted and
-                  // deletion: a deleted account's sheet offers no account actions and hides its email.
+                  role: r.role,
+                  status: r.status,
+                  coordinatorId: r.coordinatorId,
+                  coordinatorName: r.coordinatorName,
+                  assigned: r.onCampaign,
+                  // lastLoginAt and createdAt decide Never signed in / No sign-in recorded — the sheet
+                  // has no way to fetch them itself, so they're threaded through here. So do
+                  // isDeleted and deletion: a deleted account's sheet offers no account actions and
+                  // hides its email.
                   user: {
-                    id: String(u.id),
-                    firstName: u.firstName,
-                    lastName: u.lastName,
-                    email: u.email,
-                    lastLoginAt: u.lastLoginAt,
-                    isDeleted: !!u.isDeleted,
-                    deletion: u.deletion,
+                    id: r.userId,
+                    firstName: r.firstName,
+                    lastName: r.lastName,
+                    email: r.email,
+                    lastLoginAt: r.lastLoginAt,
+                    createdAt: r.createdAt,
+                    isDeleted: r.status === 'deleted',
+                    isSuperAdmin: r.isSuperAdmin,
+                    deletion: r.deletion,
                   },
                 }}
                 campaign={selectedCampaign}
                 notTargetInUse={notTargetInUse}
                 coordinators={coordinators}
+                coordinatorsStatus={crewQ.status}
+                crewSize={onRows.filter((x) => x.coordinatorId === r.userId).length}
                 viewerRole={viewerRole}
                 onClose={() => setSheetUserId(null)}
-                onChanged={() => {
-                  qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
-                  qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cId] });
-                  qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cId] });
-                }}
+                onChanged={refreshPeople}
               />
             );
           })()
         : null}
 
-      {/* Campaign-scoped create (both roles; coordinator picker included). */}
-      {showCreate && cId && canWrite ? (
-        <CreateCanvasserSheet
-          campaignName={selectedCampaign?.name}
+      {/* "All shown" runs: Move all shown to a crew…, Assign all shown, Resend invites to all shown. */}
+      {allShown ? (
+        <AllShownSheet
+          mode={allShown.mode}
+          campaign={selectedCampaign}
+          people={allShown.people}
           coordinators={coordinators}
-          onClose={() => setShowCreate(false)}
-          onCreate={(body) => createOnCampaign.mutate(body)}
-          submitting={createOnCampaign.isPending}
-          error={createOnCampaign.error}
+          coordinatorsStatus={crewQ.status}
+          onClose={() => setAllShown(null)}
+          onFinished={refreshPeople}
         />
       ) : null}
+
+      {/* Campaign-scoped add (both roles): who the email belongs to first, then the coordinator. */}
+      {showCreate && cId && canWrite ? (
+        <CreateCanvasserSheet
+          campaignId={cId}
+          campaignName={selectedCampaign?.name}
+          coordinators={coordinators}
+          coordinatorsStatus={crewQ.status}
+          isAdmin={isAdminViewer}
+          onClose={() => setShowCreate(false)}
+          onAdded={refreshPeople}
+          onOpenPerson={(userId) => {
+            setShowCreate(false);
+            // The lists may not know someone another admin added meanwhile, so they're refreshed, and
+            // the add sheet has to finish sliding away first: iOS won't present one modal while
+            // another is still being dismissed.
+            refreshPeople();
+            clearTimeout(openSheetTimer.current);
+            openSheetTimer.current = setTimeout(() => setSheetUserId(userId), 450);
+          }}
+        />
+      ) : null}
+
+      {/* Crew picker — this roster's crews, then No crew, each with the rows it would show. */}
+      <Modal
+        transparent
+        visible={crewPickerOpen}
+        animationType="fade"
+        onRequestClose={() => setCrewPickerOpen(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setCrewPickerOpen(false)}
+        >
+          <Pressable
+            style={[styles.actionSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.actionSheetTitle}>Show crew</Text>
+            <ScrollView style={{ maxHeight: 420 }}>
+              {crewOpts.map((opt) => {
+                const active = opt.key === crewFilter.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    style={styles.actionItem}
+                    onPress={() => {
+                      setCrewFilter({ key: opt.key, label: opt.label });
+                      setCrewPickerOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.actionItemText,
+                        active && {
+                          color: colors.brand,
+                          fontWeight: '700',
+                        },
+                      ]}
+                    >
+                      {opt.label} ({opt.count})
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable
+              style={[styles.actionItem, styles.actionCancel]}
+              onPress={() => setCrewPickerOpen(false)}
+            >
+              <Text style={[styles.actionItemText, { fontWeight: '600' }]}>
+                Cancel
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Sort picker */}
       <Modal
@@ -607,8 +745,8 @@ export default function AdminUsers() {
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.actionSheetTitle}>Sort users</Text>
-            {SORT_OPTIONS.map((opt) => {
-              const active = opt.key === sortMode;
+            {sortOptions.map((opt) => {
+              const active = opt.key === effectiveSort;
               return (
                 <Pressable
                   key={opt.key}
@@ -956,9 +1094,17 @@ function makeStyles(t) {
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  sortButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexShrink: 1,
+    marginRight: spacing.sm,
+  },
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
     gap: spacing.xs,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
@@ -971,6 +1117,7 @@ function makeStyles(t) {
     fontSize: 13,
     fontWeight: '600',
     color: colors.textPrimary,
+    flexShrink: 1,
   },
   sortChevron: { fontSize: 11, color: colors.textSecondary },
   countText: { ...type.caption },

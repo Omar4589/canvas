@@ -45,7 +45,8 @@ const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** The reports a one-report link can open: published and not taken down (§D — else REPORT_NOT_SHOWN), newest first. */
 export const shownReportsOf = (reports) => (reports || []).filter((r) => r.status === 'published' && !r.takenDownAt);
-const reportChoiceLabel = (r) => `${formatPeriod(r.weekStart, r.weekEnd)} (${r.seriesLabel || r.scope?.label || 'Whole campaign'})`;
+const reportChoiceLabel = (r) =>
+  `${r.allTime ? 'All time · ' : ''}${formatPeriod(r.weekStart, r.weekEnd)} (${r.seriesLabel || r.scope?.label || 'Whole campaign'})`;
 
 // `reports`: the campaign's reports — null while the list loads; `reportsError` its failure, if it failed.
 const ClientLinksPanel = ({ campaignId, tz, reports = [], reportsError = null }) => {

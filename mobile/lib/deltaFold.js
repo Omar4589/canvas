@@ -41,13 +41,39 @@ export const changesPath = ({ campaignId, since, doorConfigStamp }) => {
   return `/mobile/changes?campaignId=${campaignId}&since=${encodeURIComponent(since)}${stampParam}`;
 };
 
-// The household half of the same fold. A delta door that is archived, fully voted, fully do-not-contact, or
-// whose address asked that nobody come back is DROPPED — that is how a door suppressed mid-shift leaves a
-// running phone (the server bumps updatedAt on every recompute, so the delta always carries it). Otherwise the
+// The server's knockable-door rule (server/src/services/canvass/knockableDoorFilter.js), read off a delta row,
+// which carries every one of its flags: true when a fresh bootstrap would leave this door out — gone from the
+// campaign's active doors, everyone there voted early, everyone there asked not to be contacted, the address
+// asked that nobody come back, or the office took it out of books. server/test/knockableDoorParity.test.js
+// holds this to the server's list, so a new flag there fails CI until the phone learns it too.
+export const isSuppressedDoor = (h) =>
+  h.isActive === false ||
+  h.fullyVoted === true ||
+  h.fullyDnc === true ||
+  h.doNotKnock === true ||
+  h.excludedFromTurf === true;
+
+// Delta doors this phone doesn't hold but should be showing: knockable, with a pin, and in the canvasser's books
+// (the server only sends their doors). A door comes back this way when an early-voting upload is undone or a
+// voter un-marked, when an import or a teammate adds someone who hasn't voted, when a do-not-contact flag
+// clears, or when an emptied door is refilled. A delta row has no address or book to draw it with, so the
+// caller pulls a fresh bootstrap (map.jsx) — before this, the door stayed off the phone until a manual refresh.
+// The pin check matches the bootstrap's own, so a door the bootstrap would still leave out can't loop.
+export const returningDoorIds = (prevHouseholds, deltaHouseholds) => {
+  const known = new Set((prevHouseholds || []).map((h) => String(h._id)));
+  return (deltaHouseholds || [])
+    .filter((h) => !known.has(String(h._id)) && !isSuppressedDoor(h) && Array.isArray(h.location?.coordinates))
+    .map((h) => String(h._id));
+};
+
+// The household half of the same fold. A delta door the bootstrap would now leave out (isSuppressedDoor) is
+// DROPPED — that is how a door suppressed mid-shift leaves a running phone (the server bumps updatedAt on every
+// recompute, so the delta always carries it). Otherwise the
 // delta's status, last visit, restricted provenance, confirm stamp and shared-spot flag replace the cached ones
 // — each copied on every fold, because a stale value lies: an absent `pinSuspect` means the home has an exact
-// map spot now — and its pin when the delta carries one. Doors not in the delta are untouched. The pending-
-// action overlays (map.jsx reconcilePendingHouseholds / reconcilePendingLocations) wrap this result.
+// map spot now — and its pin when the delta carries one. Doors not in the delta are untouched; a delta door the
+// phone doesn't hold is returningDoorIds' business, not this fold's. The pending-action overlays (map.jsx
+// reconcilePendingHouseholds / reconcilePendingLocations) wrap this result.
 export const foldDeltaHouseholds = (prevHouseholds, deltaHouseholds) => {
   const prev = prevHouseholds || [];
   const delta = deltaHouseholds || [];
@@ -57,7 +83,7 @@ export const foldDeltaHouseholds = (prevHouseholds, deltaHouseholds) => {
     .map((h) => {
       const c = hMap.get(String(h._id));
       if (!c) return h;
-      if (c.isActive === false || c.fullyVoted === true || c.fullyDnc === true || c.doNotKnock === true) return null;
+      if (isSuppressedDoor(c)) return null;
       return {
         ...h,
         status: c.status,

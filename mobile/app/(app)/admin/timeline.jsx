@@ -31,6 +31,7 @@ import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import LiveStatus from '../../../components/LiveStatus';
 import CanvasserCard from '../../../components/CanvasserCard';
+import { SearchIcon } from '../../../components/icons/navIcons';
 import SectionHeader from '../../../components/SectionHeader';
 import MetricSheet from '../../../components/MetricSheet';
 import InsetGroup, {
@@ -694,7 +695,9 @@ export default function AdminTimeline() {
       {/* Name/email search + sort (folded in from Insights) */}
       <View style={styles.filterRow}>
         <View style={styles.searchWrap}>
-          <Text style={styles.searchIcon}>🔍</Text>
+          <View style={styles.searchIcon}>
+            <SearchIcon color={colors.textMuted} size={14} />
+          </View>
           <TextInput
             placeholder="Search name or email"
             placeholderTextColor={colors.textMuted}
@@ -876,10 +879,14 @@ export default function AdminTimeline() {
                   </View>
                   {displayRows.map((c) => (
                     <View key={c.userId} style={[styles.cellBase, styles.nameCell, { width: NAME_W }]}>
-                      <Text style={styles.nameText} numberOfLines={1}>
-                        {c.firstName} {c.lastName}
-                        {c.inOverlap ? ' ⚠' : ''}
-                      </Text>
+                      {/* The name truncates and the overlap tag beside it never does — the web
+                          TimelineGrid row's shape. */}
+                      <View style={styles.nameLine}>
+                        <Text style={styles.nameText} numberOfLines={1}>
+                          {c.firstName} {c.lastName}
+                        </Text>
+                        {c.inOverlap ? <Text style={styles.overlapTag}>overlap</Text> : null}
+                      </View>
                     </View>
                   ))}
                   <View style={[styles.cellBase, styles.totalCell, { width: NAME_W, alignItems: 'flex-start' }]}>
@@ -1179,7 +1186,7 @@ function makeStyles(t) {
       borderColor: colors.border,
       paddingHorizontal: spacing.sm,
     },
-    searchIcon: { marginRight: spacing.xs, fontSize: 13 },
+    searchIcon: { marginRight: spacing.xs },
     searchInput: { flex: 1, paddingVertical: 8, color: colors.textPrimary, fontSize: 14 },
     clear: { color: colors.textMuted, fontSize: 14, paddingHorizontal: spacing.xs },
     sortBtn: {
@@ -1210,7 +1217,9 @@ function makeStyles(t) {
     headCell: { backgroundColor: colors.bg },
     headText: { ...type.caption, fontWeight: '700', color: colors.textMuted, fontSize: 11 },
     nameCell: { alignItems: 'flex-start', backgroundColor: colors.card },
-    nameText: { ...type.body, fontSize: 13, fontWeight: '600', color: colors.textPrimary },
+    nameLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, maxWidth: '100%' },
+    nameText: { ...type.body, fontSize: 13, fontWeight: '600', color: colors.textPrimary, flexShrink: 1 },
+    overlapTag: { fontSize: 10, fontWeight: '700', color: colors.warnFg },
     cellText: { fontSize: 12, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
     sumStrong: { fontSize: 12, fontWeight: '700', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
     totalCell: { backgroundColor: colors.bg, borderBottomWidth: 0, borderTopWidth: 1, borderTopColor: colors.border },

@@ -286,7 +286,7 @@ export const mayOfferDelete = ({ viewerRole, isSelf, user, billingAccess, viewer
   !user.isSuperAdmin &&
   !(billingAccess && !viewerHasBilling);
 
-// Who sees Remove from org on a profile — the web's rule (client UserProfileModal.jsx): admins and
+// Who sees Remove from org on a profile — the web's rule (client/src/lib/personAccess.js canRemoveFromOrg): admins and
 // super admins, never a lead (the server answers ADMIN_ONLY) and never yourself; a live member with
 // billing access only to a viewer who has it too (BILLING_ACCESS_REQUIRED otherwise). A deleted
 // account's row is exempt, so any admin may tidy it away. A display gate only — the server decides.

@@ -85,6 +85,8 @@ export function shapeReportListRow(report, { inputs, seriesLabel = null } = {}) 
     title: r.title || '',
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
+    // Latest progress (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N): an all-time report, read with no "+N".
+    allTime: !!r.allTime,
     // Scope label only (never an id): two same-week reports — one scoped, one campaign-wide —
     // must be distinguishable on the share link's list, not just after opening each.
     effortName: r.effortName || null,
@@ -122,6 +124,7 @@ export function shapeReportForClient(report, { inputs, earlierTotals = null, nav
     scope: scopeFor(r, seriesLabel),
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
+    allTime: !!r.allTime,
     timeZone: r.timeZone,
     status: r.status,
     ...reportDates(r),

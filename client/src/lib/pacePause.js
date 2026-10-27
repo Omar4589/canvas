@@ -84,6 +84,16 @@ export const markLabel = (mark, why) => {
   return '';
 };
 
+// Who is paused right now, from GET /admin/pace-pauses?status=paused: a pause that blocks (an active
+// canvasser while automatic pause runs for the org), or, for a team lead, a roster line (their canvasser
+// paused on a campaign they don't manage). The Users and Team pages' Paused badges and filters read this.
+// MIRRORS mobile/lib/pace.js pausedUserIds.
+export const pausedUserIds = (data) =>
+  new Set([
+    ...(data?.pauses || []).filter((p) => p.status === 'paused' && p.blocking).map((p) => String(p.userId)),
+    ...(data?.rosterLines || []).filter((l) => l.paused).map((l) => String(l.userId)),
+  ]);
+
 // The phone's distance from each house, a hint not a verdict.
 export const distanceLine = (meters, format) =>
   meters == null ? null : `Their phone was a median ${format(meters)} from each house they saved that day.`;

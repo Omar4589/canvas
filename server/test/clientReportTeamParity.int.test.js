@@ -36,6 +36,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { CoordinatorChange } = await import('../src/models/CoordinatorChange.js');
 const { processClientReportJob } = await import('../src/services/reports/clientReportBuilds.js');
+const { DelayedError } = await import('bullmq');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -454,4 +455,77 @@ test('team sums: each team’s visits, visits two teams made, visits no team mad
   assert.deepStrictEqual(s.teams.map((x) => x.label), ['Paid team', 'Night team', 'Volunteer team'], 'this team first, then by name');
   assert.deepStrictEqual(s.byLabel, { 'Paid team': 3, 'Night team': 1, 'Volunteer team': 4 });
   assert.deepStrictEqual([s.multiTeamDoorVisits, s.noTeamDoorVisits, s.scopeDoorVisits], [2, 2, 8], 'h2 (Paid + Night) and h3 (Paid + Volunteer)');
+});
+
+// Crew changes and report builds (docs/PROPOSAL_PEOPLE_PAGES.md §B.6, §L "the build fence"). A crew
+// change moves which team a door counts for and nothing else, so only a team build waits for one that
+// is still moving doors; and a move whose doors came from several teams names them in `sources`, which
+// the earlier-totals reason reads. Each test on a campaign of its own.
+const campaignOfItsOwn = async (name) => {
+  const camp = await Campaign.create({ organizationId: ctx.org._id, name, type: 'survey', state: 'FL', isActive: true, surveyTemplateId: ctx.template._id, timeZone: 'America/Chicago' });
+  await seedCrews(camp);
+  return camp;
+};
+
+test('a crew change still moving doors makes a team build wait for it, never a whole-campaign build', { skip }, async () => {
+  const C = await campaignOfItsOwn('Parity C');
+  await surveyed(C, ctx.a1, ctx.dee._id, at('2026-07-07'), answer('Yes'));
+  await surveyed(C, ctx.b1, ctx.sam._id, at('2026-07-08'), answer('No'));
+  // Bob's move to Dee's crew is still running: its job holds his roster row.
+  await CampaignAssignment.updateOne(
+    { campaignId: C._id, userId: ctx.b1._id },
+    { $set: { coordinatorId: ctx.dee._id, crewJob: { token: new ObjectId(), run: 'r1', until: new Date(Date.now() + 120_000), from: ctx.sam._id, to: ctx.dee._id, sources: [], activities: 2, surveys: 1, doors: 1, source: 'lead_crew' } } }
+  );
+  const week = { weekStart: '2026-07-06', weekEnd: '2026-07-12' };
+  const whole = await reportFor(C, week); // runBuild asserts the build committed
+  assert.ok(whole.snapshotId, 'the whole-campaign build went ahead');
+
+  const volunteer = await team(C, 'Volunteer team C', [ctx.dee._id]); // the crew Bob is joining
+  const res = await call('POST', '/admin/client-reports', { campaignId: String(C._id), seriesId: String(volunteer._id), ...week });
+  assert.strictEqual(res.status, 201, JSON.stringify(res.json));
+  const reportId = res.json.report._id;
+  const jobId = new ObjectId().toHexString();
+  await ClientReport.updateOne({ _id: reportId }, { $set: { 'build.status': 'queued', 'build.jobId': jobId, 'build.startedAt': new Date() } });
+  let delayed = 0;
+  await assert.rejects(
+    processClientReportJob({ id: jobId, data: { reportId: String(reportId) }, moveToDelayed: async () => { delayed += 1; }, updateProgress: async () => {} }, 'token'),
+    DelayedError
+  );
+  const doc = await ClientReport.findById(reportId).lean();
+  assert.strictEqual(doc.build.status, 'waiting');
+  assert.match(doc.build.waitingFor, /crew change/);
+  assert.strictEqual(delayed, 1);
+
+  // Once the change is done (its job released), the team build goes ahead.
+  await CampaignAssignment.updateOne({ campaignId: C._id, userId: ctx.b1._id }, { $unset: { crewJob: '' } });
+  const built = await runBuild(reportId);
+  assert.ok(built.snapshotId);
+});
+
+test('earlier totals: a move whose doors came from several teams still reads "canvassers changed teams"', { skip }, async () => {
+  const D = await campaignOfItsOwn('Parity D');
+  // Bob's doors before the period: one on Sam's team, one knocked with no crew.
+  await surveyed(D, ctx.b1, ctx.sam._id, at('2026-06-30'), answer('No'));
+  await knock(D, await door(D), ctx.b1, null, 'not_home', at('2026-07-01'));
+  const paid = await team(D, 'Paid team D', [ctx.sam._id]);
+  const week1 = { weekStart: '2026-06-29', weekEnd: '2026-07-05' };
+  const paid1 = await reportFor(D, { seriesId: paid._id, ...week1 });
+  await publish(paid1);
+  const paid2 = await next(paid1);
+
+  // Bob's crew becomes Dee's, and his doors leave BOTH teams: the record's own `from` is the crew he
+  // had (none), and the teams the doors came from are in `sources` (setCoordinator.js recordFrom).
+  await CanvassActivity.updateMany({ campaignId: D._id, userId: ctx.b1._id }, { $set: { coordinatorId: ctx.dee._id } });
+  await SurveyResponse.updateMany({ campaignId: D._id, userId: ctx.b1._id }, { $set: { coordinatorId: ctx.dee._id } });
+  await CoordinatorChange.create({
+    organizationId: ctx.org._id, campaignId: D._id, userId: ctx.b1._id, fromCoordinatorId: null, toCoordinatorId: ctx.dee._id, source: 'lead_crew',
+    sources: [{ coordinatorId: ctx.sam._id, activities: 1, surveys: 1, doors: 1 }, { coordinatorId: null, activities: 1, surveys: 0, doors: 1 }],
+  });
+
+  const claimed = await call('POST', `/admin/client-reports/${paid2._id}/recompute`);
+  assert.strictEqual(claimed.status, 202, JSON.stringify(claimed.json));
+  await runBuild(paid2._id);
+  const res = await call('GET', `/admin/client-reports/${paid2._id}`);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+  assert.strictEqual(res.json.checks.earlierTotals?.reason?.code, 'canvassers_changed_teams', JSON.stringify(res.json.checks.earlierTotals));
 });

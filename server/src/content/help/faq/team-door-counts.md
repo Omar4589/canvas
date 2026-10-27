@@ -23,23 +23,23 @@ This is why the "Doors" number is a little lower than the raw count of everythin
 
 ## People who left the team
 
-**Their doors still count, and they still count toward their team.** Somebody who knocked for you and then quit — whose account you deactivated, who you removed from the campaign or the organization, or whose account was deleted, by them or by an admin — keeps their doors on the team they were on. You don't have to do anything.
+**Their doors still count, and they still count toward their team.** Somebody who knocked for you and then quit — whose account you deactivated, who you removed from the campaign or the organization, or whose account was deleted, by them or by an admin — keeps their doors on the team they were on until they're added back. You don't have to do anything.
 
-**Losing a person never moves a number.** The one thing that does is changing somebody's coordinator, and that's on purpose — see below.
+**Losing a person never moves a number.** Two things do, both on purpose: changing somebody's crew, and someone coming back to the campaign — see below.
 
 **If a coordinator's account is deleted,** their team keeps every door it already has, and it's still labelled with their name for 180 days — in the by-team table and the Coordinator column alike — then *Deleted user*. The people on their crew have no coordinator until you set one on the campaign's **Team** tab, and when you do, their doors on that campaign move to the new team, as below.
 
-One wrinkle if you ever want to *change* a departed person's team: a **deactivated** account that's still on the campaign is fine — open the campaign's **Team** tab and set their crew as usual. Somebody you **removed from the campaign** isn't on that Team tab anymore, so there's nothing there to set; add them back to the campaign first, then set it.
+If you ever want to *change* a departed person's team: a **deactivated** account that's still on the campaign is fine — open the campaign's **Team** tab and set their crew as usual. Somebody you **removed from the campaign** isn't on that Team tab anymore; add them back and pick their crew while you do, and their earlier doors there move to it (or to No team if you pick none). That's the same for every role, and it's also what happens when a book puts an admin or a team lead back on the team.
 
 ## Moving someone to another team
 
-You set a person's crew in one place: open the campaign, go to its **Team** tab, and pick their coordinator there. (The **Users** page just lists which crew they're on in each campaign, with a link through to the campaign that sets it.)
+You set a person's crew in one place: open the campaign, go to its **Team** tab, click them, and pick their crew in their panel — or tick several people and use **Move to crew…**. (The **Users** page just lists which crew they're on in each campaign, with a link through to the campaign that sets it.)
 
 **All of their doors in that campaign move with them,** including the ones they knocked before the change. Their doors in your other campaigns don't budge — a crew change here is not a crew change everywhere.
 
 That's what makes a forgotten setup step fixable: if you add a canvasser to a campaign, forget to put them on a crew, and they knock all day, you can set their coordinator afterwards and every one of those doors moves onto that team. You're not stuck with a pile in "No coordinator".
 
-The flip side is worth knowing: **a team number you quoted last month can change if you reassign somebody afterwards** — though only in the campaign you changed it in. Before it saves, the app tells you exactly how many of *this campaign's* doors will move and which two teams are affected. Changed your mind? Set the coordinator back and the numbers return exactly as they were.
+The flip side is worth knowing: **a team number you quoted last month can change if you reassign somebody afterwards, or someone who worked here before comes back** — though only in the campaign it happens in. Before a crew change saves, the app tells you exactly how many of *this campaign's* doors will move and from which teams. Changed your mind? Set the crew back and the numbers return exactly as they were. A change that was cut off partway shows **Finish it** on the person's panel.
 
 Two things a team change never touches:
 

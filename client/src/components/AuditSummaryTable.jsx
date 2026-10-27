@@ -6,7 +6,7 @@ export default function AuditSummaryTable({ rows = [], selectedUserId = '', onSe
   if (!rows.length) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-sunken p-8 text-center text-sm text-fg-muted">
-        No flags for anyone in this range. 🎉
+        No flags for anyone in this range.
       </div>
     );
   }

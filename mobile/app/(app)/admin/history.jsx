@@ -69,7 +69,7 @@ function historyRow(item, tz, colors) {
           headline,
           detail,
           item.restampError
-            ? 'The team changed but moving their past doors failed — by-team numbers may not add up until it is re-run.'
+            ? "Their earlier doors didn't finish moving — open them in Users on this campaign and tap Finish it."
             : null,
           `${who} · ${when}`,
         ]

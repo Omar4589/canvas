@@ -52,7 +52,7 @@ Need them back? The same bar has **Unassign all**, which takes every canvasser o
 
 Unassigning is safe: **nobody loses any work.** Every door they knocked and every survey they saved still counts toward the campaign, and they stay on the campaign team — they just stop being pointed at those books, so you can hand them to someone else.
 
-Only people already on the campaign can be given a book, so if someone's missing, add them to the campaign first. Canvassers pick up changes on their next sync — including books taken away, so someone already out walking will still see them until their app reloads the campaign. Anything they record in the meantime still counts. See [Changes I make aren't showing up in the field](changes-not-showing-in-field).
+Only people already on the campaign can be given a book, so if someone's missing, add them to the campaign first. Org admins and team leads are the exception: a book puts them on the team, which counts as coming back to the campaign — their earlier doors there move to No team until you set their crew. Canvassers pick up changes on their next sync — including books taken away, so someone already out walking will still see them until their app reloads the campaign. Anything they record in the meantime still counts. See [Changes I make aren't showing up in the field](changes-not-showing-in-field).
 
 The Books tab follows the **campaign chip** at the top. Pick an **archived** campaign and it becomes a viewer: you'll see the book layout and how the round finished, but assigning is off, because an archived campaign is read-only.
 

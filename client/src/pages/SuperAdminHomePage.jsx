@@ -475,7 +475,7 @@ export default function SuperAdminHomePage() {
                         )}
                       {o.activeNowCount > 0 && (
                         <span className="rounded-full bg-success-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-fg">
-                          🟢 {o.activeNowCount} active
+                          {o.activeNowCount} active
                         </span>
                       )}
                     </div>

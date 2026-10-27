@@ -335,6 +335,15 @@ test('Publish confirm: what is worth knowing first, Recompute first, and the lin
   );
   assert.ok(t.includes('Publish this report?'));
   assert.ok(t.includes('This period ends Oct 26 and isn’t over yet'));
+  // An all-time report (Latest progress, SIMPLIFY §N) that runs through today says what that leaves out
+  // (a last day long past stands in for today: never after it, whatever the clock says)…
+  const all = text(m.publish({ report: reportDoc({ allTime: true, weekStart: '2020-01-06', weekEnd: '2020-03-11' }), checks: { periodNotOver: true }, build: { status: 'idle' }, shares: [] }));
+  assert.ok(all.includes('Today isn’t over yet (') && all.includes('): doors knocked after these numbers were built aren’t in them.'), all);
+  assert.ok(!all.includes('This period ends'));
+  // …and one that runs to a later day reads as any period not over (code review).
+  const later = text(m.publish({ report: reportDoc({ allTime: true, weekStart: '2020-01-06', weekEnd: '2099-12-31' }), checks: { periodNotOver: true }, build: { status: 'idle' }, shares: [] }));
+  assert.ok(later.includes('This period ends Dec 31 and isn’t over yet'), later);
+  assert.ok(!later.includes('Today isn’t over yet'));
   assert.ok(t.includes('Recompute first'));
   assert.ok(t.includes('3 knocks arrived while these numbers were being built.'));
   assert.ok(t.includes('2 unreviewed mock-GPS flags are in this report’s numbers.'));
@@ -683,8 +692,10 @@ test('New report after a long gap: the most recent run on the tab’s own weeks,
   assert.ok(t.includes('Oct 14 – Oct 20 No report covers Jan 8, 2020 – Oct 13, 2026.'), 'the most recent complete Wed – Tue week, and the days no report covers');
   assert.ok(!t.includes('after your last report'), 'a long-gap choice is not “after your last report”');
   assert.ok(t.includes('Last week · Oct 19 – Oct 25') && t.includes('This week, not over yet · Oct 26 – Nov 1 — refresh it once the week ends') && t.includes('Pick dates'));
+  // Latest progress (SIMPLIFY §N) comes second, after the long-gap suggestion and the days it leaves out.
+  assert.ok(t.includes('Oct 14 – Oct 20 No report covers Jan 8, 2020 – Oct 13, 2026. Latest progress · all time, through today Last week'));
   const picked = [...html.matchAll(/<input type="radio" name="report-dates"[^>]*>/g)].map((x) => /\schecked=""/.test(x[0]));
-  assert.deepEqual(picked, [true, false, false, false], 'four choices, the first picked');
+  assert.deepEqual(picked, [true, false, false, false, false], 'five choices, the first picked');
   // The tab runs on Wednesdays: the nudge, with an admin's two ways out.
   assert.ok(t.includes('Your last Whole campaign report ran Wednesday – Tuesday. Your organization’s report weeks run Monday – Sunday.'));
   assert.ok(t.includes('Move this tab to Monday – Sunday weeks') && !t.includes('for the whole organization'), 'a lead (the default) is never offered the organization’s week');

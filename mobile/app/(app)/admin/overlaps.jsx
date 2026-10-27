@@ -33,7 +33,7 @@ import InsetGroup, {
 // 'custom' needs the from/to pickers this screen doesn't have; every other preset applies.
 const OVERLAP_PRESETS = PRESETS.filter((p) => p.key !== 'custom');
 
-// The most recent knock across every pass on the door — the "latest ⏱" in the row's sub.
+// The most recent knock across every pass on the door — the "latest 2h ago" in the row's sub.
 function latestAt(o) {
   let max = null;
   for (const p of o.passes || []) {
@@ -141,7 +141,7 @@ export default function AdminOverlaps() {
         ) : overlaps.length === 0 ? (
           <InsetGroup>
             <InsetNoteRow>
-              No overlap 🎉 — every house in this range was visited by at most one canvasser.
+              No overlap — every house in this range was visited by at most one canvasser.
               {outOfRange > 0 ? ` ${outOfRange} more sit outside your dates — widen the range to see them.` : ''}
             </InsetNoteRow>
           </InsetGroup>

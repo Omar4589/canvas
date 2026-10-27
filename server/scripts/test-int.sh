@@ -81,12 +81,15 @@ fi
 COUNT="$(printf '%s\n' "$FILES" | grep -c . || true)"
 echo "Running $COUNT integration test file(s) against mongodb://127.0.0.1:$PORT"
 
+# The preload builds the indexes that some ledger reads are hinted to, after connect and after any
+# drop (scripts/testIndexPreload.mjs). On the two `node --test` lines only: through NODE_OPTIONS it
+# would also reach drop_db's helper.
 FAIL=0
 for f in $FILES; do
   db="itest_$(printf '%s' "$f" | tr '/.' '__')"
   echo ""
   echo "── $f"
-  if MONGODB_URI_TEST="mongodb://127.0.0.1:$PORT/$db" node --test --test-force-exit "$HERE/$f"; then
+  if MONGODB_URI_TEST="mongodb://127.0.0.1:$PORT/$db" node --import "$HERE/scripts/testIndexPreload.mjs" --test --test-force-exit "$HERE/$f"; then
     drop_db "$db"
     continue
   fi
@@ -95,7 +98,7 @@ for f in $FILES; do
   if ! mongo_alive; then
     echo "↻ mongod died during $f — restarting and retrying that suite once"
     start_mongo || exit 1
-    if MONGODB_URI_TEST="mongodb://127.0.0.1:$PORT/$db" node --test --test-force-exit "$HERE/$f"; then
+    if MONGODB_URI_TEST="mongodb://127.0.0.1:$PORT/$db" node --import "$HERE/scripts/testIndexPreload.mjs" --test --test-force-exit "$HERE/$f"; then
       drop_db "$db"
       continue
     fi

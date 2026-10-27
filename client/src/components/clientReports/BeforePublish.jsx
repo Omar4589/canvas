@@ -1,7 +1,7 @@
 import { Button } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { SectionTitle } from './parts.jsx';
-import { formatCivil, formatPeriod } from './reportDates.js';
+import { formatCivil, formatPeriod, todayIn } from './reportDates.js';
 import { reportLinkReason } from './linkState.js';
 
 // "Before you publish" (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md Part 1, §G3, §F4, §O5, §O6): what is
@@ -96,7 +96,17 @@ const BeforePublish = ({ checks, report, shares, labelOf, tz, onRecompute, onRev
       </Item>
     );
   }
-  if (c.periodNotOver) items.push(<Item key="period" tone="warn">This period ends {formatCivil(report.weekEnd)} and isn’t over yet.</Item>);
+  if (c.periodNotOver) {
+    // An all-time report (SIMPLIFY §N) that runs through today: say what that leaves out. One that runs to
+    // a later day reads as any period not over.
+    items.push(
+      <Item key="period" tone="warn">
+        {report.allTime && report.weekEnd <= todayIn(report.timeZone)
+          ? 'Today isn’t over yet: doors knocked after these numbers were built aren’t in them.'
+          : `This period ends ${formatCivil(report.weekEnd)} and isn’t over yet.`}
+      </Item>
+    );
+  }
   if (c.numbersStale && c.numbersAsOf) {
     items.push(
       <Item key="stale" tone="warn" action={onRecompute && <Button size="sm" variant="secondary" disabled={busy} onClick={onRecompute}>Recompute</Button>}>
@@ -193,7 +203,19 @@ const BeforePublish = ({ checks, report, shares, labelOf, tz, onRecompute, onRev
   // how many of them more than one team made (each team's report counts them; owner ruling 10-24) and
   // how many no team made — each stated plainly, never laid out as rows that add up: a visit three
   // teams made counts three times in "together" but once as "more than one team".
-  if (c.team) {
+  // An all-time team report (Latest progress, SIMPLIFY §N) shows only who has knocked for the team: its
+  // door-visit figures would read every visit of the campaign. The one-person warning stays.
+  if (c.team?.allTime) {
+    const t = c.team;
+    items.push(
+      <Item key="team" tone="info">
+        <p>
+          {n(t.canvassers)} {t.canvassers === 1 ? 'canvasser has' : 'canvassers have'} knocked for this team since the campaign began.
+          {t.canvassers === 1 && <span className="block text-warning-fg">With one canvasser, this report shows one person’s work.</span>}
+        </p>
+      </Item>
+    );
+  } else if (c.team) {
     const t = c.team;
     const teams = t.teams || [];
     const several = teams.length > 1;

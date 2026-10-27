@@ -140,7 +140,7 @@ A door goal is a number someone promised a client, and a lead can change it. Eve
 
 On your phone, it's **Quick actions → History** on the campaign screen (and a **History** row in the Door goal section when there's a goal).
 
-It also shows **team reassignments** — the other way a number moves without anyone knocking a door. Changing someone's coordinator moves all of their past doors onto the new team, so "why did Bo's team jump by 3,907?" is answerable here.
+It also shows **team reassignments** — the other way a number moves without anyone knocking a door. Changing someone's coordinator moves all of their past doors onto the new team, and so does someone coming back to the campaign, so "why did Bo's team jump by 3,907?" is answerable here. A move that was cut off partway (say the server restarted) reads **Didn't finish moving**, until someone uses **Finish it** on that person's panel; it then also reads **Finished by a later change**.
 
 The timezone and the attached survey aren't recorded — a timezone change already announces itself (every daily number shifts, and you're warned first), and the survey is visible on the campaign's Survey tab. As a lead you see the history of campaigns you run.
 

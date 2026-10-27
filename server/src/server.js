@@ -7,7 +7,11 @@ import { syncPacePauseIndexes } from './services/audit/pacePause.js';
 const PORT = Number(process.env.PORT || 4000);
 
 async function main() {
-  await connectDb(process.env.MONGODB_URI);
+  // A request waits at most 30 s for a database connection — Heroku's router has given up on it by
+  // then anyway. A crew change's hold (services/memberships/setCoordinator.js, 150 s) is sized to cover
+  // a renewal, this wait and one 60 s ledger write. Set here, on the web dyno only: config/db.js's
+  // shared options also reach the worker and the console scripts.
+  await connectDb(process.env.MONGODB_URI, { waitQueueTimeoutMS: 30000 });
   // The client-report collections this dyno WRITES (series, area cells) get their indexes before
   // the first request can — autoIndex is off in production (services/reports/clientReportIndexes.js).
   await syncClientReportIndexes('canvass-server');

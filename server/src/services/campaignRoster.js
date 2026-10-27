@@ -3,12 +3,24 @@ import { CampaignManager } from '../models/CampaignManager.js';
 import { Membership } from '../models/Membership.js';
 import { Organization } from '../models/Organization.js';
 import { User } from '../models/User.js';
+import { joinCampaignCrew, CREW_JOB } from './memberships/setCoordinator.js';
+import { mapWithLimit } from '../utils/mapWithLimit.js';
 
 // CampaignAssignment is the per-campaign roster that GATES mobile visibility — a
 // canvasser only sees campaigns they're assigned to. Whenever a user is given work
 // (a book), make sure they're on that campaign's roster, so they can actually SEE the
 // campaign in the field app. Idempotent upsert keyed on the unique (campaignId,userId).
-export async function ensureCampaignAssignments(campaignId, userIds, orgId, byUserId) {
+//
+// `join` (the two book routes): someone a book puts BACK on a campaign is coming back to it, whatever
+// their role (owner ruling 2026-10-26), so they join with No crew and their earlier doors there move
+// with them — joinCampaignCrew, whose insert is the claim. The roster is read once and only ids not
+// on it join: joining runs the job's plan, which a book holder already on the roster doesn't need.
+// No book screen has a crew choice, so no count is shown first; History records any move. A join
+// whose plan throws still adds the person (joinCampaignCrew falls back to a plain insert), and a
+// ledger error never fails the book assignment — the job stays on the row for Finish it.
+//
+// The demo seeder calls this without `join`: it builds demo data and must not move staged doors.
+export async function ensureCampaignAssignments(campaignId, userIds, orgId, byUserId, { join = false } = {}) {
   const ids = [...new Set((userIds || []).map((u) => String(u)))].filter(Boolean);
   if (!ids.length) return;
   const now = new Date();
@@ -16,6 +28,22 @@ export async function ensureCampaignAssignments(campaignId, userIds, orgId, byUs
   // book so the campaign shows up in their field app, not from a deliberate "add to campaign" action. The
   // "you've been added to a campaign" note is sent only from the Team-page add loop (routes/admin/
   // assignments.js). Do NOT wire a sendMail here or a book assignment would spam a duplicate notice.
+  if (join) {
+    const on = new Set((await CampaignAssignment.find({ campaignId, userId: { $in: ids } }, 'userId').lean()).map((r) => String(r.userId)));
+    await mapWithLimit(ids.filter((uid) => !on.has(uid)), CREW_JOB.sideBySide, async (uid) => {
+      try {
+        await joinCampaignCrew({ organizationId: orgId, campaignId, userId: uid, coordinatorId: null, actorUserId: byUserId || null });
+      } catch (err) {
+        // Never fail the book over the join: put them on the roster plainly, as before.
+        await CampaignAssignment.updateOne(
+          { campaignId, userId: uid },
+          { $setOnInsert: { organizationId: orgId, assignedBy: byUserId || null, assignedAt: now } },
+          { upsert: true }
+        );
+      }
+    });
+    return;
+  }
   await CampaignAssignment.bulkWrite(
     ids.map((uid) => ({
       updateOne: {
@@ -106,8 +134,14 @@ export async function departedMemberIdSet(organizationId, ids) {
 // no longer be given new work. Doorline staff skip all of that only in an internal org, where
 // they self-assign for demos; in a customer org they need a membership like anyone else
 // (internalStaffIdSet). Everyone else must be added on the Team page first.
+//
+// `selfOnlyFor` is the caller's id when the caller is a TEAM LEAD (null for admins and staff): the
+// off-the-team exceptions above then cover only the lead themself, so a lead can still take a book
+// before they're on the team but can't put an org admin or a co-lead onto it, which rostered them
+// and let the lead read back their email and phone (PRIVACY_VERIFICATION item 41). People already
+// on the team are unaffected.
 // Returns { allowed, notOnTeam } as arrays of string ids (deduped).
-export async function partitionAssignable({ campaignId, organizationId, userIds }) {
+export async function partitionAssignable({ campaignId, organizationId, userIds, selfOnlyFor = null }) {
   const ids = [...new Set((userIds || []).map((u) => String(u)))].filter(Boolean);
   if (!ids.length) return { allowed: [], notOnTeam: [] };
   const [onRoster, admins, managers, staff, activeSet] = await Promise.all([
@@ -123,12 +157,14 @@ export async function partitionAssignable({ campaignId, organizationId, userIds 
   const admin = new Set(admins.map(String));
   const manager = new Set(managers.map(String));
   // Roster/admin/lead candidates must ALSO be activated; staff bypass in an internal org only.
+  // With no `selfOnlyFor` this is exactly: staff || ((roster || admin || manager) && active).
+  const self = selfOnlyFor ? String(selfOnlyFor) : null;
   const ok = new Set(
-    ids.filter(
-      (id) =>
-        staff.has(id) ||
-        ((roster.has(id) || admin.has(id) || manager.has(id)) && activeSet.has(id))
-    )
+    ids.filter((id) => {
+      if (roster.has(id) && (activeSet.has(id) || staff.has(id))) return true;
+      const exempt = staff.has(id) || ((admin.has(id) || manager.has(id)) && activeSet.has(id));
+      return exempt && (!self || id === self);
+    })
   );
   return {
     allowed: ids.filter((id) => ok.has(id)),

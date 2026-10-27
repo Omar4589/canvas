@@ -30,6 +30,7 @@ import { answerEditBusy, ANSWER_EDIT_BUSY_ERROR, removalBusy } from '../../servi
 import { getPassStatusMap, statusCountsFromMap } from '../../services/passes/passStatus.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
+import { isOrgAdmin } from '../../services/authz/campaignManagement.js';
 import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
 import { getTargetingStatusMap } from '../../services/walklist/targetingStatus.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
@@ -133,6 +134,7 @@ router.post('/assign-bulk', async (req, res, next) => {
       campaignId: req.campaign._id,
       organizationId: orgId,
       userIds: uids,
+      selfOnlyFor: isOrgAdmin(req) ? null : req.user._id,
     });
     if (!validUsers.length) return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team', notOnTeam });
 
@@ -194,7 +196,9 @@ router.post('/assign-bulk', async (req, res, next) => {
     }
     const assignments = pairs.length;
     // Books given → make sure those users are on the campaign roster (gates mobile visibility).
-    await ensureCampaignAssignments(req.campaign._id, validUsers, orgId, req.user._id);
+    // A book that puts someone back on the team counts as coming back: their earlier doors here move
+    // with them (owner ruling 2026-10-26, services/campaignRoster.js).
+    await ensureCampaignAssignments(req.campaign._id, validUsers, orgId, req.user._id, { join: true });
     res.json({ books: turfs.length, users: validUsers.length, assignments, mode: ['everyone', 'balance'].includes(mode) ? mode : 'distribute', replaced: !!replace, notOnTeam });
   } catch (err) {
     next(err);

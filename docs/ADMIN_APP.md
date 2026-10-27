@@ -246,7 +246,7 @@ worth knowing:
   `FlaggedEntryCard`s (both cards keep their chrome everywhere else — `map.jsx` renders
   FlaggedEntryCard as a standalone card).
 - **Overlaps** (both the Overlaps screen and Timeline's section) collapsed to one summary row
-  per house — `N canvassers · M passes · latest ⏱` with a brand-tinted count badge. The
+  per house — `N canvassers · M passes · latest 2h ago` with a brand-tinted count badge. The
   Overlaps screen's rows navigate to the per-house drill-in; Timeline's stay inert because its
   payload (`computeOverlaps`) isn't the drill-in's shape.
 - Retry lives inside the grammar: a failed group is an `InsetNoteRow` (message) followed by an
@@ -264,7 +264,7 @@ behavior**, so no converted screen moved:
 |---|---|---|
 | `emphasis` | `InsetNavRow` only | a three-step typographic scale: default (a datum you read) · `'menu'` (15/600 labels — the two More tabs, the drawer) · `'hero'` (`type.h3`, taller row, 22pt chevron — the one account row a menu opens with) |
 | `leading` | `InsetActionRow` | the glyph slot the other two kinds already had. Without it an action row inside a group of icon rows starts its label **36pt to the left** of every neighbour's — x=16 (the row's padding) against 16 + a 24pt glyph + a 12pt gap = **52**. That jog is what "Sign out" looked like |
-| `RowEmoji` | exported from `InsetGroup` | the fixed-24pt glyph box itself, so the three menus can't each re-derive it. The **fixed width** is the whole point: every label in a group starts at the same x |
+| `RowIcon` | exported from `InsetGroup` | the fixed-24pt glyph box itself, so the three menus can't each re-derive it. It draws a line icon from [components/icons/navIcons.jsx](../mobile/components/icons/navIcons.jsx) — the web sidebar's drawings, ported — in `textSecondary` (`tone="danger"` for Sign out). The **fixed width** is the whole point: every label in a group starts at the same x. It was `RowEmoji` until 2026-10-27, when the app dropped emoji everywhere |
 | `caption` | `SectionHeader` | swaps the `type.h3` title for a small ALL-CAPS caption. A 16pt semibold heading competes with the row labels beneath it when those rows are destinations rather than data |
 
 Two constraints on those, both learned the hard way:
@@ -279,11 +279,11 @@ Two constraints on those, both learned the hard way:
 
 ### The More screens are MENUS again (inside the grammar)
 
-The conversion had flattened the two More tabs and the drawer into what read as data lists: no emoji,
-no grey sub-line, `h3` section headings, plain-weight labels, and a bordered `ThemeToggle` nested
+The conversion had flattened the two More tabs and the drawer into what read as data lists: no leading
+glyphs, no grey sub-line, `h3` section headings, plain-weight labels, and a bordered `ThemeToggle` nested
 inside a bordered card (`sunken` on `card` is 1.10:1 — a second outline buying no separation). All of
 that is back, now expressed in the shared vocabulary rather than a local `Row`: `emphasis="menu"` rows
-with `RowEmoji` leading glyphs under `caption` headers, the account row as `emphasis="hero"`, and
+with `RowIcon` leading line icons under `caption` headers, the account row as `emphasis="hero"`, and
 **`ThemeToggle` standing bare** between its caption and the next group.
 
 Two details a future reader will want to "fix" back, and shouldn't:
@@ -553,6 +553,88 @@ never widens access).
   on `admin/index.jsx`. One shared `userRow` renderer serves both sections *and* the unscoped org
   view, so a row cannot drift between them; the org view is still one flat list.
 
+### The people pages on the phone (2026-10-27)
+
+**Part 1 — For everyone.** The Users hub, the member sheet, Add a canvasser and the profile now match
+the web's Team page and person panel ([USERS.md](USERS.md) → *The campaign team*; plan
+[PROPOSAL_PEOPLE_PAGES.md](PROPOSAL_PEOPLE_PAGES.md) §G). It arrives over the air; nothing native
+changed.
+
+- **Filters.** Status pills: **All status, Active, Inactive, Paused, Never signed in** (the phone keeps
+  its word *Inactive* until the terms sweep). On a campaign there is also a **Crew** filter (every
+  coordinator on this roster A–Z with a count, then **No crew**) and **Crew** among the sorts. Counts
+  follow the other filters. *Never signed in* uses the web's rule: an account made on or after May 15,
+  2026 with no password ever typed.
+- **50 at a time.** Each section shows 50 people, then **Show 50 more** (or *Show 23 more* near the
+  end). A new search, filter, sort or campaign starts each section at 50 again.
+- **One badge per row**, the most exceptional state first: *deleted*, *not in org*, *inactive*,
+  *paused*, then *never signed in* (amber). On a campaign, someone who has left the organization but is
+  still on its roster shows as **No longer in the org**, so they can be taken off.
+- **"All shown" rows** act on the rows actually on screen (moving and assigning take at most 500 at a
+  time), and carry their count:
+  - **Move all shown to a crew… (n)** — pick the crew, then the check: exactly how many doors move, from
+    which teams, and who runs a crew of their own. The client reports these crews feed change too; the
+    phone says so but never names them (it doesn't load client reports).
+  - **Resend invites to all shown (n)** — only people who never signed in, never Doorline staff; for a
+    team lead, canvassers only. It lists who gets one first.
+  - **Assign all shown (n)** — org admins, inside the open **Not on this campaign** section: pick the
+    crew they join, see which of their earlier doors here move with them, then add.
+
+  Each run asks first (an Alert, **Cancel** first), then goes 10 people a request (an invite is one
+  request each) with progress;
+  Android's Back button does nothing until it ends, and **Stop** ends it between requests. The summary
+  says who was done, left out (and why) or couldn't be changed; **Retry failed** checks those people
+  again first, and **Continue** picks up after a Stop. An account that is read-only for billing stops
+  the run with its message. There is no bulk remove on the phone.
+- **Add a canvasser** looks the email up first, the web's way: a new account, a colleague in your
+  organization, a switched-off account (an org admin gets **Switch on**), or someone already on the
+  campaign. You pick the **coordinator** before they're added; for someone who worked this campaign
+  before it says how many doors they have here and which teams those count for, and pre-picks their old
+  coordinator when they can still run a crew. Afterwards it says what moved and offers **Open {name}**.
+  Lookups count toward the same hourly limits as the web's (60 that find nobody, 30 that name someone),
+  and a refusal says how long to wait. Android's Back on the second step returns to the first, keeping
+  the email.
+- **The member sheet** (tap someone on a campaign): the buttons for where they stand at the top
+  (Reactivate account, Resend invite, Set temporary password, **Unpause**, which asks first); the pause
+  notice with **Review**; the **Coordinator** picker for anyone on the team, whose check shows the doors
+  that move and the teams they come from; **Finish it** when an earlier change didn't finish or some of
+  their doors here still count for another team; recent doors (door results only, never notes);
+  **Assign to this campaign** (org admins) with a coordinator and what their earlier doors do; and
+  **More options ▸**: Deactivate account and **Remove from this campaign** — for a team lead,
+  canvassers, people no longer in the organization, and themselves.
+- **The profile:** the newest 5 doors with **Show more** (10 at a time); *Never signed in* or *No
+  sign-in recorded* instead of a blank last login; the buttons for their state near the top; no
+  temporary password or resend on your own profile; **Managed by Doorline staff** for a staff account.
+  Its **Campaigns** list is read-only — each row opens Users on that campaign, where assigning and
+  unassigning happen. For a team lead the totals read **On your campaigns** and leave out miles walked
+  (miles join one campaign's doors to the next, which reads wrong once other campaigns are left out).
+
+**Part 2 — Technical reference.** The list rules are pure modules, each with a `node:test` file:
+[lib/usersHub.js](../mobile/lib/usersHub.js) (rows from `GET /admin/memberships` and the roster, status
+pills, `crewOptions`, sorts, `rowBadge`, the paging reducer, who each all-shown row covers),
+[lib/allShown.js](../mobile/lib/allShown.js) (chunks of 10, `runInChunks` and its stop rules — a 402, a
+401, `FORBIDDEN_ROLE`, or any 4xx refusal of a whole multi-person request stops; a one-person request's
+403/404/409/429 is that person's answer — per-person outcomes, `mergeRuns`, every sentence),
+[lib/addByEmail.js](../mobile/lib/addByEmail.js) (the resolve-first reducer, `backAction`, the 429 wait,
+`prePick` = the newest `history.sources` row whose `canLead`) and
+[lib/personActions.js](../mobile/lib/personActions.js) (`personAccess` and `personButtons`, the web
+panel's `personAccess.js` rules; the crew-check sentences; `RECENT_DOOR_ACTIONS`; the profile's
+`/recent-activity` paging, which stops on a short page or one with no new ids because the route has no
+total). Who is *Never signed in*, and the crew order, come from
+[lib/rosterView.js](../mobile/lib/rosterView.js), the web Team page's module copied and pinned by
+`client/src/lib/rosterView.parity.test.js`. [components/AllShownSheet.jsx](../mobile/components/AllShownSheet.jsx)
+runs the three actions: Move through `POST …/crew/coordinator-bulk/preview` then `PATCH
+…/crew/coordinator-bulk` with each person's previewed `from` (Retry re-previews first, so a torn change
+finishes instead of colliding); Assign through the same preview, then `POST …/assignments` with
+`coordinatorId` (a 400 naming `invalidUserIds` lists those people and resends the rest); Resend one
+`resend-invite` per person. The member sheet opens with the coordinator preview of the person's
+**current** crew (`finishIt`, `unfinished`, `busy`), sends `fromCoordinatorId` with every change, and on
+a 409 checks again with the crew the answer names (`now`). Nothing closes it while a crew save or an
+assign is out — the ×, the backdrop, Back or any of its links — and the lists and crew checks refresh
+from the mutation itself (`onSettled`), so they would even if it had gone. A change waits about 2 s for
+its second pass. The all-shown sheet aborts its requests when it closes,
+and its reads are TanStack queries with an abort signal.
+
 ### Deleting a member's account (admins, 2026-10-24)
 
 **Part 1 — For everyone.** An org admin can delete a member's account from the phone too, the same way as
@@ -646,7 +728,7 @@ voter, and it's **de-duped** so a survey never lists twice), its **voters**, and
 the answers **lazy-loaded** on open (they don't ride the map's live refetch) — and, with the next app
 update, an *Edited by ‹admin› · ‹time›* line under a survey an admin changed after it was recorded,
 as the web door panel already shows. Two overlap surfaces ride along, mirroring the web map:
-- **A door's ⚠ Overlap badge.** If **more than one canvasser knocked the door in the same pass**, the
+- **A door's Overlap badge.** If **more than one canvasser knocked the door in the same pass**, the
   sheet flags it and **names the others** ("Also worked by …") — a turf collision worth a look. This is
   computed straight from the door's own history (no extra fetch), pass-by-pass.
 - **An opt-in Overlaps map toggle.** Turn it on and every door worked by 2+ canvassers in the same pass
@@ -752,8 +834,10 @@ When a canvasser is paused for saving doors faster than anyone could knock them 
   the doors behind the pause with the too-fast ones marked, **Unpause** (it asks first; their count
   starts over and nothing they saved changes), and **See their day**. Fixing the doors is an org admin's
   job on the web's Door Outcomes page, and the screen says so.
-- **Users:** a *paused* badge on the row (after *deleted* and *inactive* — one badge per row), and on the
-  profile a red *Paused for review on {campaign} since {time} · Review ›* line.
+- **Users:** a *paused* badge on the row (after *deleted*, *not in org* and *inactive* — one badge per
+  row), a **Paused** status pill, and on the profile a red *Paused for review on {campaign} since {time} ·
+  Review ›* line. On a campaign's member sheet the notice opens **Review**, and **Unpause** sits with the
+  buttons at the top (it asks first).
 
 ### The More hub
 It reads as a **settings menu**: your name and email in a prominent row at the very top (it opens the
@@ -764,13 +848,16 @@ where relevant a grey line of explanation.
   their campaigns): a campaign filter chip splits the list into **On this campaign** and a collapsed
   **Not on this campaign** (above); the old standalone campaign Team screen
   merged in here, so a campaign's "Team" tile lands pre-filtered. Rows open a member sheet —
-  campaign KPIs, a **Coordinator dropdown** (its confirm quotes the doors that move, but doesn't yet name
-  the client-report teams whose numbers the move changes, as the web's does; that needs an app update,
-  [USERS.md](USERS.md)), recent doors (each taps through to the live map, "See
-  all" opens the paged activity screen), temp password, assign/unassign (admins), deactivate/
-  reactivate; its **Manage profile ›** opens the full profile, where an admin also finds **More options
-  → Delete account** (*Deleting a member's account*, above). The Add sheet creates a canvasser straight onto the selected campaign with an optional
-  **coordinator** picked at birth. Every screen in this group works the campaign named in its **campaign chip** (above).
+  the buttons for where they stand, campaign KPIs, a **Coordinator dropdown** (its confirm quotes the
+  doors that move and the teams they come from, but never names the client-report teams whose numbers
+  the move changes, as the web's does: the phone doesn't load client reports, [USERS.md](USERS.md)),
+  **Finish it** when a change didn't finish, recent doors (each taps through to the live map, "See
+  all" opens the paged activity screen), assign (admins), and under **More options ▸** deactivate and
+  remove; its **Manage profile ›** opens the full profile, where an admin also finds **More options
+  → Delete account** (*Deleting a member's account*, above). **Add a canvasser** looks the email up first
+  and asks for the **coordinator** before adding, and the lists carry status pills, a Crew filter and
+  the "all shown" rows (*The people pages on the phone*, above). Every screen in this group works the
+  campaign named in its **campaign chip** (above).
 **GPS audit** ([AUDIT.md](AUDIT.md)) — defaults to Today, each
   entry has "View on map", and canvassers paused for review are listed at the top (above); **Notes** — the campaign Notes hub ([NOTES.md](NOTES.md)), where a survey's
 note reads *edited* only when someone changed the note itself — since October 2026 an admin's edit
@@ -1254,7 +1341,7 @@ client-only:
   carries `edited: { at, by }` (2026-10-19, additive), which the sheet renders as *Edited by ‹name› ·
   ‹exact time›* under the survey's canvasser line from the next OTA. The ping sheet does the same
   under a surveyed ping's answers, from `GET /admin/activities/:id`'s `surveyResponse.edited` (its only
-  reader on either client). The inline **⚠ Overlap**
+  reader on either client). The inline **Overlap**
   badge is derived from the loaded `rounds` (2+ distinct canvassers among real knock + survey entries in
   a pass), naming the others. The **Mark / Unmark restricted** row above *Move pin* reads the same
   payload — `doorMarkState(rounds, scope.passId || currentPassId)` — and is gated `canWrite &&

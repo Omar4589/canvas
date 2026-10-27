@@ -152,7 +152,7 @@ export default function DoNotKnockPage() {
                   </p>
                   {r.newResidents > 0 && (
                     <p className="mt-1.5 text-xs font-medium text-warning-fg">
-                      ⚠ {r.newResidents} voter{r.newResidents === 1 ? '' : 's'} imported here since
+                      {r.newResidents} voter{r.newResidents === 1 ? '' : 's'} imported here since
                       this request — the household may have moved on. Nothing reopens on its own;
                       lift it only if you know it should be lifted.
                     </p>

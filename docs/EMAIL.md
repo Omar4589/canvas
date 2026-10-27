@@ -22,16 +22,16 @@ disclosed subprocessor — DPA §6 + the privacy policy's service-providers para
 | # | Email | When it goes out | Who gets it |
 | --- | --- | --- | --- |
 | 1 | **Password reset** | Someone taps **Forgot password?** on the sign-in page (real, active account only) | That person |
-| 2 | **Invite + set-password link** | An admin creates a **new** user on the Users page | The new user |
+| 2 | **Invite + set-password link** | An admin creates a **new** user on the Users page (with no campaign picked; a canvasser added with a **Campaign** goes through the Team-page steps, row 3) | The new user |
 | 3 | **Invite + set-password link** (also names the campaign) | A lead/admin adds an address that has **no** account yet, from a campaign's **Team** page | The new canvasser |
 | 4 | **"You've been added"** (no link, no credentials) | An **existing** account joins another org — the Users page link toggle, or a Team-page add whose address turned out to hold an account elsewhere | That person |
-| 5 | **Added to campaign** | A Team-page add of someone already in the org, or an `.../assignments` add — genuinely-new roster rows only | That member |
+| 5 | **Added to campaign** | A Team-page add of someone already in the org (**By email**, or **From your organization**, which is the `.../assignments` add) — genuinely-new roster rows only | That member |
 | 6 | **Welcome + set-password link** | A super admin provisions a new client org with its first admin | That admin |
 | 7 | **Support-access notice** | Doorline staff opens a **new** support-access grant into an org | **Billing admins only** (see below) |
 | 8 | **Wind-down warning** | The nightly sweep finds a canceled org within ~30 days of data deletion — sent once, and the deletion **cannot proceed without it** | **Billing admins only** |
 | 9 | **Dormancy warning** | The nightly sweep finds a non-paying org nearing the ~30-month inactivity boundary — sent once; any recorded canvassing cancels the deletion | **Billing admins only** |
 | 10 | **Demo request** | A visitor submits the demo form on the public marketing site | **Us** — `DEMO_REQUEST_TO`, default `hello@doorline.app` |
-| 11 | **A canvasser was paused for review** | Automatic pause stops a canvasser whose doors came in faster than anyone could knock them ([AUDIT.md](AUDIT.md) → *Automatic pause*) — one email per recipient, the moment it happens | The org's **billing admins** by default, plus any org admins and team leads a billing admin picked (a lead only for campaigns they manage); **never the paused person** |
+| 11 | **A canvasser was paused for review** | Automatic pause stops a canvasser whose doors came in faster than anyone could knock them ([AUDIT.md](AUDIT.md) → *Automatic pause*) — one email per recipient, the moment it happens | The org's **billing admins** by default, plus any org admins and team leads a billing admin picked on the **Settings** page, which the email's last line names (a lead only for campaigns they manage); **never the paused person** |
 
 **Email 10 is the odd one out and stays that way deliberately.** It is the only email addressed to
 Doorline rather than to a customer, so: it overrides the shared layout's footer (telling ourselves

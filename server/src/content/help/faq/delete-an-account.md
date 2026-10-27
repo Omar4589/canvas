@@ -5,7 +5,7 @@ audience: admin
 kind: faq
 order: 38.5
 sourceDoc: USERS.md
-summary: Open their profile, then Account ▸ More options ▸ Delete account, and confirm twice. Usually Remove from org is what you want. Their work stays, and their name stays on your reports for 180 days.
+summary: Open the person, then More options ▸ Delete account, and confirm twice. Usually Remove from org is what you want. Their work stays, and their name stays on your reports for 180 days.
 tags: delete, account, delete account, remove, remove from org, member, user, erase, wrong email, duplicate, test account, more options, deleted account, deleted user, billing access
 ---
 
@@ -18,11 +18,11 @@ duplicate, one made with the wrong email, or someone you hired who never started
 
 Only org admins can delete an account. Team leads never see the option. It's tucked away on purpose:
 
-- **On the web:** **Users** → click the person → **Account** → **More options** → **Delete account…**
+- **On the web:** **Users** → click the person → in their panel, **More options ▸** → **Delete account…**
 - **In the app:** **More → Users** → tap the person → **Account** → **More options** → **Delete
   account…** If you picked a campaign on the Users list, tap **Manage profile ›** first.
 
-**Remove from org** is in the same **Account** section, on the web and in the app.
+**Remove from org** sits right next to it: under **More options ▸** on the web, and in the same **Account** section in the app.
 
 Then it asks you twice:
 
@@ -46,7 +46,7 @@ Any account that **belongs only to your organization**:
   to* work for doesn't stop you.
 - **Billing access protects the person who has it.** Only an admin who also has billing access can
   delete them or remove them from the organization. If you don't have billing access, those options
-  don't show on their profile.
+  don't show for them.
 - **Not your only admin**, and not your only admin with billing access. Make someone else an admin,
   or give another admin billing access, first.
 
@@ -82,10 +82,11 @@ details and other detail screens.
 
 ## If they lead a crew
 
-The people on their crew have no coordinator until you set one on the campaign's **Team** tab. The
-team keeps its doors and its numbers, and shows their name for the same 180 days. If you'll keep
-reporting that team's numbers to a client, use **Remove from org** instead: their account stays, so
-the team keeps their name.
+The people on their crew have no coordinator until you set one on the campaign's **Team** tab (tick
+several and use **Move to crew…** to set it for all of them at once). The team keeps its doors and its
+numbers, and shows their name for the same 180 days. Once you give someone a new crew, their doors on
+that campaign move with them, like any crew change. If you'll keep reporting that team's numbers to a
+client, use **Remove from org** instead: their account stays, so the team keeps their name.
 
 ## Doors still on their phone
 

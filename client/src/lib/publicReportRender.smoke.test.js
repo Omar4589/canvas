@@ -236,6 +236,42 @@ test('the hub: tabs per series, the latest report, the trend with its first and 
   assert.match(m.page('list', { token: 'T', hub: empty, hubQ: { data: empty, isLoading: false, error: null } }, '/r/T'), /No reports are available on this link right now\./);
 });
 
+test('an all-time report (Latest progress, SIMPLIFY §N): the page and the hub show its totals, never a "+" figure', () => {
+  // Its period runs from the campaign's first knock, so its period totals equal its running totals.
+  const all = baseReport({
+    weekStart: '2026-09-14',
+    weekEnd: '2026-10-28',
+    allTime: true,
+    numbersThrough: '2026-10-28',
+    earlierTotals: null,
+    scope: { kind: 'campaign', label: 'Whole campaign', seriesKey: 'kC' },
+    stats: { ...baseReport().stats, period: { totals: { doorsKnocked: 3412, surveysTaken: 1980, surveyedVoters: 1702 } } },
+  });
+  const page = m.view(all);
+  assert.ok(page.includes('Totals since the campaign began, as of Oct 28.'), 'the totals line says when');
+  assert.doesNotMatch(page, /\+3,412|in these \d+ days|No new|Numbers as of|quiet/i, 'no pill, no period words, no "still running" note');
+  assert.match(page, />3,412</);
+  // The hub: "All time" as the title, the figures without pills, the totals line in the card.
+  const hub = {
+    campaignName: 'Fall 2026',
+    orgName: 'Fox Bryant',
+    hasLogo: false,
+    reports: [
+      row('ca', 'campaign', 'kC', 'Whole campaign', '2026-09-14', '2026-10-28', 3412, 3412, { allTime: true, numbersThrough: '2026-10-28' }),
+      row('c3', 'campaign', 'kC', 'Whole campaign', '2026-10-13', '2026-10-19', 3000, 412),
+    ],
+  };
+  const html = m.page('list', { token: 'T', hub, hubQ: { data: hub, isLoading: false, error: null, refetch() {} } }, '/r/T');
+  assert.match(html, /Latest · Sep 14 – Oct 28, 2026 · Whole campaign/);
+  assert.match(html, /<div class="mt-1 font-medium text-fg">All time<\/div>/);
+  assert.ok(html.includes('Totals since the campaign began, as of Oct 28.'));
+  assert.doesNotMatch(html, /The \+ figures are for Sep 14/);
+  assert.doesNotMatch(html, /text-success-fg">\+3,412/, 'no pill on the card or its row');
+  assert.match(html, /Sep 14 – Oct 28, 2026<span class="font-normal text-fg-muted"> · <!-- -->All time<\/span>/);
+  assert.match(html, /text-success-fg">\+412/, 'the weekly report keeps its pill');
+  assert.match(html, /<h1 class="text-xl font-semibold text-fg">Reports<\/h1>/, 'a tab with an all-time report is "Reports"');
+});
+
 test('the report page: All reports returns to its tab, Older and Newer within the series, a PDF button', () => {
   const qc = m.qcNew();
   const report = baseReport();

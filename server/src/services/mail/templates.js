@@ -415,7 +415,7 @@ export const pacePauseAlert = ({ orgName, campaignName, when, reviewUrl }) => {
     para(`A canvasser on <strong>${esc(campaignName)}</strong> (${esc(orgName)}) was paused ${esc(when)} for saving doors faster than is possible.`) +
     para('They can\'t record until someone on your team unpauses them. Nothing has been removed: their doors stay in your numbers unless you change them on Door Outcomes.') +
     button('Review the pause', reviewUrl) +
-    muted('You get this email because your organization chose you to receive automatic pause alerts. A billing admin can change who gets them, or turn automatic pause off, on the Users page.')
+    muted('You get this email because your organization chose you to receive automatic pause alerts. A billing admin can change who gets them, or turn automatic pause off, on the Settings page in the web console.')
   );
   const text = [
     `A canvasser on ${campaignName} (${orgName}) was paused ${when} for saving doors faster than is possible.`,
@@ -424,7 +424,7 @@ export const pacePauseAlert = ({ orgName, campaignName, when, reviewUrl }) => {
     '',
     `Review the pause: ${reviewUrl}`,
     '',
-    'You get this email because your organization chose you to receive automatic pause alerts. A billing admin can change who gets them, or turn automatic pause off, on the Users page.',
+    'You get this email because your organization chose you to receive automatic pause alerts. A billing admin can change who gets them, or turn automatic pause off, on the Settings page in the web console.',
     '',
     '— Doorline',
   ].join('\n');

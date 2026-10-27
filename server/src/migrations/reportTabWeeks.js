@@ -48,8 +48,10 @@ const main = async () => {
   // findById), so a week stored as a string ("3") is Wednesday here too, never reportWeekStartsOnOf's Monday.
   const orgs = await Organization.find({ 'deletion.requestedAt': null }, 'name isInternal reportWeekStartsOn').sort({ name: 1 });
   // Every tab's latest report in one pass: project to the dates first, so the sort never carries a report.
+  // All-time reports (Latest progress, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N) run on no weekday rhythm,
+  // so they never decide a tab's weeks — as New report's first choice ignores them.
   const latest = await ClientReport.aggregate([
-    { $match: { seriesId: { $ne: null } } },
+    { $match: { seriesId: { $ne: null }, allTime: { $ne: true } } },
     { $project: { seriesId: 1, organizationId: 1, weekStart: 1, weekEnd: 1, createdAt: 1 } },
     { $sort: { seriesId: 1, weekEnd: -1, createdAt: -1, _id: -1 } },
     { $group: { _id: '$seriesId', organizationId: { $first: '$organizationId' }, weekStart: { $first: '$weekStart' }, weekEnd: { $first: '$weekEnd' } } },

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { labelForField, formatValue, isNotable, answerEditSentence } from './campaignHistory.js';
+import { labelForField, formatValue, isNotable, answerEditSentence, teamMoveSummary } from './campaignHistory.js';
 
 // The History rows for the two door settings. The server stores only the field key and raw values
 // (a list as its sorted comma-join, an empty one as null), so a lost label or branch here breaks
@@ -55,4 +55,21 @@ test('the Door Outcomes acts read in words, are highlighted, and an answer edit 
     answerEditSentence({ field: 'answerEditUndo', toValue: '212 surveys put back, 2 kept newer answers', fromValue: 'Q3: took out A' }).detail,
     '212 surveys put back, 2 kept newer answers — Q3: took out A'
   );
+});
+
+// A crew move's sentence: doors (not rows), surveys or notes when no doors moved, a change that didn't
+// finish, and one a later change finished. Kept identical in both copies.
+test('a crew move says doors, then surveys, then notes; an unfinished one and a finished-later one say so', () => {
+  const base = { user: { name: 'Pat' }, fromCoordinator: { name: 'Dana' }, toCoordinator: { name: 'Yan' } };
+  assert.deepStrictEqual(teamMoveSummary({ ...base, doorsMoved: 3, activitiesMoved: 3, rowsMoved: 6, surveysMoved: 1 }), {
+    headline: 'Pat: Dana → Yan',
+    detail: '3 doors moved to Yan',
+  });
+  assert.strictEqual(teamMoveSummary({ ...base, doorsMoved: 0, activitiesMoved: 0, surveysMoved: 2 }).detail, '2 surveys moved to Yan');
+  assert.strictEqual(teamMoveSummary({ ...base, toCoordinator: null, doorsMoved: 0, activitiesMoved: 0, rowsMoved: 3 }).detail, 'Notes and marks moved to no team');
+  assert.strictEqual(teamMoveSummary({ ...base, doorsMoved: 0, activitiesMoved: 0 }).detail, 'No recorded work moved with them');
+  assert.strictEqual(teamMoveSummary({ ...base, doorsMoved: 1, restampError: 'boom' }).detail, "Didn't finish moving 1 door to Yan");
+  assert.strictEqual(teamMoveSummary({ ...base, doorsMoved: 4, finishedBy: 'x' }).detail, '4 doors moved to Yan · Finished by a later change');
+  assert.strictEqual(teamMoveSummary({ ...base, fromCoordinator: { name: 'Several teams' }, activitiesMoved: 2 }).headline, 'Pat: Several teams → Yan');
+  assert.strictEqual(teamMoveSummary({ ...base, activitiesMoved: 5 }).detail, '5 doors moved to Yan', 'an older server: activitiesMoved only');
 });

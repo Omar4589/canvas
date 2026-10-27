@@ -5,8 +5,6 @@ import { User } from '../../models/User.js';
 import { Membership } from '../../models/Membership.js';
 import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
-import { CoordinatorChange } from '../../models/CoordinatorChange.js';
-import { restampLedgerCoordinator } from './restampCoordinator.js';
 import { convergeIfDeleted } from '../users/deleteAccount.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
 
@@ -52,16 +50,17 @@ export const memberIdentityShape = {
 // visible between those cases would be a cross-tenant disclosure. Callers MUST return `outcome` and
 // `person` only — never `user`, which is the internal branch key for the write path.
 //
-// Timing: a never-seen address costs one indexed lookup less than a taken one. That residual is
-// accepted and named rather than papered over with an artificial delay; the response body is
-// byte-identical, and the flow's real defences are the per-actor rate limit and the audit line the
-// route writes whenever a person is named.
+// Timing: the membership query below runs whether or not an account exists (against an id that can't
+// match when there is none), which narrows the difference between "no account" and "an account at
+// another customer". What is left is accepted and named rather than papered over with an artificial
+// delay; the response body is byte-identical, and the flow's real defence is the per-actor rate limit
+// (middleware/crewResolveLimit.js). An AccessLog line is written only for Doorline staff under a
+// support grant (middleware/accessLog.js), so it is no defence against a customer's own staff.
+const NO_SUCH_USER = new mongoose.Types.ObjectId('000000000000000000000000');
 export async function resolveEmailInOrg({ orgId, campaignId = null, email }) {
   const normalized = String(email || '').toLowerCase().trim();
   const user = normalized ? await User.findOne({ email: normalized }) : null;
-  const membership = user
-    ? await Membership.findOne({ userId: user._id, organizationId: orgId })
-    : null;
+  const membership = await Membership.findOne({ userId: user ? user._id : NO_SUCH_USER, organizationId: orgId });
 
   // No account, or an account that is nothing to do with this organization. One answer for all of
   // them. `user` rides along for the write path and must never reach the wire.
@@ -73,68 +72,33 @@ export async function resolveEmailInOrg({ orgId, campaignId = null, email }) {
     lastName: user.lastName,
     role: membership.role,
   };
-  // Checked BEFORE role, so a switched-off admin or lead can never resolve to a plain claim and
-  // leave a roster row for someone who cannot appear.
-  if (!membership.isActive) return { outcome: 'in-org-inactive', person, user, membership };
-
   const onCampaign = campaignId
-    ? await CampaignAssignment.exists({ campaignId, userId: user._id })
-    : null;
-  return { outcome: onCampaign ? 'on-campaign' : 'in-org', person, user, membership };
-}
-
-// Move this person's ledger history in ONE campaign onto the crew they are joining with, and record
-// the move. Shared by every door onto a campaign roster — create, link, and claim — so a returning
-// canvasser's history follows the same rule however they came back. See the long note in
-// createOrgMember for why a join re-stamps at all.
-export async function restampOnJoin({ orgId, campaignId, userId, coordinatorId = null, byUserId = null, source }) {
-  let restamp = { activities: 0, surveys: 0, restampError: null };
-  if (!campaignId) return restamp;
-  try {
-    const moved = await restampLedgerCoordinator({
-      organizationId: orgId,
-      userId,
-      campaignId,
-      coordinatorId: coordinatorId || null,
-    });
-    restamp = { ...moved, restampError: null };
-  } catch (err) {
-    restamp.restampError = err?.message || String(err);
-  }
-  if (restamp.activities || restamp.surveys || restamp.restampError) {
-    await CoordinatorChange.create({
-      organizationId: orgId,
-      campaignId,
-      userId,
-      fromCoordinatorId: null,
-      toCoordinatorId: coordinatorId || null,
-      byUserId: byUserId || null,
-      source,
-      activitiesMoved: restamp.activities,
-      surveysMoved: restamp.surveys,
-      restampError: restamp.restampError,
-    });
-  }
-  return restamp;
+    ? !!(await CampaignAssignment.exists({ campaignId, userId: user._id }))
+    : false;
+  // Checked BEFORE role, so a switched-off admin or lead can never resolve to a plain claim and
+  // leave a roster row for someone who cannot appear. It is checked before the roster too, so a
+  // switched-off person already on this campaign reads as switched off; `onCampaign` tells the add
+  // step to offer only Switch on.
+  if (!membership.isActive) return { outcome: 'in-org-inactive', person, user, membership, onCampaign };
+  return { outcome: onCampaign ? 'on-campaign' : 'in-org', person, user, membership, onCampaign };
 }
 
 // Find/link/create the user and create their membership in `orgId` with `role`.
 // Throws MemberError on the same conditions the memberships route enforces.
 // `mustChangePassword` forces a temp-password reset on first login (client provisioning);
 // `billingAccess` seats a bill-payer admin. Both default off, so existing callers are
-// unaffected. Returns { user, membership, restamp } — see the re-stamp note below for why a
-// CREATE can move ledger rows.
+// unaffected. Returns { user, membership, restamp }.
+//
+// Joining an ORG carries no campaign and no crew — a crew only means something inside a campaign.
+// Putting the person on a campaign, and moving their earlier doors there, is the caller's
+// joinCampaignCrew (services/memberships/setCoordinator.js). That matters for linkExisting: removal
+// from the org hard-deletes the Membership while the ledger rows survive, so an account linked back in
+// can already have history here, which the join then moves to the crew it joins.
 export async function createOrgMember({
   orgId,
   addedBy,
   data,
   role,
-  // The campaign this person is being added to, when there is one. Only the lead's
-  // create-a-canvasser path has one; adding somebody to the ORG alone does not, and carries no
-  // crew — a crew only means something inside a campaign. Without it the ledger re-stamp below is
-  // skipped entirely, because there is no campaign whose history this call has authority over.
-  campaignId = null,
-  coordinatorId = null,
   mustChangePassword = false,
   billingAccess = false,
 }) {
@@ -195,27 +159,7 @@ export async function createOrgMember({
     throw new MemberError(409, 'This account was deleted.', 'ACCOUNT_DELETED');
   }
 
-  // NOT a no-op for a brand-new member, and this is the easy thing to miss. Removal from the ORG
-  // hard-deletes the Membership while the CanvassActivity/SurveyResponse rows survive, so
-  // linkExisting can attach an account that already has ledger history in this org — stamped with
-  // whatever team they were on when they left. Under the current-coordinator-owns-history rule
-  // that history belongs to their new crew (or to No team, if they have none).
-  // A genuinely new account simply matches zero rows.
-  //
-  // Scoped to the campaign they are being added to, because that is the only campaign whose crew
-  // this call sets. History they have in OTHER campaigns keeps the team it was earned under — the
-  // caller has no authority over those races, and silently moving them is the bug this whole
-  // change exists to remove.
-  const restamp = await restampOnJoin({
-    orgId,
-    campaignId,
-    userId: user._id,
-    coordinatorId,
-    byUserId: addedBy,
-    source: 'member_create',
-  });
-
-  return { user, membership, restamp };
+  return { user, membership, restamp: { activities: 0, surveys: 0, restampError: null } };
 }
 
 // Validate a coordinatorId for a membership in this org. A coordinator oversees a

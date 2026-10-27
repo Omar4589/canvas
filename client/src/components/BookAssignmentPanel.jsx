@@ -468,7 +468,7 @@ export default function BookAssignmentPanel({
               to={`/campaigns/${campaignId}/packets?turfIds=${turfIds.join(',')}`}
               className="mt-1 block text-[11px] font-medium text-brand-accent hover:underline"
             >
-              🖨 Print this book on paper →
+              Print this book on paper →
             </Link>
           )}
 

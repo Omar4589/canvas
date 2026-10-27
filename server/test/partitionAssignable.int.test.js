@@ -111,6 +111,33 @@ test('active org admin may be assigned on the fly; a deactivated admin may not',
   assert.ok(notOnTeam.has(ids.adminDeactivated), 'deactivated admin must be rejected');
 });
 
+test('a team lead calling (selfOnlyFor): the off-the-team exceptions cover only the lead (item 41)', { skip }, async () => {
+  const { CampaignManager } = await import('../src/models/CampaignManager.js');
+  const { ids, org, campaign } = ctx;
+  const lead = (first) =>
+    User.create({ firstName: first, lastName: 'X', email: `${first.toLowerCase()}@a.co`, passwordHash: 'x', isActive: true });
+  const [me, coLead] = [await lead('LeadMe'), await lead('LeadCo')];
+  for (const u of [me, coLead]) {
+    await Membership.create({ userId: u._id, organizationId: org._id, role: 'lead', isActive: true });
+    await CampaignManager.create({ campaignId: campaign._id, userId: u._id, organizationId: org._id });
+  }
+  const userIds = [String(me._id), String(coLead._id), ids.adminOffRoster, ids.activeRoster];
+  try {
+    const asLead = await partitionAssignable({ campaignId: campaign._id, organizationId: org._id, userIds, selfOnlyFor: me._id });
+    assert.deepStrictEqual(
+      new Set(asLead.allowed),
+      new Set([String(me._id), ids.activeRoster]),
+      'the lead may take a book themselves, and give one to the team; never put an admin or a co-lead on it'
+    );
+    const asAdmin = await partitionAssignable({ campaignId: campaign._id, organizationId: org._id, userIds });
+    assert.deepStrictEqual(new Set(asAdmin.allowed), new Set(userIds), 'an admin calling is unchanged');
+  } finally {
+    await CampaignManager.deleteMany({ userId: { $in: [me._id, coLead._id] } });
+    await Membership.deleteMany({ userId: { $in: [me._id, coLead._id] } });
+    await User.deleteMany({ _id: { $in: [me._id, coLead._id] } });
+  }
+});
+
 test('in a customer org, Doorline staff are held to the member rule', { skip }, async () => {
   const { ids } = ctx;
   const { allowed, notOnTeam } = await partition(['staffNoMember', 'superOffRoster', 'superAdminMember']);

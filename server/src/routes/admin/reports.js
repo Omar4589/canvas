@@ -4151,12 +4151,16 @@ router.get('/canvassers/:userId/activities', async (req, res, next) => {
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
     const order = req.query.order === 'asc' ? 1 : -1;
 
+    // One person's ledger: hinted to the person index, so an org- or campaign-scoped filter can't send
+    // the planner to a far larger one (services/memberships/restampCoordinator.js INDEX HINTS).
+    const PERSON = { userId: 1, timestamp: -1 };
     const [total, activities] = await Promise.all([
-      CanvassActivity.countDocuments(filter),
+      CanvassActivity.countDocuments(filter).hint(PERSON),
       CanvassActivity.find(filter)
         .sort({ timestamp: order })
         .skip(skip)
         .limit(limit)
+        .hint(PERSON)
         .populate('householdId', 'addressLine1 addressLine2 city state zipCode')
         .populate('voterId', 'fullName party')
         .lean(),

@@ -15,6 +15,7 @@ import {
   seriesHeading,
   shortDate,
   shortRange,
+  totalsSinceText,
 } from '../lib/reportDerive.js';
 
 // The hub (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §H2): a tab per series — the whole campaign,
@@ -47,8 +48,10 @@ function Figure({ label, total, delta }) {
 
 function LatestCard({ token, report, isLit }) {
   const c = report.headline?.cumulative || {};
-  const p = report.headline?.period || {};
+  // An all-time report (Latest progress, SIMPLIFY §N) has nothing new to show: no "+" figures.
+  const p = report.allTime ? {} : report.headline?.period || {};
   const change = latestChangeText(report);
+  const title = report.title || (report.allTime ? 'All time' : '');
   return (
     <Link to={`/r/${token}/reports/${report.id}`} className="block rounded-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <Card className="p-5 transition-colors hover:bg-sunken">
@@ -58,7 +61,7 @@ function LatestCard({ token, report, isLit }) {
           </div>
           {change && <div className="text-xs text-fg-muted">{change}</div>}
         </div>
-        {report.title && <div className="mt-1 font-medium text-fg">{report.title}</div>}
+        {title && <div className="mt-1 font-medium text-fg">{title}</div>}
         <div className="mt-3 grid grid-cols-2 gap-4 sm:flex sm:gap-12">
           <Figure label="Doors knocked" total={c.doorsKnocked} delta={p.doorsKnocked} />
           {isLit ? (
@@ -68,8 +71,14 @@ function LatestCard({ token, report, isLit }) {
           )}
         </div>
         <p className="mt-3 text-xs text-fg-muted">
-          {`Totals since the campaign began. The + figures are for ${shortRange(report.weekStart, report.weekEnd)}.`}
-          {report.numbersThrough ? ` Numbers as of ${shortDate(report.numbersThrough)} — the period was still running.` : ''}
+          {report.allTime ? (
+            totalsSinceText(report)
+          ) : (
+            <>
+              {`Totals since the campaign began. The + figures are for ${shortRange(report.weekStart, report.weekEnd)}.`}
+              {report.numbersThrough ? ` Numbers as of ${shortDate(report.numbersThrough)} — the period was still running.` : ''}
+            </>
+          )}
         </p>
         <div className="mt-2 text-sm font-medium text-brand-accent">Open the report ›</div>
       </Card>
@@ -123,8 +132,10 @@ function ReportRows({ token, reports }) {
       <Card className="divide-y divide-border p-0">
         {reports.map((r) => {
           const c = r.headline?.cumulative || {};
-          const p = r.headline?.period || {};
+          // An all-time report (§N): no "+" figure, and "All time" when it has no title of its own.
+          const p = r.allTime ? {} : r.headline?.period || {};
           const change = latestChangeText(r);
+          const title = r.title || (r.allTime ? 'All time' : '');
           return (
             <Link
               key={r.id}
@@ -134,7 +145,7 @@ function ReportRows({ token, reports }) {
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-fg">
                   {formatWeekRange(r.weekStart, r.weekEnd)}
-                  {r.title ? <span className="font-normal text-fg-muted"> · {r.title}</span> : null}
+                  {title ? <span className="font-normal text-fg-muted"> · {title}</span> : null}
                 </div>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg-muted">
                   <span>

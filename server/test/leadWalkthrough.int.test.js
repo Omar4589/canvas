@@ -220,6 +220,18 @@ test('4. field setup: effort (auto Pass 1), walk list + CSV, books, activate, SE
   const selfAssign = await asLead('POST', `/admin/campaigns/${ctx.A._id}/turfs/${ctx.turf._id}/assignments`, { userIds: [String(ctx.lead._id)] });
   expectOk(selfAssign, 'self-assign the book');
   assert.deepStrictEqual(selfAssign.json.notOnTeam || [], [], 'the lead is assignable (partitionAssignable lead arm)');
+  // ...but only THEMSELVES off the team (item 41): giving the book to the org admin, who isn't on
+  // this campaign, would roster them and hand the lead the admin's email and phone.
+  const adminBook = await asLead('POST', `/admin/campaigns/${ctx.A._id}/turfs/${ctx.turf._id}/assignments`, { userIds: [String(ctx.admin._id)] });
+  assert.strictEqual(adminBook.status, 409, 'an off-team admin is not the lead\'s to give a book to');
+  assert.strictEqual(adminBook.json.code, 'not-on-team');
+  const adminCrew = await asLead('POST', `/admin/campaigns/${ctx.A._id}/efforts/${ctx.effort._id}/members`, { userId: String(ctx.admin._id) });
+  assert.strictEqual(adminCrew.status, 409, 'nor to put on a walk-list crew');
+  assert.strictEqual(
+    await CampaignAssignment.exists({ campaignId: ctx.A._id, userId: ctx.admin._id }),
+    null,
+    'the admin was not rostered'
+  );
 
   expectOk(await asLead('GET', `/admin/campaigns/${ctx.A._id}/turfs?passId=${ctx.pass._id}`), 'list books');
   expectOk(await asLead('GET', `/admin/campaigns/${ctx.A._id}/turfs/progress?passId=${ctx.pass._id}`), 'book progress');
@@ -228,7 +240,11 @@ test('4. field setup: effort (auto Pass 1), walk list + CSV, books, activate, SE
 });
 
 test('5. crew: roster a canvasser, create one, set a coordinator; pin-correct a door', { skip }, async () => {
-  expectOk(await asLead('POST', `/admin/campaigns/${ctx.A._id}/assignments`, { userIds: [String(ctx.cy._id)] }), 'roster existing canvasser');
+  // A lead adds an existing canvasser by EMAIL (the Team page's resolve-then-add); adding someone
+  // else by id is an org admin's (item 41, 2026-10-25). Self-assign by id stays: see step 4.
+  const byId = await asLead('POST', `/admin/campaigns/${ctx.A._id}/assignments`, { userIds: [String(ctx.cy._id)] });
+  assert.strictEqual(byId.status, 403, 'a lead cannot roster someone else by id');
+  expectOk(await asLead('POST', `/admin/campaigns/${ctx.A._id}/crew`, { email: 'wc@t.co' }), 'roster existing canvasser by email');
   expectOk(await asLead('GET', `/admin/campaigns/${ctx.A._id}/assignments`), 'read roster');
   expectOk(await asLead('GET', `/admin/campaigns/${ctx.A._id}/crew`), 'crew picker');
   const hire = await asLead('POST', `/admin/campaigns/${ctx.A._id}/crew`, {

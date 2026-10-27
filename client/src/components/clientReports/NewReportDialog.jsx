@@ -4,7 +4,7 @@ import { api } from '../../api/client.js';
 import { Button, Modal, Select } from '../ui/index.js';
 import { ErrorBanner } from './parts.jsx';
 import { formatPeriod, periodDays, todayIn, daysBetween } from './reportDates.js';
-import { dateChoices, dayLabel, duplicateText, periodLabel, totalsSentence, weekName, weekNudge } from './newReportChoices.js';
+import { allTimeChoice, dateChoices, dayLabel, duplicateText, periodLabel, totalsSentence, weekName, weekNudge } from './newReportChoices.js';
 import { seriesKey } from './hooks.js';
 import { quotedNames } from './TeamDialog.jsx';
 import { periodPhrase } from '../../lib/reportDerive.js';
@@ -115,6 +115,13 @@ const NewReportDialog = ({
   // one — then `initial.dates` decide (below). Pick dates' two days, kept across Continue.
   const [choice, setChoice] = useState(initial.choice || null);
   const [pick, setPick] = useState(initial.dates || null);
+  // Pick dates' first day half typed: a date input reads '' then, as when it is empty, and empty means all
+  // time (§N) — so a half-typed day holds Create instead of quietly making an all-time report (code review).
+  // React fires onChange only when the value changes, and typing into an EMPTY date input leaves it '' until
+  // the day is whole: so the box is read on every key and on blur too, and once more as Create is pressed.
+  const [firstDayHalf, setFirstDayHalf] = useState(false);
+  const firstDayRef = useRef(null);
+  const readFirstDay = (e) => setFirstDayHalf(!!e.currentTarget?.validity?.badInput);
   const [moveAsked, setMoveAsked] = useState(false); // Move this tab was pressed
   const [weekStartsOn, setWeekStartsOn] = useState(null); // the organization's week, once changed here
   const [weekEdit, setWeekEdit] = useState(null); // the weekday Change is showing, while it is open
@@ -183,9 +190,11 @@ const NewReportDialog = ({
     return () => clearInterval(timer);
   }, [answeredToday, campaignTz, refetchPicker]);
 
+  // The tab's last DATED report: an all-time one (Latest progress, SIMPLIFY §N) runs on no weekday rhythm,
+  // so it never decides what comes next, nor the week nudge.
   const lastReport = useMemo(() => {
     if (!scopeSeries) return null;
-    return reports.filter((r) => r.seriesId === scopeSeries.id).sort(newestFirst)[0] || null;
+    return reports.filter((r) => r.seriesId === scopeSeries.id && !r.allTime).sort(newestFirst)[0] || null;
   }, [reports, scopeSeries]);
   const last = lastReport ? { weekStart: lastReport.weekStart, weekEnd: lastReport.weekEnd } : null;
   // While the race note or the duplicate prompt names the dates, they stay as they were when Create was
@@ -196,27 +205,34 @@ const NewReportDialog = ({
   // Move this tab: its catch-up joins the list after the first choice — or, when it is a choice already
   // (last week, after a long gap), that one, naming the days no report covers.
   const moveTarget = nudge ? dated.find((c) => sameDates(c, nudge.move)) || null : null;
-  const choices =
+  const datedChoices =
     moveAsked && nudge
       ? moveTarget
         ? dated.map((c) => (c === moveTarget ? { ...c, skipped: c.skipped || nudge.move.skipped } : c))
         : [dated[0], nudge.move, ...dated.slice(1)]
       : dated;
+  // Latest progress (§N) comes second whatever comes first — after Move this tab's catch-up when that was
+  // added — and is never the one picked on opening.
+  const lead = moveAsked && nudge && !moveTarget ? 2 : 1;
+  const choices = [...datedChoices.slice(0, lead), allTimeChoice(facts.today), ...datedChoices.slice(lead)];
   const wanted = choice ?? (initial.dates ? choices.find((c) => sameDates(c, initial.dates))?.key || 'pick' : 'first');
   const current = wanted === 'pick' || choices.some((c) => c.key === wanted) ? wanted : 'first';
   const chosen = current === 'pick' ? null : choices.find((c) => c.key === current);
   const pickDates = pick || { weekStart: choices[0].weekStart, weekEnd: choices[0].weekEnd };
   const period = chosen ? { weekStart: chosen.weekStart, weekEnd: chosen.weekEnd } : pickDates;
-  const days = periodDays(period.weekStart, period.weekEnd);
-  const badRange = !period.weekStart || !period.weekEnd || daysBetween(period.weekStart, period.weekEnd) < 0;
+  // All time (§N): Latest progress, or Pick dates with no first day — everything up to the last day. The
+  // server sets where it starts (the campaign's first knock), so only the last day goes with it.
+  const allTime = chosen ? !!chosen.allTime : !pickDates.weekStart && !firstDayHalf;
+  const days = allTime ? null : periodDays(period.weekStart, period.weekEnd);
+  const badRange = !period.weekEnd || (!allTime && (!period.weekStart || daysBetween(period.weekStart, period.weekEnd) < 0));
   // The picked dates' own note, shown under the choice it is about (code review WEEK-3): dates that start
   // after today stay empty until then (the builder says so too, ?ahead=1); dates that run past today
-  // aren't over (This week's own label already says so).
+  // aren't over (This week's own label already says so, and Latest progress's says "through today").
   const periodNote = badRange
     ? null
-    : daysBetween(facts.today, period.weekStart) > 0
+    : !allTime && daysBetween(facts.today, period.weekStart) > 0
       ? `Starts ${dayLabel(period.weekStart, facts.today)} — its numbers stay empty until then.`
-      : chosen?.kind !== 'this_week' && daysBetween(facts.today, period.weekEnd) >= 0
+      : chosen?.kind !== 'this_week' && chosen?.kind !== 'all_time' && daysBetween(facts.today, period.weekEnd) >= 0
         ? 'This period isn’t over yet — you can build it now and refresh it later.'
         : null;
   const scopeTeam = team || pickedEnded;
@@ -230,6 +246,8 @@ const NewReportDialog = ({
     wholeCampaign,
     label: !wholeCampaign && coversPicked ? scopeLabel : '',
     phrase: periodPhrase(period.weekStart, period.weekEnd).phrase,
+    allTime,
+    through: chosen?.kind === 'all_time' ? 'today' : period.weekEnd ? dayLabel(period.weekEnd, facts.today) : null,
   });
 
   const create = useMutation({
@@ -295,6 +313,10 @@ const NewReportDialog = ({
     setError(null);
     setDuplicate(null);
     if (badRange || !datesReady) return;
+    if (current === 'pick' && firstDayRef.current?.validity?.badInput) {
+      setFirstDayHalf(true);
+      return;
+    }
     const extra = { ...more };
     if (labelPrompt) {
       if (!labelPrompt.combined && clientLabel.trim() && clientLabel.trim() !== labelPrompt.label) extra.seriesLabel = clientLabel.trim();
@@ -303,7 +325,8 @@ const NewReportDialog = ({
     pressedFacts.current = facts;
     pressedBody.current = {
       campaignId,
-      weekStart: period.weekStart,
+      // An all-time report sends only its last day; the server sets where it starts (§N).
+      ...(allTime ? { allTime: true } : { weekStart: period.weekStart }),
       weekEnd: period.weekEnd,
       ...(title.trim() ? { title: title.trim() } : {}),
       ...(scope.teamId ? { teamSeriesId: scope.teamId } : {}),
@@ -337,11 +360,13 @@ const NewReportDialog = ({
   const resetDates = () => {
     setChoice('first');
     setPick(null);
+    setFirstDayHalf(false);
     setMoveAsked(false);
   };
   // Pick dates starts from the dates picked a moment ago.
   const pickChoice = (key) => {
     if (key === 'pick' && !pick) setPick(period);
+    setFirstDayHalf(false);
     setChoice(key);
     resetPrompts();
   };
@@ -487,9 +512,17 @@ const NewReportDialog = ({
                     <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="date"
-                        aria-label="First day"
-                        value={period.weekStart}
-                        onChange={(e) => editAfterPrompt(() => setPick({ ...period, weekStart: e.target.value }))}
+                        aria-label="First day (optional)"
+                        ref={firstDayRef}
+                        onKeyUp={readFirstDay}
+                        onBlur={readFirstDay}
+                        value={period.weekStart || ''}
+                        onChange={(e) =>
+                          editAfterPrompt(() => {
+                            setPick({ ...period, weekStart: e.target.value });
+                            setFirstDayHalf(!!e.target.validity?.badInput);
+                          })
+                        }
                         className="rounded-lg border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                       />
                       <span className="text-fg-muted">–</span>
@@ -500,9 +533,19 @@ const NewReportDialog = ({
                         onChange={(e) => editAfterPrompt(() => setPick({ ...period, weekEnd: e.target.value }))}
                         className="rounded-lg border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                       />
-                      {!badRange && <span className="text-xs text-fg-muted">{days} {days === 1 ? 'day' : 'days'}</span>}
+                      {!badRange && <span className="text-xs text-fg-muted">{allTime ? 'All time' : `${days} ${days === 1 ? 'day' : 'days'}`}</span>}
                     </div>
-                    {badRange && <p className="mt-1 text-xs text-danger-fg">The first day must be on or before the last day.</p>}
+                    {badRange && (
+                      <p className="mt-1 text-xs text-danger-fg">
+                        {firstDayHalf
+                          ? 'Finish the first day, or clear it to count everything up to the last day.'
+                          : period.weekEnd
+                            ? 'The first day must be on or before the last day.'
+                            : 'Pick a last day.'}
+                      </p>
+                    )}
+                    {/* §N: no first day = all time, everything up to the last day. */}
+                    <p className="mt-1 text-xs text-fg-muted">Leave the first day empty to count everything up to the last day.</p>
                     {periodNote && <p className="mt-1 text-xs text-fg-muted">{periodNote}</p>}
                   </div>
                 )}
@@ -665,7 +708,7 @@ const NewReportDialog = ({
             value={title}
             onChange={(e) => editAfterPrompt(() => setTitle(e.target.value))}
             maxLength={200}
-            placeholder={datesReady ? formatPeriod(period.weekStart, period.weekEnd) : ''}
+            placeholder={datesReady ? (allTime ? 'All time' : formatPeriod(period.weekStart, period.weekEnd)) : ''}
             className="mt-1 w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-sm text-fg focus:border-brand-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>

@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { describeIdsInFile, zeroDirection, zeroMatchLine, zeroGateText, historySubtitle } from './idListPreview.js';
+import {
+  describeIdsInFile,
+  zeroDirection,
+  zeroMatchLine,
+  zeroGateText,
+  historySubtitle,
+  ID_LIST_MAX_BYTES,
+  idListTooBig,
+  idListTooBigText,
+} from './idListPreview.js';
 
 test('describeIdsInFile: plain count, extra spellings, and rows with no usable ID', () => {
   assert.equal(describeIdsInFile({ idsInFile: 1204, spellings: 1204, noId: 0 }), '1,204 IDs in file');
@@ -45,4 +54,24 @@ test('historySubtitle: column, zero count, state and outside-state, in that orde
   assert.equal(historySubtitle({ idColumn: 'Voter ID' }), 'Voter ID');
   assert.equal(historySubtitle({ idColumn: 'Voters_StateVoterID', matchedViaZeros: 1190 }), 'Voters_StateVoterID · 1,190 by zeros');
   assert.equal(historySubtitle({ state: 'FL', idColumn: 'Voter ID', matchedViaZeros: 0, outsideState: 3 }), 'FL · Voter ID · 3 outside FL');
+});
+
+test('idListTooBig: refused at 50 MB, before anything uploads; no file is never too big', () => {
+  assert.equal(ID_LIST_MAX_BYTES, 50 * 1024 * 1024);
+  assert.equal(idListTooBig({ size: 17 }), false);
+  assert.equal(idListTooBig({ size: ID_LIST_MAX_BYTES - 1 }), false);
+  assert.equal(idListTooBig({ size: ID_LIST_MAX_BYTES }), true, 'the server refuses a file that reaches the cap');
+  assert.equal(idListTooBig({ size: 148812805 }), true, 'a 149 MB state early-voting file');
+  assert.equal(idListTooBig(null), false);
+});
+
+test('idListTooBigText names the limit and the fix; Early Voting also says which rows to keep', () => {
+  assert.equal(
+    idListTooBigText(),
+    'This file is over the 50 MB limit. Only the Voter ID column is used, so save a copy with just that column and upload it.'
+  );
+  assert.equal(
+    idListTooBigText('the voters who have already voted'),
+    'This file is over the 50 MB limit. Only the Voter ID column is used, so save a copy with just that column, keeping only the voters who have already voted, and upload it.'
+  );
 });

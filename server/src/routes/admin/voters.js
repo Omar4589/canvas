@@ -13,7 +13,7 @@ import { AccessLog } from '../../models/AccessLog.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { recomputeSurveyStatus } from '../../services/canvass/status.js';
 import { bumpCampaignStats } from '../../services/reports/campaignCounters.js';
-import { recomputeHouseholdActive } from '../../services/import/recomputeHouseholdActive.js';
+import { recomputeResidentFlags } from '../../services/households/recomputeResidentFlags.js';
 import { archiveOverwrittenResponse, snapshotFromArchive } from '../../services/surveys/archiveOverwrite.js';
 import { restoreStates, RESTORE_BLOCKED_MESSAGES } from '../../services/surveys/restoreGuard.js';
 import { planFromAnswers, applyEditPlan, editorVersion } from '../../services/canvass/answerEdit.js';
@@ -282,11 +282,12 @@ router.patch('/:voterId', async (req, res, next) => {
 //    is billable (billing = distinct household×pass over CanvassActivity); a null voterId is
 //    honest once the person is gone, and nothing joins on it (doorKey.js). Same call the
 //    survey-response delete below makes.
-//  - Household invariants recomputed; the fullyDnc recompute's updatedAt bump also tells
-//    phones the door changed. Phones that already hold the voter keep a phantom row until
-//    their next full bootstrap (a deleted doc can't ride the delta) — a survey against it
-//    404s and the offline queue drops it. If this was the door's ONLY voter, the door
-//    deactivates and the delta drops it from phones entirely.
+//  - Household invariants recomputed (services/households/recomputeResidentFlags.js); the
+//    recomputes' updatedAt bump also tells phones the door changed. Phones that already hold
+//    the voter keep a phantom row until their next full bootstrap (a deleted doc can't ride
+//    the delta) — a survey against it 404s and the offline queue drops it. If this was the
+//    door's ONLY voter, the door deactivates and the delta drops it from phones entirely; if
+//    everyone left has voted early, or asked not to be contacted, it drops the same way.
 // The router.param tag above logs the record for staff-under-grant requests.
 router.delete('/:voterId', async (req, res, next) => {
   try {
@@ -318,8 +319,7 @@ router.delete('/:voterId', async (req, res, next) => {
     await CanvassActivity.updateMany({ voterId: voter._id }, { $set: { voterId: null } });
     await Voter.deleteOne({ _id: voter._id });
 
-    await recomputeFullyDnc([String(voter.householdId)]);
-    await recomputeHouseholdActive(voter.campaignId, [voter.householdId]);
+    await recomputeResidentFlags(voter.campaignId, [voter.householdId]);
 
     res.json({ ok: true, deleted: true, responsesDeleted: responses.length });
   } catch (err) {

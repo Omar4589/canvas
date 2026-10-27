@@ -102,6 +102,9 @@ before(async () => {
   mongoose.set('strictQuery', true); // as production's connectDb: an undeclared filter key is stripped
   await mongoose.connect(URI);
   await mongoose.connection.db.dropDatabase();
+  // Model.init() is memoized, so nothing rebuilds ClientReport's declared indexes after the drop; with
+  // the integration preload (scripts/testIndexPreload.mjs) its first build has finished by now.
+  await ClientReport.createIndexes();
   await ClientReportSeries.syncIndexes();
   getQueue(QUEUE_NAMES.CLIENT_REPORT).add = async (name, data, opts) => {
     enqueued.push({ reportId: String(data.reportId), jobId: String(opts.jobId) });
@@ -215,6 +218,7 @@ test('New report looks first: REPORT_EXISTS names the draft, the published repor
     takenDown: false,
     weekStart: '2026-07-06',
     weekEnd: '2026-07-12',
+    allTime: false, // a dated report (an all-time one is named by its last day: clientReportAllTime.int.test.js)
     scopeLabel: 'Whole campaign',
   });
   // A lead of the campaign is told the same.

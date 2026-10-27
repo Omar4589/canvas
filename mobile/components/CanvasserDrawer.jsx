@@ -25,7 +25,16 @@ import {
 } from '../lib/cache';
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
-import InsetGroup, { InsetNavRow, InsetActionRow, RowEmoji } from './InsetGroup';
+import InsetGroup, { InsetNavRow, InsetActionRow, RowIcon } from './InsetGroup';
+import {
+  ReportIcon,
+  ClipboardIcon,
+  HelpIcon,
+  GaugeIcon,
+  DashboardIcon,
+  BuildingIcon,
+  SignOutIcon,
+} from './icons/navIcons';
 import SectionHeader from './SectionHeader';
 import { useDrawer } from '../lib/DrawerContext';
 import { practiceSurveys } from '../lib/doorSurvey';
@@ -188,14 +197,14 @@ export default function CanvasserDrawer() {
                     the doors assigned to them and see each household's voters at
                     the door. Voter search remains an admin-only tool. */}
                 {activeCampaign && (
-                  <InsetNavRow emphasis="menu" leading={<RowEmoji>📊</RowEmoji>} label="My stats" onPress={() => go('/(app)/stats')} />
+                  <InsetNavRow emphasis="menu" leading={<RowIcon icon={ReportIcon} />} label="My stats" onPress={() => go('/(app)/stats')} />
                 )}
                 {/* Rehearse the survey before knocking: the door's own form, nothing saved. One
                     survey opens straight away; walk lists with different surveys get a list. */}
                 {practice.length > 0 && (
                   <InsetNavRow
                     emphasis="menu"
-                    leading={<RowEmoji>📝</RowEmoji>}
+                    leading={<RowIcon icon={ClipboardIcon} />}
                     label="Practice the survey"
                     sub="Rehearse it first · nothing is saved"
                     onPress={() =>
@@ -203,7 +212,7 @@ export default function CanvasserDrawer() {
                     }
                   />
                 )}
-                <InsetNavRow emphasis="menu" leading={<RowEmoji>❓</RowEmoji>} label="Help center" sub="Guides, FAQ & tips" onPress={() => go('/(app)/help')} />
+                <InsetNavRow emphasis="menu" leading={<RowIcon icon={HelpIcon} />} label="Help center" sub="Guides, FAQ & tips" onPress={() => go('/(app)/help')} />
               </InsetGroup>
 
               <SectionHeader caption title="Appearance" />
@@ -214,19 +223,19 @@ export default function CanvasserDrawer() {
               <SectionHeader caption title="Account" />
               <InsetGroup>
                 {ctx.isSuperAdmin && (
-                  <InsetNavRow emphasis="menu" leading={<RowEmoji>🌐</RowEmoji>} label="Platform view" sub="All organizations" onPress={onPlatformView} />
+                  <InsetNavRow emphasis="menu" leading={<RowIcon icon={GaugeIcon} />} label="Platform view" sub="All organizations" onPress={onPlatformView} />
                 )}
                 {/* isConsoleUser, NOT isOrgAdmin — a team lead reaches the admin tab too
                     (admin/_layout.jsx admits them). Gating on isOrgAdmin hid this row from
                     leads, so a lead who tapped "Switch to canvass mode" was stuck in the
                     canvasser flow until they restarted the app. */}
                 {ctx.isConsoleUser && (
-                  <InsetNavRow emphasis="menu" leading={<RowEmoji>🛠</RowEmoji>} label="Admin dashboard" onPress={onAdminDashboard} />
+                  <InsetNavRow emphasis="menu" leading={<RowIcon icon={DashboardIcon} />} label="Admin dashboard" onPress={onAdminDashboard} />
                 )}
                 {canSwitchOrg && (
-                  <InsetNavRow emphasis="menu" leading={<RowEmoji>🔁</RowEmoji>} label="Switch organization" onPress={onSwitchOrg} />
+                  <InsetNavRow emphasis="menu" leading={<RowIcon icon={BuildingIcon} />} label="Switch organization" onPress={onSwitchOrg} />
                 )}
-                <InsetActionRow tone="danger" leading={<RowEmoji>↩︎</RowEmoji>} label="Sign out" onPress={onLogout} />
+                <InsetActionRow tone="danger" leading={<RowIcon icon={SignOutIcon} tone="danger" />} label="Sign out" onPress={onLogout} />
               </InsetGroup>
             </ScrollView>
           </SafeAreaView>

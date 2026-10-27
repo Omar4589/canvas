@@ -6,6 +6,7 @@ import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
+import { isOrgAdmin } from '../../services/authz/campaignManagement.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -64,6 +65,7 @@ router.post('/', async (req, res, next) => {
       campaignId: req.turf.campaignId,
       organizationId: orgId,
       userIds: userIds.filter((id) => mongoose.isValidObjectId(id)),
+      selfOnlyFor: isOrgAdmin(req) ? null : req.user._id,
     });
     if (!allowed.length) {
       return res.status(409).json({ error: 'Add them to the campaign team first.', code: 'not-on-team', notOnTeam });
@@ -90,7 +92,9 @@ router.post('/', async (req, res, next) => {
     );
     // Book given → make sure they're on the campaign roster (gates mobile visibility).
     // (No-op for existing members; covers an admin assigned on the fly, incl. self.)
-    await ensureCampaignAssignments(req.turf.campaignId, allowed, orgId, req.user._id);
+    // A book that puts someone back on the team counts as coming back: their earlier doors here move
+    // with them (owner ruling 2026-10-26, services/campaignRoster.js).
+    await ensureCampaignAssignments(req.turf.campaignId, allowed, orgId, req.user._id, { join: true });
     // The client only invalidates + refetches assignments; no caller reads the returned docs.
     res.status(201).json({ ok: true, count: allowed.length, notOnTeam });
   } catch (err) {

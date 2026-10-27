@@ -53,6 +53,10 @@ uploading to (shown as a read-only label, no dropdown to pick).
    change the column from that dropdown if the app picked the wrong one. IDs match **with or without
    leading zeros** (Georgia writes `08719967`; Excel turns it into `8719967`; either finds the voter),
    and the preview says how many matched only that way. A **preview** runs immediately — no changes yet.
+   **Files can be up to 50 MB.** Only the Voter ID column is used, so a bigger file — a state's whole
+   early-voting file, say — goes in as a copy with just that column, keeping only the people who have
+   already voted: those files often list every ballot sent out, returned or not. A file over the limit
+   is turned away the moment you pick it, with that advice, before anything uploads.
 3. The preview shows: **Will mark voted**, **Already voted** (skipped), **Doors that will drop**,
    and **Not in this campaign** (IDs that don't belong to this campaign's list).
 4. Click **Mark these voters voted** to apply. You'll see how many were marked and how many doors
@@ -89,6 +93,12 @@ effort; if those voters were on a voted list, they're already marked when they l
 **claim** them into an effort they arrive already-handled (fully-voted doors never reach the field).
 See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
 
+It doesn't matter how many walk lists or passes a campaign has, or what state each pass is in. The
+upload never looks at walk lists, passes, or books: it marks people, and every place a canvasser gets
+doors from checks each door at that moment. So a voted door leaves the books of every live pass, a
+pass you activate later arrives without it, and books cut before the upload need no re-cut. Checked
+end to end on 2026-10-27 with up to 50 walk lists of one to four passes each (Part 2 §F).
+
 ## What canvassers see
 
 - **Fully-voted doors disappear** from the map and from book/turf door counts (their book's count
@@ -101,6 +111,17 @@ See [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
   the sibling flag to `fullyVoted`; see [PASSES_AND_TURF.md](PASSES_AND_TURF.md).)
 - At doors that are still open, **voted residents get a ✓ Voted badge** so the canvasser knows to
   skip them.
+- **Phones already open catch up on their own.** A canvasser with the app open loses a fully-voted
+  door within about 30 seconds while the map is on screen (the update pauses on the door and survey
+  screens and catches up back on the map), and their book counts and **Remaining** shrink with it.
+- **A door that comes back returns on its own too.** After an **Undo**, an un-mark, or an import that
+  adds someone who hasn't voted, a phone that's already open reloads its doors on its next update
+  (about 30 seconds on the map) and the door is back. (Until the 2026-10-27 phone update, it took a
+  tap on refresh or reopening the app.)
+- **Someone added at the door keeps it open.** A person a canvasser added on the spot is never on a
+  state list, so that door stays. If a canvasser adds someone at a door that dropped while their
+  screen still showed it, the door comes back for everyone (that person hasn't voted). If you delete
+  them and everyone left has voted, the door drops right away.
 
 ## Worked example
 
@@ -191,10 +212,12 @@ Notes:
 7. **Sticky re-apply on regular import** — [importProcessor.js](../server/src/services/import/importProcessor.js)
    calls [`reapplyVotedLists(campaignId)`](../server/src/services/voted/reapplyVotedLists.js): any
    `VotedPendingId` (from a non-undone upload) whose voter has **now** been imported graduates into a
-   `VotedVoter` (pending row deleted). Then `recomputeFullyVoted` runs over the union of those doors
-   and the currently-dropped doors. So a voter who was on a prior list stays marked (the door doesn't
-   wrongly re-open, and a brand-new all-voted household drops), while a **genuinely new, un-voted**
-   voter still re-opens its door. Graduation matches the way the upload matched — leading zeros
+   `VotedVoter` (pending row deleted). Then `recomputeFullyVoted` runs over the union of those doors,
+   the currently-dropped doors, and both doors of every move the import made (`ImportJob.movedHouseholdIds`).
+   So a voter who was on a prior list stays marked (the door doesn't wrongly re-open, and a brand-new
+   all-voted household drops), a **genuinely new, un-voted** voter still re-opens its door, and a voted
+   voter who moved finishes the door they joined or left. Every other write that changes a door's
+   residents (walk-up add and delete, import undo) recomputes through `recomputeResidentFlags`. Graduation matches the way the upload matched — leading zeros
    ignored, inside the campaign — and clears parked rows by canonical ID, whatever spelling they were
    parked under. (Its do-not-contact twin, `reapplyDncLists`, is deliberately exact: it is org-wide,
    and two states can issue the same digits; see [VOTERS.md](VOTERS.md).) The clear
@@ -220,11 +243,18 @@ admin-only, campaign loaded/validated per request.
 
 `notFoundIds` is capped at 10k and powers the web "Download unmatched" button.
 
+**Upload limit.** Both uploads go through [`uploadIdList`](../server/src/middleware/idListUpload.js),
+shared with the do-not-contact and walk-list-from-CSV uploads: multer `memoryStorage`, capped at
+**50 MB**. A file that reaches the cap is a **413 `{ error, code: 'file-too-large' }`** whose error names
+the limit and the fix ("Only the Voter ID column is used, so save a copy with just that column and
+upload it.") — until 2026-10-27 it was multer's bare "File too large" as a 500. Busboy refuses a file the
+moment it *reaches* the cap, so exactly 50 MB is refused too. Why the cap stays: §F.
+
 ## D. Effect on the rest of the app
 
 | Area | Effect | Source |
 |---|---|---|
-| **Doors (mobile)** | Fully-voted households are filtered out of the canvasser's door pool (`fullyVoted: { $ne: true }`) and out of the 30s delta sync (client drops them live). | [bootstrap.js:196](../server/src/routes/mobile/bootstrap.js#L196), [bootstrap.js:339](../server/src/routes/mobile/bootstrap.js#L339), [map.jsx:516](../mobile/app/(app)/map.jsx#L516) |
+| **Doors (mobile)** | Fully-voted households are filtered out of the canvasser's door pool (`fullyVoted: { $ne: true }`) and out of the 30s delta sync (client drops them live); a door the phone lacks that the delta shows knockable again (undo, un-mark, a new un-voted resident) makes it pull a fresh bootstrap (`returningDoorIds`). | [bootstrap.js:196](../server/src/routes/mobile/bootstrap.js#L196), [bootstrap.js:339](../server/src/routes/mobile/bootstrap.js#L339), [map.jsx:516](../mobile/app/(app)/map.jsx#L516) |
 | **Books / turf** | Book door counts are computed **live** as "active & not-fully-voted" — on mobile *and* now in the admin turf list (`eligibleDoorCount`), so a book's count shrinks as doors drop. **`Turf.householdIds` is not mutated and turfs are not re-cut**; the stored `Turf.doorCount` is kept for snapshots/splits but no longer shown to admins. | [bootstrap.js:80-94](../server/src/routes/mobile/bootstrap.js#L80), [turfs.js:280](../server/src/routes/admin/turfs.js#L280) |
 | **Voters** | Not hidden — flagged `voted: true` in the bootstrap payload and shown with a ✓ badge. No write to the `Voter` doc. | [bootstrap.js:257](../server/src/routes/mobile/bootstrap.js#L257) |
 | **Passes** | No interaction — voted filtering is campaign-wide, not pass-specific. Passes/knocks are unaffected. | — |
@@ -246,7 +276,13 @@ admin-only, campaign loaded/validated per request.
   **`/campaigns/:campaignId/early-voting`**, admin-only ([App.jsx](../client/src/App.jsx)); the old flat
   `/early-voting` redirects to `/campaigns`. Reached from the **"Early Voting"** item in the
   campaign-scoped sidebar (`CAMPAIGN_NAV`, slug `early-voting`, in
-  [navItems.js](../client/src/components/navItems.js)).
+  [navItems.js](../client/src/components/navItems.js)). A file at or over the 50 MB cap is refused the
+  moment it's picked and no preview runs (`idListTooBig` /
+  `idListTooBigText('the voters who have already voted')` in
+  [lib/idListPreview.js](../client/src/lib/idListPreview.js), shared with the other two Voter-ID
+  uploads): multer drains the whole body before it answers, so a 149 MB file used to upload in full just
+  to be refused. [idListUpload.test.js](../server/test/idListUpload.test.js) keeps the page's limit and
+  sentence equal to the server's.
 - **Mobile** — bootstrap derives the per-voter `voted` flag and drops fully-voted doors (§D). The
   ✓ Voted badge renders in [map.jsx:1447](../mobile/app/(app)/map.jsx#L1447) and
   [household/[id].jsx:104](../mobile/app/(app)/household/[id].jsx#L104) — beside the shared
@@ -257,6 +293,36 @@ admin-only, campaign loaded/validated per request.
 
 Resolved (kept here so the history is clear):
 
+- **Every write that changes a door's residents recomputes `fullyVoted` (2026-10-27).** The walk-up add
+  ([canvass.js](../server/src/routes/mobile/canvass.js)) and walk-up delete
+  (`DELETE /admin/voters/:voterId`, [voters.js](../server/src/routes/admin/voters.js)) recomputed
+  `fullyDnc` and `isActive` but not `fullyVoted`, and import undo
+  ([undoImport.js](../server/src/services/import/undoImport.js)) recomputed `isActive` alone. So a person
+  added at a door that dropped while a phone still showed it (door screen open, or offline) left it hidden
+  with someone there who hadn't voted — the one dropped-wrongly case — and deleting a door's last un-voted
+  resident, or undoing the import that added them, left an all-voted door up. All three now call
+  [`recomputeResidentFlags`](../server/src/services/households/recomputeResidentFlags.js) (`fullyVoted`,
+  `fullyDnc` and `isActive` together); undo also covers an inserted door kept for a do-not-contact
+  resident, which the old exclusion skipped, so the DNC twin was fixed in the same change. An import that
+  moves people ([importProcessor.js](../server/src/services/import/importProcessor.js)) now recomputes both
+  doors of every move (voted and DNC), read right after the write and kept on the job
+  (`ImportJob.movedHouseholdIds`) so a crash-retry still finds them; it used to recompute only dropped doors
+  and graduated IDs, missing a voted voter's new door and the door an un-voted one left. Locked by
+  [residentFlags.int.test.js](../server/test/residentFlags.int.test.js). The remaining window: an import
+  that crashes partway through its write loses the moves of the batches already written (the retry sees
+  them as no move), which the next upload naming a resident clears, as before.
+- **A door that comes back reaches an open phone (2026-10-27).** The fold updates only doors the phone
+  holds (a delta row has no address to draw), so a door leaving suppression — undo, un-mark, a new un-voted
+  resident, a cleared DNC flag, a refilled door — used to stay off an open phone until a manual refresh, an
+  app restart or a pass change. `/changes` now projects every `KNOCKABLE_DOOR_FILTER` flag
+  (`KNOCKABLE_DOOR_FLAGS`; `excludedFromTurf` was the missing one), the phone mirrors the rule
+  (`isSuppressedDoor` in [deltaFold.js](../mobile/lib/deltaFold.js), held to the server's list by
+  [knockableDoorParity.test.js](../server/test/knockableDoorParity.test.js)), and when a delta carries a
+  door the phone lacks that passes it and has a pin (`returningDoorIds`), map.jsx pulls a fresh bootstrap —
+  the refetch a pass change already used. As a side effect a door taken out of books mid-shift
+  (`excludedFromTurf`) now leaves an open phone on the next poll, as it already left a fresh one.
+  Dropping was never affected: the recompute's `Household.bulkWrite` bumps `updatedAt` on every door it
+  touches (Mongoose 8 timestamps), and the door rides the delta with `fullyVoted: true`.
 - **Reports — fully-voted doors now have a "Voted" segment.** They used to inflate `unknocked`;
   `coverageBucketExpr` in [reports.js](../server/src/routes/admin/reports.js) reclassifies
   voted-and-still-unknocked doors into a `voted` bucket in `/overview` and `/campaign-rollup`.
@@ -291,6 +357,25 @@ Resolved (kept here so the history is clear):
 
 Still true:
 
+- **Verified across walk lists and passes (2026-10-27).** A scenario run over the real routes and a
+  throwaway mongod: 7 to 50 walk lists with one to four passes each in every state (archived, live, a
+  cut-and-accepted next pass, a walk list with no live pass), 31 to 241 books, shared books, books in
+  archived and draft passes, Intake doors, walk-up voters, a sibling campaign holding the same people,
+  and three cumulative daily lists spelling IDs with and without zeros. Every door's `fullyVoted`, the
+  preview and import counts, each walker's bootstrap (doors, `voted`, book `doorCount`, `/me/today`
+  `remaining`), an open phone's `/changes` replayed through
+  [`mobile/lib/deltaFold.js`](../mobile/lib/deltaFold.js), the admin turf list's `eligibleDoorCount`,
+  packets, a fresh cut, add-on books after a claim, pass activation, the import re-apply, undo and
+  un-mark all matched an oracle written independently of this code; a planted missed drop failed the
+  phone check. Why it holds: `parseAndMatch` is scoped to `{ campaignId }` alone and
+  `recomputeFullyVoted` keys on the household, so marking has no walk-list, pass or book input; and
+  every canvasser surface applies `KNOCKABLE_DOOR_FILTER` when it serves, not when a book is cut.
+- **Checking real data.** `npm run audit:voted-doors -- --campaign=<campaign id>` from the Heroku
+  dashboard's Run console ([OPERATIONS.md](OPERATIONS.md)) is read-only: Check A counts dropped doors
+  hiding someone who hasn't voted (must be 0), Check B all-voted doors still up (expected 0 since the
+  2026-10-27 resident-flag fix; a door from before it, or from an import that crashed mid-write, clears at
+  the next upload that lists a resident), Check C stray marks. Without `--campaign` it walks every campaign
+  of every organization. Run from the repo root on the scenario's data: 0 / 0 / 0.
 - **Matching is `stateVoterId`-only.** Voters without a `stateVoterId`, or a CSV with no detectable
   Voter ID column, won't match (they land in `notFound` → download & fix). Sticky re-apply also keys
   on `stateVoterId`.
@@ -299,3 +384,12 @@ Still true:
 - **Campaign-scoped.** Uploading to the wrong campaign marks no one useful (matches are filtered to
   that campaign's households); re-upload to the correct campaign.
 - **`voteMethod` is unused.** The schema field exists but the CSV import doesn't populate it.
+- **The 50 MB cap is load-bearing until the parse reads one column.** `parseIdsAndFindVoters` turns the
+  whole buffer into one string and PapaParses every column of every row on the web dyno, though only the
+  ID column is used. Measured 2026-10-27 on Nebraska's statewide early-ballot file (85 columns, 273,834
+  rows, 149 MB; parse only, no database): ~860 MB peak for its first 50 MB, ~2.3 GB for the whole file —
+  on the 1 GB web dyno. Raising the number alone would take the web dyno down. The change that would let
+  full state files through — disk storage and a streamed parse that keeps only the ID column, then timing
+  ~270k IDs against the 30-second request limit — is not built. That file was also not a voted list:
+  101,564 of its rows had no ballot returned yet, which is why the page's refusal says to keep only the
+  people who have already voted.

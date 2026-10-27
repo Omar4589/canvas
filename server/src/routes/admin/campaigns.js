@@ -478,7 +478,9 @@ router.get('/:campaignId/history', async (req, res, next) => {
     // silently losing its actor.
     const ids = [campaign.createdBy];
     for (const r of configRows) ids.push(r.byUserId);
-    for (const r of teamRows) ids.push(r.byUserId, r.userId, r.fromCoordinatorId, r.toCoordinatorId);
+    for (const r of teamRows) {
+      ids.push(r.byUserId, r.userId, r.fromCoordinatorId, r.toCoordinatorId, ...(r.sources || []).map((x) => x.coordinatorId));
+    }
     const people = await hydrateCanvassers(ids.filter(Boolean), orgId);
     const who = (id) => {
       if (!id) return null;
@@ -507,13 +509,29 @@ router.get('/:campaignId/history', async (req, res, next) => {
         at: r.createdAt,
         by: who(r.byUserId),
         user: who(r.userId),
-        fromCoordinator: who(r.fromCoordinatorId),
+        // Released phones read these fields as they are, so the new facts are folded into them:
+        //   · doors from several teams read "Several teams";
+        //   · both history builders print activitiesMoved as "N doors moved", so it carries the
+        //     doors (deduplicated knocks) when the record has them, not the row count;
+        //   · an error a later change finished stops showing as incomplete.
+        // Updated clients read sources, doorsMoved and finishedBy themselves.
+        fromCoordinator: (r.sources || []).length > 1 ? { name: 'Several teams' } : who(r.fromCoordinatorId),
         toCoordinator: who(r.toCoordinatorId),
-        activitiesMoved: r.activitiesMoved || 0,
+        activitiesMoved: r.doorsMoved ?? r.activitiesMoved ?? 0,
         surveysMoved: r.surveysMoved || 0,
-        // A torn re-stamp (membership written, ledger move threw) is the one case where the
-        // number on screen legitimately disagrees with the row — surface it, don't hide it.
-        restampError: r.restampError || null,
+        doorsMoved: r.doorsMoved ?? null,
+        rowsMoved: r.activitiesMoved || 0,
+        // A torn re-stamp (crew written, ledger move didn't finish) is the one case where the number
+        // on screen legitimately disagrees with the row — surface it, don't hide it.
+        restampError: r.finishedBy ? null : r.restampError || null,
+        finishedBy: r.finishedBy ? String(r.finishedBy) : null,
+        sources: (r.sources || []).map((x) => ({
+          coordinator: who(x.coordinatorId),
+          doors: x.doors || 0,
+          activities: x.activities || 0,
+          surveys: x.surveys || 0,
+        })),
+        source: r.source,
       })),
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 

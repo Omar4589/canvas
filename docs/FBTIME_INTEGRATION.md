@@ -447,7 +447,7 @@ Linking a kept account again, to anyone, ends its "also counts".
 | The roster row model (pure — folding, filter, sort, candidates) | [`client/src/lib/fbtimeRoster.js`](../client/src/lib/fbtimeRoster.js) + `fbtimeRoster.test.js` |
 | Bulk link/unlink runner + the invalidation rule | [`client/src/lib/fbtimeBulk.js`](../client/src/lib/fbtimeBulk.js) |
 | Per-row provenance marker | [`client/src/components/CanvasserSummaryTable.jsx`](../client/src/components/CanvasserSummaryTable.jsx) `HOURS_MARK` — the five states, their words and their tooltips, in one table |
-| Per-person link state | [`client/src/components/UserProfileModal.jsx`](../client/src/components/UserProfileModal.jsx) Activity section, off `stats.fbtime` |
+| Per-person link state | [`client/src/components/people/PersonOrgSection.jsx`](../client/src/components/people/PersonOrgSection.jsx), the person panel's **Everywhere in your organization** section (org admins only), off `stats.fbtime` |
 | Mobile | read-only status row on admin **More** ([`more.jsx`](<../mobile/app/(app)/admin/more.jsx>) — door-count copy driven by the server's `doors.state` / `doors.reason`, never re-derived); badges on every hours surface |
 | Tests | `test/fbtimeClient.test.js`, `test/hoursSourceFold.test.js`, `test/fbtimeSync.int.test.js`, `test/fbtimeIntegration.int.test.js`, `test/reportsHoursSource.int.test.js`; door counts: `test/fbtimeDoorCounts.test.js` (pure), `test/fbtimeDoorPush.int.test.js` (the step, against an `fbt_test_` fake of FbTime's rules), `test/fbtimeDoorRoutes.int.test.js`, `test/fbtimeDeletionGaps.int.test.js` (deletion, purge, migration); web `client/src/lib/fbtimeRoster.test.js` + `integrationsRender.smoke.test.js` |
 

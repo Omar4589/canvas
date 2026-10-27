@@ -11,7 +11,6 @@
 export const EXPORT_TYPE_META = [
   {
     id: 'canvass-activity',
-    emoji: '🚪',
     label: 'Canvassing activity',
     sub: 'Every door result, with the voter at that door',
     desc: 'Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (not home, refused, lit drop) are door-level records and leave them blank. Flip "One row per voter at the door" and those knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each — in a file named activity-log-by-voter.',
@@ -22,7 +21,6 @@ export const EXPORT_TYPE_META = [
   },
   {
     id: 'doors-by-round',
-    emoji: '🔁',
     label: 'Doors by round',
     sub: 'One row per door per round, with its status',
     desc: 'One row per door per round with its status — filter it to "not home" and you have a re-knock list. A household file: it deliberately has no voter columns; use Canvassing activity for who was reached.',
@@ -33,7 +31,6 @@ export const EXPORT_TYPE_META = [
   },
   {
     id: 'survey-results',
-    emoji: '📊',
     label: 'Survey results',
     sub: 'One row per survey taken, one column per question',
     desc: 'One row per survey taken, one column per question. A voter surveyed again in a later round is another row. If the campaign ran more than one survey, you get one file per survey.',
@@ -44,7 +41,6 @@ export const EXPORT_TYPE_META = [
   },
   {
     id: 'voter-file',
-    emoji: '🗂️',
     label: 'Voter file',
     sub: 'Everyone currently in the campaign',
     desc: 'Your voter file, rebuilt from the data currently in Doorline — optionally using an import’s own vendor column names. Includes State Voter ID and UID for re-matching on another platform.',
@@ -60,8 +56,8 @@ export const EXPORT_TYPE_META = [
 export const ROUND_STATUSES = ['unknocked', 'not_home', 'wrong_address', 'refused', 'surveyed', 'lit_dropped', 'restricted', 'no_soliciting'];
 
 // Lay the server registry's copy over the local fallback, keyed by id. Server label /
-// desc / descNotTargetInUse / oneRowIs / filters win; mobile-only fields (emoji, sub, contents)
-// stay local.
+// desc / descNotTargetInUse / oneRowIs / filters win; mobile-only fields (sub, contents) stay
+// local.
 export function mergeTypeMeta(serverTypes) {
   const byId = new Map((serverTypes || []).map((t) => [t.id, t]));
   return EXPORT_TYPE_META.map((meta) => {

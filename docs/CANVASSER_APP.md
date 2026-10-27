@@ -108,8 +108,9 @@ actions, so the menu isn't in the way of the job:
   the terrain + recenter buttons) where your thumb already is, and it carries the offline-pending
   badge; tapping it also flushes anything you recorded offline. **Tap it if a lead reshuffled your
   books mid-shift** — a book being moved, merged, or reassigned only lands on your phone after a full
-  refresh (pin fixes, status changes, and your campaign's door settings — which outcome buttons you
-  see, and whether you can add a person — arrive on their own ~30s sync while you're on the map). See
+  refresh (pin fixes, status changes, doors dropping off or coming back for early voting or
+  do-not-contact, and your campaign's door settings — which outcome buttons you see, and whether you
+  can add a person — arrive on their own ~30s sync while you're on the map). See
   [PASSES_AND_TURF.md → How field phones get these edits](PASSES_AND_TURF.md).
 - **Switch campaign** — on the book picker, a one-tap way back to the campaign list (next to the
   menu button).
@@ -130,7 +131,7 @@ than one effort, an **effort switcher** sits at the top to flip between them. Ta
 map are here too — Refresh, the terrain / base-map picker, and recenter (follow your location).
 
 The key dates and the pin legend share **one card** at the top. Election Day shows the **actual
-date**, with the countdown beside it — "🗳 Election Day · Wed, Nov 4" · *in 12 days* (and *tomorrow*
+date**, with the countdown beside it — "Election Day · Wed, Nov 4" · *in 12 days* (and *tomorrow*
 / *today* in brand red when it's imminent). Early voting always names **both ends of the window**
 ("Early voting Oct 20–Nov 1"), because "when does early voting end?" is a question you get at the
 door — not just once the window has already opened. Under a divider, the legend shows the same book
@@ -794,7 +795,7 @@ and would fight the Mapbox pan gesture). It opens by **tap**.
   **verbatim fork** of `admin/more.jsx`'s old local `Row`; both the fork and its ~28 orphaned styles
   are gone, along with the fork's `last` prop (a trailing hairline is not expressible — `InsetGroup`
   interleaves the separators itself). Concretely: an `emphasis="hero"` `InsetNavRow` for the account,
-  `emphasis="menu"` rows with `RowEmoji` leading glyphs under `SectionHeader caption` titles, a
+  `emphasis="menu"` rows with `RowIcon` leading line icons under `SectionHeader caption` titles, a
   `tone="danger"` `InsetActionRow` for Sign out, and `<ThemeToggle/>` standing **bare** between its
   caption and the next group (nesting a bordered control inside a bordered card bought a second
   outline and no separation). The **org name**, previously a brand micro-line inside the account card,
@@ -1189,7 +1190,10 @@ voter dropped by the `['bootstrap']` invalidate — and since the policy rides t
 (below), an online phone on the map holds a stale button only until its next poll. Teammates'
 phones learn of the voter through the 30s delta: the fold ([lib/deltaFold.js](../mobile/lib/deltaFold.js))
 merges known voters and **appends** unknown ones whose door is in the folded households (before
-this, the fold was merge-only and silently discarded new rows).
+this, the fold was merge-only and silently discarded new rows). If the door had already left a
+teammate's phone — it went fully voted while this phone still showed it — the add re-opens it on the
+server (`recomputeResidentFlags`: the walk-up is on no voted list), and the teammate's phone, handed a
+door it lacks that is knockable again, pulls a fresh bootstrap (`returningDoorIds`, 2026-10-27).
 
 All route through `submitAction`, which fires `recordHouseholdAction(qc, id, action, …)` —
 `firedRef` blocks a double-tap synchronously, `isSubmitting` disables the buttons. Recording is

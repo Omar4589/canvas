@@ -19,6 +19,13 @@ import mongoose from 'mongoose';
 //   5. Admin behavior is unchanged by all of the above.
 //   6. Campaign-scoped create (leadCrew POST) accepts coordinatorId — the mobile create sheet's
 //      coordinator picker (item D7) rides on it.
+//   7. What a drill RETURNS to a lead covers only the campaigns they manage (2026-10-25,
+//      PRIVACY_VERIFICATION item 40): totals, recent doors, the campaign list, crews on other
+//      campaigns, and a fellow lead's grants. A lead may be the client; one canvasser can work
+//      several clients' campaigns.
+//   8. On a campaign's roster a lead adds only THEMSELVES by id, and removes only canvassers and
+//      themselves (2026-10-25, item 41). Everyone else they add by email; the refusal never says
+//      who is a member.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-lead-users';
 
 const { createApp } = await import('../src/app.js');
@@ -30,6 +37,9 @@ const { Campaign } = await import('../src/models/Campaign.js');
 const { CampaignManager } = await import('../src/models/CampaignManager.js');
 const { CampaignAssignment } = await import('../src/models/CampaignAssignment.js');
 const { Subscription } = await import('../src/models/Subscription.js');
+const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
+const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
+const { Household } = await import('../src/models/Household.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -41,7 +51,8 @@ const ctx = {};
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [Organization, User, Membership, Campaign, CampaignManager, CampaignAssignment, Subscription]) {
+  for (const M of [Organization, User, Membership, Campaign, CampaignManager, CampaignAssignment, Subscription,
+    CanvassActivity, SurveyResponse, Household]) {
     await M.deleteMany({});
   }
 
@@ -270,6 +281,166 @@ test('per-user read drills follow visibility: in-scope 200, out-of-scope 403', {
   assert.strictEqual(outScope.status, 403);
   const outScopeCrews = await call('GET', `/api/admin/memberships/${ctx.canvB._id}/crews`, asLead());
   assert.strictEqual(outScopeCrews.status, 403);
+});
+
+test("a lead's profile drills return only their campaigns' part of a person (item 40)", { skip }, async () => {
+  // canvA works BOTH campaigns: Camp A (the lead's, on lead2's crew) and Camp B (not the lead's,
+  // on the admin's crew). lead2 also holds a grant on Camp B. Everything the lead gets back about
+  // canvA, and about lead2's grants, must stop at Camp A.
+  const { org, campA, campB, canvA, admin, lead2 } = ctx;
+  await CampaignAssignment.updateOne({ userId: canvA._id, campaignId: campA._id }, { $set: { coordinatorId: lead2._id } });
+  const bRow = await CampaignAssignment.create({
+    userId: canvA._id, campaignId: campB._id, organizationId: org._id, coordinatorId: admin._id,
+  });
+  const grantB = await CampaignManager.create({ campaignId: campB._id, userId: lead2._id, organizationId: org._id, grantedBy: admin._id });
+  const hh = (campaign, addressLine1) => ({
+    _id: new mongoose.Types.ObjectId(), organizationId: org._id, campaignId: campaign._id,
+    addressLine1, city: 'Austin', state: 'TX', zipCode: '78701', normalizedAddress: `${addressLine1}|AUSTIN|TX|78701`,
+  });
+  const hA = hh(campA, '1 Alpha St');
+  const hB = hh(campB, '2 Bravo St');
+  await Household.collection.insertMany([hA, hB]);
+  const knock = (campaign, household, minute) => ({
+    organizationId: org._id, campaignId: campaign._id, householdId: household._id, userId: canvA._id,
+    actionType: 'not_home', timestamp: new Date(Date.UTC(2026, 9, 20, 14, minute)), location: { lat: 30.27, lng: -97.74 },
+  });
+  await CanvassActivity.collection.insertMany([
+    knock(campA, hA, 1), knock(campA, hA, 2),
+    knock(campB, hB, 3), knock(campB, hB, 4), knock(campB, hB, 5),
+  ]);
+  const survey = (campaign, household, minute) => ({
+    organizationId: org._id, campaignId: campaign._id, householdId: household._id, userId: canvA._id,
+    voterId: new mongoose.Types.ObjectId(), passId: new mongoose.Types.ObjectId(),
+    submittedAt: new Date(Date.UTC(2026, 9, 20, 14, minute)),
+  });
+  await SurveyResponse.collection.insertMany([survey(campA, hA, 1), survey(campB, hB, 3), survey(campB, hB, 4)]);
+
+  try {
+    const stats = (who) => call('GET', `/api/admin/memberships/${canvA._id}/stats`, who());
+    const adminStats = await stats(asAdmin);
+    assert.strictEqual(adminStats.status, 200);
+    assert.strictEqual(adminStats.json.doorsKnocked, 5, 'an admin sees the whole org');
+    assert.strictEqual(adminStats.json.surveysSubmitted, 3);
+    assert.strictEqual(adminStats.json.campaignsWorked, 2);
+    const leadStats = await stats(asLead);
+    assert.strictEqual(leadStats.status, 200);
+    assert.strictEqual(leadStats.json.doorsKnocked, 2, "a lead's totals stop at Camp A");
+    assert.strictEqual(leadStats.json.surveysSubmitted, 1);
+    assert.strictEqual(leadStats.json.campaignsWorked, 1);
+
+    const recent = (who) => call('GET', `/api/admin/memberships/${canvA._id}/recent-activity?limit=20`, who());
+    const adminRecent = await recent(asAdmin);
+    assert.strictEqual(adminRecent.json.activities.length, 5);
+    const leadRecent = await recent(asLead);
+    assert.strictEqual(leadRecent.json.activities.length, 2);
+    assert.ok(
+      leadRecent.json.activities.every((a) => a.campaign?.name === 'Camp A' && a.household?.addressLine1 === '1 Alpha St'),
+      "no Camp B door address or campaign name reaches the lead"
+    );
+
+    const leadCrews = await call('GET', `/api/admin/memberships/${canvA._id}/crews`, asLead());
+    const byName = (body, name) => body.crews.find((c) => c.campaignName === name);
+    assert.strictEqual(byName(leadCrews.json, 'Camp A').coordinatorName, 'Lou Lead2', 'their own campaign stays whole');
+    assert.deepStrictEqual(
+      byName(leadCrews.json, 'Camp B'),
+      { campaignId: String(campB._id), campaignName: 'Camp B', campaignIsActive: null, coordinatorId: null, coordinatorName: null },
+      "Camp B keeps only its name (the switch-off warning names it); its crew and status don't reach the lead"
+    );
+    const adminCrews = await call('GET', `/api/admin/memberships/${canvA._id}/crews`, asAdmin());
+    assert.strictEqual(byName(adminCrews.json, 'Camp B').coordinatorName, 'Ada Admin');
+    assert.strictEqual(byName(adminCrews.json, 'Camp B').campaignIsActive, true);
+
+    const leadCamps = await call('GET', `/api/admin/memberships/${canvA._id}/campaigns`, asLead());
+    assert.deepStrictEqual(leadCamps.json.campaignIds, [String(campA._id)]);
+    const adminCamps = await call('GET', `/api/admin/memberships/${canvA._id}/campaigns`, asAdmin());
+    assert.deepStrictEqual([...adminCamps.json.campaignIds].sort(), [String(campA._id), String(campB._id)].sort());
+
+    const leadList = await call('GET', '/api/admin/memberships', asLead());
+    const lead2AsSeenByLead = leadList.json.members.find((m) => m.user.email === 'lu-lead2@t.co');
+    assert.deepStrictEqual(lead2AsSeenByLead.managedCampaignIds, [], "a fellow lead's grant on Camp B doesn't reach the lead");
+    const adminList = await call('GET', '/api/admin/memberships', asAdmin());
+    const lead2AsSeenByAdmin = adminList.json.members.find((m) => m.user.email === 'lu-lead2@t.co');
+    assert.deepStrictEqual(lead2AsSeenByAdmin.managedCampaignIds, [String(campB._id)]);
+  } finally {
+    await CampaignAssignment.deleteOne({ _id: bRow._id });
+    await CampaignAssignment.updateOne({ userId: canvA._id, campaignId: campA._id }, { $set: { coordinatorId: null } });
+    await CampaignManager.deleteOne({ _id: grantB._id });
+    await Promise.all([CanvassActivity.deleteMany({}), SurveyResponse.deleteMany({}), Household.deleteMany({})]);
+  }
+});
+
+test('a lead adds only themselves by id, and removes only canvassers and themselves (item 41)', { skip }, async () => {
+  const { org, campA, lead, lead2, admin, canvA, canvB } = ctx;
+  const roster = (path) => `/api/admin/campaigns/${campA._id}/assignments${path}`;
+  const onA = (u) => CampaignAssignment.exists({ userId: u._id, campaignId: campA._id });
+
+  // Adding by id: canvB is an active member on none of the lead's campaigns. Before the fix this
+  // answered 201, and GET .../assignments then read back canvB's email and phone.
+  const member = await call('POST', roster(''), { ...asLead(), body: { userIds: [String(canvB._id)] } });
+  assert.strictEqual(member.status, 403, "someone else can't be rostered by id");
+  assert.strictEqual(member.json.code, undefined, 'a plain message, never FORBIDDEN_ROLE');
+  const nobody = await call('POST', roster(''), { ...asLead(), body: { userIds: [String(new mongoose.Types.ObjectId())] } });
+  assert.strictEqual(nobody.status, 403);
+  assert.deepStrictEqual(nobody.json, member.json, 'a member and a made-up id get the same answer');
+  const mixed = await call('POST', roster(''), { ...asLead(), body: { userIds: [String(lead._id), String(canvB._id)] } });
+  assert.strictEqual(mixed.status, 403, 'one other id refuses the whole request');
+  assert.strictEqual(await onA(canvB), null, 'nothing was written for canvB');
+  assert.strictEqual(await onA(lead), null, 'nor for the lead, in the refused request');
+  const self = await call('POST', roster(''), { ...asLead(), body: { userIds: [String(lead._id)] } });
+  assert.strictEqual(self.status, 201, 'self-assign (taking a book) still works');
+  assert.ok(await onA(lead));
+
+  // Removing: a fellow lead and an admin rostered on Camp A, and a Doorline staff account.
+  const staff = await User.create({ firstName: 'Stu', lastName: 'Staff', email: 'lu-staff@t.co', passwordHash: 'x', isActive: true, isSuperAdmin: true });
+  const extra = [
+    await CampaignAssignment.create({ userId: admin._id, campaignId: campA._id, organizationId: org._id }),
+    await CampaignAssignment.create({ userId: staff._id, campaignId: campA._id, organizationId: org._id }),
+  ];
+  try {
+    for (const [who, label] of [[admin, 'an org admin'], [lead2, 'a fellow lead'], [staff, 'Doorline staff']]) {
+      const r = await call('DELETE', roster(`/${who._id}`), asLead());
+      assert.strictEqual(r.status, 403, `${label} is not a lead's to remove`);
+      assert.strictEqual(r.json.code, undefined);
+      assert.ok(await onA(who), `${label} is still on the roster`);
+    }
+    // A staff account this campaign and org don't have answers exactly like a made-up id, so a
+    // refusal never confirms an id is Doorline staff (the item-36 shape).
+    const farStaff = await User.create({ firstName: 'Far', lastName: 'Staff', email: 'lu-farstaff@t.co', passwordHash: 'x', isActive: true, isSuperAdmin: true });
+    try {
+      const madeUp = await call('DELETE', roster(`/${new mongoose.Types.ObjectId()}`), asLead());
+      const staffElsewhere = await call('DELETE', roster(`/${farStaff._id}`), asLead());
+      assert.strictEqual(staffElsewhere.status, madeUp.status, 'same status as a made-up id');
+      assert.deepStrictEqual(Object.keys(staffElsewhere.json).sort(), Object.keys(madeUp.json).sort(), 'same answer shape');
+    } finally {
+      await User.deleteOne({ _id: farStaff._id });
+    }
+    const canvasser = await call('DELETE', roster(`/${canvA._id}`), asLead());
+    assert.strictEqual(canvasser.status, 200, 'a canvasser on their campaign: removable');
+    assert.strictEqual(await onA(canvA), null);
+    const selfOff = await call('DELETE', roster(`/${lead._id}`), asLead());
+    assert.strictEqual(selfOff.status, 200, 'and themselves');
+    assert.strictEqual(await onA(lead), null);
+
+    // An org admin is unchanged: anyone, by id, both ways.
+    const adminAdd = await call('POST', roster(''), { ...asAdmin(), body: { userIds: [String(canvB._id)] } });
+    assert.strictEqual(adminAdd.status, 201);
+    const adminRemove = await call('DELETE', roster(`/${lead2._id}`), asAdmin());
+    assert.strictEqual(adminRemove.status, 200);
+  } finally {
+    await CampaignAssignment.deleteMany({ _id: { $in: extra.map((r) => r._id) } });
+    await CampaignAssignment.deleteMany({ campaignId: campA._id, userId: { $in: [canvB._id, lead._id] } });
+    await CampaignAssignment.updateOne(
+      { userId: canvA._id, campaignId: campA._id },
+      { $setOnInsert: { organizationId: org._id } },
+      { upsert: true }
+    );
+    await CampaignAssignment.updateOne(
+      { userId: lead2._id, campaignId: campA._id },
+      { $setOnInsert: { organizationId: org._id } },
+      { upsert: true }
+    );
+    await User.deleteOne({ _id: staff._id });
+  }
 });
 
 test('admin writes are untouched by the new guards', { skip }, async () => {

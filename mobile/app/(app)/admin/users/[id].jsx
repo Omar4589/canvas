@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { loadCurrentUser, loadMemberships, loadActiveOrgId } from '../../../../lib/cache';
 import { formatDate, formatRelative as sharedFormatRelative } from '../../../../lib/dates';
@@ -32,7 +32,10 @@ import {
   viewerHasBillingAccess,
 } from '../../../../lib/memberDeletion';
 import { leaveDeletionNotice } from '../../../../lib/deletionNotice';
-import { usePausedList } from '../../../../lib/pacePauses';
+import { usePausedList, invalidatePaceCaches } from '../../../../lib/pacePauses';
+import { pausedUserIds } from '../../../../lib/pace';
+import { standing } from '../../../../lib/rosterView';
+import { isAdminRole, personAccess, personButtons, recentLimit, nextRecentSkip, recentRows } from '../../../../lib/personActions';
 import { formatInTz } from '../../../../lib/datetime';
 import PasswordInput from '../../../../components/PasswordInput';
 import DeleteMemberSheet from '../../../../components/DeleteMemberSheet';
@@ -63,7 +66,17 @@ function StatCell({ label, value }) {
   );
 }
 
-export default function AdminUserDetail() {
+// The tab navigator keeps ONE instance of this screen and hands it the next person's id (users/[id] is a
+// Tabs.Screen, admin/_layout.jsx), so everything held per person — a half-typed temporary password, More
+// options, the frozen view a deletion leaves behind — would carry over to whoever is opened next. Keyed
+// on the id, each person gets a fresh screen.
+const AdminUserDetail = () => {
+  const { id } = useLocalSearchParams();
+  return <AdminUserProfile key={String(Array.isArray(id) ? id[0] : id)} />;
+};
+export default AdminUserDetail;
+
+function AdminUserProfile() {
   const { colors, type } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const ACTION_DOT_COLOR = {
@@ -80,9 +93,10 @@ export default function AdminUserDetail() {
   const qc = useQueryClient();
   const { id } = useLocalSearchParams();
   const userId = Array.isArray(id) ? id[0] : id;
-  // Lead capabilities on this page: read + temp password + deactivate for CANVASSER
-  // targets on their campaigns (server-enforced). Identity/role editing and campaign
-  // assignment stay admin-only, so those sections don't render for a lead at all.
+  // Lead capabilities on this page: read, and for CANVASSER targets on their campaigns the
+  // identity fields, temp password, invite and deactivate (server-enforced). Role editing and
+  // the Campaigns list stay admin-only, so those sections don't render for a lead at all, and a
+  // lead's totals cover only the campaigns they manage (item 40).
   const viewerRole = useConsoleRole();
   const isAdminViewer = viewerRole !== 'lead';
 
@@ -102,6 +116,7 @@ export default function AdminUserDetail() {
   const pausedQ = usePausedList();
   const pausedHere = (pausedQ.data?.pauses || []).find((p) => String(p.userId) === String(userId) && p.status === 'paused' && p.blocking);
   const pausedElsewhere = (pausedQ.data?.rosterLines || []).some((l) => String(l.userId) === String(userId) && l.paused);
+  const pausedIds = pausedUserIds(pausedQ.data);
 
   // Set once this person's account is deleted, or they are removed from the org, from here: the
   // screen pops at once and, until it is gone, keeps drawing them as they were. The refetched list no longer holds an unused account
@@ -147,7 +162,7 @@ export default function AdminUserDetail() {
 
   // Team-lead campaign grants. Lives in CampaignManager server-side; GET
   // /admin/memberships back-joins it as managedCampaignIds. Sent with the role
-  // PATCH exactly like the web's UserProfileModal.
+  // PATCH exactly like the web person panel's profile form (client/src/components/people/PersonProfileForm.jsx).
   const managedFromServer = (member?.managedCampaignIds || []).map(String);
   const [managedIds, setManagedIds] = useState(() => new Set());
   useEffect(() => {
@@ -176,9 +191,16 @@ export default function AdminUserDetail() {
     enabled: !!userId,
   });
 
-  const activityQ = useQuery({
-    queryKey: ['admin', 'membership-recent-activity', userId],
-    queryFn: () => api(`/admin/memberships/${userId}/recent-activity?limit=20`),
+  // The newest 5 doors, then 10 per Show more. Written inline, with a literal path, rather than through
+  // lib/useInfinitePaged: that helper builds its URL inside itself, which hides the endpoint from
+  // `npm run audit:mobile-api`, and it expects a `total` this route doesn't send. So Show more stops on
+  // a page that comes back short or adds no new ids (lib/personActions.js nextRecentSkip).
+  const activityQ = useInfiniteQuery({
+    queryKey: ['admin', 'membership-recent-activity', userId, 'paged'],
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      api(`/admin/memberships/${userId}/recent-activity?limit=${recentLimit(pageParam)}&skip=${pageParam}`, { signal }),
+    getNextPageParam: (_lastPage, allPages) => nextRecentSkip(allPages),
     enabled: !!userId,
   });
 
@@ -261,7 +283,9 @@ export default function AdminUserDetail() {
     onError: (err) => flash('error', err.message),
   });
 
-  // Campaign roster membership — assign this person to campaigns from their own profile.
+  // The campaigns this person is on — read-only here. Assigning and unassigning happen on Users with
+  // that campaign picked, where the member sheet asks for the crew and says what moves first (plan §G):
+  // an Assign here would join them with no crew and move a returning person's doors unseen.
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
     queryFn: () => api('/admin/campaigns'),
@@ -271,31 +295,25 @@ export default function AdminUserDetail() {
     queryFn: () => api(`/admin/memberships/${userId}/campaigns`),
     enabled: !!userId,
   });
-  // Campaign NAMES for the activate/deactivate confirm. /crews resolves names and is not
-  // grant-filtered, so the disclosure names every campaign the switch reaches — the roster UI
-  // above keeps its own /campaigns id list (different query, different invalidation).
+  // Campaign NAMES for the activate/deactivate confirm. /crews names every campaign the switch
+  // reaches, for every reader, so the disclosure is whole — the Campaigns list above keeps its own
+  // /campaigns id list (different query, different invalidation).
   const crewsQ = useQuery({
     queryKey: ['admin', 'member-crews', userId],
     queryFn: () => api(`/admin/memberships/${userId}/crews`),
     enabled: !!userId,
   });
-  const assignCampaign = useMutation({
-    mutationFn: (campaignId) =>
-      api(`/admin/campaigns/${campaignId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
+  // Unpause, from the state buttons (the pause notice's Review opens the pause itself).
+  const unpause = useMutation({
+    mutationFn: (pauseId) => api(`/admin/pace-pauses/${pauseId}/unpause`, { method: 'POST' }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'membership-campaigns', userId] });
-      flash('success', 'Added to campaign.');
+      invalidatePaceCaches(qc);
+      flash('success', 'Unpaused. They can record again.');
     },
-    onError: (err) => flash('error', err.message),
-  });
-  const unassignCampaign = useMutation({
-    mutationFn: (campaignId) =>
-      api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'membership-campaigns', userId] });
-      flash('success', 'Removed from campaign.');
+    onError: (err) => {
+      invalidatePaceCaches(qc);
+      flash('error', err.message);
     },
-    onError: (err) => flash('error', err.message),
   });
 
   // Delete account (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md §E1). The viewer's own membership here
@@ -519,8 +537,139 @@ export default function AdminUserDetail() {
   const onAccountDeleted = (outcome) =>
     leaveProfile(outcome === 'gone' ? goneNotice(displayName(user)) : accountDeletedText(user));
 
+  // Where they stand (rosterView.standing, the Team page's rule) and the buttons for it, near the top
+  // (lib/personActions.js, Part 1's table): Reactivate, Resend invite, Set temporary password or Unpause.
+  // Deactivate stays in the danger zone at the bottom, beside what folds away under More options.
+  const accountStatus = user.isActive ? 'active' : 'deactivated';
+  const st = standing(
+    { userId: String(userId), status: accountStatus, lastLoginAt: user.lastLoginAt, createdAt: user.createdAt },
+    pausedIds
+  );
+  // Never signed in (an account made since sign-ins were recorded) or No sign-in recorded (older).
+  const signedIn = standing({ userId: '', status: 'active', lastLoginAt: user.lastLoginAt, createdAt: user.createdAt });
+  const access = personAccess({
+    viewerRole,
+    viewerId: currentUser?.id,
+    target: { userId: String(userId), role: user.role, status: accountStatus, isSuperAdmin: !!user.isSuperAdmin, lastLoginAt: user.lastLoginAt },
+  });
+  // The open pause this viewer may lift: the blocking one, or for an org admin one that isn't blocking
+  // right now (plan §D.5; the web panel's rule), which personButtons puts under More options.
+  const openPause =
+    pausedHere ||
+    (isAdminRole(viewerRole)
+      ? (pausedQ.data?.pauses || []).find((p) => String(p.userId) === String(userId) && p.status === 'paused')
+      : null) ||
+    null;
+  const buttons = personButtons({ st, access, canUnpause: !!openPause });
+  const moreActions = buttons.more.filter((k) => k === 'resend' || k === 'temp-password' || k === 'unpause');
+
+  // Cancel first, as every confirm in the app (Android lays the buttons out in array order).
+  const confirmResend = () =>
+    Alert.alert(
+      'Resend invite?',
+      `Email ${user.email} a new set-password link.\n\nThis replaces any earlier invite or reset link — if they still have one, it will stop working.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send', onPress: () => resendInvite.mutate() },
+      ]
+    );
+  const confirmUnpause = () => {
+    if (!openPause) return;
+    Alert.alert(
+      `Unpause ${displayName(user)}?`,
+      'They can record again right away, and their count starts over. Nothing they saved is changed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Unpause', onPress: () => unpause.mutate(openPause.id) },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  // One button per state action, wherever personButtons puts it.
+  const stateButton = (key) => {
+    if (key === 'reactivate') {
+      return (
+        <Pressable
+          key={key}
+          onPress={onToggleActive}
+          disabled={toggleActive.isPending}
+          style={[styles.secondaryBtn, { backgroundColor: colors.successBg, borderColor: colors.successBorder }]}
+        >
+          <Text style={[styles.secondaryBtnText, { color: colors.successFg }]}>Reactivate account</Text>
+        </Pressable>
+      );
+    }
+    if (key === 'resend') {
+      return (
+        <Pressable key={key} onPress={confirmResend} disabled={resendInvite.isPending} style={styles.secondaryBtn}>
+          <Text style={styles.secondaryBtnText}>{resendInvite.isPending ? 'Sending…' : 'Resend invite'}</Text>
+        </Pressable>
+      );
+    }
+    if (key === 'temp-password') {
+      return (
+        <Pressable key={key} onPress={() => setShowResetPw((s) => !s)} style={styles.secondaryBtn}>
+          <Text style={styles.secondaryBtnText}>{showResetPw ? 'Cancel' : 'Set temporary password'}</Text>
+        </Pressable>
+      );
+    }
+    if (key === 'unpause') {
+      return (
+        <Pressable key={key} onPress={confirmUnpause} disabled={unpause.isPending} style={styles.secondaryBtn}>
+          <Text style={styles.secondaryBtnText}>{unpause.isPending ? 'Unpausing…' : 'Unpause'}</Text>
+        </Pressable>
+      );
+    }
+    return null;
+  };
+
+  const resetPwForm = showResetPw ? (
+    <View style={styles.resetPwBox}>
+      <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
+      <Text
+        style={{
+          ...type.caption,
+          color: colors.textMuted,
+          marginBottom: spacing.sm,
+        }}
+      >
+        The user will be required to choose a new password the next time
+        they log in.
+      </Text>
+      <PasswordInput
+        value={newPassword}
+        onChangeText={setNewPassword}
+        autoComplete="new-password"
+        placeholder="••••••••"
+      />
+      <Pressable
+        onPress={onResetPw}
+        disabled={!isValidTempPassword(newPassword) || resetPw.isPending}
+        style={[
+          styles.saveBtn,
+          {
+            marginTop: spacing.md,
+            opacity:
+              isValidTempPassword(newPassword) && !resetPw.isPending ? 1 : 0.5,
+          },
+        ]}
+      >
+        {resetPw.isPending ? (
+          <ActivityIndicator color={colors.textInverse} />
+        ) : (
+          <Text style={styles.saveBtnText}>Set password</Text>
+        )}
+      </Pressable>
+    </View>
+  ) : null;
+
   const stats = statsQ.data;
-  const activities = activityQ.data?.activities || [];
+  const activities = recentRows(activityQ.data?.pages);
+  // A team lead's totals cover only the campaigns they manage (item 40), so they say so — and leave
+  // out miles, which join one campaign's doors to the next in a straight line and read wrong once
+  // the other campaigns are gone.
+  const leadTotals = viewerRole === 'lead';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -624,10 +773,25 @@ export default function AdminUserDetail() {
             <Text style={styles.headerMeta}>
               Member since {formatDate(user.createdAt)}
             </Text>
+            {/* Before 2026-05-15 Doorline didn't record sign-ins, so an older account with none on
+                record reads "No sign-in recorded", never "Never". */}
             <Text style={styles.headerMeta}>
-              Last password login {formatRelative(user.lastLoginAt)}
+              {signedIn === 'never-signed-in'
+                ? 'Never signed in'
+                : signedIn === 'no-sign-in-recorded'
+                  ? 'No sign-in recorded'
+                  : `Last password login ${formatRelative(user.lastLoginAt)}`}
             </Text>
+            {access.staff ? <Text style={styles.headerMeta}>Managed by Doorline staff</Text> : null}
           </View>
+
+          {/* The buttons for where they stand, near the top. */}
+          {buttons.top.length ? (
+            <View style={[styles.card, styles.stateCard]}>
+              {buttons.top.map(stateButton)}
+              {buttons.top.includes('temp-password') ? resetPwForm : null}
+            </View>
+          ) : null}
 
           {pausedHere ? (
             <Pressable
@@ -823,87 +987,9 @@ export default function AdminUserDetail() {
           </View>
           )}
 
-          {/* Password — right under the profile/role section for quick access.
-              A lead may set one only for canvasser accounts (their crew). */}
-          {(isAdminViewer || user.role === 'canvasser') && (
-          <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Password</Text>
-            <Pressable
-              onPress={() => setShowResetPw((s) => !s)}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>
-                {showResetPw ? 'Cancel' : 'Set temporary password'}
-              </Text>
-            </Pressable>
-
-            {/* Never-signed-in only — lastLoginAt is written in exactly one place, so null is
-                unambiguous, and a resend kills any link they already hold. */}
-            {!user.lastLoginAt && (
-              <Pressable
-                onPress={() =>
-                  Alert.alert(
-                    'Resend invite?',
-                    `Email ${user.email} a new set-password link.\n\nThis replaces any earlier invite or reset link — if they still have one, it will stop working.`,
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Send', onPress: () => resendInvite.mutate() },
-                    ]
-                  )
-                }
-                disabled={resendInvite.isPending}
-                style={styles.secondaryBtn}
-              >
-                <Text style={styles.secondaryBtnText}>
-                  {resendInvite.isPending ? 'Sending…' : 'Resend invite'}
-                </Text>
-              </Pressable>
-            )}
-
-            {showResetPw && (
-              <View style={styles.resetPwBox}>
-                <Text style={styles.formLabel}>Temporary password (min 8 chars)</Text>
-                <Text
-                  style={{
-                    ...type.caption,
-                    color: colors.textMuted,
-                    marginBottom: spacing.sm,
-                  }}
-                >
-                  The user will be required to choose a new password the next time
-                  they log in.
-                </Text>
-                <PasswordInput
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  autoComplete="new-password"
-                  placeholder="••••••••"
-                />
-                <Pressable
-                  onPress={onResetPw}
-                  disabled={!isValidTempPassword(newPassword) || resetPw.isPending}
-                  style={[
-                    styles.saveBtn,
-                    {
-                      marginTop: spacing.md,
-                      opacity:
-                        isValidTempPassword(newPassword) && !resetPw.isPending ? 1 : 0.5,
-                    },
-                  ]}
-                >
-                  {resetPw.isPending ? (
-                    <ActivityIndicator color={colors.textInverse} />
-                  ) : (
-                    <Text style={styles.saveBtnText}>Set password</Text>
-                  )}
-                </Pressable>
-              </View>
-            )}
-          </View>
-          )}
-
-          {/* Campaigns — assign from the profile. Admin-only: a lead's creations are
-              auto-assigned, and leads never (un)assign (owner decision, item A5-C). */}
+          {/* Campaigns — the ones they're on, read-only. Assigning and unassigning happen on Users
+              with that campaign picked, where the member sheet asks for the crew and shows what moves
+              first; each row goes there. Admin-only, as the list always was. */}
           {isAdminViewer && (
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Campaigns</Text>
@@ -911,22 +997,23 @@ export default function AdminUserDetail() {
               <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.sm }} />
             ) : (
               (() => {
-                const assigned = new Set(userCampaignsQ.data?.campaignIds || []);
-                const campaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
+                const assigned = new Set((userCampaignsQ.data?.campaignIds || []).map(String));
+                const campaigns = (campaignsQ.data?.campaigns || []).filter(
+                  (c) => c.isActive && assigned.has(String(c._id))
+                );
                 if (campaigns.length === 0) {
-                  return <Text style={styles.campaignEmpty}>No active campaigns.</Text>;
+                  return <Text style={styles.campaignEmpty}>Not on any active campaign.</Text>;
                 }
-                const pendingId = assignCampaign.isPending
-                  ? assignCampaign.variables
-                  : unassignCampaign.isPending
-                    ? unassignCampaign.variables
-                    : null;
                 return campaigns.map((c) => {
                   const cid = String(c._id);
-                  const on = assigned.has(cid);
-                  const busy = pendingId === cid;
                   return (
-                    <View key={cid} style={styles.campaignRow}>
+                    <Pressable
+                      key={cid}
+                      onPress={() => router.push(`/(app)/admin/users?campaignId=${cid}`)}
+                      accessibilityRole="button"
+                      accessibilityHint="Opens Users on this campaign"
+                      style={({ pressed }) => [styles.campaignRow, pressed && { opacity: 0.7 }]}
+                    >
                       <View style={{ flex: 1 }}>
                         <Text style={styles.campaignName}>{c.name}</Text>
                         <Text style={styles.campaignMeta}>
@@ -934,27 +1021,21 @@ export default function AdminUserDetail() {
                           {c.type === 'lit_drop' ? ' · Lit drop' : ' · Survey'}
                         </Text>
                       </View>
-                      <Pressable
-                        onPress={() => (on ? unassignCampaign.mutate(cid) : assignCampaign.mutate(cid))}
-                        disabled={busy}
-                        style={[styles.campaignBtn, on ? styles.campaignBtnOn : styles.campaignBtnOff, busy && { opacity: 0.5 }]}
-                      >
-                        <Text style={[styles.campaignBtnText, on ? styles.campaignBtnTextOn : styles.campaignBtnTextOff]}>
-                          {busy ? '…' : on ? 'Unassign' : 'Assign'}
-                        </Text>
-                      </Pressable>
-                    </View>
+                      <Text style={styles.campaignChevron}>›</Text>
+                    </Pressable>
                   );
                 });
               })()
             )}
+            <Text style={styles.campaignFooter}>Assign or unassign from Users on that campaign.</Text>
           </View>
           )}
 
-          {/* Lifetime stats */}
+          {/* Totals: lifetime for an org admin; for a team lead, the campaigns they manage only
+              (item 40), so they say so and leave out miles. */}
           <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Activity (lifetime)</Text>
-            {statsQ.isLoading ? (
+            <Text style={styles.sectionLabel}>{leadTotals ? 'On your campaigns' : 'Activity (lifetime)'}</Text>
+            {statsQ.isLoading || !viewerRole ? (
               <ActivityIndicator color={colors.brand} />
             ) : statsQ.error ? (
               <Text style={styles.errorText}>{statsQ.error.message}</Text>
@@ -973,14 +1054,17 @@ export default function AdminUserDetail() {
                     label="Lit drops"
                     value={(stats.litDropped ?? 0).toLocaleString()}
                   />
-                  <StatCell
-                    label="Miles walked"
-                    value={metersToMiles(stats.distanceMeters)}
-                  />
+                  {leadTotals ? null : (
+                    <StatCell
+                      label="Miles walked"
+                      value={metersToMiles(stats.distanceMeters)}
+                    />
+                  )}
                 </View>
                 <Text style={styles.statMeta}>
-                  {stats.campaignsWorked || 0}{' '}
-                  {stats.campaignsWorked === 1 ? 'campaign' : 'campaigns'} worked
+                  {leadTotals
+                    ? `${(stats.campaignsWorked || 0).toLocaleString()} of your campaigns`
+                    : `${stats.campaignsWorked || 0} ${stats.campaignsWorked === 1 ? 'campaign' : 'campaigns'} worked`}
                   {stats.lastActivityAt
                     ? ` · Last activity ${formatRelative(stats.lastActivityAt)}`
                     : ''}
@@ -989,12 +1073,12 @@ export default function AdminUserDetail() {
             ) : null}
           </View>
 
-          {/* Recent activity */}
+          {/* Recent activity — the newest 5, then Show more adds 10. */}
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Recent activity</Text>
             {activityQ.isLoading ? (
               <ActivityIndicator color={colors.brand} />
-            ) : activityQ.error ? (
+            ) : activityQ.error && !activities.length ? (
               <Text style={styles.errorText}>{activityQ.error.message}</Text>
             ) : activities.length === 0 ? (
               <View style={styles.emptyInline}>
@@ -1033,46 +1117,41 @@ export default function AdminUserDetail() {
                 ))}
               </View>
             )}
-          </View>
-
-          {/* Account actions — deactivate/reactivate lives at the bottom (danger zone).
-              A lead may switch only canvasser accounts (their crew); the server enforces
-              the same boundary. */}
-          {!isSelf && (isAdminViewer || user.role === 'canvasser') && (
-            <View style={styles.card}>
-              <Text style={styles.sectionLabel}>Account</Text>
+            {activityQ.hasNextPage ? (
               <Pressable
-                onPress={onToggleActive}
-                disabled={toggleActive.isPending}
-                style={[
-                  styles.secondaryBtn,
-                  {
-                    backgroundColor: user.isActive
-                      ? colors.dangerBg
-                      : colors.successBg,
-                    borderColor: user.isActive
-                      ? colors.dangerBorder
-                      : colors.successBorder,
-                  },
-                ]}
+                onPress={() => activityQ.fetchNextPage()}
+                disabled={activityQ.isFetchingNextPage}
+                style={[styles.secondaryBtn, { marginTop: spacing.md }, activityQ.isFetchingNextPage && { opacity: 0.6 }]}
               >
-                <Text
-                  style={[
-                    styles.secondaryBtnText,
-                    {
-                      color: user.isActive ? colors.danger : colors.success,
-                    },
-                  ]}
-                >
-                  {user.isActive ? 'Deactivate' : 'Reactivate'}
+                <Text style={styles.secondaryBtnText}>
+                  {activityQ.isFetchingNextPage ? 'Loading…' : 'Show more'}
                 </Text>
               </Pressable>
+            ) : null}
+          </View>
+
+          {/* Account actions — Deactivate lives at the bottom (danger zone), with Remove from org and
+              More options: there, the rarer state actions (Resend invite for an account with no
+              sign-in on record, a temporary password for someone paused) and Delete account. A lead
+              may switch only canvasser accounts (their crew); the server enforces the same boundary. */}
+          {buttons.more.includes('deactivate') || offerRemove || offerDelete || moreActions.length ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionLabel}>Account</Text>
+              {buttons.more.includes('deactivate') ? (
+                <Pressable
+                  onPress={onToggleActive}
+                  disabled={toggleActive.isPending}
+                  style={[styles.secondaryBtn, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}
+                >
+                  <Text style={[styles.secondaryBtnText, { color: colors.danger }]}>Deactivate</Text>
+                </Pressable>
+              ) : null}
 
               {offerRemove && <RemoveFromOrgButton onPress={onRemove} pending={removeFromOrg.isPending} />}
 
-              {/* Delete account, tucked behind More options so it's hard to reach by accident;
-                  the sheet then asks twice. */}
-              {offerDelete && (
+              {/* Tucked behind More options so they're hard to reach by accident; Delete then asks
+                  twice in its sheet. */}
+              {offerDelete || moreActions.length ? (
                 <>
                   <Pressable
                     onPress={() => setMoreOpen((v) => !v)}
@@ -1083,7 +1162,13 @@ export default function AdminUserDetail() {
                   >
                     <Text style={styles.moreToggleText}>More options {moreOpen ? '▾' : '▸'}</Text>
                   </Pressable>
-                  {moreOpen && (
+                  {moreOpen && moreActions.length ? (
+                    <View style={styles.moreActions}>
+                      {moreActions.map(stateButton)}
+                      {moreActions.includes('temp-password') ? resetPwForm : null}
+                    </View>
+                  ) : null}
+                  {moreOpen && offerDelete && (
                     <View style={styles.deleteBox}>
                       <Text style={styles.deleteTitle}>Delete account</Text>
                       <Text style={styles.deleteText}>{deleteAccountBlurb(user)}</Text>
@@ -1102,9 +1187,9 @@ export default function AdminUserDetail() {
                     </View>
                   )}
                 </>
-              )}
+              ) : null}
             </View>
-          )}
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -1237,19 +1322,10 @@ function makeStyles(t) {
   },
   campaignName: { ...type.bodyStrong, fontSize: 14 },
   campaignMeta: { ...type.caption, marginTop: 1 },
-  campaignBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    minWidth: 88,
-    alignItems: 'center',
-  },
-  campaignBtnOn: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerBg },
-  campaignBtnOff: { borderColor: colors.brand, backgroundColor: colors.brandTint },
-  campaignBtnText: { fontSize: 12, fontWeight: '700' },
-  campaignBtnTextOn: { color: colors.danger },
-  campaignBtnTextOff: { color: colors.brand },
+  campaignChevron: { ...type.body, color: colors.textMuted },
+  campaignFooter: { ...type.caption, marginTop: spacing.sm },
+  stateCard: { gap: spacing.sm },
+  moreActions: { marginTop: spacing.sm, gap: spacing.sm },
   formLabel: {
     ...type.caption,
     color: colors.textPrimary,

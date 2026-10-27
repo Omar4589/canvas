@@ -115,7 +115,9 @@ before(async () => {
     act({ replaced: { actionType: 'not_home', timestamp: OLD, location: loc(-1), distanceFromHouseMeters: 10, nearest: null } }),
   ]);
 
-  const survey = (accuracy, extra = {}) => ({ _id: oid(), organizationId: ids.org, campaignId: ids.campaign, householdId: ids.door, userId: ids.u5, location: { lat: P.lat, lng: P.lng, accuracy, ...extra }, createdAt: RECENT, updatedAt: RECENT });
+  // Each raw row gets its own voterId/passId: SurveyResponse is unique on that pair, and with the
+  // integration preload (scripts/testIndexPreload.mjs) the index exists before these inserts run.
+  const survey = (accuracy, extra = {}) => ({ _id: oid(), organizationId: ids.org, campaignId: ids.campaign, householdId: ids.door, userId: ids.u5, voterId: oid(), passId: oid(), location: { lat: P.lat, lng: P.lng, accuracy, ...extra }, createdAt: RECENT, updatedAt: RECENT });
   await SurveyResponse.collection.insertMany([survey(10), survey(-2), { ...survey(10), location: { lat: P.lat, lng: 200, accuracy: 10 } }]);
   await SurveyResponseArchive.collection.insertMany([survey(10), survey(0)]);
   await UnknockRunChunk.collection.insertMany([

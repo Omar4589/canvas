@@ -20,6 +20,14 @@
 > `client/src/pages/UsersPage.jsx`, `client/src/components/UserProfileModal.jsx`,
 > `mobile/app/(app)/admin/users.jsx`, `mobile/app/(app)/admin/users/[id].jsx`, the Help Center inbox and
 > most of `docs/`.
+>
+> **Later (2026-10-27, [PROPOSAL_PEOPLE_PAGES.md](PROPOSAL_PEOPLE_PAGES.md)):** the settings card moved off
+> the Users page to a new org **Settings** page (`/settings`, org admins; `components/settings/`). *Who gets
+> the email* became a search box with an **Also email** list, and anyone no longer an admin or team lead
+> shows as *Not emailed* (`GET /settings` gained `chosen`) instead of silently failing every Save. The
+> alert email's last line now names the Settings page. Unpause moved to the person panel's state buttons
+> and asks first, like the Audit page's. Where this plan says *Users page* for the card, read *Settings
+> page*.
 
 Related: [AUDIT.md](AUDIT.md) (the GPS audit and its `rapid` flag, which this builds on),
 [CANVASSER_APP.md](CANVASSER_APP.md), [ADMIN_APP.md](ADMIN_APP.md), [EMAIL.md](EMAIL.md),

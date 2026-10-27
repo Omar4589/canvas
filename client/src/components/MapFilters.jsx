@@ -420,7 +420,7 @@ export default function MapFilters({
             like it lost them. */}
         {buildingCount > 0 && (
           <p className="mt-2 rounded border border-border bg-sunken px-2 py-1.5 text-[11px] leading-snug text-fg-muted">
-            🏢 <strong className="text-fg">{buildingCount.toLocaleString()}</strong> building
+            <strong className="text-fg">{buildingCount.toLocaleString()}</strong> building
             {buildingCount === 1 ? '' : 's'} on screen hold{' '}
             <strong className="text-fg">{stackedDoorCount.toLocaleString()}</strong> doors on shared pins. Click one to
             see every door in it.

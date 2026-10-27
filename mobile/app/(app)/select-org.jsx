@@ -140,7 +140,7 @@ export default function SelectOrgScreen() {
             ]}
           >
             <View style={styles.cardLeft}>
-              <Text style={styles.platformTitle}>🌐 Platform view</Text>
+              <Text style={styles.platformTitle}>Platform view</Text>
               <Text style={styles.platformMeta}>All orgs · super admin</Text>
             </View>
             <Text style={styles.chevron}>›</Text>

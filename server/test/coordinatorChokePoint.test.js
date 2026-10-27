@@ -21,14 +21,11 @@ const SRC = path.resolve(HERE, '../src');
 // belongs to IN ONE CAMPAIGN. (It lived on Membership until crews became per-campaign; the guard
 // moved with it, because the hazard did.)
 const ALLOWED = new Set([
-  // The update path. Writes the roster row, then re-stamps this campaign's ledger, then files a
-  // CoordinatorChange. Everything that reassigns an existing crew member goes through here.
+  // The choke point. Every crew change runs here as one job kept on the roster row (claim the crew,
+  // re-stamp this campaign's ledger, file a CoordinatorChange), and so does every way back onto a
+  // campaign roster (joinCampaignCrew): the add by email, the add from the organization, and a book.
+  // leadCrew.js used to write the crew itself on the create path; it now calls joinCampaignCrew.
   'services/memberships/setCoordinator.js',
-  // The create path. A lead creating (or linking) a canvasser puts them on this campaign with a
-  // crew in one step, and re-stamps any ORPHANED history — org removal hard-deletes the Membership
-  // but keeps the knocks, so linking a returning canvasser back in can inherit rows stamped with
-  // their old team.
-  'routes/admin/leadCrew.js',
   // ── THE SANCTIONED EXCEPTION ───────────────────────────────────────────────────────────────
   // When a coordinator leaves the ORG we clear their crew's coordinatorId — nobody keeps
   // supervising from outside — but we deliberately DO NOT touch the ledger. The stamp on those old
@@ -62,8 +59,8 @@ const ALLOWED = new Set([
 
 const WRITE_CALL = /CampaignAssignment\.(updateOne|updateMany|findOneAndUpdate|create|bulkWrite)\b/;
 
-// How many lines after the call opener still count as "the payload". A Membership write is a
-// A roster write is a handful of lines; anything further away is a different statement. Mentioning coordinatorId
+// How many lines after the call opener still count as "the payload". A roster write is a handful
+// of lines; anything further away is a different statement. Mentioning coordinatorId
 // somewhere ELSE in a file that also happens to deactivate a member is not a violation — only a
 // write whose own payload carries the field is.
 const PAYLOAD_WINDOW = 8;

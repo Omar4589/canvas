@@ -186,9 +186,12 @@ export const buildReportSnapshot = async ({
   const teamClause = team ? teamClauseFor(inputs.coordinatorIds) : null;
   const fence = FENCE(fenceAt);
 
+  // `users`: who made the knocks each window counts, for the builder's one-canvasser check (frozen as
+  // provenance.canvassers — internal, shapeWindow never ships it). An all-time team report reads it there
+  // instead of re-reading every visit of the campaign (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N, code review).
   const windows = [
-    { name: 'cumulative', from: null, to: rangeEnd, acc: emptyAcc() },
-    { name: 'period', from: rangeStart, to: rangeEnd, acc: emptyAcc() },
+    { name: 'cumulative', from: null, to: rangeEnd, acc: emptyAcc(), users: new Set() },
+    { name: 'period', from: rangeStart, to: rangeEnd, acc: emptyAcc(), users: new Set() },
   ];
   const earlierEnd = compared?.end ? new Date(compared.end) : null;
   // The earlier report froze what it had RECEIVED by its cut-off (its fence), timed before its
@@ -198,7 +201,7 @@ export const buildReportSnapshot = async ({
   // Counting "timed before the cut-off" read a phone clock a few minutes fast as a door taken away
   // (NUM-3). A cut-off at or after the period's end changes nothing: every row is timed before it.
   const earlierCut = earlierEnd && compared.cut ? new Date(compared.cut) : null;
-  if (earlierEnd) windows.push({ name: 'earlier', from: null, to: earlierEnd, cut: earlierCut, acc: emptyAcc() });
+  if (earlierEnd) windows.push({ name: 'earlier', from: null, to: earlierEnd, cut: earlierCut, acc: emptyAcc(), users: new Set() });
   const inWindow = (w, a) => {
     const ms = new Date(a.timestamp).getTime();
     if ((w.from && ms < w.from.getTime()) || ms >= w.to.getTime()) return false;
@@ -293,7 +296,7 @@ export const buildReportSnapshot = async ({
   const runBatch = async (hhIds) => {
     await beforeBatch();
     const [scopeRows, statusRows, households] = await Promise.all([
-      CanvassActivity.find(knockMatch(hhIds), { householdId: 1, passId: 1, actionType: 1, timestamp: 1, createdAt: 1 })
+      CanvassActivity.find(knockMatch(hhIds), { householdId: 1, passId: 1, actionType: 1, timestamp: 1, createdAt: 1, userId: 1 })
         .sort({ timestamp: 1, _id: 1 })
         .lean(),
       showMap
@@ -336,6 +339,7 @@ export const buildReportSnapshot = async ({
       windows.forEach((w, i) => {
         const acts = g.acts.filter((a) => inWindow(w, a));
         if (!acts.length) return;
+        for (const a of acts) if (a.userId) w.users.add(String(a.userId));
         const acc = w.acc;
         acc.knocks += 1;
         let survey = 0, lit = 0, refused = 0, notTarget = 0, contact = 0;
@@ -453,7 +457,7 @@ export const buildReportSnapshot = async ({
       coverage: {},
       surveyBreakdowns: cumSurvey.surveyBreakdowns,
       tagBreakdowns: cumSurvey.tagBreakdowns,
-      provenance: cumSurvey.provenance,
+      provenance: { ...cumSurvey.provenance, canvassers: cum.users.size },
     },
     period: {
       totals: totalsOf(period.acc, periodSurvey),
@@ -461,7 +465,7 @@ export const buildReportSnapshot = async ({
       coverage: {},
       surveyBreakdowns: periodSurvey.surveyBreakdowns,
       tagBreakdowns: periodSurvey.tagBreakdowns,
-      provenance: periodSurvey.provenance,
+      provenance: { ...periodSurvey.provenance, canvassers: period.users.size },
     },
   };
   assertInvariants(stats);

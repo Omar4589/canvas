@@ -236,12 +236,18 @@ export function InsetActionRow({ label, leading, onPress, disabled, tone = 'bran
   );
 }
 
-// A row's leading glyph. The app has no icon library — an emoji in a fixed 24pt box is the
-// convention (the chevrons are text glyphs for the same reason). The FIXED WIDTH is the point:
-// every label in a group then starts at the same x, which is the whole job of the slot.
-export const RowEmoji = ({ children }) => {
+// A row's leading glyph: a line icon from components/icons/navIcons.jsx (the web sidebar's
+// drawings), never an emoji, in a fixed 24pt box. The FIXED WIDTH is the point: every label in a
+// group then starts at the same x, which is the whole job of the slot. `tone="danger"` matches
+// InsetActionRow's danger label, so Sign out's icon and words are one color.
+export const RowIcon = ({ icon: Icon, tone }) => {
+  const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  return <Text style={styles.rowEmoji}>{children}</Text>;
+  return (
+    <View style={styles.rowIcon}>
+      <Icon color={tone === 'danger' ? colors.danger : colors.textSecondary} size={20} />
+    </View>
+  );
 };
 
 // The group's headline number: small caps label over a large tabular value. `subAccent` /
@@ -394,8 +400,8 @@ function makeStyles(t) {
     // `type.body` is 15pt and `type.bodyStrong` is 15/600, so the menu step is exactly the weight.
     rowLabelMenu: { fontWeight: '600' },
     rowLabelHero: { ...type.h3 },
-    // Sized to match the label column's origin: see RowEmoji.
-    rowEmoji: { fontSize: 18, width: 24, textAlign: 'center' },
+    // Sized to match the label column's origin: see RowIcon.
+    rowIcon: { width: 24, alignItems: 'center' },
     rowValue: { ...type.bodyStrong, fontVariant: ['tabular-nums'], color: colors.textPrimary },
     // type.caption is already 13/textSecondary (4.83:1). textMuted here would be 2.54:1.
     sub: { ...type.caption, marginTop: 1 },

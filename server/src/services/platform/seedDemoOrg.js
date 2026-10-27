@@ -1179,9 +1179,12 @@ export async function seedDemoOrg({
       const lead = leadUsers[i % leadUsers.length];
       if (String(lead._id) === String(u._id)) continue; // nobody coordinates themselves
       crewByUser.set(String(u._id), String(lead._id));
+      // Every crew write outside a crew job also clears any job on the row
+      // (services/memberships/setCoordinator.js), or a stale one would offer a Finish it that moves
+      // this crew's staged doors to No team.
       await CampaignAssignment.updateOne(
         { campaignId: campaign._id, userId: u._id },
-        { $set: { coordinatorId: lead._id } }
+        { $set: { coordinatorId: lead._id }, $unset: { crewJob: '' } }
       );
     }
     log(`   crews: ${leadUsers.map((l) => l.email).join(' + ')} over ${crewByUser.size} canvasser(s)`);

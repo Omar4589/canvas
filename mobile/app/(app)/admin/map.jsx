@@ -1713,7 +1713,7 @@ export default function AdminMap() {
               {overlapDoorCount > 0 ? (
                 <Pressable onPress={() => setShowOverlapList(true)} hitSlop={6}>
                   <Text style={styles.overlapReviewLink}>
-                    ⚠ {overlapDoorCount} double-knocked · Review
+                    {overlapDoorCount} double-knocked · Review
                   </Text>
                 </Pressable>
               ) : (
@@ -1759,7 +1759,7 @@ export default function AdminMap() {
                 <Text style={[styles.countSub, mapTruncated && styles.countWarn]} numberOfLines={1}>
                   {countClip ? `${fmtCount(countClip.shown)} in view` : ''}
                   {countClip && mapTruncated ? ' · ' : ''}
-                  {mapTruncated ? `⚠ capped at ${fmtCount(mapCap)}` : ''}
+                  {mapTruncated ? `capped at ${fmtCount(mapCap)}` : ''}
                 </Text>
               ) : null}
             </Pressable>
@@ -2115,7 +2115,7 @@ export default function AdminMap() {
               distinct canvassers among its knock+survey entries. Names the OTHERS. */}
           {hasOverlap && (
             <View style={styles.overlapWarnBadge}>
-              <Text style={styles.overlapWarnText}>⚠ Overlap</Text>
+              <Text style={styles.overlapWarnText}>Overlap</Text>
               {overlapOthers.length > 0 && (
                 <Text style={styles.overlapWarnSub}>
                   Also worked by {overlapOthers.join(', ')}{' '}
@@ -2161,7 +2161,7 @@ export default function AdminMap() {
                       </Text>
                       {overlapByPass.has(r.passId || 'none') && (
                         <View style={styles.roundOverlapChip}>
-                          <Text style={styles.roundOverlapChipText}>⚠ Overlap</Text>
+                          <Text style={styles.roundOverlapChipText}>Overlap</Text>
                         </View>
                       )}
                     </View>

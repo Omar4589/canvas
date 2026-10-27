@@ -208,9 +208,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
           </GestureDetector>
 
           <ScrollView contentContainerStyle={{ paddingBottom: spacing.md }}>
-            <Text style={styles.title}>
-              {meta.emoji} {meta.label}
-            </Text>
+            <Text style={styles.title}>{meta.label}</Text>
             <Text style={styles.desc}>{(notTargetInUse && meta.descNotTargetInUse) || meta.desc}</Text>
 
             <View style={styles.item}>

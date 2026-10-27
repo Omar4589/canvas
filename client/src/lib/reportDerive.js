@@ -36,6 +36,13 @@ export const periodPhrase = (weekStart, weekEnd) => {
   return { days: null, phrase: 'in this period', span: 'this period', noun: 'period' };
 };
 
+// Latest progress (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N): an all-time report starts on the
+// campaign's first knock, so its period IS its running total and nothing in it reads as new — no "+N"
+// pills, no quiet banner, no period sentence in the help. Its length never decides its words: a
+// campaign that began six days ago still reads "All time", never "Week of …".
+export const ALL_TIME = Object.freeze({ days: null, phrase: 'since the campaign began', span: 'all time', noun: 'all' });
+export const periodOf = (report) => (report?.allTime ? ALL_TIME : periodPhrase(report?.weekStart, report?.weekEnd));
+
 // The words each kind of period needs. A weekly report reads exactly as every report did before.
 const PERIOD_WORDS = {
   week: {
@@ -74,6 +81,13 @@ const PERIOD_WORDS = {
     titles: 'Reports',
     file: 'report',
   },
+  // An all-time report (§N): no figure of its own, so no figure words and no quiet banner.
+  all: {
+    end: "this report's last day",
+    title: 'All time',
+    titles: 'Reports',
+    file: 'all-time-report',
+  },
 };
 const wordsFor = (period) => PERIOD_WORDS[period?.noun] || PERIOD_WORDS.period;
 
@@ -83,8 +97,8 @@ export const periodStrings = (period) => {
   return {
     // The line under "Activity at a glance" says the totals run from the campaign's start
     // (totalsSinceText), so the banner says only what was quiet.
-    quiet: `${w.quiet} — no new doors were knocked ${period.phrase}.`,
-    pdfQuiet: `${w.pdfQuiet} — no new doors knocked ${period.phrase}.`,
+    quiet: w.quiet ? `${w.quiet} — no new doors were knocked ${period.phrase}.` : null,
+    pdfQuiet: w.pdfQuiet ? `${w.pdfQuiet} — no new doors knocked ${period.phrase}.` : null,
     // The map is every door reached through the report's last day, never only its dates' doors
     // (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M): "for this week" read as if it were.
     mapEmpty: 'No mapped doors on this report.',
@@ -179,6 +193,15 @@ const KPI_HELP = {
 // ones already sent to a client. A weekly report's wording is unchanged where it existed.
 const periodHelp = (period) => {
   const w = wordsFor(period);
+  // An all-time report (§N) has no figure of its own to caveat: the base sentences only.
+  if (period?.noun === 'all') {
+    return {
+      doorsKnocked: 'Every door we knocked, counted once per pass. Going back in a later pass counts again.',
+      surveyedVoters: 'How many distinct people we surveyed — counted once each, however many passes we surveyed them in. Not how many forms were filled out.',
+      homesKnocked: 'Distinct homes we have reached at least once (a home counts once no matter how many passes).',
+      goal: `Progress toward the campaign's door target, counted in the same doors as "Doors knocked" above and measured as of ${w.end} — not today.`,
+    };
+  }
   return {
     doorsKnocked: `Every door we knocked, counted once per pass. Going back in a later pass counts again. ${w.figure} counts the doors knocked ${w.within}: a door knocked ${w.twice} during one pass appears in both but once in the running total, so ${w.figures} may not add up to it.`,
     surveyedVoters: `How many distinct people we surveyed — counted once each, however many passes we surveyed them in. Not how many forms were filled out. ${w.figure} counts the people surveyed ${w.within}, so someone surveyed ${w.twice} appears in both; ${w.figures} will not add up to the running total. "Surveys taken" is the one that adds up.`,
@@ -209,14 +232,17 @@ export function supportColor(label) {
 // card, which shows a static `hint` instead.
 function deriveKpis({ isLit, t, d, period }) {
   const help = periodHelp(period);
+  // An all-time report (§N) has nothing new to show: its cards carry the total alone (delta null, no
+  // hint), as the rate card carries no pill.
+  const allTime = period.noun === 'all';
   const card = (key, label, accent, total, delta, zero, cardHelp) => ({
     key,
     label,
     value: formatCount(total),
     accent,
-    delta: delta || 0,
-    deltaText: `+${formatCount(delta)} ${period.phrase}`,
-    deltaZeroText: `${zero} ${period.phrase}`,
+    delta: allTime ? null : delta || 0,
+    deltaText: allTime ? null : `+${formatCount(delta)} ${period.phrase}`,
+    deltaZeroText: allTime ? null : `${zero} ${period.phrase}`,
     hint: null,
     help: cardHelp,
   });
@@ -267,12 +293,16 @@ export const numbersAsOfText = (numbersThrough) =>
  * The line under "Activity at a glance" (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §M): every number but the
  * "+412 this week" pills runs from the campaign's first door through the report's last day. "Totals
  * since the campaign began, through Oct 25." — without the date when the numbers stopped early, where
- * "Numbers as of" says when.
+ * "Numbers as of" says when. An all-time report (§N) has no "Numbers as of" note — its period is all
+ * time, so "the period was still running" means nothing — and says when here instead: "Totals since the
+ * campaign began, as of Oct 28."
  */
-export const totalsSinceText = (report) =>
-  !report?.numbersThrough && /^\d{4}-\d{2}-\d{2}$/.test(report?.weekEnd ?? '')
+export const totalsSinceText = (report) => {
+  if (report?.allTime && report?.numbersThrough) return `Totals since the campaign began, as of ${shortDate(report.numbersThrough)}.`;
+  return !report?.numbersThrough && /^\d{4}-\d{2}-\d{2}$/.test(report?.weekEnd ?? '')
     ? `Totals since the campaign began, through ${shortDate(report.weekEnd)}.`
     : 'Totals since the campaign began.';
+};
 
 // Each count card's noun, singular and plural, for the earlier-totals line.
 const CARD_NOUNS = {
@@ -302,6 +332,10 @@ export const earlierTotalsText = (earlierTotals) => {
   );
   if (!changes.length) return null;
   const parts = changes.map(({ card, delta }) => `${signedCount(delta)} ${CARD_NOUNS[card][Math.abs(delta) === 1 ? 0 : 1]}`);
+  // An all-time report's form (Latest progress, SIMPLIFY §N) names the earlier report's last day.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(earlierTotals.through ?? '')) {
+    return `Totals through ${shortDate(earlierTotals.through)} were updated by ${joinList(parts)} after they were first reported.`;
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(earlierTotals.before ?? '')) {
     return `Totals from before ${shortDate(earlierTotals.before)} were updated by ${joinList(parts)} after they were first reported.`;
   }
@@ -350,9 +384,9 @@ export const latestChangeText = (row) => {
  * dates), the date range when the title isn't already it, the scope, and the dates line.
  */
 export const reportHeading = (report) => {
-  const period = periodPhrase(report?.weekStart, report?.weekEnd);
+  const period = periodOf(report);
   const range = formatWeekRange(report?.weekStart, report?.weekEnd);
-  const fallback = period.noun === 'week' ? weekOfTitle(report?.weekStart) : range;
+  const fallback = period.noun === 'all' ? wordsFor(period).title : period.noun === 'week' ? weekOfTitle(report?.weekStart) : range;
   const title = report?.title || fallback;
   return {
     title,
@@ -371,7 +405,7 @@ export function deriveReportSections(report) {
   const t = cum.totals || {};
   const d = per.totals || {};
   const isLit = report?.campaignType === 'lit_drop';
-  const period = periodPhrase(report?.weekStart, report?.weekEnd);
+  const period = periodOf(report);
   const strings = periodStrings(period);
 
   const kpis = deriveKpis({ isLit, t, d, period });
@@ -459,8 +493,9 @@ export function deriveReportSections(report) {
         }
       : null;
 
-  // A "quiet week": no new doors knocked in the reported period (drives the empty-state banner).
-  const isQuietWeek = (d.doorsKnocked || 0) === 0;
+  // A "quiet week": no new doors knocked in the reported period (drives the empty-state banner). An
+  // all-time report (§N) has no "new" to be quiet about.
+  const isQuietWeek = period.noun !== 'all' && (d.doorsKnocked || 0) === 0;
 
   return {
     isLit,
@@ -478,7 +513,8 @@ export function deriveReportSections(report) {
     // The notes that qualify the numbers (§H3): what the totals run over (SIMPLIFY §M), when they were
     // taken, earlier totals that moved since they were sent, and the team overlap rule.
     totalsSince: totalsSinceText(report),
-    numbersAsOf: numbersAsOfText(report?.numbersThrough),
+    // An all-time report's totals line says "as of" itself (§N).
+    numbersAsOf: report?.allTime ? null : numbersAsOfText(report?.numbersThrough),
     earlierTotals: earlierTotalsText(report?.earlierTotals),
     teamNote: isTeamScope(report?.scope?.kind) ? TEAM_NOTE : null,
     heading: reportHeading(report),
@@ -526,7 +562,7 @@ export const pickSeries = (groups, wanted) =>
 
 /** "Weekly reports" when every report in the tab is a week, "Daily reports" for days, else "Reports". */
 export const seriesHeading = (reports = []) => {
-  const nouns = new Set(reports.map((r) => periodPhrase(r.weekStart, r.weekEnd).noun));
+  const nouns = new Set(reports.map((r) => periodOf(r).noun));
   return nouns.size === 1 ? wordsFor({ noun: [...nouns][0] }).titles : PERIOD_WORDS.period.titles;
 };
 
@@ -569,7 +605,7 @@ const slug = (s) =>
  * scope and both dates, so two scopes' PDFs for one period never collide (C12).
  */
 export const reportPdfFileName = (report, { campaignName = '' } = {}) => {
-  const period = periodPhrase(report?.weekStart, report?.weekEnd);
+  const period = periodOf(report);
   const dates =
     report?.weekStart && report?.weekEnd && report.weekStart !== report.weekEnd
       ? `${report.weekStart}-to-${report.weekEnd}`

@@ -18,7 +18,7 @@ import InfoHint from '../components/InfoHint.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import CoverageBar from '../components/CoverageBar.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
-import { IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
+import { IconBuilding, IconChevron, IconExpand, IconMinimize } from '../components/navIcons.jsx';
 import { passBookIds, visibleCutDoors, countLooseDoors, drawnCutDoors, isOffLimitsDoor, isOffLimitsStack, booksEmptiedByOffLimits, passStatusOf, targetStatusOf } from '../lib/cutMapDoors.js';
 import { bookStatusSet, matchesBookStatus } from '../lib/bookStatusFilter.js';
 import { crewCounts } from '../lib/turfCrewCounts.js';
@@ -730,7 +730,7 @@ function DiscardModal({ isActive, bookCount, draftCount, publishedCount, passLab
           </p>
         ) : worked ? (
           <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-            ⚠️ <strong>{knockCount.toLocaleString()} knock{knockCount === 1 ? '' : 's'} already recorded</strong> in this
+            <strong>{knockCount.toLocaleString()} knock{knockCount === 1 ? '' : 's'} already recorded</strong> in this
             pass{isActive ? ' — and it is LIVE' : ''}. Discarding removes its books and{' '}
             <strong>all canvasser assignments</strong>{isActive ? ' and reverts the pass to draft' : ''}. Knock history
             is kept (unless you check the box below), and a snapshot is saved — restorable from{' '}
@@ -738,7 +738,7 @@ function DiscardModal({ isActive, bookCount, draftCount, publishedCount, passLab
           </div>
         ) : isActive ? (
           <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-            ⚠️ This pass is <strong>LIVE</strong>. Discarding wipes its books and{' '}
+            This pass is <strong>LIVE</strong>. Discarding wipes its books and{' '}
             <strong>all canvasser assignments</strong>, and reverts the pass to draft. Knock history is kept
             unless you check the box below.
           </div>
@@ -1265,7 +1265,7 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
-            <span aria-hidden>🏢</span>
+            <span className="shrink-0 text-fg-muted"><IconBuilding size={16} /></span>
             <span className="truncate">{complex ? `${total} homes · a complex` : separateHomes ? `${total} homes at one map spot` : movePlan ? movePlan.address : addressLine1 || 'Apartment building'}</span>
           </div>
           <div className="text-xs text-fg-muted">{city}, {state} {zipCode}</div>
@@ -3203,7 +3203,6 @@ export default function TurfsPage() {
           never white on solid warning, which fails WCAG at this size. */}
       {!!turfs.length && crew.inactiveCanvassers > 0 && (
         <div className="mb-4 inline-flex items-center gap-1.5 rounded bg-warning-tint px-2 py-1 text-[11px] text-warning-fg">
-          <span aria-hidden="true">⚠</span>
           <span>
             {crew.inactiveCanvassers} canvasser{crew.inactiveCanvassers === 1 ? '' : 's'} deactivated
             {crew.booksAllInactive > 0
@@ -3315,7 +3314,7 @@ export default function TurfsPage() {
                       return (
                         <li key={g.name} className={`flex justify-between gap-2 ${over ? 'text-warning-fg' : 'text-fg-muted'}`}>
                           <span className="truncate">{g.name}</span>
-                          <span className="shrink-0 font-semibold">{g.doorCount.toLocaleString()}{over ? ' ⚠' : ''}</span>
+                          <span className="shrink-0 font-semibold">{g.doorCount.toLocaleString()}{over ? ' · split' : ''}</span>
                         </li>
                       );
                     })}

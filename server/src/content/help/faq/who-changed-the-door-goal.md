@@ -38,9 +38,9 @@ The **timezone** and the **attached survey** aren't recorded. A timezone change 
 
 ## Why team moves are in there
 
-Changing someone's coordinator moves **all of their past doors** onto the new team. That's a big number changing with nobody knocking a door, so it belongs in the same place as the settings changes: *"Cara: No coordinator → Bo Boss — 3,907 doors moved to Bo Boss."*
+Changing someone's coordinator moves **all of their past doors** onto the new team, and so does someone coming back to the campaign (to the crew they rejoin, or No team). That's a big number changing with nobody knocking a door, so it belongs in the same place as the settings changes: *"Cara: No coordinator → Bo Boss — 3,907 doors moved to Bo Boss."*
 
-If a reassignment only half-completed, the entry is flagged — in red on the web, with an **incomplete** tag on the phone. That's the one case where your by-team numbers won't add up to the campaign total until it's re-run.
+If a reassignment only half-completed (say the server restarted partway), the entry is flagged — in red on the web, with an **incomplete** tag on the phone — and says *Didn't finish moving*. That's the one case where your by-team numbers won't add up to the campaign total, until someone opens that person on the campaign's **Team** page and uses **Finish it** (on the phone, comes with an app update: **Users** on that campaign). The entry then also reads *Finished by a later change*.
 
 ## Who can see it
 

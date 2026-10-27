@@ -82,7 +82,7 @@ function DoNotKnockSection({ household, onChanged }) {
     return (
       <div className="border-b border-border px-4 py-3">
         <div className="text-xs uppercase tracking-wide text-fg-muted">Do not knock</div>
-        <div className="mt-1 text-sm font-medium text-danger">⛔ Nobody visits this address</div>
+        <div className="mt-1 text-sm font-medium text-danger">Nobody visits this address</div>
         <p className="mt-1 text-xs text-fg-muted">
           Suppressed in every campaign, and it will not reopen on its own — not even when new
           residents are imported here.
@@ -604,7 +604,7 @@ export default function HouseholdDetailPanel({
                 className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg"
                 title="Worked by two or more canvassers in the same pass"
               >
-                ⚠ Overlap
+                Overlap
               </span>
             )}
             {h.doNotKnock && (
@@ -612,7 +612,7 @@ export default function HouseholdDetailPanel({
                 className="inline-flex items-center gap-1 rounded-full bg-danger-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
                 title="This address asked that nobody come back — suppressed in every campaign"
               >
-                ⛔ Do not knock
+                Do not knock
               </span>
             )}
             {/* Administrative, not a resident request — warning tokens, not danger. The wording
@@ -623,7 +623,7 @@ export default function HouseholdDetailPanel({
                 className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg"
                 title="Held back by Remove apartments when turf was cut — not cut into books, not sent to phones, and not printed, anywhere in this campaign. Clear it from Turf Cutting on the walk list that owns this door."
               >
-                🚫 Not in books
+                Not in books
               </span>
             )}
           </div>
@@ -636,7 +636,7 @@ export default function HouseholdDetailPanel({
           </div>
           {overlapOthers.length > 0 && (
             <div className="mt-1.5 text-[11px] font-medium text-warning-fg">
-              ⚠ Also worked by {overlapOthers.join(', ')}{' '}
+              Also worked by {overlapOthers.join(', ')}{' '}
               {overlapByPass.size > 1 ? 'in the same pass' : 'this pass'}
             </div>
           )}
@@ -767,7 +767,7 @@ export default function HouseholdDetailPanel({
                   </span>
                   {overlapByPass.has(r.passId || 'none') && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-fg">
-                      ⚠ Overlap
+                      Overlap
                     </span>
                   )}
                 </div>

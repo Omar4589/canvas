@@ -58,9 +58,9 @@ function HelpSpans({ spans, style }) {
 
 // Callout accent per variant — a tinted well with a colored left rail + label.
 const CALLOUTS = {
-  tip: { style: 'calloutTip', label: 'Tip', icon: '💡' },
-  warning: { style: 'calloutWarn', label: 'Heads up', icon: '⚠️' },
-  note: { style: 'calloutNote', label: 'Note', icon: 'ℹ️' },
+  tip: { style: 'calloutTip', label: 'Tip' },
+  warning: { style: 'calloutWarn', label: 'Heads up' },
+  note: { style: 'calloutNote', label: 'Note' },
 };
 
 function Block({ block, styles }) {
@@ -89,9 +89,7 @@ function Block({ block, styles }) {
       const cfg = CALLOUTS[block.variant] || CALLOUTS.note;
       return (
         <View style={[styles.callout, styles[cfg.style]]}>
-          <Text style={[styles.calloutLabel, styles[`${cfg.style}Label`]]}>
-            {cfg.icon} {cfg.label}
-          </Text>
+          <Text style={[styles.calloutLabel, styles[`${cfg.style}Label`]]}>{cfg.label}</Text>
           <HelpSpans spans={block.spans} style={styles.calloutText} />
         </View>
       );

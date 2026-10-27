@@ -38,7 +38,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction, setPace } from '../../lib/recordAction';
 import { isPaused } from '../../lib/pace';
-import { foldDeltaVoters, foldDeltaHouseholds, changesPath } from '../../lib/deltaFold';
+import { foldDeltaVoters, foldDeltaHouseholds, returningDoorIds, changesPath } from '../../lib/deltaFold';
 import { isOutcomeOn } from '../../lib/outcomeToggles';
 import { bootstrapQueryFn, rosterErrorIsFinal, useSeatedRoster } from '../../lib/bootstrapQuery';
 import { guardedPush } from '../../lib/navGuard';
@@ -71,6 +71,7 @@ import { isPoint } from '../../lib/mapCamera';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
+import { PeopleIcon, ClockIcon } from '../../components/icons/tabIcons';
 
 initMapbox();
 
@@ -578,6 +579,13 @@ export default function MapScreen() {
     // arrives on an otherwise empty one.
     setPace(qc, result.pace);
     const { households = [], voters = [], serverTime } = result;
+    // A door this phone doesn't hold that it should now show — it came back (an early-voting Undo or un-mark,
+    // someone new who hasn't voted, a cleared do-not-contact). The fold below only updates doors already here,
+    // and a delta row has no address or book to draw, so pull a fresh bootstrap — the same refetch a round
+    // change triggers below, whose pending-recolor overlay keeps a just-recorded knock from reverting.
+    if (returningDoorIds(qc.getQueryData(['bootstrap'])?.households, households).length) {
+      qc.invalidateQueries({ queryKey: ['bootstrap'] });
+    }
     if (households.length || voters.length) {
       qc.setQueryData(['bootstrap'], (prev) => {
         if (!prev) return prev;
@@ -585,7 +593,7 @@ export default function MapScreen() {
         // the delta so a poll that predates the action can't revert a fresh
         // optimistic recolor / move. The fold itself (lib/deltaFold.js foldDeltaHouseholds) applies the
         // delta — status, provenance, the confirm stamp, the shared-spot flag and a server-side pin move
-        // (e.g. an admin pin-move) live — and drops a door suppressed mid-shift.
+        // (e.g. an admin pin-move) live — and drops a door suppressed mid-shift (lib/deltaFold.js isSuppressedDoor).
         const foldedHouseholds = reconcilePendingLocations(
           reconcilePendingHouseholds(foldDeltaHouseholds(prev.households, households))
         );
@@ -1528,6 +1536,7 @@ function SelectedHouseSheetContent({
   onOpen,
   onClose,
 }) {
+  const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
   return (
@@ -1552,7 +1561,9 @@ function SelectedHouseSheetContent({
       <View style={styles.sheetMetaRow}>
         {!isLitDrop && (
           <View style={styles.sheetMetaItem}>
-            <Text style={styles.sheetMetaIcon}>👥</Text>
+            <View style={styles.sheetMetaIcon}>
+              <PeopleIcon color={colors.textSecondary} size={14} />
+            </View>
             <Text style={styles.sheetMetaText}>
               <Text style={styles.sheetMetaStrong}>{voters.length}</Text>{' '}
               {voters.length === 1 ? 'voter' : 'voters'}
@@ -1566,7 +1577,9 @@ function SelectedHouseSheetContent({
         )}
         {lastSeen && (
           <View style={styles.sheetMetaItem}>
-            <Text style={styles.sheetMetaIcon}>🕒</Text>
+            <View style={styles.sheetMetaIcon}>
+              <ClockIcon color={colors.textSecondary} size={14} />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sheetMetaText}>
                 <Text style={styles.sheetMetaStrong}>Last visit</Text>{' '}
@@ -1769,7 +1782,7 @@ function makeStyles(t) {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  sheetMetaIcon: { fontSize: 14, marginRight: spacing.xs },
+  sheetMetaIcon: { marginRight: spacing.xs },
   sheetMetaText: { fontSize: 13, color: colors.textSecondary },
   sheetMetaStrong: { fontWeight: '700', color: colors.textPrimary },
   sheetMetaSub: { color: colors.textSecondary },

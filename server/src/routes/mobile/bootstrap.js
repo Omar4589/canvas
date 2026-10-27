@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { requireAuth, requireOrgMember } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
-import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
+import { KNOCKABLE_DOOR_FILTER, KNOCKABLE_DOOR_FLAGS } from '../../services/canvass/knockableDoorFilter.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
@@ -505,10 +505,10 @@ router.get('/changes', async (req, res, next) => {
       _id: 1,
       status: 1,
       lastActionAt: 1,
-      isActive: 1,
-      fullyVoted: 1, // client drops doors where everyone has now voted
-      fullyDnc: 1, // client drops doors where everyone is do-not-contact
-      doNotKnock: 1, // client drops doors whose address asked that nobody come back
+      // Every knockable-door flag (isActive, fullyVoted, fullyDnc, doNotKnock, excludedFromTurf): the phone drops a
+      // door that fails one (everyone voted, everyone asked not to be contacted, ...), and pulls a fresh bootstrap
+      // for a door it doesn't hold that passes them all — one that came back (mobile/lib/deltaFold.js).
+      ...KNOCKABLE_DOOR_FLAGS,
       // The pin, so an admin pin-move (or another canvasser's fix, or a confirm) reflects live — the same
       // projection as the bootstrap.
       ...HOUSEHOLD_PIN_PROJECTION,

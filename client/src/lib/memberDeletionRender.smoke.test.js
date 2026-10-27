@@ -7,7 +7,9 @@ import esbuild from 'esbuild';
 
 // RENDER smoke tests for deleting a member's account (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md, Part 1
 // "What you'll see", §D): the review's two variants, a blocked review, the loading state, the
-// profile's More options gate, a deleted account's profile, and its row on the Users page.
+// profile's More options gate, a deleted account's profile, and its row on the Users page. The profile
+// is the person panel now (components/people/, docs/PROPOSAL_PEOPLE_PAGES.md §D), opened as the Users
+// page opens it; More options ▸ is its inline fold-out, rendered open where a test reads what's inside.
 // renderToString EXECUTES each component body, so a hook-order slip or a branch that throws on a
 // real payload fails here, in `npm test`. The typed-email step and Escape need a browser; they were
 // checked by hand (the report that shipped this lists the cases).
@@ -81,6 +83,8 @@ const button = (html, label) => {
   return b;
 };
 const disabled = (b) => /\sdisabled=""/.test(b.attrs);
+// The panel's own chrome: × and the ‹ › arrows.
+const CHROME = /aria-label="(Close|Previous person|Next person)"/;
 
 const ADMIN = { user: { id: 'viewer' }, isSuperAdmin: false, isOrgAdmin: true, activeMembership: { role: 'admin', billingAccess: false }, canViewBilling: false };
 
@@ -196,18 +200,42 @@ test('until the preflight lands, Continue waits', async () => {
   assert.equal(disabled(button(html, 'Continue')), true);
 });
 
+// `render`: the Users page's panel, opened on one member. `renderMore`: that panel's state buttons with
+// More options ▸ open (on a campaign's Team page with onTeam), for what the fold-out holds.
 const profileEntry = () => `
   import React from 'react';
   import { renderToString } from 'react-dom/server';
   import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
   import { MemoryRouter } from 'react-router-dom';
-  import UserProfileModal from '${src('components/UserProfileModal.jsx')}';
+  import PersonPanel from '${src('components/people/PersonPanel.jsx')}';
+  import PersonActions from '${src('components/people/PersonActions.jsx')}';
+  import { personAccess, personFromMember } from '${src('lib/personAccess.js')}';
+  import { standing } from '${src('lib/rosterView.js')}';
+  import { viewerHasBillingAccess } from '${src('lib/memberDeletion.js')}';
   const noop = () => {};
+  const wrap = (node) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    return renderToString(<QueryClientProvider client={qc}><MemoryRouter>{node}</MemoryRouter></QueryClientProvider>);
+  };
   export const render = (auth, membership) => {
     globalThis.__auth = auth;
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-    return renderToString(
-      <QueryClientProvider client={qc}><MemoryRouter><UserProfileModal membership={membership} onClose={noop} /></MemoryRouter></QueryClientProvider>
+    const person = personFromMember(membership);
+    return wrap(
+      <PersonPanel personId={person.userId} ids={[person.userId]} place={() => null} lookup={(id) => (id === person.userId ? person : null)}
+        loaded scope={{ kind: 'org', pausedIds: new Set(), rosterLines: [] }} onStep={noop} onClose={noop} />
+    );
+  };
+  export const renderMore = (auth, membership, { onTeam = false } = {}) => {
+    globalThis.__auth = auth;
+    const person = personFromMember(membership);
+    const viewer = { userId: auth.user.id, isOrgAdmin: auth.isOrgAdmin, viewerBilling: viewerHasBillingAccess(auth) };
+    const scope = onTeam
+      ? { kind: 'campaign', campaignId: 'c1', campaign: { _id: 'c1', name: 'Fall Canvass' }, roster: [], pausedIds: new Set() }
+      : { kind: 'org', pausedIds: new Set() };
+    return wrap(
+      <PersonActions person={person} access={personAccess({ viewer, person, onTeam })} standing={standing(person)} scope={scope}
+        openPause={null} crewsQ={{ data: { crews: [] } }} statsQuery={{ queryKey: ['admin', 'membership-stats', person.userId], queryFn: () => new Promise(noop) }}
+        refetchStats={noop} dialogRef={{ current: false }} report={noop} markDirty={noop} onClosePanel={noop} defaultMoreOpen />
     );
   };`;
 
@@ -231,7 +259,7 @@ test('a deleted account’s profile: the header, the deletion line and Remove fr
   assert.doesNotMatch(html, /deleted\.doorline\.invalid/, 'the tombstone address never renders');
   assert.doesNotMatch(t, /Deleted user/, '"Deleted user" is the reports’ word, not the Users list’s');
   assert.deepEqual(
-    buttons(html).filter((b) => !/aria-label="Close"/.test(b.attrs)).map((b) => b.label),
+    buttons(html).filter((b) => !CHROME.test(b.attrs)).map((b) => b.label),
     ['Remove from org'],
     'billing access never hides Remove on a deleted row'
   );
@@ -242,33 +270,40 @@ test('a deleted account’s profile: the header, the deletion line and Remove fr
   assert.doesNotMatch(pending, /Deleted account Deleted account/, 'no record yet: the label alone, not twice');
 });
 
+// More options ▸ now holds Deactivate account, Remove from this campaign (a Team page) and Remove from
+// org as well as Delete account (docs/PROPOSAL_PEOPLE_PAGES.md Part 1), so where this used to check that
+// the fold-out itself was missing, it checks that Delete (and Remove from org) are missing from it.
 test('More options shows for an admin, never on a billing-access row the viewer can’t touch', async () => {
-  const { render } = await build(profileEntry());
+  const { render, renderMore } = await build(profileEntry());
   const live = (over = {}) => ({ membershipId: 'm7', role: 'canvasser', isActive: true, billingAccess: false, managedCampaignIds: [], user: SAM, ...over });
 
   const open = render(ADMIN, live());
   assert.ok(button(open, 'More options ▸'), 'closed on open');
   assert.doesNotMatch(text(open), /Delete account…/, 'the card waits behind More options');
-  assert.ok(button(open, 'Remove from org'));
+  const openMore = renderMore(ADMIN, live());
+  assert.ok(button(openMore, 'Remove from org'));
+  assert.ok(button(openMore, 'Delete account…'), 'inside the fold-out');
 
-  const lead = render({ ...ADMIN, isOrgAdmin: false, activeMembership: { role: 'lead' } }, live());
-  assert.doesNotMatch(text(lead), /More options/, 'team leads never see it');
+  // A team lead opens people on their campaign's Team page only.
+  const lead = text(renderMore({ ...ADMIN, isOrgAdmin: false, activeMembership: { role: 'lead' } }, live(), { onTeam: true }));
+  assert.doesNotMatch(lead, /Delete account|Remove from org/, 'team leads never see them');
+  assert.match(lead, /Remove from this campaign/, 'a canvasser on their campaign, theirs to remove');
 
   const self = render({ ...ADMIN, user: { id: SAM.id } }, live());
   assert.doesNotMatch(text(self), /More options/, 'not on your own profile');
 
   const billingRow = live({ role: 'admin', billingAccess: true });
-  const noBilling = text(render(ADMIN, billingRow));
-  assert.doesNotMatch(noBilling, /More options/);
+  const noBilling = text(renderMore(ADMIN, billingRow));
+  assert.doesNotMatch(noBilling, /Delete account/);
   assert.doesNotMatch(noBilling, /Remove from org/, 'the server would answer BILLING_ACCESS_REQUIRED');
-  assert.match(noBilling, /Deactivate membership/, 'Deactivate is not part of the billing rule');
+  assert.match(noBilling, /Deactivate account/, 'Deactivate is not part of the billing rule');
 
-  const withBilling = render({ ...ADMIN, activeMembership: { role: 'admin', billingAccess: true } }, billingRow);
-  assert.ok(button(withBilling, 'More options ▸'));
-  assert.ok(button(withBilling, 'Remove from org'));
+  const withBilling = { ...ADMIN, activeMembership: { role: 'admin', billingAccess: true } };
+  assert.ok(button(render(withBilling, billingRow), 'More options ▸'));
+  assert.ok(button(renderMore(withBilling, billingRow), 'Remove from org'));
 
-  const staff = text(render(ADMIN, live({ user: { ...SAM, isSuperAdmin: true } })));
-  assert.doesNotMatch(staff, /More options/, 'never a Doorline staff account');
+  const staff = text(renderMore(ADMIN, live({ user: { ...SAM, isSuperAdmin: true } })));
+  assert.doesNotMatch(staff, /Delete account/, 'never a Doorline staff account');
 });
 
 test('the Users page: a deleted row reads Deleted account, its deletion line and a Deleted pill — no email, no billing switch', async () => {
