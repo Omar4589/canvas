@@ -181,6 +181,26 @@ so the profile you build with is the profile you submit with. Don't cross them.
 
 Everything already installed keeps working while any of this is in review.
 
+### When a TestFlight build expires
+
+Apple expires every TestFlight build **90 days after upload**: it stops opening on testers' phones
+and can't be extended. Play internal-track builds never expire, and the App Store build is unaffected.
+
+The fix is **one new iOS staging build** from `main`, not four. With no native change it keeps the
+same fingerprint, so OTAs keep landing on it and the nag already reads it as current (check with
+`GET /api/build-status`). Bump `expo.version` first if the current one is live on the App Store
+(see the note above), then confirm `npm run ota:check -- --build-profile=staging` still passes:
+
+```bash
+eas build --profile staging --platform ios
+eas submit --profile staging --platform ios --id <ios-staging-build-id> \
+  --groups "Team (Expo)" --what-to-test "fresh build, the last one expired"
+```
+
+The new build carries whatever is on `main`, so treat it like an `ota:staging` from `main`: a
+feature that needs its server change live goes out after the deploy. Last hit 2026-10-27, when
+`1.0.1 (28)` (uploaded 2026-07-29) expired; `expo.version` went to `1.0.2` for its replacement.
+
 ---
 
 ## Shipping an OTA (and why it might reach nobody)
