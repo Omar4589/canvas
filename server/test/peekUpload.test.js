@@ -11,7 +11,7 @@ import ExcelJS from 'exceljs';
 import unzipper from 'unzipper';
 import archiver from 'archiver';
 import { peekUpload } from '../src/services/import/peekUpload.js';
-import { parseUpload, listWorkbookSheets, resolveFirstSheetTarget } from '../src/services/import/parseUpload.js';
+import { parseUpload, listWorkbookSheets, resolveFirstSheetTarget, dateStylesFromXml } from '../src/services/import/parseUpload.js';
 
 /** Rebuild a workbook's zip without one entry — to exercise degraded files. */
 async function rezipWithout(buf, dropPath) {
@@ -169,6 +169,24 @@ test('resolveFirstSheetTarget: skips hidden leading tabs, unless every tab is hi
   assert.equal(resolveFirstSheetTarget(allHidden, RELS_XML), 'xl/worksheets/sheet7.xml');
 });
 
+test('a workbook written with namespace prefixes resolves to its first VISIBLE tab, not the sheet1.xml guess', () => {
+  // <x:workbook><x:sheets> once matched nothing, so the import fell back to sheet1.xml — here the
+  // hidden Scratch tab — and read it silently (docs/PROPOSAL_ID_LIST_EXCEL.md, round-2 review). The
+  // link to the part is the id attribute in the relationships NAMESPACE, whatever its prefix ("rel").
+  const prefixed =
+    '<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><x:sheets><x:sheet name="Scratch" state="hidden" rel:id="rId1"/><x:sheet name="Master" rel:id="rId2"/></x:sheets></x:workbook>';
+  const prefixedRels =
+    '<pr:Relationships xmlns:pr="pkg"><pr:Relationship Id="rId1" Target="worksheets/sheet1.xml"/><pr:Relationship Id="rId2" Target="worksheets/sheet2.xml"/></pr:Relationships>';
+  assert.equal(resolveFirstSheetTarget(prefixed, prefixedRels), 'xl/worksheets/sheet2.xml');
+  assert.deepEqual(
+    listWorkbookSheets(prefixed, prefixedRels).map((s) => [s.name, s.hidden]),
+    [
+      ['Scratch', true],
+      ['Master', false],
+    ]
+  );
+});
+
 test('xlsx: unreadable rels — the preview names no tab rather than the wrong one', async () => {
   // Without the rels nothing maps a <sheet> to a zip entry, so reading falls back
   // to sheet1.xml and we can no longer PROVE which tab that is. Naming it by
@@ -200,4 +218,36 @@ test('csv: a file bigger than the decode window drops its torn trailing line', a
   assert.equal(peek.rows[0]['Voter ID'], '1234567');
   // The estimate must land near the true count (within 2%), never crash on the torn line.
   assert.ok(Math.abs(peek.estimatedRows - count) / count < 0.02, `estimate ${peek.estimatedRows} vs ${count}`);
+});
+
+test('the tab list: single quotes, entities decoded once, an extra prefixed id never stands in for the relationship id', () => {
+  const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const rels = "<Relationships><Relationship Id='rId1' Target='worksheets/sheet1.xml'/><Relationship Id='rId2' Target='worksheets/sheet2.xml'/></Relationships>";
+  const single = `<workbook xmlns:r='${R}'><sheets><sheet name='Scratch &amp; Notes' state='hidden' r:id='rId1'/><sheet name='Master' r:id='rId2'/></sheets></workbook>`;
+  assert.deepEqual(listWorkbookSheets(single, rels).map((s) => [s.name, s.target, s.hidden]), [
+    ['Scratch & Notes', 'xl/worksheets/sheet1.xml', true],
+    ['Master', 'xl/worksheets/sheet2.xml', false],
+  ]);
+  const extraId = `<workbook xmlns:r='${R}' xmlns:xr='http://schemas.microsoft.com/office/spreadsheetml/2014/revision'><sheets><sheet name='Scratch' state='hidden' r:id='rId1'/><sheet name='Master' xr:id='rId1' r:id='rId2'/></sheets></workbook>`;
+  assert.equal(resolveFirstSheetTarget(extraId, rels), 'xl/worksheets/sheet2.xml');
+});
+
+test('crafted workbook, rels and styles text parses in linear time (the regexes it replaced were quadratic)', () => {
+  // Shapes that made the old patterns rescan to the end of the text at every starting point.
+  const n = 200000;
+  const crafts = [
+    () => listWorkbookSheets('<sheets>'.repeat(n), ''),
+    () => listWorkbookSheets('<workbook><sheets><sheet name="a"' + ' x="y"'.repeat(n), ''),
+    () => listWorkbookSheets('', '<Relationship Id="a"'.repeat(n)),
+    () => dateStylesFromXml('<cellXfs>'.repeat(n)),
+    () => dateStylesFromXml('<numFmt numFmtId="1"'.repeat(n)),
+    // Tags of 256 DISTINCT attributes each (every attribute an object), and formats of 255 "[" each.
+    () => listWorkbookSheets(`<workbook><sheets>${`<sheet${Array.from({ length: 256 }, (_, i) => ` a${i}=""`).join('')}/>`.repeat(4000)}`, ''),
+    () => dateStylesFromXml(`<numFmt numFmtId="200" formatCode="${'['.repeat(255)}"/>`.repeat(28000)),
+  ];
+  for (const craft of crafts) {
+    const started = Date.now();
+    craft();
+    assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
+  }
 });

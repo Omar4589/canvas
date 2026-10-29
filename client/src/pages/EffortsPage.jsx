@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -7,15 +7,45 @@ import StatCard from '../components/StatCard.jsx';
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import PassManager from '../components/PassManager.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
-import { Card, Badge, Button, Input, Select, Modal } from '../components/ui';
+import { Card, Button, Input, Select, Modal } from '../components/ui';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
+import {
+  ArchiveWalkListDialog,
+  UnarchiveWalkListDialog,
+  WalkListStatus,
+  errorCode,
+  invalidateLifecycle,
+  isTemporaryError,
+  noticeText,
+  refreshAfterRefusal,
+} from '../components/walkListLifecycle';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
 import { useJobPoll } from '../lib/useJobPoll.js';
+import { walkListActions, walkListState } from '../lib/walkListState.js';
+import { passShortLabel } from '../lib/walkListOptions.js';
 
-const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
 // Compact token field for the tiny in-row / in-panel controls.
 const COMPACT = 'rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg focus:border-brand-accent focus:outline-none';
+
+// Whether the "Archived walk lists" section is open: a per-viewer convenience. Storage can be blocked
+// (a private window), and then it just starts closed.
+const ARCHIVED_OPEN_KEY = 'canvass.walkLists.archivedOpen';
+const readArchivedOpen = () => {
+  try {
+    return localStorage.getItem(ARCHIVED_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+const saveArchivedOpen = (open) => {
+  try {
+    if (open) localStorage.setItem(ARCHIVED_OPEN_KEY, '1');
+    else localStorage.removeItem(ARCHIVED_OPEN_KEY);
+  } catch {
+    /* blocked: remembered for this visit only */
+  }
+};
 
 function RosterPanel({ campaignId, effort }) {
   const qc = useQueryClient();
@@ -31,14 +61,19 @@ function RosterPanel({ campaignId, effort }) {
     qc.invalidateQueries({ queryKey: ['effort-crew', effort._id] });
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
   };
+  // A drawer left open while someone else archives the walk list gets the server's 409: say it, and
+  // refetch so the page flips to read-only.
   const add = useMutation({
     mutationFn: (uid) => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/members`, { method: 'POST', body: { userId: uid } }),
     onSuccess: () => { setUserId(''); invalidate(); },
+    onError: (err) => refreshAfterRefusal(qc, campaignId, err),
   });
   const remove = useMutation({
     mutationFn: (uid) => api(`/admin/campaigns/${campaignId}/efforts/${effort._id}/members/${uid}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+    onError: (err) => refreshAfterRefusal(qc, campaignId, err),
   });
+  const crewError = add.error || remove.error;
 
   const crew = crewQ.data?.crew || [];
   const crewIds = new Set(crew.map((c) => String(c.user.id)));
@@ -81,6 +116,7 @@ function RosterPanel({ campaignId, effort }) {
         </select>
         <Button size="sm" onClick={() => userId && add.mutate(userId)} disabled={!userId || add.isPending}>Add</Button>
       </div>
+      {crewError && <p className="mt-1.5 text-xs text-danger">{crewError.message}</p>}
       <Link to={`/campaigns/${campaignId}/team`} className="mt-1.5 inline-block text-[11px] font-medium text-brand-accent hover:underline">
         ＋ Add someone to the team →
       </Link>
@@ -92,7 +128,16 @@ function RosterPanel({ campaignId, effort }) {
 // list — how many doors it loses, how many books that guts — plus the snapshot
 // promise and the one thing people learn the hard way: moving doors back later
 // does NOT rebuild their old books. `data` is the claim 409 body (doors-owned).
-function MoveConfirmModal({ effortName, data, pending, onCancel, onConfirm }) {
+//
+// A snapshot of an ARCHIVED pass can only be restored once that pass is back (an archived pass is
+// view-only on Turf Cutting). The 409 names donor walk lists, not their passes, so `efforts` (this
+// page's list) says which donors have an archived pass — or are archived — and the promise gets its
+// caveat for those.
+function MoveConfirmModal({ effortName, data, efforts = [], pending, onCancel, onConfirm }) {
+  const archivedDonor = (data.breakdown || []).some((d) => {
+    const donor = efforts.find((e) => String(e._id) === String(d.effortId));
+    return !!donor && (donor.status === 'archived' || !!donor.lastEndedPass);
+  });
   return (
     <Modal
       size="md"
@@ -124,7 +169,8 @@ function MoveConfirmModal({ effortName, data, pending, onCancel, onConfirm }) {
         )}
         <p className="text-xs">
           Each affected list's books are <strong>snapshotted first</strong> — restorable from its Turf page under
-          Undo / snapshots. The move runs in the background; progress shows here.
+          Undo / snapshots{archivedDonor ? ' (bring an archived pass back first)' : ''}. The move runs in the background;
+          progress shows here.
         </p>
         <p className="text-xs font-medium text-danger">
           Moving doors back later will NOT rebuild their old books — they return bookless until you re-cut or restore
@@ -185,7 +231,7 @@ function ClaimJobStatus({ campaignId, jobId, doneLink, onDone, onMoveSkipped }) 
   );
 }
 
-function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
+function ClaimPanel({ campaignId, effort, efforts, walkLists, intakeCount = 0 }) {
   const qc = useQueryClient();
   const [walkListId, setWalkListId] = useState('');
   const [confirmAll, setConfirmAll] = useState(false);
@@ -203,6 +249,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
       // The 409 IS the flow, not a failure: it carries the per-donor breakdown
       // the confirm modal renders before anything moves.
       if (err?.data?.code === 'doors-owned') setMoveConfirm(err.data);
+      else refreshAfterRefusal(qc, campaignId, err);
     },
   });
   const owned = claim.error?.data?.code === 'doors-owned';
@@ -214,7 +261,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
         <select value={walkListId} onChange={(e) => setWalkListId(e.target.value)} className={COMPACT}>
           <option value="">From a saved search…</option>
           {walkLists.map((w) => (
-            <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>
+            <option key={w._id} value={w._id}>{w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · uploaded' : ''}</option>
           ))}
         </select>
         <Button size="sm" onClick={() => walkListId && claim.mutate({ body: { walkListId } })} disabled={!walkListId || claim.isPending}>Claim list</Button>
@@ -257,6 +304,7 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
         <MoveConfirmModal
           effortName={effort.name}
           data={moveConfirm}
+          efforts={efforts}
           pending={claim.isPending}
           onCancel={() => setMoveConfirm(null)}
           onConfirm={() => claim.mutate({ body: { walkListId: walkListId || undefined, all: walkListId ? undefined : true, force: true } })}
@@ -286,10 +334,34 @@ function ClaimPanel({ campaignId, effort, walkLists, intakeCount = 0 }) {
   );
 }
 
-function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, campaignType, crewNames, tz, intakeCount, onUpdate, onArchive, onDelete }) {
+// One walk list's row and its drawer. `state` and `actions` come from lib/walkListState.js: one status
+// (never "archived" and "Live" together) and the actions it can take. An archived walk list opens
+// read-only — renaming is the one change left (§D.1); an archived campaign freezes the name too.
+function EffortRow({
+  campaignId,
+  effort,
+  efforts,
+  state,
+  actions,
+  campaignArchived,
+  walkLists,
+  surveys,
+  isSurveyType,
+  campaignType,
+  crewNames,
+  tz,
+  intakeCount,
+  onUpdate,
+  onArchive,
+  onUnarchive,
+  onEndPass,
+  onDelete,
+}) {
   const [open, setOpen] = useState(false);
   const survey = surveys.find((s) => String(s._id) === String(effort.surveyTemplateId));
   const crewTitle = (crewNames || []).join(', ');
+  const archived = effort.status === 'archived';
+  const readOnly = archived || campaignArchived;
   return (
     <>
       <tr className="border-t border-border transition-colors hover:bg-sunken/60">
@@ -297,17 +369,7 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, campa
           <span className="font-medium text-fg">{effort.name}</span>
         </td>
         <td className="px-4 py-2">
-          <div className="flex flex-col items-start gap-1">
-            <Badge variant={STATUS_VARIANT[effort.status] || 'neutral'} dot className="capitalize">{effort.status}</Badge>
-            {effort.setup && (effort.setup.complete ? (
-              <Badge variant="success" dot>Live</Badge>
-            ) : (
-              <span className="text-[10px] text-fg-muted">
-                Setup {effort.setup.stepsDone}/{effort.setup.stepsTotal}
-                {effort.setup.nextStepLabel ? ` · next: ${effort.setup.nextStepLabel}` : ''}
-              </span>
-            ))}
-          </div>
+          <WalkListStatus state={state} />
         </td>
         <td className="px-4 py-2 text-right tabular-nums text-fg">{(effort.doorCount || 0).toLocaleString()}</td>
         <td className="px-4 py-2 text-right tabular-nums text-fg">
@@ -315,38 +377,63 @@ function EffortRow({ campaignId, effort, walkLists, surveys, isSurveyType, campa
             {effort.crewCount || 0}
           </span>
         </td>
-        <td className="px-4 py-2 text-fg">{effort.activeRound ? `Pass ${effort.activeRound.roundNumber} · ${effort.activeRound.name}` : <span className="text-fg-subtle">—</span>}</td>
+        <td className="px-4 py-2 text-fg">{effort.activeRound ? passShortLabel(effort.activeRound) : <span className="text-fg-subtle">—</span>}</td>
         <td className="px-4 py-2 text-fg-muted">{isSurveyType ? (survey ? survey.name : <span className="text-fg-subtle">campaign default</span>) : <span className="text-fg-subtle">n/a</span>}</td>
         <td className="px-4 py-2 text-fg-muted">{effort.createdAt ? formatInTz(effort.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : <span className="text-fg-subtle">—</span>}</td>
         <td className="space-x-2 px-4 py-2 text-right">
-          <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-accent hover:underline">{open ? 'Close' : 'Manage'}</button>
-          {effort.status !== 'archived' && <button onClick={() => onArchive(effort)} className="text-xs text-fg-muted hover:underline">Archive</button>}
-          <button onClick={() => onDelete(effort)} className="text-xs text-danger hover:underline">Delete</button>
+          <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-brand-accent hover:underline">{open ? 'Close' : actions.open}</button>
+          {actions.archive && <button onClick={() => onArchive(effort)} className="text-xs text-fg-muted hover:underline">Archive</button>}
+          {actions.unarchive && <button onClick={() => onUnarchive(effort)} className="text-xs font-medium text-fg hover:underline">Unarchive</button>}
+          {actions.endPass && <button onClick={() => onEndPass(effort)} className="text-xs font-medium text-warning-fg hover:underline">{actions.endPass}</button>}
+          {actions.remove && <button onClick={() => onDelete(effort)} className="text-xs text-danger hover:underline">Delete</button>}
         </td>
       </tr>
       {open && (
         <tr className="border-t border-border bg-sunken/50">
           <td colSpan="8" className="px-4 py-3">
-            <div className="grid gap-3 md:grid-cols-2">
-              <RosterPanel campaignId={campaignId} effort={effort} />
-              <ClaimPanel campaignId={campaignId} effort={effort} walkLists={walkLists} intakeCount={intakeCount} />
-            </div>
+            {readOnly ? (
+              <p className="rounded-lg border border-border bg-sunken p-3 text-xs text-fg-muted">
+                {campaignArchived ? (
+                  <>This campaign is archived, so the crew, survey and doors of {effort.name} can't change.</>
+                ) : (
+                  <>
+                    Its crew, survey and doors can't change while {effort.name} is archived.{' '}
+                    <button type="button" onClick={() => onUnarchive(effort)} className="font-semibold text-brand-accent hover:underline">
+                      Unarchive {effort.name}
+                    </button>{' '}
+                    to change this.
+                  </>
+                )}
+              </p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                <RosterPanel campaignId={campaignId} effort={effort} />
+                <ClaimPanel campaignId={campaignId} effort={effort} efforts={efforts} walkLists={walkLists} intakeCount={intakeCount} />
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <input
                 defaultValue={effort.name}
+                disabled={campaignArchived}
+                aria-label="Walk list name"
                 onBlur={(e) => e.target.value.trim() && e.target.value !== effort.name && onUpdate(effort, { name: e.target.value.trim() })}
-                className={COMPACT}
+                className={`${COMPACT} disabled:cursor-not-allowed disabled:opacity-60`}
               />
-              {isSurveyType && (
-                <WalkListSurveySelect
-                  value={effort.surveyTemplateId || ''}
-                  surveys={surveys}
-                  onChange={(id) => onUpdate(effort, { surveyTemplateId: id })}
-                  className={COMPACT}
-                />
-              )}
-              {effort.activeRound && (
-                <a href={`/campaigns/${campaignId}/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">Cut / assign books →</a>
+              {isSurveyType &&
+                (readOnly ? (
+                  <span className="text-xs text-fg-muted">Survey: {survey ? survey.name : 'campaign default'}</span>
+                ) : (
+                  <WalkListSurveySelect
+                    value={effort.surveyTemplateId || ''}
+                    surveys={surveys}
+                    onChange={(id) => onUpdate(effort, { surveyTemplateId: id })}
+                    className={COMPACT}
+                  />
+                ))}
+              {effort.activeRound && !archived && (
+                <a href={`/campaigns/${campaignId}/turfs?passId=${effort.activeRound._id}`} className="text-xs font-medium text-brand-accent hover:underline">
+                  {campaignArchived ? 'View books →' : 'Cut / assign books →'}
+                </a>
               )}
               <a href={`/campaigns/${campaignId}/map?effortId=${effort._id}`} className="text-xs font-medium text-brand-accent hover:underline">Audit on map →</a>
             </div>
@@ -371,6 +458,8 @@ export default function EffortsPage() {
   const { campaignId } = useParams();
   const { selected } = useCampaignSelection(campaignId);
   const isSurveyType = selected?.type === 'survey';
+  // An archived campaign's walk lists and passes are read-only (the server refuses every change).
+  const campaignArchived = selected?.isActive === false;
   const [name, setName] = useState('');
   const [surveyTemplateId, setSurveyTemplateId] = useState('');
   // Door source for the new walk list: '__intake__' (all remaining) | a saved-search id | '' (none).
@@ -408,6 +497,13 @@ export default function EffortsPage() {
     queryFn: () => api(`/admin/campaigns/${campaignId}/assignments`),
     enabled: !!campaignId,
   });
+  // The campaign's passes (the cache Turf Cutting and the pickers share), only to name a walk list's
+  // waiting draft in its status: "Between passes · Pass 1 ended Oct 20 · Pass 2 draft".
+  const passesQ = useQuery({
+    queryKey: ['admin', 'passes', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+    enabled: !!campaignId,
+  });
   const orgTz = useOrgTimeZone();
   const tz = selected?.timeZone || orgTz;
 
@@ -415,6 +511,27 @@ export default function EffortsPage() {
   const intakeCount = effortsQ.data?.intakeCount || 0;
   const walkLists = walkListsQ.data?.walkLists || [];
   const surveys = surveysQ.data?.surveys || [];
+
+  // One status and one set of actions per walk list; archived ones fold into their own section.
+  const formatDay = useCallback((iso) => formatInTz(iso, tz, { month: 'short', day: 'numeric' }, false), [tz]);
+  const rows = useMemo(
+    () =>
+      (effortsQ.data?.efforts || []).map((e) => ({
+        effort: e,
+        state: walkListState(e, { formatDate: formatDay, passes: passesQ.data?.passes }),
+        actions: walkListActions(e, { campaignArchived }),
+      })),
+    [effortsQ.data, passesQ.data, formatDay, campaignArchived]
+  );
+  const openRows = rows.filter((r) => r.effort.status !== 'archived');
+  const archivedRows = rows.filter((r) => r.effort.status === 'archived');
+  const stillLive = archivedRows.filter((r) => r.state.key === 'archived-still-live').length;
+  const [archivedOpen, setArchivedOpen] = useState(readArchivedOpen);
+  const toggleArchived = () => {
+    const next = !archivedOpen;
+    setArchivedOpen(next);
+    saveArchivedOpen(next);
+  };
 
   // Once the walk lists load, honor a ?seed= deep-link (from the import "Create revisit
   // walk list" link) by preselecting that saved search as the new list's door source.
@@ -505,11 +622,94 @@ export default function EffortsPage() {
       }
     },
   });
-  const update = useMutation({ mutationFn: ({ id, body }) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'PATCH', body }), onSuccess: invalidate });
-  const archive = useMutation({ mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}/archive`, { method: 'POST' }), onSuccess: invalidate });
-  const del = useMutation({ mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'DELETE' }), onSuccess: invalidate });
+  const update = useMutation({
+    mutationFn: ({ id, body }) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'PATCH', body }),
+    onSuccess: invalidate,
+    onError: (err) => refreshAfterRefusal(qc, campaignId, err),
+  });
+  const del = useMutation({
+    mutationFn: (id) => api(`/admin/campaigns/${campaignId}/efforts/${id}`, { method: 'DELETE' }),
+    // Its passes go with it: refresh every pass list too, not just the walk lists.
+    onSuccess: () => invalidateLifecycle(qc, campaignId),
+    onError: (err) => refreshAfterRefusal(qc, campaignId, err),
+  });
+
+  // Archive and Unarchive open their boxes (components/walkListLifecycle); the line they leave above
+  // the table is `notice` (lifecycleCopy.noticeText). It sits ABOVE the table because the row it
+  // talks about has just moved into, or out of, the closed archived section.
+  const [lifecycle, setLifecycle] = useState(null); // { kind: 'archive' | 'unarchive', effort }
+  const [notice, setNotice] = useState(null);
+  // A write refused because the walk list was archived meanwhile — by someone else, or in another tab.
+  // The refetch moves its row into the closed archived section, which unmounts its open drawer and the
+  // refusal with it, so the page says it here instead (code review round 2). Any mutation on the page
+  // counts: the drawer's crew, claim and pass panels each make their own.
+  useEffect(
+    () =>
+      qc.getMutationCache().subscribe((event) => {
+        const err = event?.type === 'updated' && event.action?.type === 'error' ? event.action.error : null;
+        if (err?.status === 409 && errorCode(err) === 'walk-list-archived') setNotice({ kind: 'archived-meanwhile', message: err.message });
+      }),
+    [qc]
+  );
+  // Undo, right after an archive: unarchive and bring back the pass it ended, in one click.
+  const undo = useMutation({
+    mutationFn: ({ effortId, bringBack }) =>
+      api(`/admin/campaigns/${campaignId}/efforts/${effortId}/unarchive`, { method: 'POST', body: { bringBack } }),
+    onSuccess: (res, vars) => {
+      invalidateLifecycle(qc, campaignId);
+      setNotice({ kind: 'walk-list-unarchived', name: vars.name, pass: vars.pass, to: res?.to || null, bringBackError: res?.bringBackError || null });
+    },
+    onError: (err) => refreshAfterRefusal(qc, campaignId, err),
+  });
+  const openLifecycle = (kind, effort) => {
+    undo.reset();
+    setLifecycle({ kind, effort });
+  };
+  const afterArchive = (res) => {
+    const eff = lifecycle.effort;
+    setLifecycle(null);
+    // "End Pass 3" on a walk list that was already archived: no Undo, since undoing would also unarchive it.
+    setNotice(
+      eff.status === 'archived'
+        ? { kind: 'pass-ended', name: eff.name, pass: res?.endedPass || null }
+        : { kind: 'walk-list-archived', effortId: eff._id, name: eff.name, pass: res?.endedPass || null }
+    );
+  };
+  const afterUnarchive = (res) => {
+    const eff = lifecycle.effort;
+    setLifecycle(null);
+    setNotice({ kind: 'walk-list-unarchived', name: eff.name, pass: res?.endedPass || null, to: res?.to || null, bringBackError: res?.bringBackError || null });
+  };
+  const noticeLine = notice ? noticeText(notice) : null;
+  // A refused Undo says why on the notice line; a permanent refusal (the pass can't come back) takes the
+  // link away and points at Unarchive, which can still reopen the walk list without it.
+  const undoRefused = undo.error?.status === 409 && !isTemporaryError(undo.error);
 
   const fieldLabel = 'mb-1 block text-xs font-medium text-fg';
+
+  const renderRow = ({ effort: e, state, actions }) => (
+    <EffortRow
+      key={e._id}
+      campaignId={campaignId}
+      effort={e}
+      efforts={efforts}
+      state={state}
+      actions={actions}
+      campaignArchived={campaignArchived}
+      walkLists={walkLists}
+      surveys={surveys}
+      isSurveyType={isSurveyType}
+      campaignType={selected?.type}
+      crewNames={(e.crewUserIds || []).map((id) => nameByUserId.get(id)).filter(Boolean)}
+      tz={tz}
+      intakeCount={intakeCount}
+      onUpdate={(eff, body) => update.mutate({ id: eff._id, body })}
+      onArchive={(eff) => openLifecycle('archive', eff)}
+      onUnarchive={(eff) => openLifecycle('unarchive', eff)}
+      onEndPass={(eff) => openLifecycle('archive', eff)}
+      onDelete={(eff) => { if (window.confirm(`Delete walk list "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}
+    />
+  );
 
   return (
     <div>
@@ -521,9 +721,19 @@ export default function EffortsPage() {
         (cut on the Turf Cutting page). Doors no one has claimed sit in <strong>Intake</strong>.
       </p>
 
+      {campaignArchived && (
+        <div className="mb-4 rounded-md border border-border bg-sunken px-3 py-2 text-sm text-fg-muted">
+          This campaign is archived, so its walk lists and passes are read-only. Reactivate it on the Campaigns page to make changes.
+        </div>
+      )}
+
       {campaignId && (
         <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatCard label="Walk Lists" value={efforts.length.toLocaleString()} />
+          <StatCard
+            label="Walk Lists"
+            value={openRows.length.toLocaleString()}
+            hint={archivedRows.length ? `+${archivedRows.length.toLocaleString()} archived` : undefined}
+          />
           <StatCard label="Doors assigned" value={totalDoors.toLocaleString()} />
           <StatCard
             label="In Intake"
@@ -534,90 +744,123 @@ export default function EffortsPage() {
         </div>
       )}
 
-      {intakeCount > 0 && (
+      {intakeCount > 0 && !campaignArchived && (
         <NextStepBanner tone="info" className="mb-4">
           <strong>{intakeCount.toLocaleString()}</strong> door{intakeCount === 1 ? '' : 's'} in Intake (new addresses awaiting assignment). Open a walk list below → <em>Claim all Intake</em> to assign them.
         </NextStepBanner>
       )}
 
-      <Card as="section" className="mb-6 p-5">
-        <h2 className="mb-3 text-base font-semibold text-fg">New walk list</h2>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="text-sm">
-            <span className={fieldLabel}>Name</span>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="w-56" />
-          </label>
-          <label className="text-sm">
-            <span className={fieldLabel}>Doors</span>
-            <Select value={effectiveSource} onChange={(e) => setDoorSource(e.target.value)}>
-              <option value="__intake__" disabled={intakeCount === 0}>
-                All remaining doors (Intake){intakeCount ? ` — ${intakeCount.toLocaleString()}` : ''}
-              </option>
-              {walkLists.map((w) => <option key={w._id} value={w._id}>From: {w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · CSV' : ''}</option>)}
-              <option value="">None — claim doors later</option>
-            </Select>
-          </label>
-          {isSurveyType && (
+      {!campaignArchived && (
+        <Card as="section" className="mb-6 p-5">
+          <h2 className="mb-3 text-base font-semibold text-fg">New walk list</h2>
+          <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm">
-              <span className={fieldLabel}>Survey override</span>
-              <WalkListSurveySelect
-                value={surveyTemplateId}
-                surveys={surveys}
-                onChange={(id) => setSurveyTemplateId(id || '')}
-              />
+              <span className={fieldLabel}>Name</span>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. North Dallas" className="w-56" />
             </label>
-          )}
-          <Button onClick={() => name && create.mutate()} disabled={!name} loading={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create walk list'}
-          </Button>
-        </div>
-        {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
-        {create.data?.effort && (
-          <p className="mt-2 text-xs text-success-fg">
-            Created <strong>{create.data.effort.name}</strong>
-            {create.data.pass ? ' — Pass 1 is ready.' : '.'}{' '}
-            {create.data.pass ? (
-              <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
-            ) : (
-              <Link to={`/campaigns/${campaignId}/efforts/${create.data.effort._id}/passes`} className="font-semibold underline">Manage passes →</Link>
+            <label className="text-sm">
+              <span className={fieldLabel}>Doors</span>
+              <Select value={effectiveSource} onChange={(e) => setDoorSource(e.target.value)}>
+                <option value="__intake__" disabled={intakeCount === 0}>
+                  All remaining doors (Intake){intakeCount ? ` — ${intakeCount.toLocaleString()}` : ''}
+                </option>
+                {walkLists.map((w) => <option key={w._id} value={w._id}>From: {w.name} ({w.householdCount} hh){w.source === 'csv' ? ' · uploaded' : ''}</option>)}
+                <option value="">None — claim doors later</option>
+              </Select>
+            </label>
+            {isSurveyType && (
+              <label className="text-sm">
+                <span className={fieldLabel}>Survey override</span>
+                <WalkListSurveySelect
+                  value={surveyTemplateId}
+                  surveys={surveys}
+                  onChange={(id) => setSurveyTemplateId(id || '')}
+                />
+              </label>
             )}
-          </p>
-        )}
-        {create.data?.claimError && (
-          <p className="mt-1 text-xs text-warning-fg">
-            The door claim couldn't be queued — open the new list below and use <strong>Claim doors</strong>.
-          </p>
-        )}
-        <ClaimJobStatus
-          campaignId={campaignId}
-          jobId={createClaimJobId}
-          doneLink={
-            create.data?.pass ? (
-              <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
-            ) : null
-          }
-          onDone={() => {
-            invalidate();
-            qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
-            qc.invalidateQueries({ queryKey: ['turfs', campaignId] });
-            qc.invalidateQueries({ queryKey: ['turf-doors', campaignId] });
-          }}
-          onMoveSkipped={createdSeed ? () => revisitClaim.mutate({ ...createdSeed, force: false }) : undefined}
-        />
-        {revisitClaim.error && revisitClaim.error?.data?.code !== 'doors-owned' && (
-          <p className="mt-1 text-xs text-danger">{revisitClaim.error.message}</p>
-        )}
-        {createMove && (
-          <MoveConfirmModal
-            effortName={createMove.effortName}
-            data={createMove.data}
-            pending={revisitClaim.isPending}
-            onCancel={() => setCreateMove(null)}
-            onConfirm={() => revisitClaim.mutate({ ...createMove, force: true })}
+            <Button onClick={() => name && create.mutate()} disabled={!name} loading={create.isPending}>
+              {create.isPending ? 'Creating…' : 'Create walk list'}
+            </Button>
+          </div>
+          {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
+          {create.data?.effort && (
+            <p className="mt-2 text-xs text-success-fg">
+              Created <strong>{create.data.effort.name}</strong>
+              {create.data.pass ? ' — Pass 1 is ready.' : '.'}{' '}
+              {create.data.pass ? (
+                <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
+              ) : (
+                <Link to={`/campaigns/${campaignId}/efforts/${create.data.effort._id}/passes`} className="font-semibold underline">Manage passes →</Link>
+              )}
+            </p>
+          )}
+          {create.data?.claimError && (
+            <p className="mt-1 text-xs text-warning-fg">
+              The door claim couldn't be queued — open the new list below and use <strong>Claim doors</strong>.
+            </p>
+          )}
+          <ClaimJobStatus
+            campaignId={campaignId}
+            jobId={createClaimJobId}
+            doneLink={
+              create.data?.pass ? (
+                <Link to={`/campaigns/${campaignId}/turfs?passId=${create.data.pass._id}`} className="font-semibold underline">Cut its books →</Link>
+              ) : null
+            }
+            onDone={() => {
+              invalidate();
+              qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
+              qc.invalidateQueries({ queryKey: ['turfs', campaignId] });
+              qc.invalidateQueries({ queryKey: ['turf-doors', campaignId] });
+            }}
+            onMoveSkipped={createdSeed ? () => revisitClaim.mutate({ ...createdSeed, force: false }) : undefined}
           />
-        )}
-        <p className="mt-2 text-xs text-fg-muted"><strong>All remaining doors (Intake)</strong> claims every unassigned door in the campaign — the usual whole-district list. Pick a <strong>saved search</strong> to seed only that list's <em>unowned</em> doors, or <strong>None</strong> to create an empty list and claim doors later (open the list → Claim). Saved searches are built from filters or a Voter-ID CSV on the Saved Searches page.</p>
-      </Card>
+          {revisitClaim.error && revisitClaim.error?.data?.code !== 'doors-owned' && (
+            <p className="mt-1 text-xs text-danger">{revisitClaim.error.message}</p>
+          )}
+          {createMove && (
+            <MoveConfirmModal
+              effortName={createMove.effortName}
+              data={createMove.data}
+              efforts={efforts}
+              pending={revisitClaim.isPending}
+              onCancel={() => setCreateMove(null)}
+              onConfirm={() => revisitClaim.mutate({ ...createMove, force: true })}
+            />
+          )}
+          <p className="mt-2 text-xs text-fg-muted"><strong>All remaining doors (Intake)</strong> claims every unassigned door in the campaign — the usual whole-district list. Pick a <strong>saved search</strong> to seed only that list's <em>unowned</em> doors, or <strong>None</strong> to create an empty list and claim doors later (open the list → Claim). Saved searches are built from filters or an uploaded Voter-ID list on the Saved Searches page.</p>
+        </Card>
+      )}
+
+      {noticeLine && (
+        <div role="status" className={`mb-2 flex items-start gap-3 text-xs ${noticeLine.tone === 'warning' ? 'text-warning-fg' : 'text-success-fg'}`}>
+          <span className="flex-1">
+            {noticeLine.text}
+            {noticeLine.undo && notice.kind === 'walk-list-archived' && !undoRefused && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => undo.mutate({ effortId: notice.effortId, name: notice.name, pass: notice.pass, bringBack: !!notice.pass })}
+                  disabled={undo.isPending}
+                  className="font-semibold underline disabled:opacity-60"
+                >
+                  {undo.isPending ? 'Undoing…' : 'Undo'}
+                </button>
+              </>
+            )}
+            {undo.error && notice.kind === 'walk-list-archived' && (
+              <span className="ml-1 text-danger">
+                {undo.error.message}
+                {undoRefused ? ` To reopen ${notice.name} without it, use Unarchive on its row under Archived walk lists.` : ''}
+              </span>
+            )}
+          </span>
+          <button type="button" onClick={() => setNotice(null)} className="shrink-0 font-semibold hover:opacity-70" aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
 
       <Card className="overflow-hidden">
         <table className="min-w-full text-sm">
@@ -627,35 +870,63 @@ export default function EffortsPage() {
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-right">Doors</th>
               <th className="px-4 py-2 text-right">Crew</th>
-              <th className="px-4 py-2 text-left">Active pass</th>
+              <th className="px-4 py-2 text-left">Pass</th>
               <th className="px-4 py-2 text-left">Survey</th>
               <th className="px-4 py-2 text-left">Created</th>
               <th className="px-4 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {efforts.map((e) => (
-              <EffortRow
-                key={e._id}
-                campaignId={campaignId}
-                effort={e}
-                walkLists={walkLists}
-                surveys={surveys}
-                isSurveyType={isSurveyType}
-                campaignType={selected?.type}
-                crewNames={(e.crewUserIds || []).map((id) => nameByUserId.get(id)).filter(Boolean)}
-                tz={tz}
-                intakeCount={intakeCount}
-                onUpdate={(eff, body) => update.mutate({ id: eff._id, body })}
-                onArchive={(eff) => archive.mutate(eff._id)}
-                onDelete={(eff) => { if (window.confirm(`Delete walk list "${eff.name}"? Its doors return to Intake.`)) del.mutate(eff._id); }}
-              />
-            ))}
-            {!efforts.length && <tr><td colSpan="8" className="px-4 py-6 text-center text-fg-muted">No walk lists yet.</td></tr>}
+            {openRows.map(renderRow)}
+            {!openRows.length && (
+              <tr>
+                <td colSpan="8" className="px-4 py-6 text-center text-fg-muted">
+                  {effortsQ.isLoading
+                    ? 'Loading walk lists…'
+                    : archivedRows.length
+                      ? `No open walk lists — ${archivedRows.length.toLocaleString()} archived below.`
+                      : 'No walk lists yet.'}
+                </td>
+              </tr>
+            )}
           </tbody>
+          {archivedRows.length > 0 && (
+            <tbody>
+              <tr className="border-t border-border bg-sunken/40">
+                <td colSpan="8" className="px-4 py-2">
+                  <button
+                    type="button"
+                    onClick={toggleArchived}
+                    aria-expanded={archivedOpen}
+                    className="text-xs font-semibold text-fg-muted hover:text-fg"
+                  >
+                    <span className="mr-1.5 inline-block text-fg-subtle">{archivedOpen ? '▾' : '▸'}</span>
+                    Archived walk lists ({archivedRows.length.toLocaleString()})
+                  </button>
+                  {stillLive > 0 && (
+                    <span className="ml-2 text-xs font-medium text-warning-fg">
+                      · {stillLive.toLocaleString()} still {stillLive === 1 ? 'has a live pass' : 'have a live pass'}
+                    </span>
+                  )}
+                </td>
+              </tr>
+              {archivedOpen && archivedRows.map(renderRow)}
+            </tbody>
+          )}
         </table>
       </Card>
-      {del.error && <div className="mt-2 text-sm text-danger">{del.error.message}</div>}
+      {[del.error, update.error].filter(Boolean).map((err, i) => (
+        <div key={i} className="mt-2 text-sm text-danger">
+          {err.message}
+        </div>
+      ))}
+
+      {lifecycle?.kind === 'archive' && (
+        <ArchiveWalkListDialog campaignId={campaignId} effort={lifecycle.effort} onClose={() => setLifecycle(null)} onDone={afterArchive} />
+      )}
+      {lifecycle?.kind === 'unarchive' && (
+        <UnarchiveWalkListDialog campaignId={campaignId} effort={lifecycle.effort} onClose={() => setLifecycle(null)} onDone={afterUnarchive} />
+      )}
     </div>
   );
 }

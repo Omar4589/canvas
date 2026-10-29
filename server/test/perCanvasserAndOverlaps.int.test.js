@@ -114,11 +114,14 @@ before(async () => {
   await CampaignManager.create({ campaignId: camp._id, userId: lead._id, organizationId: org._id, grantedBy: admin._id });
 
   const effort = await Effort.create({ organizationId: org._id, campaignId: camp._id, name: 'North' });
-  // Pass 1 is the active pass for the H overlap; Pass 2 exists only to stage F's
-  // different-passes-are-not-an-overlap case.
+  // Pass 1 holds the H overlap; Pass 2 exists only to stage F's different-passes-are-not-an-overlap
+  // case. One live pass per walk list, as in the field: Pass 1 ended when Pass 2 went live, so its
+  // knocks here are late ones, counted in the pass whose books they were made in (no live book holds
+  // those doors). The overlap reports group the ledger by (door, pass) whatever the pass's state.
   const pass1 = await Pass.create({
     organizationId: org._id, campaignId: camp._id, effortId: effort._id, roundNumber: 1, name: 'Round 1',
-    status: 'active', activatedAt: new Date('2026-06-09T12:00:00Z'),
+    status: 'archived', activatedAt: new Date('2026-06-09T12:00:00Z'),
+    archivedAt: new Date('2026-06-10T12:00:00Z'), archivedFrom: 'active', archivedVia: 'next-pass',
   });
   const pass2 = await Pass.create({
     organizationId: org._id, campaignId: camp._id, effortId: effort._id, roundNumber: 2, name: 'Round 2',

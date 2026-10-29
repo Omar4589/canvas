@@ -26,6 +26,10 @@ export const REPORT_FIELDS = Object.freeze({
   putBackUp: 'clientReport.putBackUp',
   deleted: 'clientReport.deleted',
   remapped: 'clientReport.remapped',
+  // Archive tidies the operator's list only (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4): one row per
+  // change, never a second for a repeat.
+  archived: 'clientReport.archived',
+  unarchived: 'clientReport.unarchived',
 });
 // A series row names its team or tab as it read at the time (WALK-3): toValue.label on created, crews
 // changed, ended and continued, the new name itself on a rename. Crews-changed and ended rows written
@@ -87,12 +91,30 @@ const withoutSecrets = (v) =>
     ? Object.fromEntries(Object.entries(v).filter(([k]) => !/token|password|hash/i.test(k)))
     : v;
 
+// The report a link row names: the one handed over, else the link's own, looked up. Only what the row
+// stamps is read; null for a link to all your reports, or when the report is already gone (a caller
+// that deletes the report first hands it over).
+const reportOfLink = async (link, report) => {
+  if (report !== undefined && report !== null) return report;
+  if (!link?.reportId) return null;
+  return ClientReport.findOne(
+    { _id: link.reportId, organizationId: link.organizationId },
+    { seriesId: 1, weekStart: 1, weekEnd: 1 }
+  ).lean();
+};
+
 /**
  * One History row about a share link (stage 2, §F6/§F9): the link's id, never its URL token, a
- * password or its hash, and no IP address or user agent (§O7).
+ * password or its hash, and no IP address or user agent (§O7). A link to one report also stamps the
+ * report's id, its tab and its period, as the report's own rows do, so History names the link by its
+ * report ("Oct 12 – Oct 18, 2026 · Paid team report · Link created" — PROPOSAL_CLIENT_REPORT_LINKS.md
+ * §C7). `report` is optional: handed over when the caller has it (and must be, when it deleted the
+ * report first), looked up otherwise. These rows stay outside erase and restore, which touch edit rows
+ * only, and outside the phone's feed.
  */
-export const writeLinkHistory = (link, field, { by = null, fromValue = null, toValue = null } = {}) =>
-  CampaignChange.create({
+export const writeLinkHistory = async (link, field, { by = null, fromValue = null, toValue = null, report } = {}) => {
+  const r = await reportOfLink(link, report);
+  return CampaignChange.create({
     organizationId: link.organizationId,
     campaignId: link.campaignId,
     field,
@@ -101,7 +123,11 @@ export const writeLinkHistory = (link, field, { by = null, fromValue = null, toV
     byUserId: by,
     source: 'client_report',
     shareLinkId: link._id,
+    clientReportId: r?._id || link.reportId || null,
+    seriesId: r?.seriesId || null,
+    periodLabel: r ? periodLabelOf(r) : null,
   });
+};
 
 const sameText = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const plainSections = (obs) => (obs || []).map((s) => ({ heading: s.heading, body: s.body ?? '' }));

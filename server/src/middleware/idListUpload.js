@@ -8,6 +8,11 @@ import multer from 'multer';
 // 2026-10-27 on a state absentee file with 85 columns: 50 MB of it peaked near 860 MB, the whole
 // 149 MB file near 2.3 GB — on the 1 GB web dyno that serves everyone in the field. The cap stays.
 //
+// EXCEL TOO. The same 50 MB covers an .xlsx (docs/PROPOSAL_ID_LIST_EXCEL.md). Its reader keeps only the
+// columns it needs, in memory, so 50 MB of workbook costs far less than 50 MB of CSV; what it bounds
+// instead is what's INSIDE the file — the unpacked tab, rows, any one tag — in
+// services/import/readIdColumn.js (ID_LIST_XLSX_LIMITS).
+//
 // WHY THE WRAPPER. Multer's own refusal is a bare "File too large" that the error handler answers as
 // a 500, naming neither the limit nor the fix. This 413 says both, with the code the voter import's
 // refusal already uses (routes/admin/imports.js). The web pages check the size the moment a file is

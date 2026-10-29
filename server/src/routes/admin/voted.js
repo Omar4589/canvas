@@ -77,17 +77,60 @@ async function previewDrops(campaign, affected, newlyVoterIds) {
   return drops;
 }
 
+// "Count only rows where" (docs/PROPOSAL_ID_LIST_EXCEL.md, call A): the column, and which of its
+// values count, a JSON array in the multipart form. The page's apply sends what the last preview
+// RESPONSE echoed (keep.column, keep.selected), never its local ticks — what was previewed is what runs.
+const keepOf = (body) => {
+  const rawColumn = body?.keepColumn;
+  const rawSelected = body?.keepSelected;
+  const sent = (v) => v != null && v !== '';
+  // A malformed request is refused, never read as "count every row": that would mark the very rows
+  // the admin left out (keepColumn sent twice arrives from multer as an array).
+  if (!sent(rawColumn)) return sent(rawSelected) ? { error: 'keepSelected needs a keepColumn.' } : { keep: null };
+  if (typeof rawColumn !== 'string') return { error: 'keepColumn must be one column name.' };
+  const column = rawColumn;
+  if (!sent(rawSelected)) return { keep: { column } };
+  let selected;
+  try {
+    selected = JSON.parse(body.keepSelected);
+  } catch {
+    selected = null;
+  }
+  if (!Array.isArray(selected) || !selected.every((v) => typeof v === 'string')) {
+    return { error: 'keepSelected must be a JSON array of values.' };
+  }
+  return { keep: { column, selected } };
+};
+
+// A parse refusal, with the tab and (for the code-less "Could not detect") the column list and the
+// title-row line, so the page can say which tab it read and where the column names seem to be.
+const parseFailure = (res, m) =>
+  res.status(400).json({
+    error: m.error,
+    code: m.code || null,
+    columns: m.columns || [],
+    sheetName: m.sheetName ?? null,
+    otherSheets: m.otherSheets ?? [],
+    headerRowHint: m.headerRowHint ?? null,
+  });
+
 // Dry run — no writes.
 router.post('/preview', uploadIdList, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
-    if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
+    const k = keepOf(req.body);
+    if (k.error) return res.status(400).json({ error: k.error, code: 'keep-selected', columns: [] });
+    const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn, { keep: k.keep });
+    if (m.error) return parseFailure(res, m);
     const { newly, alreadyCount, affected } = await classify(req.campaign, m.inCampaign);
     const doorsWillDrop = await previewDrops(req.campaign, affected, newly.map((v) => v._id));
     res.json({
       idColumn: m.col,
       columns: m.columns,
+      sheetName: m.sheetName,
+      otherSheets: m.otherSheets,
+      keep: m.keep,
+      keptRows: m.keptRows,
       sampleIds: m.sampleIds,
       totalRows: m.totalRows,
       idsInFile: m.csvCount,
@@ -111,9 +154,15 @@ router.post('/preview', uploadIdList, async (req, res, next) => {
 router.post('/import', uploadIdList, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
-    const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
-    if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
+    const k = keepOf(req.body);
+    if (k.error) return res.status(400).json({ error: k.error, code: 'keep-selected', columns: [] });
+    const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn, { keep: k.keep });
+    if (m.error) return parseFailure(res, m);
     const { newly, alreadyCount, affected } = await classify(req.campaign, m.inCampaign);
+    // Only when rows were actually left out. The column NAME and the count, never the ticked values:
+    // every VotedVoter row carries this upload's id, so stored values would describe each voter it
+    // marked (with a ballot-type column, how they voted). docs/PROPOSAL_ID_LIST_EXCEL.md §E.
+    const filtered = m.keep && !m.keep.tooMany && !m.keep.tooLong && m.keep.selected.length < m.keep.values.length;
 
     const uploadDoc = await VotedUpload.create({
       organizationId: req.campaign.organizationId,
@@ -125,6 +174,8 @@ router.post('/import', uploadIdList, async (req, res, next) => {
       notFound: m.notFound,
       idColumn: m.col,
       matchedViaZeros: m.matchedViaZeros,
+      keepColumn: filtered ? m.keep.column : null,
+      keptRows: filtered ? m.keptRows : null,
     });
 
     if (newly.length) {
@@ -191,6 +242,7 @@ router.post('/import', uploadIdList, async (req, res, next) => {
       notFoundIds: m.notFoundIds.slice(0, NOT_FOUND_CAP),
       doorsDropped,
       totalRows: m.totalRows,
+      keptRows: filtered ? m.keptRows : null,
     });
   } catch (err) {
     next(err);

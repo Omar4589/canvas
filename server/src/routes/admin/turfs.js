@@ -2,9 +2,16 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
-import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
+import {
+  requireActiveCampaign,
+  assertPassWritable,
+  passArchivedBody,
+  walkListArchivedBody,
+  WALK_LIST_ARCHIVED,
+} from '../../middleware/campaignWritable.js';
 import { Campaign } from '../../models/Campaign.js';
 import { NOT_DELETING } from '../../services/campaigns/deletionState.js';
+import { Effort } from '../../models/Effort.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { getQueue, QUEUE_NAMES, queueOp } from '../../queues/index.js';
@@ -98,8 +105,73 @@ async function loadCampaign(req, res, next) {
 router.use(loadCampaign);
 // Archived campaign ⇒ read-only: no cutting, assigning, restricting or moving doors.
 // The two *-preview endpoints are POSTs that persist nothing, so they stay open — the
-// same carve-out entitlement.js makes for the exports estimate.
-router.use(requireActiveCampaign({ readOnlyPosts: /-preview$/ }));
+// same carve-out entitlement.js makes for the exports estimate. Deleting a snapshot stays
+// open too (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §B.8): it changes no book, and it is how a
+// Door Outcomes undo held by a cleared snapshot (§C.7) gets free without Reactivate, which
+// back-bills.
+const activeCampaignGuard = requireActiveCampaign({ readOnlyPosts: /-preview$/ });
+const SNAPSHOT_DELETE = /^\/snapshots\/[^/]+\/?$/;
+router.use((req, res, next) =>
+  req.method === 'DELETE' && SNAPSHOT_DELETE.test(req.path) ? next() : activeCampaignGuard(req, res, next)
+);
+
+// Archived pass ⇒ VIEW-ONLY, and an archived walk list freezes every pass of it, drafts
+// included (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §B.8): every book write below checks the pass it
+// writes into — a turf-scoped route through turf.passId — with assertPassWritable (409
+// `pass-archived` / `walk-list-archived`, same already-shipped-phone contract as the campaign
+// guard). Still allowed on purpose: reads, the -preview POSTs, deleting a snapshot, and
+// unrestrict-bulk / unrestrict-doors (a correction of the office's own marks, by design).
+// Every recut-lock holder that writes books (discard, restore-snapshot, delete book) re-reads the
+// pass AFTER taking the lock and checks again — an archive that landed between the first read and
+// the lock must win.
+
+// What the pass guard reads, and what its sentence names (passLabel).
+const PASS_GUARD_FIELDS = { status: 1, effortId: 1, roundNumber: 1, name: 1 };
+
+const loadGuardPass = (campaignId, passId) =>
+  Pass.findOne({ _id: passId, campaignId }, PASS_GUARD_FIELDS).lean();
+
+// For a recut-lock holder, right after taking the lock: the pass as it is NOW — 404 if it went
+// away, else the guard again. Returns false once it has answered.
+const assertStillWritable = async (res, campaignId, passId) => {
+  const pass = await loadGuardPass(campaignId, passId);
+  if (!pass) {
+    res.status(404).json({ error: 'Pass not found' });
+    return false;
+  }
+  return assertPassWritable(res, pass);
+};
+
+// C.8's wording for a desk mark on an archived walk list's doors — shared by restrict-doors
+// and restrict-bulk.
+const deskWalkListArchivedBody = (name) => ({
+  error: `Walk list "${name || ''}" is archived — unarchive it to mark its doors.`,
+  code: WALK_LIST_ARCHIVED,
+});
+
+// The multi-book form (assign-bulk, unassign-bulk, restrict-bulk): every pass the books sit on,
+// one read for the passes and one for their walk lists; the first refusal answers. A book whose
+// pass is gone is left to the route, as before. `desk` swaps in the desk-mark wording above.
+// Returns false once it has sent the 409.
+const assertBooksWritable = async (res, campaignId, books, { desk = false } = {}) => {
+  const passIds = [...new Set(books.map((b) => (b.passId ? String(b.passId) : null)).filter(Boolean))];
+  if (!passIds.length) return true;
+  const passes = await Pass.find({ _id: { $in: passIds }, campaignId }, PASS_GUARD_FIELDS).lean();
+  const archivedPass = passes.find((p) => p.status === 'archived');
+  if (archivedPass) {
+    res.status(409).json(passArchivedBody(archivedPass));
+    return false;
+  }
+  const frozen = await Effort.findOne(
+    { _id: { $in: passes.map((p) => p.effortId).filter(Boolean) }, status: 'archived' },
+    { name: 1, status: 1 }
+  ).lean();
+  if (frozen) {
+    res.status(409).json(desk ? deskWalkListArchivedBody(frozen.name) : walkListArchivedBody(frozen));
+    return false;
+  }
+  return true;
+};
 
 // Bulk-assign many books to many people in one call.
 //   mode 'distribute' = round-robin: spread the books evenly across the crew (one
@@ -123,6 +195,7 @@ router.post('/assign-bulk', async (req, res, next) => {
       { _id: 1, passId: 1, name: 1, householdIds: 1, status: 1 }
     ).lean();
     if (!turfs.length) return res.status(404).json({ error: 'No matching books in this campaign' });
+    if (!(await assertBooksWritable(res, req.campaign._id, turfs))) return;
     // Only published (accepted) books can be assigned — draft assignments would be
     // silently wiped by a re-cut, so we require Accept first.
     if (turfs.some((t) => t.status !== 'published')) {
@@ -214,8 +287,9 @@ router.post('/unassign-bulk', async (req, res, next) => {
     const uids = (Array.isArray(userIds) ? userIds : []).filter((x) => mongoose.isValidObjectId(x));
     if (!tids.length || !uids.length) return res.status(400).json({ error: 'turfIds and userIds required' });
     // Scope to THIS campaign's books so a bad id can't delete another campaign's assignments.
-    const scoped = await Turf.find({ _id: { $in: tids }, campaignId: req.campaign._id }, { _id: 1 }).lean();
+    const scoped = await Turf.find({ _id: { $in: tids }, campaignId: req.campaign._id }, { _id: 1, passId: 1 }).lean();
     if (!scoped.length) return res.json({ deleted: 0 });
+    if (!(await assertBooksWritable(res, req.campaign._id, scoped))) return;
     const r = await TurfAssignment.deleteMany({ turfId: { $in: scoped.map((t) => t._id) }, userId: { $in: uids } });
     res.json({ deleted: r.deletedCount });
   } catch (err) {
@@ -231,8 +305,10 @@ router.post('/generate', async (req, res, next) => {
     if (!['attribute', 'geometric', 'manual'].includes(mode)) {
       return res.status(400).json({ error: 'mode must be attribute|geometric|manual' });
     }
-    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).select('_id effortId').lean();
+    const pass = await loadGuardPass(req.campaign._id, passId);
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    // The job re-checks too (generateTurf.js), since an archive can land while it waits.
+    if (!(await assertPassWritable(res, pass))) return;
 
     // Dead-end guard: the round cuts from its effort's owned, mappable doors. With
     // none, generation silently produces 0 books — so block it and point the admin
@@ -311,6 +387,8 @@ router.post('/accept', async (req, res, next) => {
   try {
     const { passId } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    // A pass that isn't this campaign's accepts nothing (the updateMany below matches no book), as before.
+    if (!(await assertPassWritable(res, await loadGuardPass(req.campaign._id, passId)))) return;
     const r = await Turf.updateMany(
       { campaignId: req.campaign._id, passId, status: 'draft' },
       { $set: { status: 'published' } }
@@ -336,9 +414,9 @@ router.post('/add-supplemental', async (req, res, next) => {
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    if (pass.status === 'archived') {
-      return res.status(400).json({ error: 'Cannot add books to an archived pass' });
-    }
+    // 409 `pass-archived` / `walk-list-archived` (this was a bare 400 before the walk-list archive
+    // plan); the job checks again under its lock (generateTurf.js addSupplementalBooks).
+    if (!(await assertPassWritable(res, pass))) return;
 
     // Advisory pre-check only — the BINDING lock acquire lives in the job: a
     // route-held lock could go stale while the job waits behind a long generate.
@@ -386,6 +464,10 @@ router.post('/add-supplemental', async (req, res, next) => {
 // only — nothing reads it for counts/undo (deskRestrict.js keys by passId + current
 // membership); those marks survive the wipe as loose-door marks and count under the
 // door's next book.
+//
+// Both scopes are refused on an archived pass and on every pass of an archived walk list
+// (409 `pass-archived` / `walk-list-archived`, §B.8), and both check again UNDER the lock:
+// an archive that landed between the read below and the lock must not be discarded into.
 router.post('/discard', async (req, res, next) => {
   const { passId, confirmActive, clearKnocks, scope } = req.body || {};
   let locked = false;
@@ -395,15 +477,16 @@ router.post('/discard', async (req, res, next) => {
     if (draftsOnly && clearKnocks) {
       return res.status(400).json({ error: 'Knock history belongs to the pass, not its draft books — clear knocks with a full discard.' });
     }
-    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id });
+    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    if (pass.status === 'archived') return res.status(409).json({ error: 'Pass is archived; create a new pass instead' });
+    if (!(await assertPassWritable(res, pass))) return;
 
     if (draftsOnly) {
       if (!(await acquireRecutLock(passId, req.user._id))) {
         return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
       }
       locked = true;
+      if (!(await assertStillWritable(res, req.campaign._id, passId))) return;
       const discarded = await wipeDraftBooks(passId);
       return res.json({ discarded, scope: 'drafts' });
     }
@@ -432,6 +515,7 @@ router.post('/discard', async (req, res, next) => {
       return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
     }
     locked = true;
+    if (!(await assertStillWritable(res, req.campaign._id, passId))) return;
     // Clearing knocks takes the round's surveys and their earlier versions with it, in two reads; an
     // answer edit landing between them would leave the snapshot holding the edit with its original
     // nowhere. Checked AFTER taking the lock, which the edit side reads too, so neither can slip in.
@@ -500,12 +584,12 @@ router.post('/discard', async (req, res, next) => {
 
     // An active round with no books is invalid — revert it to draft. (Active
     // rounds are derived from Pass.status, so there's no campaign cache to clear.)
-    let reverted = false;
-    if (pass.status === 'active') {
-      pass.status = 'draft';
-      await pass.save();
-      reverted = true;
-    }
+    // Conditional on it being live NOW, never on a status read earlier: the next pass's
+    // activation doesn't take this lock, so it can end this pass mid-discard, and an ended
+    // pass must stay ended (round 2 of the walk-list archive review reproduced a stale revert
+    // turning a just-archived pass back into a draft).
+    const revert = await Pass.updateOne({ _id: passId, campaignId: req.campaign._id, status: 'active' }, { $set: { status: 'draft' } });
+    const reverted = revert.modifiedCount > 0;
 
     res.json({
       discarded: turfIds.length,
@@ -543,6 +627,9 @@ router.get('/snapshots', async (req, res, next) => {
 // Restore a snapshot (undo a discard/re-cut). Refuses if the pass already has
 // live books — discard them first. Re-creates books + assignments and, if the
 // snapshot captured them, the cleared knocks. Does NOT re-activate the pass.
+// Refused on an archived pass and on every pass of an archived walk list (§B.8) —
+// bring the pass back (unarchiving its walk list first) and restore then — and
+// checked again under the lock.
 router.post('/restore-snapshot', async (req, res, next) => {
   const { snapshotId } = req.body || {};
   let lockPassId = null;
@@ -550,8 +637,9 @@ router.post('/restore-snapshot', async (req, res, next) => {
     if (!mongoose.isValidObjectId(snapshotId)) return res.status(400).json({ error: 'snapshotId required' });
     const snapshot = await TurfSnapshot.findOne({ _id: snapshotId, campaignId: req.campaign._id });
     if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' });
-    const pass = await Pass.findOne({ _id: snapshot.passId, campaignId: req.campaign._id }).select('_id').lean();
+    const pass = await loadGuardPass(req.campaign._id, snapshot.passId);
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    if (!(await assertPassWritable(res, pass))) return;
 
     const liveBooks = await Turf.countDocuments({ passId: snapshot.passId, status: { $in: ['draft', 'published'] } });
     if (liveBooks > 0) {
@@ -562,6 +650,7 @@ router.post('/restore-snapshot', async (req, res, next) => {
       return res.status(409).json({ error: 'A re-cut is already in progress for this pass; try again shortly.' });
     }
     lockPassId = snapshot.passId;
+    if (!(await assertStillWritable(res, req.campaign._id, snapshot.passId))) return;
     if (snapshot.clearedKnocks) {
       // Restoring knocks brings surveys and their earlier versions back; not while an answer edit runs (the
       // same rule as a clear-knocks discard), nor beside a removal or its undo — a books-only snapshot touches
@@ -617,7 +706,12 @@ router.post('/restore-snapshot', async (req, res, next) => {
 });
 
 // Delete a snapshot the admin no longer needs. Lock-guarded so it can't be
-// removed out from under an in-flight restore.
+// removed out from under an in-flight restore. Allowed on an archived pass, an archived
+// walk list and an archived campaign (§B.8, and the carve-out at the top of this file): it
+// changes no book, and it frees a Door Outcomes undo held by a cleared snapshot (§C.7)
+// without putting a finished round back on phones. Under the lock the delete itself is the
+// re-read: a snapshot another request (or its round's delete) removed meanwhile answers 404
+// rather than a delete that didn't happen.
 router.delete('/snapshots/:id', async (req, res, next) => {
   const { id } = req.params;
   let lockPassId = null;
@@ -629,7 +723,8 @@ router.delete('/snapshots/:id', async (req, res, next) => {
       return res.status(409).json({ error: 'A re-cut/restore is in progress for this pass; try again shortly.' });
     }
     lockPassId = snapshot.passId;
-    await TurfSnapshot.deleteOne({ _id: id, campaignId: req.campaign._id });
+    const r = await TurfSnapshot.deleteOne({ _id: id, campaignId: req.campaign._id });
+    if (!r.deletedCount) return res.status(404).json({ error: 'Snapshot not found' });
     res.json({ deleted: 1 });
   } catch (err) {
     next(err);
@@ -816,8 +911,9 @@ router.post('/exclude-apartments', async (req, res, next) => {
     const { passId, threshold } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
     const n = apartmentThreshold(threshold);
-    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    const pass = await loadGuardPass(req.campaign._id, passId);
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    if (!(await assertPassWritable(res, pass))) return;
 
     const taken = (await apartmentCandidates({ campaignId: req.campaign._id, effortId: pass.effortId })).filter((c) => c.takenUpTo >= n);
     const ids = taken.map((c) => c.id);
@@ -857,8 +953,9 @@ router.post('/include-apartments', async (req, res, next) => {
   try {
     const { passId } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
-    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    const pass = await loadGuardPass(req.campaign._id, passId);
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    if (!(await assertPassWritable(res, pass))) return;
     // A home set aside in Pin Fixes rides the same flag; Re-include must never put it back into cuts
     // (it would be cuttable at a holding spot while hidden from the queue). Bring back is its only way back.
     const r = await Household.updateMany(
@@ -1104,6 +1201,8 @@ router.post('/restrict-bulk', async (req, res, next) => {
       { passId: 1, householdIds: 1, status: 1, name: 1 }
     ).lean();
     if (!turfs.length) return res.status(404).json({ error: 'Books not found' });
+    // An archived pass, or any pass of an archived walk list: 409 before anything is planned.
+    if (!(await assertBooksWritable(res, req.campaign._id, turfs, { desk: true }))) return;
     if (turfs.some((t) => t.status !== 'published')) {
       return res.status(409).json({
         error: 'Draft books can’t be bulk-restricted — accept the cut first.',
@@ -1187,10 +1286,14 @@ const passRequiredMessage = (unresolved) =>
 // time the house is on the page (draft books, accepted books, loose dots), unlike
 // restrict-bulk's published-only gate.
 //   body { householdIds: string[], passId?: string, scope?: 'incomplete'|'unknocked' }
-//   passId: explicit (must be this campaign's → 404; archived round → 409 `pass-archived`)
+//   passId: explicit (must be this campaign's → 404; archived round → 409 `pass-archived`;
+//     a round of an archived walk list, its frozen drafts included → 409 `walk-list-archived`)
 //     else each door's own effort's active round, else its single draft round, else
 //     400 PASS_REQUIRED { unresolved:[{ id, reason:'intake'|'no-round' }] } — all-or-nothing.
-//     An Intake door (no walk list) can never be marked: no round can own it.
+//     An Intake door (no walk list) can never be marked: no round can own it. A door of an
+//     archived walk list can't either: 409 `walk-list-archived`, answered BEFORE the
+//     PASS_REQUIRED branch, because an already-released phone turns any non-Intake
+//     PASS_REQUIRED into "this walk list has no current round" (mobile/lib/restrictBooks.js).
 //   scope: the same ladder restrict-bulk offers, so a map lasso over a part-worked street never
 //     silently relabels the crew's not-homes and refusals — 'incomplete' (the default, and what
 //     an older client that sends no scope gets) marks every door not surveyed/lit-dropped/
@@ -1216,7 +1319,7 @@ router.post('/restrict-doors', async (req, res, next) => {
     const skipped = emptyDeskSkips();
     skipped.ineligible += ids.length - households.length;
 
-    const { byPass, unresolved, ineligible, passProblem } = await resolveDeskPassForDoors({
+    const { byPass, unresolved, ineligible, passProblem, walkList } = await resolveDeskPassForDoors({
       campaign: req.campaign,
       households,
       passId: rawPassId,
@@ -1229,6 +1332,9 @@ router.post('/restrict-doors', async (req, res, next) => {
         code: 'pass-archived',
       });
     }
+    if (passProblem === 'walk-list-archived') return res.status(409).json(deskWalkListArchivedBody(walkList));
+    const frozen = unresolved.find((u) => u.reason === 'walk-list-archived');
+    if (frozen) return res.status(409).json(deskWalkListArchivedBody(frozen.walkList));
     if (unresolved.length) {
       return res.status(400).json({ error: passRequiredMessage(unresolved), code: 'PASS_REQUIRED', unresolved });
     }
@@ -1269,7 +1375,8 @@ router.post('/restrict-doors', async (req, res, next) => {
 // effort / pass-status / pass-existence check: it deletes for whatever passId the client
 // names (the mark's own round from /activity), so a mark whose draft round was since
 // deleted or whose door was re-housed can always be removed. Omitted passId resolves
-// exactly as restrict-doors does.
+// as restrict-doors does, except that a door of an archived walk list still resolves
+// (its active round, else its single draft): unmarking stays allowed there (§B.8).
 //   body { householdIds: string[], passId?: string } → { unmarked, households, passId, passIds }
 router.post('/unrestrict-doors', async (req, res, next) => {
   try {
@@ -1625,7 +1732,9 @@ router.get('/progress', async (req, res, next) => {
   }
 });
 
-// Move a single door from one book to another (both recompute).
+// Move a single door from one book to another (both recompute). Both books are in ONE pass
+// (§C.4): the guard below checks the target's pass, so a `from` in another pass — an archived
+// one, say — would be a book write nothing checked.
 router.post('/move-door', async (req, res, next) => {
   try {
     const { householdId, fromTurfId, toTurfId } = req.body || {};
@@ -1636,8 +1745,9 @@ router.post('/move-door', async (req, res, next) => {
     if (!to) return res.status(404).json({ error: 'Target book not found' });
 
     // Disjointness: a book may only hold doors owned by the book's effort.
-    const toPass = await Pass.findById(to.passId, { effortId: 1 }).lean();
+    const toPass = await loadGuardPass(req.campaign._id, to.passId);
     if (!toPass) return res.status(409).json({ error: 'That book’s pass no longer exists.' });
+    if (!(await assertPassWritable(res, toPass))) return;
     const movingHh = await Household.findOne({ _id: householdId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!movingHh) return res.status(404).json({ error: 'Household not found' });
     if (String(movingHh.effortId) !== String(toPass.effortId)) {
@@ -1648,6 +1758,9 @@ router.post('/move-door', async (req, res, next) => {
       ? { _id: fromTurfId, campaignId: req.campaign._id }
       : { campaignId: req.campaign._id, passId: to.passId, householdIds: householdId };
     const from = await Turf.findOne(fromQuery);
+    if (from && String(from.passId) !== String(to.passId)) {
+      return res.status(400).json({ error: 'Both books must be in the same pass.', code: 'different-pass' });
+    }
     if (from && String(from._id) !== String(to._id)) {
       from.householdIds = from.householdIds.filter((id) => String(id) !== String(householdId));
       await recomputeTurf(from);
@@ -1703,18 +1816,14 @@ router.post('/move-doors', async (req, res, next) => {
       passId = new mongoose.Types.ObjectId(String(newBook.passId));
     }
 
-    const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1, status: 1 }).lean();
+    const pass = await loadGuardPass(req.campaign._id, passId);
     if (!pass) {
       return to
         ? res.status(409).json({ error: 'That book’s pass no longer exists.' })
         : res.status(404).json({ error: 'Pass not found' });
     }
-    if (pass.status === 'archived') {
-      return res.status(409).json({
-        error: 'That round is archived — its books never reach a canvasser.',
-        code: 'pass-archived',
-      });
-    }
+    // An archived round (its books never reach a canvasser), or any round of an archived walk list.
+    if (!(await assertPassWritable(res, pass))) return;
 
     // Disjointness: a book may only hold doors owned by the book's effort. And only doors
     // this campaign owns AT ALL — recomputeTurf's mirror write is unscoped, so a foreign
@@ -1798,6 +1907,7 @@ router.post('/merge', async (req, res, next) => {
     if (!turfs.every((t) => String(t.passId) === passId)) {
       return res.status(400).json({ error: 'books must be in the same pass' });
     }
+    if (!(await assertPassWritable(res, await loadGuardPass(req.campaign._id, passId)))) return;
     if (primaryTurfId != null) {
       const i = turfs.findIndex((t) => String(t._id) === String(primaryTurfId));
       if (i < 0) return res.status(400).json({ error: 'primaryTurfId must be one of turfIds' });
@@ -1841,6 +1951,7 @@ router.post('/:turfId/split', async (req, res, next) => {
     }
     const src = await Turf.findOne({ _id: req.params.turfId, campaignId: req.campaign._id });
     if (!src) return res.status(404).json({ error: 'Book not found' });
+    if (!(await assertPassWritable(res, await loadGuardPass(req.campaign._id, src.passId)))) return;
     const moveSet = new Set(householdIds.map(String));
     const moving = src.householdIds.filter((id) => moveSet.has(String(id)));
     if (!moving.length) return res.status(400).json({ error: 'none of those doors are in this book' });
@@ -1875,6 +1986,7 @@ router.patch('/:turfId', async (req, res, next) => {
   try {
     const turf = await Turf.findOne({ _id: req.params.turfId, campaignId: req.campaign._id });
     if (!turf) return res.status(404).json({ error: 'Book not found' });
+    if (!(await assertPassWritable(res, await loadGuardPass(req.campaign._id, turf.passId)))) return;
     if (req.body.name) turf.name = String(req.body.name).trim();
     await turf.save();
     res.json({ turf });
@@ -1897,7 +2009,8 @@ router.patch('/:turfId', async (req, res, next) => {
 // neighbors' Voronoi entitlement, so every other stored shape stays disjoint and
 // containing (same invariant the onlyTurfIds notes in generateTurf.js rely on).
 // Lock-guarded so a supplemental/claim job re-tessellating this pass can't race
-// the delete.
+// the delete. Refused on an archived pass and on every pass of an archived walk list
+// (§B.8), checked again under the lock.
 router.delete('/:turfId', async (req, res, next) => {
   const { turfId } = req.params;
   let lockPassId = null;
@@ -1908,6 +2021,7 @@ router.delete('/:turfId', async (req, res, next) => {
       { status: 1, passId: 1, householdIds: { $slice: 1 } }
     ).lean();
     if (!turf) return res.status(404).json({ error: 'Book not found' });
+    if (!(await assertPassWritable(res, await loadGuardPass(req.campaign._id, turf.passId)))) return;
     const emptyPublished = turf.status === 'published' && !(turf.householdIds || []).length;
     if (turf.status !== 'draft' && !emptyPublished) {
       return res.status(409).json({ error: 'Accepted books can only be removed with Discard.', code: 'not-draft' });
@@ -1916,6 +2030,7 @@ router.delete('/:turfId', async (req, res, next) => {
       return res.status(409).json({ error: 'A re-cut or restore is in progress on this pass. Try again shortly.' });
     }
     lockPassId = turf.passId;
+    if (!(await assertStillWritable(res, req.campaign._id, turf.passId))) return;
     await TurfAssignment.deleteMany({ turfId: turf._id }); // load-bearing for an emptied published book; belt-and-braces for drafts
     await Household.updateMany({ turfId: turf._id }, { $set: { turfId: null, walkOrder: null } });
     await Turf.deleteOne({ _id: turf._id });

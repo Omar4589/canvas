@@ -31,6 +31,7 @@ import InsetGroup, {
 import MetricSheet from './MetricSheet';
 import ElectionCountdownChip from './ElectionCountdownChip';
 import { rangeFor, deviceTimezone, labelForRange, effectiveRange } from '../lib/dateRanges';
+import { walkListOptions, walkListLabel } from '../lib/walkListOptions';
 import { useTodayInTz } from '../lib/useTodayInTz';
 import { useFocusedPoll } from '../lib/useFocusedPoll';
 import { useRefreshGroup } from '../lib/useRefreshGroup';
@@ -729,17 +730,18 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
         <FilterBar
           filters={[
             { key: 'range', kind: 'dateRange', title: 'Date range', value: range, onChange: onRangeChange, tz },
-            // Only worth offering once a campaign HAS a second walk list. Switching lists also
-            // clears any picked survey pass: the pass chips below draw from the (now filtered)
-            // By-pass rows, so a pass from another walk list would keep scoping the survey
-            // numbers with no visible chip saying so.
+            // Only worth offering once a campaign HAS a second walk list — archived ones count, and
+            // stay pickable, marked and listed last: their history is still in every number here
+            // (lib/walkListOptions.js). Switching lists also clears any picked survey pass: the pass
+            // chips below draw from the (now filtered) By-pass rows, so a pass from another walk list
+            // would keep scoping the survey numbers with no visible chip saying so.
             {
               key: 'effort',
               title: 'Walk list',
               hidden: efforts.length <= 1,
               options: [
                 { key: '', label: 'All walk lists' },
-                ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+                ...walkListOptions(efforts).map((ef) => ({ key: String(ef._id), label: walkListLabel(ef) })),
               ],
               selected: effortId,
               onSelect: (k) => {

@@ -949,11 +949,13 @@ test('L-M2: a conversion Undo and an unknock Undo read the slots they write into
 // ── an Undo waits while a round it touched sits cleared (L-M3) ───────────────────────────────────
 
 // A round of its own at door `d`, with one book and Cara's surveyed entry there: a clear-knocks discard
-// leaves its round with no entries, and only such a round's snapshot holds an Undo (round 9).
+// leaves its round with no entries, and only such a round's snapshot holds an Undo (round 9). Live beside
+// round 1, so on a walk list of its own: one live pass per walk list (models/Pass.js).
 let clearedRoundNo = 200;
 const roundOfItsOwn = async (d) => {
   clearedRoundNo += 1;
-  const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.pass.effortId, roundNumber: clearedRoundNo, name: `Round ${clearedRoundNo}`, status: 'active' });
+  const side = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, name: `Side ${clearedRoundNo}` });
+  const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: side._id, roundNumber: clearedRoundNo, name: `Round ${clearedRoundNo}`, status: 'active' });
   await Turf.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, passId: p._id, name: `Book ${clearedRoundNo}`, mode: 'manual', status: 'published', householdIds: [ctx.homes[d]._id], doorCount: 1 });
   const at = new Date(Date.now() - 3600_000);
   const e = await CanvassActivity.create({
@@ -1035,8 +1037,10 @@ test('L-m5: the console step marks an older unknock that deleted the answers whe
 
 test('C-m5: a discard that clears a round\'s knocks, and the restore that brings them back, hold removals while they write — a books-only discard doesn\'t', { skip }, async () => {
   const d = 45;
+  // Two live rounds beside round 1: each on a walk list of its own (one live pass per walk list).
   const round = async (n) => {
-    const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.pass.effortId, roundNumber: n, name: `Round ${n}`, status: 'active' });
+    const side = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, name: `Side ${n}` });
+    const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: side._id, roundNumber: n, name: `Round ${n}`, status: 'active' });
     await Turf.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, passId: p._id, name: `Book ${n}`, mode: 'manual', status: 'published', householdIds: [ctx.homes[d]._id], doorCount: 1 });
     await CanvassActivity.create({
       organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: ctx.homes[d]._id, voterId: ctx.voters[d]._id, userId: ctx.otto._id,

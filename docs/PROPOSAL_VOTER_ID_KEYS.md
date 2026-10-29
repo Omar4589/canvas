@@ -192,7 +192,7 @@ The sites that decide behavior. Everything else is display, projection, or copyi
 
 **Undo** [undoImport.js](../server/src/services/import/undoImport.js) never touches `VotedPendingId` or `DncPendingId`. Import → graduate (parked row deleted) → undo loses the parked request permanently. Pre-existing; better matching makes it fire more often.
 
-**Uploads are CSV-only** ([parseVoterIdList.js:20-21](../server/src/services/import/parseVoterIdList.js#L20-L21)); "Save As CSV" from Excel strips the zeros before the file reaches the app, so query-time matching is the only fix for that surface.
+**Uploads are CSV-only** ([parseVoterIdList.js:20-21](../server/src/services/import/parseVoterIdList.js#L20-L21)); "Save As CSV" from Excel strips the zeros before the file reaches the app, so query-time matching is the only fix for that surface. *(True when written. Since 2026-10-28 the three uploads also take .xlsx ([PROPOSAL_ID_LIST_EXCEL.md](PROPOSAL_ID_LIST_EXCEL.md)): a workbook's text cells keep their zeros, but a column Excel already turned into numbers has lost them, so query-time matching is still the fix.)*
 
 **Mobile is untouched by any of this.** `stateVoterId` is not in [MOBILE_VOTER_PROJECTION](../server/src/routes/mobile/bootstrap.js#L53); the phone only displays it.
 

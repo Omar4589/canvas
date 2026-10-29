@@ -15,7 +15,9 @@ const RESOLVE_JS = `export const resolve = async (specifier, context, next) => {
   }
 };`;
 register(`data:text/javascript,${encodeURIComponent(RESOLVE_JS)}`);
-const { labelForField, formatValue, isNotable, answerEditSentence, teamMoveSummary } = await import('./campaignHistory.js');
+const { labelForField, formatValue, isNotable, answerEditSentence, teamMoveSummary, walkListSentence, actorLabel } = await import(
+  './campaignHistory.js'
+);
 
 // The History rows for the two door settings. The server stores only the field key and raw values
 // (a list as its sorted comma-join, an empty one as null), so a lost label or branch here breaks
@@ -87,4 +89,72 @@ test('a crew move says doors, then surveys, then notes; an unfinished one and a 
   assert.strictEqual(teamMoveSummary({ ...base, doorsMoved: 4, finishedBy: 'x' }).detail, '4 doors moved to Yan · Finished by a later change');
   assert.strictEqual(teamMoveSummary({ ...base, fromCoordinator: { name: 'Several teams' }, activitiesMoved: 2 }).headline, 'Pat: Several teams → Yan');
   assert.strictEqual(teamMoveSummary({ ...base, activitiesMoved: 5 }).detail, '5 doors moved to Yan', 'an older server: activitiesMoved only');
+});
+
+// Walk-list lifecycle rows (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.9): one sentence per outcome, built
+// from `details` alone — the from/to strings below are deliberately different, to prove they're never
+// read. Same sentences as client/src/lib/campaignHistory.test.js.
+test('every walk-list and pass lifecycle outcome reads as its sentence, from the details alone', () => {
+  const ADA = { id: 'u1', name: 'Ada', status: 'active' };
+  const row = (field, outcome, extra = {}, by = ADA) => ({
+    kind: 'config',
+    field,
+    by,
+    fromValue: 'not read',
+    toValue: 'not read either',
+    details: { walkList: 'North', pass: 'Pass 3 · GOTV', outcome, ...extra },
+  });
+  const cases = [
+    [row('walkListArchived', 'ended'), 'Ada archived walk list North — ended Pass 3 · GOTV'],
+    [row('walkListArchived', 'nothing-live', { pass: null }), 'Ada archived walk list North'],
+    [row('walkListUnarchived', 'brought-back'), 'Ada unarchived walk list North — brought back Pass 3 · GOTV'],
+    [row('walkListUnarchived', 'stayed-ended'), 'Ada unarchived walk list North — Pass 3 · GOTV stayed ended'],
+    [row('walkListUnarchived', 'nothing-ended', { pass: null }), 'Ada unarchived walk list North'],
+    [row('passArchived', 'by-hand'), 'Ada archived North · Pass 3 · GOTV'],
+    [row('passBroughtBack', 'live'), 'Ada brought back North · Pass 3 · GOTV'],
+    [row('passBroughtBack', 'draft'), 'Ada brought back North · Pass 3 · GOTV as a draft'],
+    // The server names the actorless repair row; it isn't said twice.
+    [row('passArchived', 'repair', {}, { id: null, name: 'One-time check' }), 'One-time check ended North · Pass 3 · GOTV'],
+    [row('passArchived', 'repair'), 'Ada ended North · Pass 3 · GOTV (one-time check)'],
+    [row('passArchived', 'by-hand', {}, null), 'Someone archived North · Pass 3 · GOTV'],
+  ];
+  for (const [item, sentence] of cases) {
+    assert.strictEqual(walkListSentence(item), sentence, `${item.field} ${item.details.outcome}`);
+  }
+  // An auto-named pass is just its number (the server's passLabel), and names are free text: a walk
+  // list called "North — Pass 9" stays whole, never split.
+  assert.strictEqual(
+    walkListSentence(row('passArchived', 'by-hand', { walkList: 'North — Pass 9', pass: 'Pass 2' })),
+    'Ada archived North — Pass 9 · Pass 2'
+  );
+  // A pass whose walk list was gone when the row was written names the pass alone.
+  assert.strictEqual(walkListSentence(row('passBroughtBack', 'live', { walkList: null })), 'Ada brought back Pass 3 · GOTV');
+});
+
+test('a lifecycle row without usable details falls back to the label row, which old phones show too', () => {
+  const base = { kind: 'config', field: 'walkListArchived', fromValue: 'North · live (Pass 3 · GOTV)', toValue: 'North · archived · Pass 3 · GOTV ended' };
+  assert.strictEqual(walkListSentence(base), null, 'no details');
+  assert.strictEqual(walkListSentence({ ...base, details: { walkList: 'North', pass: 'Pass 3', outcome: 'mystery' } }), null, 'unknown outcome');
+  assert.strictEqual(walkListSentence({ ...base, details: { walkList: 'North', pass: null, outcome: 'ended' } }), null, 'an ended pass with no name');
+  assert.strictEqual(walkListSentence({ ...base, details: { walkList: null, pass: 'Pass 3', outcome: 'ended' } }), null, 'a walk-list row with no name');
+  // Any other row with details is not a lifecycle row.
+  assert.strictEqual(walkListSentence({ kind: 'config', field: 'doorGoal', details: { outcome: 'ended' } }), null);
+  // The fallback reads in words: the label, and the server's readable from/to strings as they are.
+  assert.strictEqual(labelForField('walkListArchived'), 'Walk list archived');
+  assert.strictEqual(labelForField('walkListUnarchived'), 'Walk list unarchived');
+  assert.strictEqual(labelForField('passArchived'), 'Pass archived');
+  assert.strictEqual(labelForField('passBroughtBack'), 'Pass brought back');
+  assert.strictEqual(formatValue('walkListArchived', base.toValue), 'North · archived · Pass 3 · GOTV ended');
+  // Ordinary upkeep, not flagged for review.
+  for (const field of ['walkListArchived', 'walkListUnarchived', 'passArchived', 'passBroughtBack']) {
+    assert.strictEqual(isNotable({ kind: 'config', field }), false, field);
+  }
+});
+
+test('the one-time check is named plainly; a departed person still says so', () => {
+  // The History route's actor for a repair row nobody made.
+  assert.strictEqual(actorLabel({ id: null, name: 'One-time check', status: 'system' }), 'One-time check');
+  assert.strictEqual(actorLabel({ id: 'u1', name: 'Lee Lead', status: 'deactivated' }), 'Lee Lead (deactivated)');
+  assert.strictEqual(actorLabel({ id: 'u1', name: 'Ada', status: 'active' }), 'Ada');
+  assert.strictEqual(actorLabel(null), 'Unknown user');
 });

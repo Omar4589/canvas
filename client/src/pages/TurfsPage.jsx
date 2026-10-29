@@ -36,7 +36,16 @@ import { useMovePin } from '../lib/useMovePin.js';
 import { movePinToast } from '../lib/movePin.js';
 import MovePinCard from '../components/MovePinCard.jsx';
 import { STATUS_COLORS, statusColorsForTheme, STATUS_LABELS, actionLabel } from '../lib/statusColors.js';
-import { pickDefaultPass, groupPassesByEffortStatus } from '../lib/passPicker.js';
+import { pickDefaultPass, groupPassesByState } from '../lib/passPicker.js';
+import {
+  viewOnlyReason,
+  viewOnlyNotice,
+  viewOnlyLine,
+  snapshotRestoreNote,
+  crewHint,
+  undoDiscardSnapshotId,
+} from '../lib/turfViewOnly.js';
+import { UnarchiveWalkListDialog, BringBackPassDialog, refreshAfterRefusal } from '../components/walkListLifecycle';
 import { pickRound, roundMarkFromEntries, unmarkButtonLabel } from '../lib/restrictMark.js';
 import MoveTargetModal from '../components/MoveTargetModal.jsx';
 import { unplacedToggleCopy, unplacedLeftOutLine, unassignedDoorCount } from '../lib/turfUnplacedToggle.js';
@@ -480,7 +489,6 @@ function PassPicker({ campaignId, passId, onChange }) {
   });
   const passes = passesQ.data?.passes || [];
   const efforts = effortsQ.data?.efforts || [];
-  const effortName = new Map(efforts.map((e) => [String(e._id), e.name]));
   // Landing pass: which walk list is actually BEING WALKED ranks first, the old pass ranking
   // second. Rules and their tests live in lib/passPicker.js — the ranking regresses silently, and
   // a wrong landing sends you to cut a list nobody is walking.
@@ -496,9 +504,9 @@ function PassPicker({ campaignId, passId, onChange }) {
     if (pick) onChange(String(pick._id));
   }, [passId, ready, passes, efforts]);
 
-  // Every pass stays reachable — you may need an archived round's books — but grouped so active
-  // work sits at the top.
-  const groups = groupPassesByEffortStatus({ passes, efforts });
+  // Every pass stays reachable — you may need an archived round's books — grouped by what each one
+  // is: Live, Drafts, Archived, each "Walk list · Pass N · name" (lib/passPicker.js).
+  const groups = groupPassesByState({ passes, efforts });
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs font-medium uppercase tracking-wide text-fg-muted">Pass</span>
@@ -510,9 +518,9 @@ function PassPicker({ campaignId, passId, onChange }) {
         {!passes.length && <option value="">No passes</option>}
         {groups.map((g) => (
           <optgroup key={g.key} label={g.label}>
-            {g.passes.map((p) => (
-              <option key={p._id} value={p._id}>
-                {effortName.get(String(p.effortId)) || 'Walk list'} · Pass {p.roundNumber} · {p.name} ({p.status})
+            {g.options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </optgroup>
@@ -947,7 +955,9 @@ const COMPLETED_STATUSES = new Set(['surveyed', 'lit_dropped']);
 //     shows its new status, but the row is still on file and still counted on the book, so the
 //     undo is offered here too. Before this state existed the row was simply unreachable from
 //     the page it was made on.
-function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pending, error }) {
+// `readOnly` (a view-only pass — docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3): the state and who/when
+// stay, every button goes. Unmarking a desk mark stays possible from the Map page's door panel.
+function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pending, error, readOnly = false }) {
   const [open, setOpen] = useState(false);
   const activityQ = useQuery({
     queryKey: ['household-activity', householdId],
@@ -980,16 +990,18 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
         <div className="mt-0.5 text-[11px] text-fg-muted">
           Marked from the desk by {mark.byName ?? 'a removed user'}{mark.at ? ` · ${day(mark.at)}` : ''}
         </div>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => {
-            if (window.confirm('Remove the desk mark? This door is knockable again this round.')) { setOpen(false); onUnmark(); }
-          }}
-          className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-        >
-          {pending ? 'Working…' : unmarkButtonLabel(mark)}
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              if (window.confirm('Remove the desk mark? This door is knockable again this round.')) { setOpen(false); onUnmark(); }
+            }}
+            className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+          >
+            {pending ? 'Working…' : unmarkButtonLabel(mark)}
+          </button>
+        )}
       </>
     );
   } else if (mark?.kind === 'field') {
@@ -1005,6 +1017,8 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
         <div className="mt-0.5 text-[11px] text-fg-subtle">Only a canvasser re-knocking this door changes it.</div>
       </>
     );
+  } else if (readOnly) {
+    body = <div className="text-[11px] text-fg-subtle">Not restricted this round.</div>;
   } else if (completed) {
     body = (
       <>
@@ -1072,16 +1086,18 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
       <div className="mt-0.5 text-[11px] text-fg-subtle">
         Still on file and still counted on this book.
       </div>
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() => {
-          if (window.confirm('Remove the desk mark? It no longer affects this door — this only clears it from the record.')) { setOpen(false); onUnmark(); }
-        }}
-        className="mt-1 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-      >
-        {pending ? 'Working…' : unmarkButtonLabel(mark)}
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            if (window.confirm('Remove the desk mark? It no longer affects this door — this only clears it from the record.')) { setOpen(false); onUnmark(); }
+          }}
+          className="mt-1 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+        >
+          {pending ? 'Working…' : unmarkButtonLabel(mark)}
+        </button>
+      )}
     </div>
   );
 
@@ -1095,7 +1111,9 @@ function RestrictSection({ householdId, passId, status, tz, onMark, onUnmark, pe
   );
 }
 
-function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled, target }) {
+// `viewOnly` (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3): the door's book, state and history stay; Move to
+// book, Mark restricted and Unmark go (the page also passes no onMovePin).
+function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove, onClose, householdId, passId, status, tz, showRound, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, moveDisabled, target, viewOnly = false }) {
   const hh = data?.household;
   const voters = data?.voters || [];
   const currentId = book ? String(book._id) : null;
@@ -1142,19 +1160,21 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
             {bookColor && <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: bookColor }} />}
             <span className="font-medium">{book ? book.name : 'Unassigned'}</span>
           </div>
-          <select
-            value=""
-            onChange={(e) => { if (e.target.value) onMove(e.target.value); }}
-            disabled={moving}
-            className="mt-1.5 w-full rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
-          >
-            <option value="">{moving ? 'Moving…' : 'Move to book…'}</option>
-            {books
-              .filter((t) => String(t._id) !== currentId)
-              .map((t) => (
-                <option key={t._id} value={t._id}>{t.name}</option>
-              ))}
-          </select>
+          {!viewOnly && (
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) onMove(e.target.value); }}
+              disabled={moving}
+              className="mt-1.5 w-full rounded border border-border-strong bg-card px-2 py-1 text-xs text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+            >
+              <option value="">{moving ? 'Moving…' : 'Move to book…'}</option>
+              {books
+                .filter((t) => String(t._id) !== currentId)
+                .map((t) => (
+                  <option key={t._id} value={t._id}>{t.name}</option>
+                ))}
+            </select>
+          )}
         </div>
       )}
       {/* While Target doors is open: the door's status across ALL rounds — the one a tick reads —
@@ -1173,7 +1193,8 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
         </div>
       )}
       {/* Always rendered (not gated on showRound): a desk mark is allowed any time the door is
-          on this page. Keyed per door+pass so the inline confirm resets when either changes. */}
+          on this page — on a view-only pass it shows the state, without the buttons. Keyed per
+          door+pass so the inline confirm resets when either changes. */}
       {hh && (
         <RestrictSection
           key={`${householdId}|${passId}`}
@@ -1185,6 +1206,7 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
           onUnmark={onUnrestrict}
           pending={restrictPending}
           error={restrictError}
+          readOnly={viewOnly}
         />
       )}
       {/* Pin provenance + Move pin. The button is offered whenever the caller passes onMovePin
@@ -1237,7 +1259,9 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
 // On a spot of different homes (building.kind 'unplaced', or no address holding the pin) the pop-up lists each
 // home with its own Move pin (`onMovePinDoor(unit, { scope, count, addressLine1, unplaced })`), Mark restricted… and
 // Move to book…; units of one address are grouped with "Move these N units"; there is no Move building pin.
-function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, onMovePinDoor, moveDisabled, movePlan, pinFixesHref, target }) {
+// `viewOnly` (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3): each unit's book and slate dot stay; every move
+// select, the Restricted access block and the per-home Mark / Unmark go (the page passes no Move pin).
+function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMoveAll, onClose, onRestrict, onUnrestrict, restrictPending, restrictError, onMovePin, onMovePinDoor, moveDisabled, movePlan, pinFixesHref, target, viewOnly = false }) {
   // Inline confirm for the building-wide desk mark. Counts-only — no per-unit /activity read:
   // `units` are the raw /doors rows, whose `passStatus` is THIS round's status per unit. Every
   // unit id is sent; the server's skip ladder (completed / already restricted) is the truth and
@@ -1294,83 +1318,87 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
         <button onClick={onClose} className="shrink-0 rounded p-0.5 text-fg-subtle hover:bg-sunken hover:text-fg-muted" aria-label="Close">✕</button>
       </div>
 
-      <div className="mt-2 border-t border-border pt-2">
-        <select
-          value=""
-          onChange={(e) => { if (e.target.value) onMoveAll(e.target.value); }}
-          disabled={moving}
-          className="w-full rounded border border-border-strong bg-card px-2 py-1 text-xs font-medium text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
-        >
-          <option value="">{moving ? 'Moving…' : separateHomes ? 'Move all to book…' : 'Move all units to book…'}</option>
-          {books.map((t) => (
-            <option key={t._id} value={t._id}>{t.name}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="mt-2 border-t border-border pt-2">
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Restricted access</div>
-        {!confirmMark ? (
-          <button
-            type="button"
-            disabled={restrictPending || markableN === 0}
-            onClick={() => setConfirmMark(true)}
-            className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-          >
-            {separateHomes
-              ? `Mark all ${markableN} restricted…`
-              : `Mark building restricted… (${markableN} unit${markableN === 1 ? '' : 's'})`}
-          </button>
-        ) : (
-          <>
-            <p className="text-[11px] text-fg-muted">
-              Marks every {separateHomes ? 'home' : 'unit'} not yet done this round ({markableN}) — including{' '}
-              {separateHomes ? 'homes' : 'units'} the crew already reached; completed and already-restricted ones are skipped.
-            </p>
-            <div className="mt-1.5 flex gap-1.5">
-              <button
-                type="button"
-                disabled={restrictPending}
-                onClick={() => { setConfirmMark(false); onRestrict(unitIds); }}
-                className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {restrictPending ? 'Marking…' : `Mark ${markableN} unit${markableN === 1 ? '' : 's'}`}
-              </button>
-              <button
-                type="button"
-                disabled={restrictPending}
-                onClick={() => setConfirmMark(false)}
-                className="rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </>
-        )}
-        {deskRowsN > 0 && (
-          <>
-            <button
-              type="button"
-              disabled={restrictPending}
-              onClick={() => {
-                if (window.confirm('Remove desk marks from this building? Marks canvassers recorded at the door are kept.')) {
-                  onUnrestrict(unitIds);
-                }
-              }}
-              className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+      {!viewOnly && (
+        <>
+          <div className="mt-2 border-t border-border pt-2">
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) onMoveAll(e.target.value); }}
+              disabled={moving}
+              className="w-full rounded border border-border-strong bg-card px-2 py-1 text-xs font-medium text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
             >
-              Unmark restricted ({deskRowsN} desk {deskRowsN === 1 ? 'mark' : 'marks'})
-            </button>
-            {supersededN > 0 && (
-              <div className="mt-1 text-[11px] text-fg-subtle">
-                {supersededN === 1 ? '1 unit was' : `${supersededN} units were`} worked after being marked — those marks
-                no longer apply but are still on file.
-              </div>
+              <option value="">{moving ? 'Moving…' : separateHomes ? 'Move all to book…' : 'Move all units to book…'}</option>
+              {books.map((t) => (
+                <option key={t._id} value={t._id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-2 border-t border-border pt-2">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">Restricted access</div>
+            {!confirmMark ? (
+              <button
+                type="button"
+                disabled={restrictPending || markableN === 0}
+                onClick={() => setConfirmMark(true)}
+                className="w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+              >
+                {separateHomes
+                  ? `Mark all ${markableN} restricted…`
+                  : `Mark building restricted… (${markableN} unit${markableN === 1 ? '' : 's'})`}
+              </button>
+            ) : (
+              <>
+                <p className="text-[11px] text-fg-muted">
+                  Marks every {separateHomes ? 'home' : 'unit'} not yet done this round ({markableN}) — including{' '}
+                  {separateHomes ? 'homes' : 'units'} the crew already reached; completed and already-restricted ones are skipped.
+                </p>
+                <div className="mt-1.5 flex gap-1.5">
+                  <button
+                    type="button"
+                    disabled={restrictPending}
+                    onClick={() => { setConfirmMark(false); onRestrict(unitIds); }}
+                    className="rounded bg-brand-600 px-2 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    {restrictPending ? 'Marking…' : `Mark ${markableN} unit${markableN === 1 ? '' : 's'}`}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={restrictPending}
+                    onClick={() => setConfirmMark(false)}
+                    className="rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
             )}
-          </>
-        )}
-        {restrictError && <div className="mt-1 text-[11px] text-danger">{restrictError.message}</div>}
-      </div>
+            {deskRowsN > 0 && (
+              <>
+                <button
+                  type="button"
+                  disabled={restrictPending}
+                  onClick={() => {
+                    if (window.confirm('Remove desk marks from this building? Marks canvassers recorded at the door are kept.')) {
+                      onUnrestrict(unitIds);
+                    }
+                  }}
+                  className="mt-1.5 w-full rounded border border-border-strong px-2 py-1 text-xs font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                >
+                  Unmark restricted ({deskRowsN} desk {deskRowsN === 1 ? 'mark' : 'marks'})
+                </button>
+                {supersededN > 0 && (
+                  <div className="mt-1 text-[11px] text-fg-subtle">
+                    {supersededN === 1 ? '1 unit was' : `${supersededN} units were`} worked after being marked — those marks
+                    no longer apply but are still on file.
+                  </div>
+                )}
+              </>
+            )}
+            {restrictError && <div className="mt-1 text-[11px] text-danger">{restrictError.message}</div>}
+          </div>
+        </>
+      )}
 
       {/* Move pin for the building (server scope 'building' — the units of the majority street address at
           this coordinate move together, never the other homes on it). Offered only when one address holds the
@@ -1455,59 +1483,63 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
                           </span>
                         </div>
                       )}
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        {onMovePinDoor && (
-                          <button
-                            type="button"
-                            disabled={moveDisabled}
-                            onClick={() =>
-                              onMovePinDoor(u, { scope: 'unit', count: 1, addressLine1: u.addressLine1, unplaced: !!u.pinSuspect })
-                            }
-                            className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                      {!viewOnly && (
+                        <>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {onMovePinDoor && (
+                              <button
+                                type="button"
+                                disabled={moveDisabled}
+                                onClick={() =>
+                                  onMovePinDoor(u, { scope: 'unit', count: 1, addressLine1: u.addressLine1, unplaced: !!u.pinSuspect })
+                                }
+                                className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                              >
+                                Move pin
+                              </button>
+                            )}
+                            {markable && (
+                              <button
+                                type="button"
+                                disabled={restrictPending}
+                                onClick={() => {
+                                  if (window.confirm(`Mark ${label} restricted this round?`)) onRestrict([u.id]);
+                                }}
+                                className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                              >
+                                Mark restricted…
+                              </button>
+                            )}
+                            {(u.deskMarks || 0) > 0 && (
+                              <button
+                                type="button"
+                                disabled={restrictPending}
+                                onClick={() => {
+                                  if (window.confirm(`Remove the desk mark from ${label}? Marks canvassers recorded at the door are kept.`)) {
+                                    onUnrestrict([u.id]);
+                                  }
+                                }}
+                                className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                              >
+                                Unmark
+                              </button>
+                            )}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
+                            disabled={moving}
+                            className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
                           >
-                            Move pin
-                          </button>
-                        )}
-                        {markable && (
-                          <button
-                            type="button"
-                            disabled={restrictPending}
-                            onClick={() => {
-                              if (window.confirm(`Mark ${label} restricted this round?`)) onRestrict([u.id]);
-                            }}
-                            className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-                          >
-                            Mark restricted…
-                          </button>
-                        )}
-                        {(u.deskMarks || 0) > 0 && (
-                          <button
-                            type="button"
-                            disabled={restrictPending}
-                            onClick={() => {
-                              if (window.confirm(`Remove the desk mark from ${label}? Marks canvassers recorded at the door are kept.`)) {
-                                onUnrestrict([u.id]);
-                              }
-                            }}
-                            className="rounded border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-                          >
-                            Unmark
-                          </button>
-                        )}
-                      </div>
-                      <select
-                        value=""
-                        onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
-                        disabled={moving}
-                        className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
-                      >
-                        <option value="">Move to book…</option>
-                        {books
-                          .filter((t) => String(t._id) !== String(u.turfId))
-                          .map((t) => (
-                            <option key={t._id} value={t._id}>{t.name}</option>
-                          ))}
-                      </select>
+                            <option value="">Move to book…</option>
+                            {books
+                              .filter((t) => String(t._id) !== String(u.turfId))
+                              .map((t) => (
+                                <option key={t._id} value={t._id}>{t.name}</option>
+                              ))}
+                          </select>
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -1538,19 +1570,21 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
                       <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
                     </span>
                   </div>
-                  <select
-                    value=""
-                    onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
-                    disabled={moving}
-                    className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
-                  >
-                    <option value="">Move to book…</option>
-                    {books
-                      .filter((t) => String(t._id) !== String(u.turfId))
-                      .map((t) => (
-                        <option key={t._id} value={t._id}>{t.name}</option>
-                      ))}
-                  </select>
+                  {!viewOnly && (
+                    <select
+                      value=""
+                      onChange={(e) => { if (e.target.value) onMove(u.id, e.target.value); }}
+                      disabled={moving}
+                      className="mt-1 w-full rounded border border-border bg-card px-1.5 py-0.5 text-[11px] text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-60"
+                    >
+                      <option value="">Move to book…</option>
+                      {books
+                        .filter((t) => String(t._id) !== String(u.turfId))
+                        .map((t) => (
+                          <option key={t._id} value={t._id}>{t.name}</option>
+                        ))}
+                    </select>
+                  )}
                 </li>
               );
             })}
@@ -1577,6 +1611,31 @@ export default function TurfsPage() {
   // auto-select only kicks in when this is empty, so a seeded value wins.
   const [searchParams] = useSearchParams();
   const [passId, setPassId] = useState(() => searchParams.get('passId') || '');
+
+  // Selected pass (shares react-query cache with PassPicker) — for the live flag
+  // + whether Discard must confirm an active pass.
+  const passesQ = useQuery({
+    queryKey: ['admin', 'passes', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
+    enabled: !!campaignId,
+  });
+  const selectedPass = (passesQ.data?.passes || []).find((p) => String(p._id) === String(passId)) || null;
+  const isActivePass = selectedPass?.status === 'active';
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
+  // "{Effort} · Round N" — named in the Discard dialog so you can't wipe the wrong effort blind.
+  const selectedEffort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(selectedPass?.effortId)) || null;
+  const passLabel = selectedPass ? `${selectedEffort?.name || 'Walk list'} · Round ${selectedPass.roundNumber}` : '';
+  // VIEW-ONLY (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3): an archived pass, any pass of an archived walk
+  // list (its drafts are frozen too), or anything on an archived campaign. The page shows the books as
+  // they were, under one banner that says why and what you can do; every write but deleting a snapshot
+  // is left out. The rules and the copy live in lib/turfViewOnly.js. Up here, above the target view,
+  // because a view-only page has no cut to target.
+  const lifecycle = { pass: selectedPass, effort: selectedEffort, campaign: selected };
+  const viewOnly = !!viewOnlyReason(lifecycle);
 
   const [mode, setMode] = useState('geometric');
   const [attribute, setAttribute] = useState('precinct');
@@ -1620,15 +1679,18 @@ export default function TurfsPage() {
   // server's isActiveTargetFilter — an exclude-only filter must still reach the server, so the
   // exclude side counts too. Defined here, above the doors query, because `targetView` below
   // decides what that query asks for.
+  // A filter set on another pass waits on a view-only one: its panels are gone, so nothing could
+  // turn it off there.
   const sideActive = (f) => !!f && ((f.priorPassStatuses?.length || 0) > 0 || (f.answerFilters?.length || 0) > 0);
-  const targetActive = sideActive(targetFilter) || sideActive(targetFilter.exclude);
+  const targetActive = !viewOnly && (sideActive(targetFilter) || sideActive(targetFilter.exclude));
   const excludeActive = sideActive(targetFilter.exclude);
   // While Target doors / Exclude doors is open (or a target is live), the map shows the ALL-ROUNDS
   // targeting status those ticks read instead of this round's — a fresh round has no status of its
   // own, and ticking against a status the page never showed is how the 2026-10-13 list swap went
   // wrong. The doors query asks the server for that status only then (withTarget=1): the aggregate
-  // behind it walks every drawn door's history, too much to pay on every page load.
-  const targetView = showTarget || showExclude || targetActive;
+  // behind it walks every drawn door's history, too much to pay on every page load. Off on a
+  // view-only page, with the panels that open it.
+  const targetView = !viewOnly && (showTarget || showExclude || targetActive);
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnAreas, setDrawnAreas] = useState([]); // [{ id, geometry }] from MapboxDraw
   const [manualSplit, setManualSplit] = useState(false);
@@ -1638,7 +1700,12 @@ export default function TurfsPage() {
   const [showRestrict, setShowRestrict] = useState(null); // 'mark' | 'unmark' | null
   const [mapToast, setMapToast] = useState(null);
   const [clearKnocks, setClearKnocks] = useState(false);
-  const [lastSnapshotId, setLastSnapshotId] = useState(null);
+  // The last discard's snapshot AND the pass it was made on: "Undo last discard" is offered on that
+  // pass only (undoDiscardSnapshotId). A bare id used to follow you to the next pass and restore the
+  // previous one's books.
+  const [lastSnapshot, setLastSnapshot] = useState(null); // { passId, snapshotId }
+  // The view-only banner's Unarchive / Bring back box, opened in place: 'unarchive' | 'bring-back'.
+  const [lifecycleDialog, setLifecycleDialog] = useState(null);
   const [popupHouseholdId, setPopupHouseholdId] = useState(null);
   const [popupBuildingKey, setPopupBuildingKey] = useState(null);
   // Map layer visibility toggles + book status filter + crew-load bar open state.
@@ -1848,24 +1915,6 @@ export default function TurfsPage() {
   const popupBuilding = popupBuildingKey ? grouped.buildings.find((b) => b.key === popupBuildingKey) || null : null;
   // The street address whose units Move building pin carries (null on a spot of different homes).
   const popupMovePlan = useMemo(() => (popupBuilding ? buildingMovePrimary(popupBuilding.units) : null), [popupBuilding]);
-
-  // Selected pass (shares react-query cache with PassPicker) — for the live flag
-  // + whether Discard must confirm an active pass.
-  const passesQ = useQuery({
-    queryKey: ['admin', 'passes', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
-    enabled: !!campaignId,
-  });
-  const selectedPass = (passesQ.data?.passes || []).find((p) => String(p._id) === String(passId)) || null;
-  const isActivePass = selectedPass?.status === 'active';
-  const effortsQ = useQuery({
-    queryKey: ['admin', 'efforts', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
-    enabled: !!campaignId,
-  });
-  // "{Effort} · Round N" — named in the Discard dialog so you can't wipe the wrong effort blind.
-  const selectedEffort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(selectedPass?.effortId)) || null;
-  const passLabel = selectedPass ? `${selectedEffort?.name || 'Walk list'} · Round ${selectedPass.roundNumber}` : '';
 
   // Targeted-pass filter: the effort's survey questions (for answer chips) + a live count.
   const campaign = selected || null;
@@ -2378,20 +2427,23 @@ export default function TurfsPage() {
       qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
     },
   });
+  // `opts.passId` is the pass the discard was clicked on, carried in the variables: a pending
+  // mutation runs the LATEST render's onSuccess, so the closure's passId may already name the next
+  // pass by the time the snapshot id comes back.
   const discard = useMutation({
     mutationFn: (opts = {}) =>
       api(`/admin/campaigns/${campaignId}/turfs/discard`, {
         method: 'POST',
-        body: { passId, confirmActive: !!opts.confirmActive, clearKnocks: !!opts.clearKnocks, scope: opts.scope || 'all' },
+        body: { passId: opts.passId || passId, confirmActive: !!opts.confirmActive, clearKnocks: !!opts.clearKnocks, scope: opts.scope || 'all' },
       }),
-    onSuccess: (res) => {
+    onSuccess: (res, opts = {}) => {
       setShowDiscard(false);
       setClearKnocks(false);
       setDiscardScope('all');
       setSelectedBooks(new Set());
       setEditMode(false);
       // Drafts-only discards write no snapshot — don't offer an undo that isn't there.
-      setLastSnapshotId(res?.snapshotId || null);
+      setLastSnapshot(res?.snapshotId ? { passId: String(opts.passId || passId), snapshotId: res.snapshotId } : null);
       invalidateTurfs();
       qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
       qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
@@ -2443,7 +2495,7 @@ export default function TurfsPage() {
     mutationFn: (snapshotId) =>
       api(`/admin/campaigns/${campaignId}/turfs/restore-snapshot`, { method: 'POST', body: { snapshotId } }),
     onSuccess: () => {
-      setLastSnapshotId(null);
+      setLastSnapshot(null);
       invalidateTurfs();
       qc.invalidateQueries({ queryKey: ['turf-snapshots', campaignId, passId] });
       qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
@@ -2552,6 +2604,8 @@ export default function TurfsPage() {
     // The server folds the absorbed books' assignments onto the survivor, so the assignment
     // caches go stale with the book list — invalidateBookSet covers both.
     onSuccess: () => { setSelectedBooks(new Set()); invalidateBookSet(); },
+    // A refusal used to vanish here too (the button just re-enabled) — toast it, as the moves do.
+    onError: (err) => setMapToast({ text: `Couldn't merge — ${err.message}`, tone: 'error' }),
   });
   const rename = useMutation({
     mutationFn: ({ turfId, name }) => api(`/admin/campaigns/${campaignId}/turfs/${turfId}`, { method: 'PATCH', body: { name } }),
@@ -3117,7 +3171,31 @@ export default function TurfsPage() {
     // …and so does an open move dialog / emptied-book prompt: their frozen ids belong to it too.
     setMoveDialog(null);
     setEmptiedPrompt(null);
+    // …and the last discard's undo, the view-only box, and every refusal the left panel prints: each
+    // one is about the pass that just left (a "Pass 2 is archived" line must not sit under Pass 3).
+    // reset() is bound once per mutation observer, so the stale closures here are safe; an idle one
+    // is skipped, since every reset re-renders the page.
+    setLastSnapshot(null);
+    setLifecycleDialog(null);
+    for (const m of [generate, accept, rename, deleteDrafts, excludeApts, includeApts, addSupplemental, restore, deleteSnapshot]) {
+      if (!m.isIdle) m.reset();
+    }
   }, [passId, campaignId, clearDoorSelection]);
+
+  // Stale pages (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3): a write refused because the pass, its walk
+  // list or the campaign was archived elsewhere (or is being changed right now) means this page's
+  // picture is out of date — refetch it, so a page left open flips to view-only instead of failing
+  // button by button. The rule is the Walk Lists page's (refreshAfterRefusal: any 409 refetches the
+  // passes, walk lists and books; pass-archived, walk-list-archived, campaign-archived and
+  // lifecycle-busy refetch the campaign too). Watches the mutation cache rather than each
+  // mutation's onError, so BookAssignmentPanel's writes, and any write added later, are covered
+  // without being listed.
+  useEffect(() => {
+    if (!campaignId) return undefined;
+    return qc.getMutationCache().subscribe((event) => {
+      if (event?.type === 'updated' && event.action?.type === 'error') refreshAfterRefusal(qc, campaignId, event.action.error);
+    });
+  }, [qc, campaignId]);
 
   function startDraw() {
     // The blue Move-pin marker owns the drag while armed; Draw waits (its button is disabled too).
@@ -3140,6 +3218,23 @@ export default function TurfsPage() {
   const pct = job.pct;
   const canGenerate =
     passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnAreas.length > 0);
+  // Rename mode outlives a flip to view-only in state, never on screen.
+  const renaming = editMode && !viewOnly;
+  const undoSnapshotId = undoDiscardSnapshotId(lastSnapshot, passId);
+
+  // The view-only banner and its one action: the Unarchive / Bring back box in place, or the walk
+  // list's live pass.
+  const viewOnlyBanner = viewOnly
+    ? viewOnlyNotice({
+        ...lifecycle,
+        passes: passesQ.data?.passes,
+        day: (at) => formatInTz(at, tz, { month: 'short', day: 'numeric' }, false),
+      })
+    : null;
+  const runViewOnlyAction = (action) => {
+    if (action.kind === 'open') setPassId(action.passId);
+    else setLifecycleDialog(action.kind);
+  };
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -3151,11 +3246,21 @@ export default function TurfsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {campaignId && <PassPicker campaignId={campaignId} passId={passId} onChange={setPassId} />}
-          {isActivePass && (
+          {/* One badge for what the page is: Live, Draft, or view-only (a live pass on an archived
+              walk list or campaign reads view-only too — the banner below says it is still live). */}
+          {viewOnly ? (
+            <span className="rounded bg-sunken px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+              Archived · view only
+            </span>
+          ) : isActivePass ? (
             <span className="rounded bg-success-tint px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
               ● Live
             </span>
-          )}
+          ) : selectedPass?.status === 'draft' ? (
+            <span className="rounded bg-sunken px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+              Draft
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -3165,7 +3270,16 @@ export default function TurfsPage() {
       {campaignId && !passId && (
         <NextStepBanner tone="info" className="mb-5">Pick a pass above to cut its doors into books.</NextStepBanner>
       )}
-      {campaignId && passId && !hasNoDoors && turfs.length === 0 && doorsQ.data && (
+      {viewOnlyBanner && (
+        <NextStepBanner
+          tone="info"
+          className="mb-5"
+          action={viewOnlyBanner.action ? { label: viewOnlyBanner.action.label, onClick: () => runViewOnlyAction(viewOnlyBanner.action) } : null}
+        >
+          {viewOnlyBanner.text}
+        </NextStepBanner>
+      )}
+      {campaignId && passId && !viewOnly && !hasNoDoors && turfs.length === 0 && doorsQ.data && (
         <NextStepBanner tone="info" className="mb-5">No books yet — pick a cutting mode on the left and click Generate.</NextStepBanner>
       )}
 
@@ -3182,7 +3296,7 @@ export default function TurfsPage() {
               label="Canvassers"
               value={crew.canvassers.toLocaleString()}
               accent={!!crew.canvassers}
-              hint={crew.unassignedBooks > 0 ? `${crew.unassignedBooks} book${crew.unassignedBooks === 1 ? '' : 's'} unassigned` : 'every book covered'}
+              hint={crewHint({ unassignedBooks: crew.unassignedBooks, publishedCount, viewOnly })}
             />
             <StatChip
               label="Selected"
@@ -3235,35 +3349,39 @@ export default function TurfsPage() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '1.25rem' }} className="px-6 pb-6">
         <section style={{ flexShrink: 0, overflowY: 'auto', display: panelCollapsed ? 'none' : undefined }} className="w-80 rounded-lg border border-border bg-card p-5">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-base font-medium">Generate books</h2>
+            {/* View-only: everything that cuts (mode, target, exclude, apartments, the boxes,
+                Generate) and every to-do nudge is left out below; the book list stays. */}
+            <h2 className="text-base font-medium">{viewOnly ? 'Books' : 'Generate books'}</h2>
             <IconButton label="Collapse panel" variant="subtle" onClick={() => setPanelCollapsed(true)}>
               <IconChevron />
             </IconButton>
           </div>
 
-          <div className="mb-4">
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <span className="text-xs font-medium text-fg-muted">Cutting mode</span>
-              <InfoHint label="When to use each mode">
-                <b>Geometric</b> — group nearby houses into even, walkable books (the usual choice).<br />
-                <b>Attribute</b> — one book per precinct / zip / district.<br />
-                <b>Manual</b> — draw an area on the map by hand.
-              </InfoHint>
+          {!viewOnly && (
+            <div className="mb-4">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <span className="text-xs font-medium text-fg-muted">Cutting mode</span>
+                <InfoHint label="When to use each mode">
+                  <b>Geometric</b> — group nearby houses into even, walkable books (the usual choice).<br />
+                  <b>Attribute</b> — one book per precinct / zip / district.<br />
+                  <b>Manual</b> — draw an area on the map by hand.
+                </InfoHint>
+              </div>
+              <div className="flex rounded-md border border-border p-0.5 text-sm">
+                {['geometric', 'attribute', 'manual'].map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setMode(m)}
+                    className={['flex-1 rounded px-2 py-1.5 font-medium capitalize transition-colors', mode === m ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex rounded-md border border-border p-0.5 text-sm">
-              {['geometric', 'attribute', 'manual'].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={['flex-1 rounded px-2 py-1.5 font-medium capitalize transition-colors', mode === m ? 'bg-brand-600 text-white' : 'text-fg-muted hover:bg-sunken'].join(' ')}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
-          {mode === 'geometric' && (
+          {!viewOnly && mode === 'geometric' && (
             <div className="mb-4 space-y-3">
               <label className="block text-sm">
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Max doors per book</span>
@@ -3295,7 +3413,7 @@ export default function TurfsPage() {
               </div>
             </div>
           )}
-          {mode === 'attribute' && (
+          {!viewOnly && mode === 'attribute' && (
             <>
               <label className="mb-3 block text-sm">
                 <span className="mb-1 block text-xs font-medium text-fg-muted">Group by</span>
@@ -3327,7 +3445,7 @@ export default function TurfsPage() {
               </label>
             </>
           )}
-          {mode === 'manual' && (
+          {!viewOnly && mode === 'manual' && (
             <div className="mb-4 text-sm">
               <div className="flex gap-2">
                 <button
@@ -3394,7 +3512,7 @@ export default function TurfsPage() {
             </div>
           )}
 
-          {passId && publishedCount === 0 && (
+          {!viewOnly && passId && publishedCount === 0 && (
             <div className="mb-3">
               <button
                 type="button"
@@ -3469,7 +3587,7 @@ export default function TurfsPage() {
             </div>
           )}
 
-          {passId && publishedCount === 0 && (
+          {!viewOnly && passId && publishedCount === 0 && (
             <div className="mb-3">
               <button
                 type="button"
@@ -3519,7 +3637,7 @@ export default function TurfsPage() {
             </div>
           )}
 
-          {passId && !hasNoDoors && publishedCount === 0 && (
+          {!viewOnly && passId && !hasNoDoors && publishedCount === 0 && (
             <div className="mb-3 rounded-md border border-border-strong bg-sunken px-3 py-2 text-xs">
               {excludedApartmentCount > 0 ? (
                 <div className="flex items-center justify-between gap-2">
@@ -3553,10 +3671,16 @@ export default function TurfsPage() {
                   </div>
                 </div>
               )}
+              {/* The refusal for whichever button is showing — both used to fail without a word. */}
+              {(excludedApartmentCount > 0 ? includeApts.error : excludeApts.error) && (
+                <div className="mt-1 text-danger">
+                  {(excludedApartmentCount > 0 ? includeApts.error : excludeApts.error).message}
+                </div>
+              )}
             </div>
           )}
 
-          {doorsQ.data && !hasNoDoors && publishedCount === 0 && (() => {
+          {!viewOnly && doorsQ.data && !hasNoDoors && publishedCount === 0 && (() => {
             const total = doorsQ.data.doors?.length || 0;
             const n = targetActive ? targetPreviewQ.data?.doorCount ?? null : total;
             // With a target live, every faded door is accounted for by name — the Exclude panel,
@@ -3572,7 +3696,7 @@ export default function TurfsPage() {
             );
           })()}
 
-          {restrictedDoorCount > 0 && publishedCount === 0 && (
+          {!viewOnly && restrictedDoorCount > 0 && publishedCount === 0 && (
             <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
               <input
                 type="checkbox"
@@ -3587,7 +3711,7 @@ export default function TurfsPage() {
             </label>
           )}
 
-          {noSolicitingDoorCount > 0 && publishedCount === 0 && (
+          {!viewOnly && noSolicitingDoorCount > 0 && publishedCount === 0 && (
             <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
               <input
                 type="checkbox"
@@ -3605,7 +3729,7 @@ export default function TurfsPage() {
           {/* Shown whenever the round has such homes at all (unplacedAny), not only when the current
               target holds some: a box that vanished under one tick and came back ticked under the next
               is how the 2026-10-13 list swap hid what was fading the never-visited homes. */}
-          {(unplacedAny || unplacedDoorCount > 0) && publishedCount === 0 && (
+          {!viewOnly && (unplacedAny || unplacedDoorCount > 0) && publishedCount === 0 && (
             <label className="mb-2 flex items-start gap-2 text-xs text-fg-muted">
               <input
                 type="checkbox"
@@ -3625,21 +3749,23 @@ export default function TurfsPage() {
             </label>
           )}
 
-          <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
-            {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
-          </button>
-          {!hasNoDoors && publishedCount === 0 && (
+          {!viewOnly && (
+            <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
+              {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
+            </button>
+          )}
+          {!viewOnly && !hasNoDoors && publishedCount === 0 && (
             <p className="mt-2 text-[11px] text-fg-muted">
               Generated books are <strong>drafts</strong> — nothing reaches canvassers until you Accept. Re-cut freely until then.
             </p>
           )}
 
-          {hasNoDoors && votedDoorCount > 0 && (
+          {!viewOnly && hasNoDoors && votedDoorCount > 0 && (
             <NextStepBanner tone="info" className="mt-3">
               All {votedDoorCount.toLocaleString()} door{votedDoorCount === 1 ? '' : 's'} here have already voted — nothing to cut.
             </NextStepBanner>
           )}
-          {hasNoDoors && votedDoorCount === 0 && (
+          {!viewOnly && hasNoDoors && votedDoorCount === 0 && (
             <NextStepBanner
               tone="warning"
               className="mt-3"
@@ -3648,14 +3774,14 @@ export default function TurfsPage() {
               This walk list owns no mappable doors yet. Claim doors into it on the Walk Lists page before cutting books.
             </NextStepBanner>
           )}
-          {!hasNoDoors && votedDoorCount > 0 && (
+          {!viewOnly && !hasNoDoors && votedDoorCount > 0 && (
             <p className="mt-2 text-xs text-fg-muted">
               {votedDoorCount.toLocaleString()} door{votedDoorCount === 1 ? '' : 's'} here already voted — skipped (not cut into books).
             </p>
           )}
           {/* Disjoint from the voted line above (the server keeps the three skip counts mutually
               exclusive in coverage-bucket precedence), so both can show without double-counting. */}
-          {!hasNoDoors && doNotKnockDoorCount > 0 && (
+          {!viewOnly && !hasNoDoors && doNotKnockDoorCount > 0 && (
             <p className="mt-1 text-xs text-fg-muted">
               {doNotKnockDoorCount.toLocaleString()} door{doNotKnockDoorCount === 1 ? '' : 's'} here are marked do not knock — skipped (not cut into books).
             </p>
@@ -3696,11 +3822,13 @@ export default function TurfsPage() {
             </div>
           )}
           {generate.error && <div className="mt-2 text-xs text-danger">{generate.error.message}</div>}
-          {publishedCount > 0 && (
+          {!viewOnly && publishedCount > 0 && (
             <p className="mt-2 text-xs text-warning-fg">This pass has accepted books — Discard them below to re-cut.</p>
           )}
 
-          {publishedCount > 0 && selectedPass && selectedPass.status !== 'active' && (
+          {/* Only a DRAFT of an open walk list can be activated — an archived pass comes back through
+              Bring back, and the drafts of an archived walk list wait for Unarchive. */}
+          {!viewOnly && publishedCount > 0 && selectedPass?.status === 'draft' && (
             <NextStepBanner
               tone="success"
               className="mt-3"
@@ -3714,7 +3842,7 @@ export default function TurfsPage() {
             </NextStepBanner>
           )}
 
-          {!!turfs.length && unassignedCount > 0 && (
+          {!viewOnly && !!turfs.length && unassignedCount > 0 && (
             <div className="mt-3 rounded-md border border-info/30 bg-info-tint px-3 py-2.5 text-xs">
               <p className="font-medium text-info-fg">
                 {unassignedCount.toLocaleString()} door{unassignedCount === 1 ? '' : 's'} not in any book
@@ -3741,15 +3869,17 @@ export default function TurfsPage() {
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{turfs.length} books{draftCount ? ` · ${draftCount} draft` : ''}</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setEditMode((v) => !v)} title="Rename books" className={`rounded px-2 py-1 text-xs font-medium ${editMode ? 'bg-fg text-card' : 'border border-border-strong text-fg-muted hover:bg-sunken'}`}>
-                    {editMode ? 'Renaming' : 'Rename'}
-                  </button>
-                  {draftCount > 0 && (
+                  {!viewOnly && (
+                    <button onClick={() => setEditMode((v) => !v)} title="Rename books" className={`rounded px-2 py-1 text-xs font-medium ${editMode ? 'bg-fg text-card' : 'border border-border-strong text-fg-muted hover:bg-sunken'}`}>
+                      {editMode ? 'Renaming' : 'Rename'}
+                    </button>
+                  )}
+                  {!viewOnly && draftCount > 0 && (
                     <button onClick={() => accept.mutate()} disabled={accept.isPending} className="rounded bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
                       {accept.isPending ? 'Accepting…' : 'Accept'}
                     </button>
                   )}
-                  {selectedTurfs.length > 0 && selectedTurfs.every((t) => t.status === 'draft') && (
+                  {!viewOnly && selectedTurfs.length > 0 && selectedTurfs.every((t) => t.status === 'draft') && (
                     <button
                       onClick={() => {
                         if (window.confirm(`Delete ${selectedTurfs.length} draft book${selectedTurfs.length === 1 ? '' : 's'}? Their doors go back to "not in any book" (re-cut or add them again anytime).`)) {
@@ -3763,19 +3893,24 @@ export default function TurfsPage() {
                       {deleteDrafts.isPending ? 'Deleting…' : `Delete draft${selectedTurfs.length === 1 ? '' : 's'} (${selectedTurfs.length})`}
                     </button>
                   )}
-                  <button
-                    onClick={() => setShowDiscard(true)}
-                    disabled={discard.isPending}
-                    className="rounded px-2 py-1 text-xs font-medium text-danger hover:bg-danger-tint disabled:opacity-60"
-                  >
-                    {discard.isPending ? 'Discarding…' : 'Discard'}
-                  </button>
+                  {!viewOnly && (
+                    <button
+                      onClick={() => setShowDiscard(true)}
+                      disabled={discard.isPending}
+                      className="rounded px-2 py-1 text-xs font-medium text-danger hover:bg-danger-tint disabled:opacity-60"
+                    >
+                      {discard.isPending ? 'Discarding…' : 'Discard'}
+                    </button>
+                  )}
                 </div>
               </div>
+              {/* Accept and rename used to fail without a word; the server's sentence shows here. */}
               {deleteDrafts.error && <div className="mb-2 text-[11px] text-danger">{deleteDrafts.error.message}</div>}
+              {accept.error && <div className="mb-2 text-[11px] text-danger">{accept.error.message}</div>}
+              {rename.error && <div className="mb-2 text-[11px] text-danger">{rename.error.message}</div>}
               {(() => {
                 const zeroCount = turfs.filter((t) => (t.doorCount || 0) === 0).length;
-                if (!zeroCount) return null;
+                if (!zeroCount || viewOnly) return null;
                 return (
                   <div className="mb-2 rounded bg-warning-tint px-2 py-1.5 text-[11px] text-warning-fg">
                     {zeroCount} book{zeroCount === 1 ? '' : 's'} hold 0 doors — usually from moving doors to another walk
@@ -3789,10 +3924,12 @@ export default function TurfsPage() {
                 {selectedBooks.size > 0 && (
                   <button onClick={() => setSelectedBooks(new Set())} className="font-medium text-fg-muted hover:underline">Clear ({selectedBooks.size})</button>
                 )}
-                <span className="text-fg-subtle">Click a book (here or on the map) to assign canvassers.</span>
+                <span className="text-fg-subtle">
+                  {viewOnly ? 'Click a book (here or on the map) to see who held it.' : 'Click a book (here or on the map) to assign canvassers.'}
+                </span>
               </div>
 
-              {editMode && (
+              {renaming && (
                 <div className="mb-2 rounded bg-sunken px-2 py-1.5 text-xs text-fg-muted">
                   Rename mode: edit a book's name below. Selecting/assigning still works as usual.
                 </div>
@@ -3826,7 +3963,7 @@ export default function TurfsPage() {
                   >
                     <span className="flex min-w-0 items-center gap-2 truncate">
                       <span className="inline-block h-3 w-3 shrink-0 rounded-sm" style={{ background: colorFor(i) }} />
-                      {editMode ? (
+                      {renaming ? (
                         <input
                           defaultValue={t.name}
                           onClick={(e) => e.stopPropagation()}
@@ -3878,9 +4015,12 @@ export default function TurfsPage() {
           {snapshots.length > 0 && (
             <div className="mt-5 border-t border-border pt-4">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-muted">Undo / snapshots</div>
-              {lastSnapshotId && turfs.length === 0 && (
+              {/* Only on the pass the discard was made on (undoDiscardSnapshotId). On a view-only pass
+                  snapshots are listed with Delete only — deleting one is the way out of a Door
+                  Outcomes undo hold without bringing the pass back. */}
+              {undoSnapshotId && turfs.length === 0 && !viewOnly && (
                 <button
-                  onClick={() => restore.mutate(lastSnapshotId)}
+                  onClick={() => restore.mutate(undoSnapshotId)}
                   disabled={restore.isPending}
                   className="mb-2 w-full rounded bg-fg px-2 py-1.5 text-xs font-semibold text-card hover:bg-fg-muted disabled:opacity-60"
                 >
@@ -3897,14 +4037,16 @@ export default function TurfsPage() {
                       {s.restoredAt ? ' · restored' : ''}
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
-                      <button
-                        onClick={() => restore.mutate(s._id)}
-                        disabled={restore.isPending || turfs.length > 0}
-                        title={turfs.length > 0 ? 'Discard current books first' : 'Restore this snapshot'}
-                        className="rounded border border-border-strong px-2 py-0.5 font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
-                      >
-                        Restore
-                      </button>
+                      {!viewOnly && (
+                        <button
+                          onClick={() => restore.mutate(s._id)}
+                          disabled={restore.isPending || turfs.length > 0}
+                          title={turfs.length > 0 ? 'Discard current books first' : 'Restore this snapshot'}
+                          className="rounded border border-border-strong px-2 py-0.5 font-medium text-fg-muted hover:bg-sunken disabled:opacity-50"
+                        >
+                          Restore
+                        </button>
+                      )}
                       <button
                         onClick={() => { if (window.confirm('Delete this snapshot? It can no longer be restored.')) deleteSnapshot.mutate(s._id); }}
                         disabled={deleteSnapshot.isPending}
@@ -3917,10 +4059,15 @@ export default function TurfsPage() {
                   </li>
                 ))}
               </ul>
-              {turfs.length > 0 && (
-                <p className="mt-1 text-[11px] text-fg-subtle">Discard the current books to restore an earlier snapshot.</p>
+              {viewOnly ? (
+                <p className="mt-1 text-[11px] text-fg-subtle">{snapshotRestoreNote(lifecycle)}</p>
+              ) : (
+                turfs.length > 0 && (
+                  <p className="mt-1 text-[11px] text-fg-subtle">Discard the current books to restore an earlier snapshot.</p>
+                )
               )}
               {restore.error && <div className="mt-1 text-[11px] text-danger">{restore.error.message}</div>}
+              {deleteSnapshot.error && <div className="mt-1 text-[11px] text-danger">{deleteSnapshot.error.message}</div>}
             </div>
           )}
         </section>
@@ -3960,7 +4107,10 @@ export default function TurfsPage() {
                 {mapFullscreen ? <IconMinimize /> : <IconExpand />}
               </IconButton>
             )}
-            {tokenQ.data?.isReady && !!passId && (
+            {/* Not offered on a view-only page (every action it leads to is a write); a page that
+                flips to view-only mid-selection keeps the panel so Done still works, and the
+                selection bar goes read-only. */}
+            {tokenQ.data?.isReady && !!passId && (!viewOnly || selectMode) && (
               <MapSelectModeControl
                 active={selectMode}
                 onActivate={enterSelectMode}
@@ -4074,8 +4224,9 @@ export default function TurfsPage() {
           {/* Both pop-ups step aside while Move pin is armed (state kept — the pop-up comes back
               where it was on Cancel, or at the new spot after Save); the MovePinCard takes their
               corner. Move pin is offered only while the door is actually on the page (ghost-door
-              guard, same as onRestrict below) and the campaign is not archived (`isActive === false`
-              is the archived flag; a direct call still 409s and the card shows it inline). */}
+              guard, same as onRestrict below) and the page is not view-only — an archived pass, walk
+              list or campaign (a direct call on an archived campaign still 409s and the card shows it
+              inline). A view-only pop-up also loses Move to book, Mark restricted and Unmark. */}
           {popupHouseholdId && !movePin.armed && (
             <HousePopup
               data={householdQ.data}
@@ -4113,7 +4264,7 @@ export default function TurfsPage() {
               restrictPending={restrictDoors.isPending || unrestrictDoors.isPending}
               restrictError={restrictDoors.error || unrestrictDoors.error}
               onMovePin={
-                popupDoor && selected?.isActive !== false
+                popupDoor && !viewOnly
                   ? () => beginMovePin({
                       id: String(popupHouseholdId),
                       addressLine1: householdQ.data?.household?.addressLine1 || popupDoor.addressLine1,
@@ -4127,6 +4278,7 @@ export default function TurfsPage() {
                   : undefined
               }
               moveDisabled={jobBusy || generate.isPending}
+              viewOnly={viewOnly}
             />
           )}
           {/* Keyed per building so the inline mark-confirm resets when another building is clicked. */}
@@ -4152,7 +4304,7 @@ export default function TurfsPage() {
               movePlan={popupMovePlan}
               pinFixesHref={campaignId ? `/campaigns/${campaignId}/pin-fixes` : null}
               onMovePinDoor={
-                selected?.isActive !== false
+                !viewOnly
                   ? (u, opts) =>
                       beginMovePin({
                         id: String(u.id),
@@ -4167,7 +4319,7 @@ export default function TurfsPage() {
               }
               onMovePin={
                 // Only a real building moves as one: a spot of different homes, and a condo complex, never.
-                selected?.isActive !== false && popupMovePlan && popupBuilding.kind === 'building'
+                !viewOnly && popupMovePlan && popupBuilding.kind === 'building'
                   ? () =>
                       beginMovePin({
                         id: String(popupMovePlan.primary.id),
@@ -4180,6 +4332,7 @@ export default function TurfsPage() {
                   : undefined
               }
               moveDisabled={jobBusy || generate.isPending}
+              viewOnly={viewOnly}
             />
           )}
           {movePin.armed && (
@@ -4225,6 +4378,9 @@ export default function TurfsPage() {
               canUnmark={canUnmarkSelection}
               busy={restrictSelection.isPending ? 'mark' : unrestrictSelection.isPending ? 'unmark' : null}
               error={restrictSelection.error || unrestrictSelection.error}
+              // Only reachable here when the page flipped to view-only mid-selection: nothing writes.
+              readOnly={viewOnly}
+              readOnlyReason={viewOnlyLine(lifecycle) || undefined}
               reloading={doorsQ.isFetching}
               housesHidden={!layerVis.houses}
               overCap={overCap}
@@ -4283,6 +4439,10 @@ export default function TurfsPage() {
                 });
               }}
               movePending={moveBooks.isPending}
+              // View-only: who held each book stays; assign, unassign, merge, move, restrict and
+              // print all go.
+              readOnly={viewOnly}
+              readOnlyReason={viewOnlyLine(lifecycle)}
             />
           )}
           {/* Both move dialogs render INSIDE the map section — fullscreen is a fixed z-50 box,
@@ -4377,10 +4537,32 @@ export default function TurfsPage() {
           onConfirm={() =>
             discard.mutate(
               discardScope === 'drafts'
-                ? { scope: 'drafts' }
-                : { confirmActive: isActivePass || knockCount > 0, clearKnocks }
+                ? { passId, scope: 'drafts' }
+                : { passId, confirmActive: isActivePass || knockCount > 0, clearKnocks }
             )
           }
+        />
+      )}
+
+      {/* The view-only banner's actions, opened in place (the shared boxes the Walk Lists page uses).
+          Each refreshes the passes, walk lists and books itself before onDone, and Unarchive keeps a
+          pass that couldn't come back on screen as a warning — so the page only closes the box, and
+          stops being view-only once the refetch lands. */}
+      {lifecycleDialog === 'unarchive' && selectedEffort && (
+        <UnarchiveWalkListDialog
+          campaignId={campaignId}
+          effort={{ _id: selectedEffort._id, name: selectedEffort.name }}
+          onClose={() => setLifecycleDialog(null)}
+          onDone={() => setLifecycleDialog(null)}
+        />
+      )}
+      {lifecycleDialog === 'bring-back' && selectedPass && (
+        <BringBackPassDialog
+          campaignId={campaignId}
+          pass={selectedPass}
+          effortName={selectedEffort?.name || ''}
+          onClose={() => setLifecycleDialog(null)}
+          onDone={() => setLifecycleDialog(null)}
         />
       )}
     </div>

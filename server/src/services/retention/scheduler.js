@@ -10,7 +10,7 @@ import { sweepExpiredExports, EXPORT_SWEEP_JOB } from '../export/sweepExpiredExp
 import { sweepStaleImportJobs, IMPORT_SWEEP_JOB } from '../import/sweepStaleImports.js';
 import { sweepOrphanSnapshots, SNAPSHOT_SWEEP_JOB } from '../turf/snapshotRetention.js';
 import { sweepClientReportRows, CLIENT_REPORT_SWEEP_JOB } from '../reports/clientReportSweep.js';
-import { ensureAllTimeGuard, ensureReportPeriodGuard } from '../reports/clientReportIndexes.js';
+import { ensureAllTimeGuard, ensureOneLinkGuard, ensureReportPeriodGuard } from '../reports/clientReportIndexes.js';
 import {
   runFbtimeSync,
   syncOneConnection,
@@ -228,6 +228,8 @@ export async function processMaintenanceJob(job) {
     // next restart. A no-op when it exists; never throws.
     await ensureReportPeriodGuard('maintenance');
     await ensureAllTimeGuard('maintenance');
+    // And the one-link-per-report guard on links (PROPOSAL_CLIENT_REPORT_LINKS.md §C2), the same way.
+    await ensureOneLinkGuard('maintenance');
     const res = await sweepClientReportRows();
     console.log(
       `[maintenance] ${CLIENT_REPORT_SWEEP_JOB}: ${res.orphans} orphan, ${res.mapOff} map-off, ${res.legacy} legacy, ${res.stale} stale row(s) over ${res.reports} report(s)`

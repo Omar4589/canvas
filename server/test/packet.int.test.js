@@ -707,3 +707,37 @@ test('a survey saved before scripted surveys prints with every new field read as
     },
   ]);
 });
+
+test('an archived walk list offers no pass to print — its frozen draft, and a live pass left from before archiving', { skip }, async () => {
+  // docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.4: print packets are a picker for work, and an archived
+  // walk list is read-only — left out server-side, as an archived pass already is.
+  const old = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, name: 'Old Town', status: 'archived', archivedAt: new Date() });
+  // The pre-repair state (archived with a pass still live), plus a draft with an accepted book.
+  const live = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: old._id, roundNumber: 1, name: 'Round 1', status: 'active' });
+  const draft = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: old._id, roundNumber: 2, name: 'Round 2', status: 'draft' });
+  const home = await Household.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: old._id,
+    addressLine1: '1 Old Town Rd', city: 'Town', state: 'FL', zipCode: '34741', normalizedAddress: 'old-town-1',
+    location: { type: 'Point', coordinates: [-81.39, 28.31] }, isActive: true,
+  });
+  for (const p of [live, draft]) {
+    await Turf.create({
+      organizationId: ctx.org._id, campaignId: ctx.camp._id, passId: p._id, name: `Old Town ${p.name}`,
+      mode: 'geometric', status: 'published', householdIds: [home._id], doorCount: 1,
+    });
+  }
+  const sources = () => call(`/admin/campaigns/${ctx.camp._id}/packets/sources`, { token: ctx.adminTok, orgId: ctx.org._id });
+
+  const { status, json } = await sources();
+  assert.equal(status, 200);
+  const offered = new Set(json.rounds.map((r) => r.id));
+  assert.ok(!offered.has(String(live._id)), 'not the live pass of an archived walk list');
+  assert.ok(!offered.has(String(draft._id)), 'not its frozen draft');
+  assert.ok(json.rounds.some((r) => r.effortId === String(ctx.effort._id)), 'the open walk list is still offered');
+
+  // Unarchived, both come back: the exclusion is the archive alone.
+  await Effort.updateOne({ _id: old._id }, { $set: { status: 'active', archivedAt: null } });
+  const again = await sources();
+  const back = new Set(again.json.rounds.map((r) => r.id));
+  assert.ok(back.has(String(live._id)) && back.has(String(draft._id)));
+});

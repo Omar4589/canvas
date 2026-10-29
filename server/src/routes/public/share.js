@@ -11,7 +11,9 @@ import { OrgBranding } from '../../models/OrgBranding.js';
 import { signShareToken, shareTokenNamesLink, verifyToken } from '../../services/auth/tokens.js';
 import { shareLinksBlocked } from '../../services/billing/entitlement.js';
 import {
+  allReportsRetired,
   credentialVersionOf,
+  isAllReportsLink,
   reserveUnlockSlot,
   refundUnlockSlot,
   recordWrongPassword,
@@ -19,6 +21,7 @@ import {
   stampLinkAccess,
 } from '../../services/reports/shareLinks.js';
 import { recordReportOpen } from '../../services/reports/reportOpens.js';
+import { isWellFormedText } from '../../utils/passwordText.js';
 import { logoBytesOf } from '../../services/branding/orgLogo.js';
 import {
   shapeReportForClient,
@@ -37,9 +40,11 @@ import {
 import { earlierTotalsLine, seriesNav, currentSeriesLabels } from '../../services/reports/clientReportRead.js';
 
 // PUBLIC report sharing — no login. A capability token in the URL (the SPA's /r/:token → /share/:token
-// here) opens a campaign's PUBLISHED report hub (latest + history). An optional per-link password is
-// exchanged for a short-lived share JWT that authorizes the reads. Mounted before the requireAuth gate.
-// See docs/CLIENT_PORTAL.md; hardened in docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 / §O7.
+// here) opens ONE published report — each report has its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md);
+// an older link may open the campaign's whole report hub instead, until RETIRE_ALL_REPORTS_LINKS turns
+// those off (loadShare). The link's password is exchanged for a short-lived share JWT that authorizes the
+// reads. Mounted before the requireAuth gate. See docs/CLIENT_PORTAL.md; hardened in
+// docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 / §O7.
 const router = Router();
 
 // Every /share response, the logo included: never cached (a shared or borrowed device must not replay
@@ -52,17 +57,32 @@ router.use((req, res, next) => {
   next();
 });
 
+// A link to all your reports once RETIRE_ALL_REPORTS_LINKS is on (docs/PROPOSAL_CLIENT_REPORT_LINKS.md
+// §C1, contract K6). The page needs no change: any 410 ends the session and titles its notice with these
+// words (client lib/shareErrors.js, lib/shareSession.js).
+const SHARE_RETIRED = {
+  error: 'This link no longer works. Ask the person who sent it for the link to the latest report.',
+  code: 'SHARE_RETIRED',
+};
+
 async function loadShare(req, res, next) {
   try {
     const share = await ReportShareLink.findOne({ token: req.params.token, isActive: true });
     // A coded 404, so the page can tell a dead link (drop the remembered session) from a report
-    // that was taken down (keep it) — the two used to read the same.
+    // that was taken down (keep it) — the two used to read the same. A link already turned off says
+    // this, retired or not.
     if (!share) return res.status(404).json({ error: 'This report link is not available.', code: 'SHARE_NOT_FOUND' });
+    // Retired: before the expiry and billing checks, so a link to all your reports always says why it
+    // stopped. Every route below runs this first, so a device signed in to one is refused at once too.
+    // Nothing is written to the link: unsetting the switch brings it back. (`share` is hydrated, so a
+    // link from before the field reads reportId null.)
+    if (isAllReportsLink(share) && allReportsRetired()) return res.status(410).json(SHARE_RETIRED);
     // Expiry. A published report pins survey answers to street addresses, so a link that lives
     // forever is a forever-liability: it outlives the campaign, the staffer who sent it, and the
     // client relationship, and it keeps working from any inbox it was ever forwarded to.
-    // Legacy rows have expiresAt: null and are treated as unexpired — the migration sunsets them
-    // on notice rather than breaking a client's live URL without warning.
+    // Legacy rows have expiresAt: null and are treated as unexpired. Every one of them is a link to all
+    // reports, so the RETIRE_ALL_REPORTS_LINKS switch above is what ends them — set on a date the owner
+    // announces, rather than breaking a client's live URL without warning.
     if (share.expiresAt && share.expiresAt <= new Date()) {
       return res.status(410).json({
         error: 'This report link has expired. Ask your campaign contact for a new one.',
@@ -168,6 +188,9 @@ router.post('/:token/unlock', unlockLimiter, loadShare, async (req, res, next) =
       return issue(req.share);
     }
     const { password } = unlockSchema.parse(req.body);
+    // Never a lone surrogate to bcrypt — it takes the whole process down (utils/passwordText.js). No real
+    // password has one, so it's a wrong password, answered without a slot: it never reaches a compare.
+    if (!isWellFormedText(password)) return res.status(401).json({ error: 'Incorrect password', code: 'SHARE_PASSWORD_WRONG' });
     const slot = await reserveUnlockSlot({ linkId: req.share._id, token: req.params.token });
     if (!slot) return res.status(404).json({ error: 'This report link is not available.', code: 'SHARE_NOT_FOUND' });
     if (!slot.reserved) {

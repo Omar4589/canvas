@@ -128,9 +128,12 @@ before(async () => {
   const effortB = await Effort.create({
     organizationId: org._id, campaignId: campaign._id, name: 'Spanish list', surveyTemplateId: otherTemplate._id,
   });
+  // One live pass per walk list: R1 ended when R2 went live. Door Outcomes work on an ended pass's
+  // knocks as on a live one's.
   const pass = await Pass.create({
     organizationId: org._id, campaignId: campaign._id, effortId: effort._id,
-    roundNumber: 1, name: 'R1', status: 'active', activatedAt: new Date(),
+    roundNumber: 1, name: 'R1', status: 'archived', activatedAt: new Date(),
+    archivedAt: new Date(), archivedFrom: 'active', archivedVia: 'next-pass',
   });
   const pass2 = await Pass.create({
     organizationId: org._id, campaignId: campaign._id, effortId: effort._id,

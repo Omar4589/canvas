@@ -23,6 +23,18 @@ import { partitionAssignable } from '../../services/campaignRoster.js';
 import { deleteRoundSnapshots } from '../../services/turf/snapshotRetention.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
+import { requireActiveCampaign, assertWalkListWritable, walkListArchivedBody } from '../../middleware/campaignWritable.js';
+import {
+  archiveWalkList,
+  unarchiveWalkList,
+  walkListArchivePreview,
+  walkListUnarchivePreview,
+  withLifecycleLock,
+  heldReply,
+  sendLifecycleError,
+  publicEffort,
+} from '../../services/passes/passLifecycle.js';
+import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -77,6 +89,19 @@ async function loadCampaign(req, res, next) {
   }
 }
 router.use(loadCampaign);
+// Archived campaign ⇒ walk lists are read-only too (the promise CAMPAIGNS.md makes); reads stay open.
+router.use(requireActiveCampaign());
+
+// userId -> "First Last" through the History feed's resolver, so a deleted account still reads as a
+// name. null for no id.
+const actorNames = async (req, ids) => {
+  const people = await hydrateCanvassers(ids.filter(Boolean), req.campaign.organizationId);
+  return (id) => {
+    if (!id) return null;
+    const p = people.get(String(id));
+    return p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || null : null;
+  };
+};
 
 async function loadEffort(req, res, next) {
   try {
@@ -100,7 +125,7 @@ router.get('/', async (req, res, next) => {
     // per-effort readiness rollup (round/books/assigned across any pass status).
     const passes = await Pass.find(
       { campaignId: cId },
-      { effortId: 1, roundNumber: 1, name: 1, status: 1 }
+      { effortId: 1, roundNumber: 1, name: 1, status: 1, activatedAt: 1, archivedAt: 1, archivedVia: 1 }
     ).lean();
     const activeRounds = passes.filter((p) => p.status === 'active');
     const activePassIds = activeRounds.map((p) => p._id);
@@ -178,11 +203,45 @@ router.get('/', async (req, res, next) => {
       crewByEffort.set(effId, set);
     }
 
+    // Archive facts (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.3): who archived it, its most recently
+    // ended pass, whether any pass ever went live, and whether Delete can work (every pass still a
+    // draft — the delete route's own rule; it still checks the ledger).
+    const passesByEffort = new Map();
+    for (const p of passes) {
+      const k = String(p.effortId);
+      if (!passesByEffort.has(k)) passesByEffort.set(k, []);
+      passesByEffort.get(k).push(p);
+    }
+    const nameOf = await actorNames(req, efforts.map((e) => e.archivedBy));
+    const lastEndedOf = (k) =>
+      (passesByEffort.get(k) || [])
+        .filter((p) => p.status === 'archived')
+        .sort((a, b) => new Date(b.archivedAt || 0) - new Date(a.archivedAt || 0))[0] || null;
+
     res.json({
       efforts: efforts.map((e) => {
         const k = String(e._id);
+        const own = passesByEffort.get(k) || [];
+        const lastEnded = lastEndedOf(k);
+        const { lifecycleLock, ...effort } = e;
         return {
-          ...e,
+          ...effort,
+          // Always present, null on walk lists from before these fields existed (the clients test === null).
+          archivedAt: e.archivedAt ?? null,
+          archivedBy: e.archivedBy ?? null,
+          endedPassId: e.endedPassId ?? null,
+          archivedByName: nameOf(e.archivedBy),
+          canDelete: own.every((p) => p.status === 'draft'),
+          everLive: own.some((p) => !!p.activatedAt),
+          lastEndedPass: lastEnded
+            ? {
+                _id: String(lastEnded._id),
+                roundNumber: lastEnded.roundNumber,
+                name: lastEnded.name,
+                archivedAt: lastEnded.archivedAt || null,
+                archivedVia: lastEnded.archivedVia || null,
+              }
+            : null,
           doorCount: doorMap.get(k) || 0,
           crewCount: crewByEffort.get(k)?.size || 0,
           crewUserIds: [...(crewByEffort.get(k) || [])],
@@ -295,7 +354,7 @@ router.post('/', async (req, res, next) => {
         claimError = 'queue-unavailable';
       }
     }
-    res.status(201).json({ effort, pass, claimJobId, claimError });
+    res.status(201).json({ effort: publicEffort(effort), pass, claimJobId, claimError });
   } catch (err) {
     next(err);
   }
@@ -304,14 +363,22 @@ router.post('/', async (req, res, next) => {
 router.patch('/:id', loadEffort, async (req, res, next) => {
   try {
     const { name, surveyTemplateId } = req.body || {};
-    if (name) req.effort.name = String(name).trim();
+    // An archived walk list can be renamed, but its survey is frozen: a phone that was offline can
+    // still be sending answers to that survey, and the survey route refuses a mismatch (it would
+    // drop them).
+    if (surveyTemplateId !== undefined && !assertWalkListWritable(res, req.effort)) return;
     if (surveyTemplateId !== undefined) {
       const tpl = await resolveOverrideTemplate(req, res, surveyTemplateId);
       if (tpl.error) return;
+      // ...at the write too, not only at the check above: an archive landing in between must win (code
+      // review round 2 raced the two and lost 30 times in 30).
+      const set = await Effort.updateOne({ _id: req.effort._id, status: { $ne: 'archived' } }, { $set: { surveyTemplateId: tpl.value } });
+      if (!set.matchedCount) return res.status(409).json(walkListArchivedBody(req.effort));
       req.effort.surveyTemplateId = tpl.value;
     }
+    if (name) req.effort.name = String(name).trim();
     await req.effort.save();
-    res.json({ effort: req.effort });
+    res.json({ effort: publicEffort(req.effort) });
   } catch (err) {
     next(err);
   }
@@ -331,6 +398,9 @@ router.patch('/:id', loadEffort, async (req, res, next) => {
 // "Claim all Intake" only ever touches unowned doors, so it never conflicts.
 router.post('/:id/claim', loadEffort, async (req, res, next) => {
   try {
+    // Claiming INTO an archived walk list is refused; claiming doors OUT of one (this route on the
+    // receiving walk list, the archived one as a donor) stays allowed — that's the re-carve.
+    if (!assertWalkListWritable(res, req.effort)) return;
     const { walkListId, all, force } = req.body || {};
     if (walkListId && !mongoose.isValidObjectId(walkListId)) {
       return res.status(400).json({ error: 'Invalid walkListId' });
@@ -444,6 +514,7 @@ router.get('/:id/members', loadEffort, async (req, res, next) => {
 
 router.post('/:id/members', loadEffort, async (req, res, next) => {
   try {
+    if (!assertWalkListWritable(res, req.effort)) return;
     const { userId } = req.body || {};
     if (!mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'userId is required' });
     // Pre-staging is limited to the campaign team (or an org admin) — mirrors book assignment.
@@ -475,6 +546,7 @@ router.post('/:id/members', loadEffort, async (req, res, next) => {
 
 router.delete('/:id/members/:userId', loadEffort, async (req, res, next) => {
   try {
+    if (!assertWalkListWritable(res, req.effort)) return;
     await EffortMember.deleteOne({ effortId: req.effort._id, userId: req.params.userId });
     res.json({ deleted: 1 });
   } catch (err) {
@@ -482,19 +554,73 @@ router.delete('/:id/members/:userId', loadEffort, async (req, res, next) => {
   }
 });
 
-router.post('/:id/archive', loadEffort, async (req, res, next) => {
+// Archive ends the walk list's live pass (its books leave the phones on their next refresh) and
+// freezes the walk list; Unarchive can bring that pass back. The rules live in
+// services/passes/passLifecycle.js (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §B.2-B.3).
+router.get('/:id/archive-preview', loadEffort, async (req, res, next) => {
   try {
-    req.effort.status = 'archived';
-    await req.effort.save();
-    res.json({ effort: req.effort });
+    res.json(await walkListArchivePreview({ campaign: req.campaign, effort: req.effort }));
   } catch (err) {
     next(err);
   }
 });
 
+router.post('/:id/archive', loadEffort, async (req, res, next) => {
+  try {
+    res.json(
+      await archiveWalkList({
+        campaign: req.campaign,
+        effortId: req.effort._id,
+        userId: req.user._id,
+        confirm: req.body?.confirmArchive === true,
+      })
+    );
+  } catch (err) {
+    if (!sendLifecycleError(res, err)) next(err);
+  }
+});
+
+router.get('/:id/unarchive-preview', loadEffort, async (req, res, next) => {
+  try {
+    const ended = req.effort.endedPassId
+      ? await Pass.findOne({ _id: req.effort.endedPassId }, { archivedBy: 1 }).lean()
+      : null;
+    const nameOf = await actorNames(req, [ended?.archivedBy]);
+    res.json(await walkListUnarchivePreview({ campaign: req.campaign, effort: req.effort.toObject(), nameOf }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/unarchive', loadEffort, async (req, res, next) => {
+  try {
+    res.json(
+      await unarchiveWalkList({
+        campaign: req.campaign,
+        effortId: req.effort._id,
+        userId: req.user._id,
+        bringBack: req.body?.bringBack === true,
+      })
+    );
+  } catch (err) {
+    if (!sendLifecycleError(res, err)) next(err);
+  }
+});
+
 // Delete a draft effort: release its doors back to Intake first; refuse if it has
-// any non-draft rounds (history would dangle).
+// any non-draft rounds (history would dangle). Under the walk list's lifecycle lock, so an
+// activation or a bring-back can't land on a round mid-delete, answering once it's released.
 router.delete('/:id', loadEffort, async (req, res, next) => {
+  try {
+    const { reply, send } = heldReply();
+    await withLifecycleLock(req.effort._id, () => deleteEffort(req, reply));
+    send(res);
+  } catch (err) {
+    if (!sendLifecycleError(res, err)) next(err);
+  }
+});
+
+const deleteEffort = async (req, res) => {
   const locked = [];
   try {
     const liveRounds = await Pass.countDocuments({ effortId: req.effort._id, status: { $ne: 'draft' } });
@@ -512,7 +638,7 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
     }
     // Draft-rounds-only is NOT proof of no history — the ledger is the authority
     // (2026-08 incident): knocks recorded while doors sat in this list carry its
-    // effortId (resolveAttribution stamps the owner at write time, mobile/canvass.js),
+    // effortId (resolveAttribution stamps the owner at write time, services/canvass/attribution.js),
     // and deleting the doc orphans those rows into the by-pass report's
     // "Legacy / no pass" bucket. Archiving keeps the name resolvable forever.
     const ledgerRef = {
@@ -547,12 +673,10 @@ router.delete('/:id', loadEffort, async (req, res, next) => {
     await EffortMember.deleteMany({ effortId: req.effort._id });
     await Effort.deleteOne({ _id: req.effort._id });
     res.json({ deleted: 1 });
-  } catch (err) {
-    next(err);
   } finally {
     // A no-op for the rounds now gone; a delete that stopped short lets the rest go again.
     for (const id of locked) await releaseRecutLock(id).catch(() => {});
   }
-});
+};
 
 export default router;

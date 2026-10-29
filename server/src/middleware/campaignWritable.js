@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { Campaign } from '../models/Campaign.js';
+import { Effort } from '../models/Effort.js';
+import { passLabel } from '../services/passes/passLabel.js';
 
 // ── Archived campaigns are READ-ONLY ──
 //
@@ -15,6 +17,9 @@ import { Campaign } from '../models/Campaign.js';
 //                     create them, because the export window is a legal promise.
 //   - flag review     bookkeeping ABOUT past activity, not new field work.
 //   - campaign PATCH  you must be able to rename — and above all REACTIVATE — an archive.
+//   - snapshot delete DELETE /turfs/snapshots/:id changes no book; it is the way out of a Door
+//                     Outcomes undo held by a cleared snapshot (answerEditRuns.js roundClearedSince),
+//                     which must never require a Reactivate — that back-bills. Carved out in turfs.js.
 //
 // 409 rather than 403 is load-bearing: mobile/lib/api.js inspects 400/403/404 for
 // ORG_CONTEXT / FORBIDDEN_ROLE and can eject the user to the org picker on a 403 it
@@ -49,6 +54,46 @@ export const assertCampaignWritable = (res, campaign) => {
     return false;
   }
   return true;
+};
+
+// ── Archived walk lists are READ-ONLY, archived passes VIEW-ONLY ──
+// (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §B.8). Same 409 contract as the campaign guard above, for the
+// same already-shipped-phone reason. What stays allowed on purpose: renaming an archived walk list,
+// claiming doors OUT of it (a re-carve), deleting a snapshot, unmarking a desk mark, and everything
+// that only reads or corrects history (Door Outcomes, flag review, notes, exports).
+
+export const WALK_LIST_ARCHIVED = 'walk-list-archived';
+export const PASS_ARCHIVED = 'pass-archived';
+
+export const walkListArchivedBody = (effort) => ({
+  error: `Walk list "${effort?.name || ''}" is archived — unarchive it to change it.`,
+  code: WALK_LIST_ARCHIVED,
+});
+
+export const passArchivedBody = (pass) => ({
+  error: `${passLabel(pass)} is archived — bring it back to change it.`,
+  code: PASS_ARCHIVED,
+});
+
+export const assertWalkListWritable = (res, effort) => {
+  if (effort?.status === 'archived') {
+    res.status(409).json(walkListArchivedBody(effort));
+    return false;
+  }
+  return true;
+};
+
+// A pass is writable when it isn't archived AND its walk list isn't — the second covers the drafts
+// of an archived walk list, which stay drafts but are frozen. Pass `effort` when the caller already
+// has it; otherwise it is looked up. Returns false once it has sent the 409.
+export const assertPassWritable = async (res, pass, effort) => {
+  if (!pass) return true;
+  if (pass.status === 'archived') {
+    res.status(409).json(passArchivedBody(pass));
+    return false;
+  }
+  const eff = effort !== undefined ? effort : await Effort.findById(pass.effortId, { name: 1, status: 1 }).lean();
+  return assertWalkListWritable(res, eff);
 };
 
 const loadCampaignState = async (req) => {

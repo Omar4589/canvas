@@ -4,15 +4,19 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
+import { formatDayOf } from '../components/clientReports/reportDates.js';
+import { clientReportHistoryLine, isClientReportField } from './campaignHistory.js';
 
 // The Client Reports admin pieces, rendered for real (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §K
 // "Client"): the per-question rows — a follow-up says what mapping it shows and why its Map box is
-// held, a follow-up of a written answer can't be mapped at all; the links panel's badges for every
-// row state; the team-changed card with its live counts and choices, never Retry; and every build
-// state a row or the builder shows. Then the round-1 review fixes: Before you publish's team block and
-// notes, an expired link's buttons, Restore's reach, ended teams (Continue, never End or a dead end),
-// and New report after a long gap — since docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md, a row's Share and
+// held, a follow-up of a written answer can't be mapped at all; the team-changed card with its live
+// counts and choices, never Retry; and every build state a row or the builder shows. Then the round-1
+// review fixes: Before you publish's team block and notes, Restore's reach, ended teams (Continue, never
+// End or a dead end), and New report after a long gap — since docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md,
 // New report's dated choices (the clicked-through flows are in clientReportsSimplify.smoke.test.js).
+// Since docs/PROPOSAL_CLIENT_REPORT_LINKS.md (one link per report, Archive): a row's buttons by state and
+// its two lines, Delete's words by state, the Publish confirm's subtitle, Before you publish without a
+// link line, and History naming each link by its report. A link's own states are Share's (its tests).
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const dir = mkdtempSync(join(here, '../../.smoke-cr-render-'));
@@ -32,9 +36,9 @@ const load = async () => {
      import { MemoryRouter } from 'react-router-dom';
      import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
      import QuestionTable from '${join(here, '../components/clientReports/QuestionTable.jsx')}';
-     import ClientLinksPanel from '${join(here, '../components/clientReports/ClientLinksPanel.jsx')}';
      import TeamChangedCard from '${join(here, '../components/clientReports/TeamChangedCard.jsx')}';
-     import ReportRow from '${join(here, '../components/clientReports/ReportRow.jsx')}';
+     import ReportRow, { deleteWarning } from '${join(here, '../components/clientReports/ReportRow.jsx')}';
+     export { deleteWarning };
      import { BuildStatus } from '${join(here, '../components/clientReports/parts.jsx')}';
      import PublishDialog from '${join(here, '../components/clientReports/PublishDialog.jsx')}';
      import RefreshDialog from '${join(here, '../components/clientReports/RefreshDialog.jsx')}';
@@ -53,11 +57,6 @@ const load = async () => {
      const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
      export const questions = ({ breakdowns, settings, deps, published = false, liveMapKeys = null, removedNotes = {} }) =>
        wrap(client(), <QuestionTable rows={rowsFor({ breakdowns, settings, deps: depsMapOf(deps), published, liveMapKeys })} mapOn={settings.visibility.showMap !== false} removedNotes={removedNotes} onToggleChart={() => {}} onToggleMap={() => {}} onHeadline={() => {}} onShowAll={() => {}} onShowNone={() => {}} />);
-     export const links = (shares) => {
-       const qc = client();
-       qc.setQueryData(['admin', 'client-report-shares', 'c1'], { shares });
-       return wrap(qc, <ClientLinksPanel campaignId="c1" tz="America/New_York" />);
-     };
      export const teamCard = (data) => {
        const qc = client();
        qc.setQueryData(['admin', 'client-report-team-changed', 's1', 'r1'], data);
@@ -73,14 +72,16 @@ const load = async () => {
        if (series) qc.setQueryData(['admin', 'client-report-series', 'c1'], { series });
        return wrap(qc, <HistoryDrawer campaignId="c1" tz="America/New_York" isAdmin reportsById={new Map(reports.map((r) => [r.id, r]))} onClose={noop} />);
      };
-     export const row = (r, { shares = [], isLatest = true, seriesEnded = false, teamChanged = null } = {}) => {
+     // \`newestOfKind\` follows \`isLatest\` unless a test says otherwise (an all-time report through today is
+     // the newest of its kind with no Next report).
+     export const row = (r, { shares = [], isLatest = true, newestOfKind = isLatest, seriesEnded = false, teamChanged = null, allReportsRetired = false } = {}) => {
        const qc = client();
        if (teamChanged) qc.setQueryData(['admin', 'client-report-team-changed', 's1', r.id ?? null], teamChanged);
-       return wrap(qc, <ul><ReportRow row={r} campaignId="c1" campaignType="survey" listUpdatedAt={1} isLatest={isLatest} seriesEnded={seriesEnded} teamLabel="Paid team" shares={shares} busy={null}
-         onOpen={() => {}} onNext={() => {}} onShare={() => {}} onTakeDown={() => {}} onPutBackUp={() => {}} onDelete={() => {}} onCancelBuild={() => {}} onRetry={() => {}} onSettled={() => {}} onTeamResolved={() => {}} onChangeCrews={() => {}} onEndTeam={() => {}} /></ul>);
+       return wrap(qc, <ul><ReportRow row={r} campaignId="c1" campaignType="survey" listUpdatedAt={1} isLatest={isLatest} newestOfKind={newestOfKind} seriesEnded={seriesEnded} teamLabel="Paid team" shares={shares} allReportsRetired={allReportsRetired} tz="America/New_York" busy={null}
+         onOpen={() => {}} onNext={() => {}} onShare={() => {}} onArchive={() => {}} onUnarchive={() => {}} onTakeDown={() => {}} onPutBackUp={() => {}} onDelete={() => {}} onCancelBuild={() => {}} onRetry={() => {}} onSettled={() => {}} onTeamResolved={() => {}} onChangeCrews={() => {}} onEndTeam={() => {}} /></ul>);
      };
      export const before = (checks, report = {}) =>
-       wrap(client(), <BeforePublish checks={checks} report={{ status: 'draft', weekStart: '2026-10-20', weekEnd: '2026-10-26', snapshotId: 'snap1', ...report }} shares={[]} labelOf={(k) => k} tz="America/New_York" onRecompute={noop} onReviewMocks={noop} copiedReviewed={false} onCopiedReviewed={noop} busy={false} />);
+       wrap(client(), <BeforePublish checks={checks} report={{ status: 'draft', weekStart: '2026-10-20', weekEnd: '2026-10-26', snapshotId: 'snap1', ...report }} labelOf={(k) => k} tz="America/New_York" onRecompute={noop} onReviewMocks={noop} copiedReviewed={false} onCopiedReviewed={noop} busy={false} />);
      // New report reads the series picker again as it opens and shows its dates only from that answer
      // (code review WEEK-1): here it is in already, stamped after the dialog opened.
      export const newReport = (props) => {
@@ -153,44 +154,6 @@ test('question rows: published, an addition reads "Add this with Refresh numbers
   assert.ok(off.includes('Turn on the map below to use questions as map filters.'));
 });
 
-test('link badges: active, expiring, expired with Renew, locked with Unlock now and rotate advice, wrong passwords, short password only when known, legacy', async () => {
-  const m = await load();
-  const base = {
-    campaignId: 'c1',
-    hasPassword: true,
-    isActive: true,
-    isLegacyOpen: false,
-    lifetimeEndsAt: iso(NOW + 300 * DAY),
-    passwordMeetsRule: true,
-    lock: { locked: false, until: null },
-    failures: { last24h: 0, last7d: 0, total: 0 },
-    lastAccessedAt: null,
-    createdAt: iso(NOW - 10 * DAY),
-  };
-  const html = m.links([
-    { ...base, id: 'a', token: 'e67TqWZpXkLm9nQ2', label: 'Candidate', expiresAt: iso(NOW + 60 * DAY), lastAccessedAt: iso(NOW - DAY) },
-    { ...base, id: 'b', token: 'tokB', label: 'Consultant', expiresAt: iso(NOW + 3 * DAY + 3600000) },
-    { ...base, id: 'c', token: 'tokC', label: 'Old', expiresAt: iso(NOW - DAY) },
-    { ...base, id: 'd', token: 'tokD', label: 'Board', expiresAt: iso(NOW + 60 * DAY), lock: { locked: true, until: iso(NOW + 5 * 3600000) }, failures: { last24h: 50, last7d: 50, total: 61 }, rotateAdvice: true },
-    { ...base, id: 'e', token: 'tokE', label: 'Field', expiresAt: iso(NOW + 60 * DAY), failures: { last24h: 12, last7d: 30, total: 41 } },
-    { ...base, id: 'f', token: 'tokF', label: 'Legacy', expiresAt: null, hasPassword: false, isLegacyOpen: true, passwordMeetsRule: null, lifetimeEndsAt: null },
-    { ...base, id: 'g', token: 'tokG', label: 'Short', expiresAt: iso(NOW + 60 * DAY), passwordMeetsRule: false },
-    { ...base, id: 'h', token: 'tokH', label: 'Off', expiresAt: iso(NOW + 60 * DAY), isActive: false },
-  ]);
-  const t = text(html);
-  for (const s of ['Client links', 'Active', 'Expires in 3 days', 'Expired', 'Renew', 'Locked', 'Unlock now', 'Wrong passwords', 'No password', 'Never expires', 'Short password', 'Disabled', 'Set an expiry', 'Last opened']) {
-    assert.ok(t.includes(s), `shows “${s}”`);
-  }
-  assert.ok(t.includes('Renew gives this link a new address — send your client the new link.'));
-  assert.ok(t.includes('after 50 wrong passwords. Devices already signed in still work.'));
-  assert.ok(t.includes('Someone else has this link'), 'a lock always says to rotate');
-  assert.ok(t.includes('12 wrong passwords in the last day · 30 this week · 41 in total.'));
-  assert.ok(t.includes('This link’s password is shorter than 12 characters — change it.'));
-  assert.equal((t.match(/Short password/g) || []).length, 1, 'only the link KNOWN to be short is flagged — never the unknown legacy one');
-  assert.ok(t.includes('doorline.app/r/e67Tq…'), 'the row shows a short form of the address');
-  assert.ok(!t.includes('e67TqWZpXkLm9nQ2'), 'the full token is not printed as text (it rides the hover title and Copy)');
-});
-
 test('team-changed card: who left, live counts, keep (default) or remove with what it takes out, change crews, end — never Retry', async () => {
   const m = await load();
   const t = text(
@@ -239,7 +202,7 @@ test('build states render as §G1 names them, with Cancel while live and Retry w
   assert.equal(text(m.status({ status: 'failed', error: { code: 'TEAM_CHANGED', seriesId: 's1' } })).trim(), '');
 });
 
-test('report rows: a queued draft, a published report with opens, Next and Share, and why no link opens it (SIMPLIFY §D)', async () => {
+test('report rows: a queued draft, and a published report with its link line and its visits through every link (LINKS §D2)', async () => {
   const m = await load();
   const draft = text(
     m.row({
@@ -254,6 +217,7 @@ test('report rows: a queued draft, a published report with opens, Next and Share
     })
   );
   assert.ok(draft.includes('Oct 20 – Oct 26') && draft.includes('Draft') && draft.includes('Queued (1 ahead)') && draft.includes('No numbers yet'));
+  assert.ok(!/Link|visit/.test(draft), 'a draft says nothing about a link or visits');
   const pub = text(
     m.row(
       {
@@ -265,7 +229,8 @@ test('report rows: a queued draft, a published report with opens, Next and Share
         hasSnapshot: true,
         publishedAt: '2026-10-20T14:00:00Z',
         contentEditedAt: '2026-10-21T14:00:00Z',
-        views: { byLink: { a: { opens: 2 } } },
+        // Visits through its own link, an old link to all your reports and a link since deleted: summed.
+        views: { byLink: { own: { opens: 2 }, old: { opens: 1 }, gone: { opens: 2 } }, members: { admins: { opens: 2 } } },
         build: { status: 'idle' },
         headline: { cumulative: { doorsKnocked: 3412, surveysTaken: 1980 }, period: { doorsKnocked: 412, surveysTaken: 260 } },
       },
@@ -274,42 +239,106 @@ test('report rows: a queued draft, a published report with opens, Next and Share
   );
   assert.ok(pub.includes('Published') && pub.includes('Edited Oct 21'));
   assert.ok(pub.includes('3,412 doors (+412) · 1,980 surveys (+260)'));
-  assert.ok(pub.includes('Opened via a deleted link: about 2 visits'));
-  // The links list not in yet (null): no opens line — every link would read "a deleted link" meanwhile.
+  assert.ok(pub.includes('About 5 visits · your organization: 2 visits'), 'every visit through any link, summed — never named by link');
+  assert.ok(!pub.includes('Opened via'));
+  assert.ok(pub.includes('No link of its own yet — Share makes one.'), 'the link line: no link yet');
+  assert.ok(pub.indexOf('3,412 doors') < pub.indexOf('No link of its own yet') && pub.indexOf('No link of its own yet') < pub.indexOf('About 5 visits'), 'two lines under the numbers: the link, then the visits');
+  assert.ok(pub.indexOf('About 5 visits') < pub.indexOf('Open'), '…above the buttons');
+  // The visits need no links list: they're the report's own counts.
   const opened = { id: 'r9', status: 'published', weekStart: '2026-10-13', weekEnd: '2026-10-19', timeZone: 'America/New_York', hasSnapshot: true, views: { byLink: { a: { opens: 2 } } }, build: { status: 'idle' }, headline: { cumulative: {}, period: {} } };
-  assert.ok(!text(m.row(opened, { shares: null })).includes('Opened via'));
-  assert.ok(text(m.row(opened, { shares: [{ id: 'a', label: 'Candidate', isActive: true, reportId: null }] })).includes('Opened via Candidate: about 2 visits'));
-  assert.ok(pub.includes('Next report'), 'the latest report of its tab offers Next');
-  assert.ok(!pub.includes('Copy message'), 'Share replaced Copy message');
-  assert.ok(pub.includes('No link yet — create one.'), 'no link at all: the reason, with Share right there');
-  const pubRow = {
-    id: 'r1',
-    status: 'published',
-    weekStart: '2026-10-13',
-    weekEnd: '2026-10-19',
-    timeZone: 'America/New_York',
-    hasSnapshot: true,
-    build: { status: 'idle' },
-    headline: { cumulative: {}, period: {} },
-  };
-  const linkTo = (over) => ({ id: 'l1', token: 'tok1', label: 'Board', isActive: true, hasPassword: true, expiresAt: iso(NOW + 30 * DAY), lock: { locked: false }, ...over });
-  // Share is never held: it makes a link when none opens the report.
-  const shareBtn = buttonFor(m.row(pubRow, { shares: [] }), 'Share');
-  assert.equal(shareBtn.disabled, false);
-  // The campaign's only link opens another report: it doesn't count (linksFor), and the row says so.
-  const other = text(m.row(pubRow, { shares: [linkTo({ reportId: 'r9', report: { id: 'r9', weekStart: '2026-10-06', weekEnd: '2026-10-12', scopeLabel: 'Whole campaign' } })] }));
-  assert.ok(other.includes('No link opens this report — your links open other reports. Share makes one.'));
-  // Its own one-report link, or a link to all your reports, opens it: nothing to say.
-  for (const s of [linkTo({ reportId: 'r1' }), linkTo({ reportId: null, label: 'Candidate' }), linkTo({ label: 'Old' })]) {
-    const t = text(m.row(pubRow, { shares: [s] }));
-    assert.ok(!/No link/.test(t), `${s.label}: a link opens it`);
+  assert.ok(text(m.row(opened, { shares: null })).includes('About 2 visits'));
+  const pubRow = { id: 'r1', status: 'published', weekStart: '2026-10-13', weekEnd: '2026-10-19', timeZone: 'America/New_York', hasSnapshot: true, build: { status: 'idle' }, headline: { cumulative: {}, period: {} } };
+  const own = (over) => ({ id: 'l1', token: 'tok1', label: '', isActive: true, hasPassword: true, expiresAt: iso(NOW + 30 * DAY), lock: { locked: false }, reportId: 'r1', createdAt: iso(NOW - DAY), ...over });
+  // Its own link: how it's doing, in the tone the link line gives it.
+  const active = m.row(pubRow, { shares: [own()] });
+  assert.ok(text(active).includes(`Link: active · expires ${formatDayOf(iso(NOW + 30 * DAY), 'America/New_York')}`), text(active));
+  assert.match(active, /<div class="mt-0\.5 text-xs text-fg-muted">Link: active/);
+  const expired = m.row(pubRow, { shares: [own({ expiresAt: iso(NOW - DAY) })] });
+  assert.ok(text(expired).includes(`Link expired ${formatDayOf(iso(NOW - DAY), 'America/New_York')} — Share to renew it.`));
+  assert.match(expired, /<div class="mt-0\.5 text-xs text-warning-fg">Link expired/);
+  // A link to another report, or an old link to all your reports, isn't this report's link.
+  const elsewhere = text(m.row(pubRow, { shares: [own({ reportId: 'r9' })] }));
+  assert.ok(elsewhere.includes('No link of its own yet — Share makes one.'));
+  // The links list not here yet (null): no link line at all, never a flash of "No link of its own yet".
+  assert.ok(!/Link|No link/.test(text(m.row(pubRow, { shares: null }))));
+  // Taken down, with its link: what the link shows meanwhile.
+  const down = text(m.row({ ...pubRow, takenDownAt: '2026-10-22T14:00:00Z' }, { shares: [own()], isLatest: false }));
+  assert.ok(down.includes('Taken down Oct 22') && down.includes('Its link shows “taken down” until you put it back up.'));
+});
+
+// The row's action buttons, in the order they read.
+const ACTIONS = ['Open', 'Share', 'Next report', 'Archive', 'Unarchive', 'Take down', 'Put back up', 'Delete'];
+const actionsOf = (html) => [...html.matchAll(/>([^<>]+)<\/button>/g)].map((x) => x[1]).filter((t) => ACTIONS.includes(t));
+
+test('report rows: every action is a button by state — Archive never on the newest of its kind, Unarchive on every archived report, Delete last (LINKS §D2)', async () => {
+  const m = await load();
+  const base = { id: 'r1', status: 'published', weekStart: '2026-10-13', weekEnd: '2026-10-19', timeZone: 'America/New_York', hasSnapshot: true, build: { status: 'idle' }, headline: { cumulative: {}, period: {} } };
+  const down = { ...base, takenDownAt: '2026-10-22T14:00:00Z' };
+  const draft = { ...base, status: 'draft', hasSnapshot: false };
+  const archived = { archivedAt: '2026-10-27T14:00:00Z' };
+  const cases = [
+    ['published, the newest of its kind', base, { isLatest: true }, ['Open', 'Share', 'Next report', 'Take down', 'Delete']],
+    ['published, an older one', base, { isLatest: false }, ['Open', 'Share', 'Archive', 'Take down', 'Delete']],
+    ['taken down: Share stays, to manage its link', down, { isLatest: false }, ['Open', 'Share', 'Archive', 'Put back up', 'Delete']],
+    ['taken down, the newest', down, { isLatest: true }, ['Open', 'Share', 'Next report', 'Put back up', 'Delete']],
+    ['a draft, the newest', draft, { isLatest: true }, ['Open', 'Next report', 'Delete']],
+    ['a draft, an older one', draft, { isLatest: false }, ['Open', 'Archive', 'Delete']],
+    ['archived, the newest of its kind: kept in the list with Unarchive', { ...base, ...archived }, { isLatest: true }, ['Open', 'Share', 'Next report', 'Unarchive', 'Take down', 'Delete']],
+    ['archived, an older one', { ...base, ...archived }, { isLatest: false }, ['Open', 'Share', 'Unarchive', 'Take down', 'Delete']],
+    ['an archived draft', { ...draft, ...archived }, { isLatest: false }, ['Open', 'Unarchive', 'Delete']],
+    // The newest all-time report that already runs through today: no Next (Refresh numbers does that),
+    // and still no Archive — it's the newest of its kind.
+    ['the newest all-time report, through today', { ...base, allTime: true }, { isLatest: false, newestOfKind: true }, ['Open', 'Share', 'Take down', 'Delete']],
+    ['the newest report of an ended team', base, { isLatest: true, seriesEnded: true }, ['Open', 'Share', 'Take down', 'Delete']],
+  ];
+  for (const [what, r, opts, want] of cases) {
+    const html = m.row(r, opts);
+    assert.deepEqual(actionsOf(html), want, what);
+    assert.ok(!html.includes('aria-label="Actions"') && !html.includes('⋮'), `${what}: nothing behind a ⋮`);
   }
-  // The links list not here yet (null): no line at all, never a flash of "No link yet".
-  assert.ok(!/No link/.test(text(m.row(pubRow, { shares: null }))));
-  const older = text(m.row({ id: 'r0', status: 'published', weekStart: '2026-10-06', weekEnd: '2026-10-12', timeZone: 'America/New_York', hasSnapshot: true, takenDownAt: '2026-10-22T14:00:00Z', build: { status: 'idle' }, headline: { cumulative: {}, period: {} } }, { isLatest: false }));
-  assert.ok(older.includes('Taken down Oct 22'));
-  assert.ok(!older.includes('Next report'), 'Next only on the latest');
-  assert.ok(!/\bShare\b/.test(older) && !/No link/.test(older), 'no Share, and no link talk, for a report the client can’t see');
+  // The right-hand group wraps as one unit — ghost buttons, Delete last in danger text — and an archived
+  // report wears "Archived" beside its status.
+  const html = m.row({ ...base, ...archived }, { isLatest: false });
+  const group = html.slice(html.indexOf('<div class="ml-auto flex flex-wrap gap-1">'));
+  assert.ok(group.length < html.length, 'one group on the right');
+  assert.deepEqual(actionsOf(group), ['Unarchive', 'Take down', 'Delete']);
+  assert.match(group, /<button type="button" class="[^"]*text-danger-fg[^"]*">Delete<\/button>/);
+  assert.match(group, /bg-transparent text-fg-muted[^"]*">Take down<\/button>/, 'a ghost button');
+  assert.ok(text(html).includes('Published Archived'), 'marked Archived');
+  assert.ok(!text(m.row(base, { isLatest: false })).includes('Archived'));
+});
+
+test('Delete says what happens to the report’s own link, by state — and while an old link to all your reports still works (LINKS §D2)', async () => {
+  const m = await load();
+  const shown = { id: 'r1', status: 'published', weekStart: '2026-10-19', weekEnd: '2026-10-25' };
+  const own = (over) => ({ id: 'l1', isActive: true, expiresAt: iso(NOW + 30 * DAY), reportId: 'r1', createdAt: iso(NOW - DAY), ...over });
+  const old = (over) => ({ id: 'a1', isActive: true, expiresAt: iso(NOW + 30 * DAY), reportId: null, createdAt: iso(NOW - 90 * DAY), ...over });
+  const words = (row, shares, opts = {}) => m.deleteWarning({ row, shares, now: NOW, ...opts });
+  const TAIL = 'Deleting it also deletes its link — anyone who opens it then reads “This link isn’t available.” To hide it but keep it, use Take down instead. This can’t be undone.';
+  assert.deepEqual(words(shown, [own()]), [{ text: 'Your client can open the Oct 19 – Oct 25 report right now.', tone: 'danger' }, { text: TAIL }]);
+  // Its link can't be opened now (expired, or turned off): no "right now" — the rest stays true.
+  assert.deepEqual(words(shown, [own({ expiresAt: iso(NOW - DAY) })]), [{ text: TAIL }]);
+  assert.deepEqual(words(shown, [own({ isActive: false })]), [{ text: TAIL }]);
+  // Two links of its own, from before one link per report: both go.
+  assert.equal(words(shown, [own(), own({ id: 'l2' })]).at(-1).text, 'Deleting it also deletes its links — anyone who opens one then reads “This link isn’t available.” To hide it but keep it, use Take down instead. This can’t be undone.');
+  // No link of its own.
+  const NONE = [{ text: 'The Oct 19 – Oct 25 report has no link of its own, so this deletes only the report. This can’t be undone.' }];
+  assert.deepEqual(words(shown, []), NONE);
+  assert.deepEqual(words(shown, [own({ reportId: 'r9' })]), NONE, 'another report’s link isn’t its own');
+  // …while an old link to all your reports still works, it says that link shows it.
+  const WINDOW = [{ text: 'The Oct 19 – Oct 25 report has no link of its own, but your old link to all your reports shows it — deleting it takes it off that too. This can’t be undone.' }];
+  assert.deepEqual(words(shown, [old()]), WINDOW);
+  assert.deepEqual(words(shown, [old()], { allReportsRetired: true }), NONE, 'once Doorline has turned them off, it doesn’t');
+  assert.deepEqual(words(shown, [old({ expiresAt: iso(NOW - DAY) })]), NONE, 'nor an expired one');
+  assert.deepEqual(words(shown, [old({ isActive: false })]), NONE, 'nor a turned-off one');
+  // Taken down.
+  const down = { ...shown, takenDownAt: '2026-10-27T14:00:00Z' };
+  assert.deepEqual(words(down, [own()]), [{ text: 'Your client already can’t see the Oct 19 – Oct 25 report — it was taken down. Deleting it also deletes its link, for good. This can’t be undone.' }]);
+  assert.deepEqual(words(down, [old()]), [{ text: 'Your client already can’t see the Oct 19 – Oct 25 report — it was taken down. Deleting it removes it for good. This can’t be undone.' }]);
+  // A draft never had a link.
+  assert.deepEqual(words({ ...shown, status: 'draft' }, [own()]), [{ text: 'The Oct 19 – Oct 25 draft and its numbers are deleted. This can’t be undone.' }]);
+  // The links list not in: nothing about links that might not be true.
+  assert.deepEqual(words(shown, null), [{ text: 'The Oct 19 – Oct 25 report and any link of its own are deleted for good. This can’t be undone.' }]);
 });
 
 const reportDoc = (over = {}) => ({
@@ -323,7 +352,7 @@ const reportDoc = (over = {}) => ({
   ...over,
 });
 
-test('Publish confirm: what is worth knowing first, Recompute first, and the link line naming why no link can open it', async () => {
+test('Publish confirm: what is worth knowing first, Recompute first, and what happens next — Share makes its link (LINKS §D5)', async () => {
   const m = await load();
   const t = text(
     m.publish({
@@ -334,6 +363,7 @@ test('Publish confirm: what is worth knowing first, Recompute first, and the lin
     })
   );
   assert.ok(t.includes('Publish this report?'));
+  assert.ok(t.includes('Oct 20 – Oct 26 — after you publish, Share makes its link for your client.'), 'the subtitle');
   assert.ok(t.includes('This period ends Oct 26 and isn’t over yet'));
   // An all-time report (Latest progress, SIMPLIFY §N) that runs through today says what that leaves out
   // (a last day long past stands in for today: never after it, whatever the clock says)…
@@ -349,11 +379,32 @@ test('Publish confirm: what is worth knowing first, Recompute first, and the lin
   assert.ok(t.includes('2 unreviewed mock-GPS flags are in this report’s numbers.'));
   assert.ok(t.includes('The notes were copied from Oct 13 – Oct 19'));
   assert.ok(t.includes('Your client sees exactly the preview.'));
-  // A draft with no link at all: nothing to create one with here — Share makes one after publishing (FRESH-8).
-  assert.ok(t.includes('No link yet — after you publish, Share makes one.'), 'the state-specific link line');
+  // A draft never has a link: no line counting links, or why none opens it.
+  assert.ok(!/No link|It shows on|link expires|create one/.test(t), t);
   const queued = text(m.publish({ report: reportDoc(), checks: { periodNotOver: true }, build: { status: 'running', progress: 40 }, shares: [] }));
   assert.ok(queued.includes('A recompute is running — wait for it, or publish these numbers and cancel it.'));
   assert.ok(!queued.includes('Recompute first'), 'no second recompute while one runs');
+});
+
+test('Publish confirm: while an old link to all your reports still works, it says that link shows the report at once (LINKS §D5)', async () => {
+  const m = await load();
+  const old = (over) => ({ id: 'a1', token: 'tokA', label: 'Candidate', isActive: true, hasPassword: true, expiresAt: iso(NOW + 30 * DAY), lock: { locked: false }, reportId: null, createdAt: iso(NOW - 90 * DAY), ...over });
+  const subtitleOf = (props) => text(m.publish({ report: reportDoc(), checks: {}, build: { status: 'idle' }, ...props }));
+  const WINDOW = 'Oct 20 – Oct 26 — your old link to all your reports shows it as soon as you publish; Share makes its own link.';
+  const AFTER = 'Oct 20 – Oct 26 — after you publish, Share makes its link for your client.';
+  const t = subtitleOf({ shares: [old()] });
+  assert.ok(t.includes(WINDOW) && !t.includes(AFTER), t);
+  assert.ok(t.includes('Your client sees exactly the preview.'), 'as today');
+  for (const [what, props] of [
+    ['the switch has turned them off', { shares: [old()], allReportsRetired: true }],
+    ['the old link expired', { shares: [old({ expiresAt: iso(NOW - DAY) })] }],
+    ['the old link is turned off', { shares: [old({ isActive: false })] }],
+    ['the links list isn’t in yet', { shares: null }],
+    ['only links to one report', { shares: [old({ reportId: 'r9' })] }],
+  ]) {
+    const s = subtitleOf(props);
+    assert.ok(s.includes(AFTER) && !s.includes('your old link'), what);
+  }
 });
 
 test('Refresh numbers: the before/after with +N and the period, "Areas on the map" on an area report, Apply and Discard', async () => {
@@ -455,8 +506,88 @@ test('History drawer names the tab and the team (WALK-3): one week, two tabs, re
   assert.ok(!t.includes('A team ·'));
 });
 
+test('History names each link by its report, says Archived and Unarchived, and uses Share’s words (LINKS §C7)', async () => {
+  const m = await load();
+  const at = '2026-10-27T14:00:00Z';
+  const by = { name: 'Ada Admin', status: 'active' };
+  // What the server stamps on a link row now: the report's id, its tab and its period (contract K8).
+  const report = { clientReportId: 'r1', seriesId: 's-paid', periodLabel: 'Oct 12 – Oct 18, 2026' };
+  const t = text(
+    m.history(
+      [
+        { id: 'k1', field: 'reportLink.created', at, by, ...report, toValue: { expiresAt: '2027-01-25T15:00:00Z' } },
+        { id: 'k2', field: 'reportLink.rotated', at, by, ...report, toValue: {} },
+        { id: 'k3', field: 'reportLink.disabled', at, by, ...report, toValue: {} },
+        { id: 'k4', field: 'reportLink.enabled', at, by, ...report, toValue: {} },
+        { id: 'k5', field: 'reportLink.passwordChanged', at, by, ...report, toValue: { alsoChanged: 3 } },
+        { id: 'k6', field: 'reportLink.passwordChanged', at, by, clientReportId: 'r2', seriesId: 's-camp', periodLabel: 'Oct 5 – Oct 11, 2026', toValue: { changedTogether: true } },
+        { id: 'k7', field: 'reportLink.deleted', at, by, toValue: { allReports: true, label: 'Candidate' } },
+        { id: 'k8', field: 'clientReport.archived', at, by, ...report },
+        { id: 'k9', field: 'clientReport.unarchived', at, by, ...report },
+        // A row written before rows named their report: its label, as before.
+        { id: 'k10', field: 'reportLink.disabled', at, by, toValue: { label: 'Board' } },
+      ],
+      [],
+      [
+        { id: 's-paid', label: 'Paid team' },
+        { id: 's-camp', label: 'Whole campaign' },
+      ]
+    )
+  );
+  const R = 'Oct 12 – Oct 18, 2026 · Paid team report';
+  assert.ok(t.includes(`${R} · Link created`) && t.includes('Expires Jan 25, 2027'), t);
+  assert.ok(t.includes(`${R} · Link given a new address — everyone was signed out`));
+  assert.ok(t.includes(`${R} · Link turned off — everyone was signed out`));
+  assert.ok(t.includes(`${R} · Link turned on`));
+  assert.ok(t.includes(`${R} · Link password changed — everyone was signed out Also changed on 3 other links that used the same password`));
+  assert.ok(t.includes('Oct 5 – Oct 11, 2026 · Whole campaign report · Link password changed — everyone was signed out Changed along with other links that used the same password'));
+  assert.ok(t.includes('An old link to all your reports · Link deleted'), 'a deleted link to all your reports says what it was — never its label');
+  assert.ok(t.includes(`${R} · Archived`) && t.includes(`${R} · Unarchived`));
+  assert.ok(t.includes('Board · Link turned off — everyone was signed out'), 'an older row reads by its label');
+  assert.ok(!/rotated|disabled|enabled|A client link/i.test(t), 'none of the old words');
+  // The words themselves, row by row.
+  const line = (field, extra = {}) => clientReportHistoryLine({ field, ...extra });
+  assert.equal(line('reportLink.passwordChanged', { toValue: { alsoChanged: 1 } }).detail, 'Also changed on 1 other link that used the same password');
+  assert.equal(line('reportLink.passwordChanged', { toValue: { alsoChanged: 0 } }).detail, '', 'none changed with it: nothing to say');
+  assert.equal(line('reportLink.deleted', { periodLabel: 'Oct 12 – Oct 18, 2026', toValue: { reportDeleted: true } }).subject, 'Oct 12 – Oct 18, 2026 report');
+  assert.equal(line('reportLink.deleted', { periodLabel: 'Oct 12 – Oct 18, 2026', toValue: { reportDeleted: true } }).detail, 'Deleted with its report');
+  assert.equal(line('reportLink.locked', {}).subject, 'A client link', 'a row with neither a report nor a label');
+  assert.equal(line('reportLink.deleted', { toValue: { label: 'Donor' } }).subject, 'Donor', 'a deleted link of either kind from before: its label');
+  for (const f of ['clientReport.archived', 'clientReport.unarchived']) assert.ok(isClientReportField(f), f);
+});
+
+test('Before you publish says nothing about links (a draft never has one), and the area warning names what your client can open (LINKS §D5, §D6)', async () => {
+  const m = await load();
+  const quiet = text(m.before({ links: { usable: 0, labels: [], reason: 'no_link' } }));
+  assert.ok(quiet.includes('Nothing needs a look.'), 'with no link line, nothing can need a look');
+  assert.ok(!/link/i.test(quiet), quiet);
+  const narrowed = text(
+    m.before(
+      {
+        areaNarrowedBy: [
+          {
+            key: 'support',
+            label: 'Support Smith?',
+            reports: [
+              { scopeLabel: 'Paid team', period: 'Oct 13 – Oct 19', how: 'doors' },
+              { scopeLabel: 'Whole campaign', period: 'Oct 6 – Oct 12', how: 'chart' },
+            ],
+          },
+        ],
+      },
+      { snapshotInputs: { mapMode: 'area', areaSize: 'small' } }
+    )
+  );
+  assert.ok(
+    narrowed.includes('“Support Smith?”: other reports your client can open could narrow down the answers its areas keep hidden — Paid team, Oct 13 – Oct 19 (exact doors); Oct 6 – Oct 12 (its chart).'),
+    narrowed
+  );
+  assert.ok(!narrowed.includes('on the same link'));
+});
+
 // ── Round-1 review fixes (CA2): the team block (C1), the refreshed and survey-version notes (C2, C3),
-// links on an expired link (ADMINUX-8), Restore's reach (ADMINUX-9), and ended teams (ADMINUX-10). ──
+// Restore's reach (ADMINUX-9), and ended teams (ADMINUX-10). An expired link's buttons (ADMINUX-8) are
+// Share's now (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D1), tested with it. ──
 
 // The <button> whose text is `label`, and whether it renders disabled (the attribute — its classes
 // name "disabled:" styles on every button).
@@ -538,45 +669,6 @@ test('Before you publish: the earlier report was refreshed (C2), and answers fro
   );
   assert.ok(!t.includes('more than one version of the survey'), 'the multipleSurveyVersions note is gone');
   assert.ok(!text(m.before({ conditionsUnknown: false, earlierReportRefreshed: null })).includes('earlier version of your survey'));
-});
-
-test('link rows: the wrong-password counts read, muted, whenever there are any — locked and expired links too (WALK-2)', async () => {
-  const m = await load();
-  const base = { campaignId: 'c1', hasPassword: true, isActive: true, lifetimeEndsAt: iso(NOW + 300 * DAY), passwordMeetsRule: true, lock: { locked: false, until: null }, createdAt: iso(NOW - 10 * DAY) };
-  // React's server render puts <!-- --> between `{failures}` and its full stop.
-  const muted = (html, line) => new RegExp(`<p class="text-fg-muted">${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</p>`).test(html.replace(/<!-- -->/g, ''));
-  // Wrong passwords this week, none today: no warning badge, the counts still read.
-  const week = m.links([{ ...base, id: 'w', token: 'tokW', label: 'Field', expiresAt: iso(NOW + 60 * DAY), failures: { last24h: 0, last7d: 3, total: 41 } }]);
-  assert.ok(muted(week, '3 wrong passwords this week · 41 in total.'), 'muted counts');
-  assert.ok(!text(week).includes('Wrong passwords'), 'no badge without one in the last day');
-  // Only the total left (a rotate cleared the week): still said.
-  assert.ok(muted(m.links([{ ...base, id: 't', token: 'tokT', label: 'Field', expiresAt: iso(NOW + 60 * DAY), failures: { last24h: 0, last7d: 0, total: 41 } }]), '41 wrong passwords in total.'));
-  // The last day: the badge, and the same muted line — said once.
-  const today = m.links([{ ...base, id: 'd', token: 'tokD', label: 'Field', expiresAt: iso(NOW + 60 * DAY), failures: { last24h: 12, last7d: 30, total: 41 } }]);
-  assert.ok(text(today).includes('Wrong passwords'));
-  assert.ok(muted(today, '12 wrong passwords in the last day · 30 this week · 41 in total.'));
-  assert.equal((text(today).match(/12 wrong passwords/g) || []).length, 1);
-  // Locked, and expired: their counts read too.
-  const fails = { last24h: 50, last7d: 50, total: 61 };
-  const locked = m.links([{ ...base, id: 'l', token: 'tokL', label: 'Board', expiresAt: iso(NOW + 60 * DAY), lock: { locked: true, until: iso(NOW + 3600000) }, failures: fails, rotateAdvice: true }]);
-  assert.ok(muted(locked, '50 wrong passwords in the last day · 50 this week · 61 in total.'));
-  const expired = m.links([{ ...base, id: 'x', token: 'tokX', label: 'Old', expiresAt: iso(NOW - 3600000), failures: fails }]);
-  assert.ok(muted(expired, '50 wrong passwords in the last day · 50 this week · 61 in total.'));
-  // None at all: nothing.
-  assert.ok(!text(m.links([{ ...base, id: 'n', token: 'tokN', label: 'Quiet', expiresAt: iso(NOW + 60 * DAY), failures: { last24h: 0, last7d: 0, total: 0 } }])).includes('wrong password'));
-});
-
-test('client links: an expired link offers Renew, never Rotate or Unlock; an active one keeps Rotate (ADMINUX-8)', async () => {
-  const m = await load();
-  const base = { campaignId: 'c1', hasPassword: true, isActive: true, lifetimeEndsAt: iso(NOW + 300 * DAY), passwordMeetsRule: true, failures: { last24h: 0, last7d: 0, total: 0 }, createdAt: iso(NOW - 10 * DAY) };
-  const expired = text(
-    m.links([{ ...base, id: 'x', token: 'tokX', label: 'Old', expiresAt: iso(NOW - 3600000), lock: { locked: true, until: iso(NOW + 3600000) }, failures: { last24h: 50, last7d: 50, total: 50 }, rotateAdvice: true }])
-  );
-  assert.ok(expired.includes('Renew') && expired.includes('Renew gives this link a new address — send your client the new link.'));
-  assert.ok(!/\bRotate\b/.test(expired), 'no Rotate: it keeps the expiry, so its new address would be dead');
-  assert.ok(!expired.includes('Unlock now') && !expired.includes('Locked') && !expired.includes('Someone else has this link'));
-  const active = text(m.links([{ ...base, id: 'y', token: 'tokY', label: 'Candidate', expiresAt: iso(NOW + 60 * DAY), lock: { locked: false, until: null } }]));
-  assert.ok(/\bRotate\b/.test(active) && active.includes('Extend'));
 });
 
 test('History Restore: what the client sees depends on whether the report is taken down (ADMINUX-9)', async () => {

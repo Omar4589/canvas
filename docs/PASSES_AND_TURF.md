@@ -25,7 +25,8 @@ book on paper for volunteers who aren't using the app).
 > (1) a campaign can have **several active passes at once** (one per active walk list), not one;
 > (2) a pass's door-set comes from its **walk list's owned doors** (`Household.effortId`);
 > (3) knock attribution is **deterministic by door → book → walk list**, not the `activatedAt`
-> time-window; (4) new-address imports go to **Intake** until assigned to a walk list. See
+> time-window (and since 2026-10-28 a late knock counts in the book the phone says it was made in —
+> §F); (4) new-address imports go to **Intake** until assigned to a walk list. See
 > [EFFORTS.md](EFFORTS.md) and [IMPORTS.md](IMPORTS.md).
 
 ---
@@ -51,9 +52,11 @@ cut into **books**, and each book is an ordered list of households for one perso
 
 A **pass** is a single planned sweep of one **walk list** — Pass 1, Pass 2, and so on. It has a
 pass number (counted **per walk list**, so every walk list has its own Pass 1), a name, and a
-status that only moves **one way**:
+status:
 
-**draft → active → archived.** An archived pass is never reopened — you make a new pass instead.
+**draft → active → archived.** An archived pass can come back with **Bring back** until a newer pass
+on its walk list has gone live; a pass ended by the next one going live never comes back
+([PASSES.md](PASSES.md)).
 
 A pass's doors are its **walk list's owned doors** — the full set by default, or, on a follow-up
 round, just the doors that still need work via the optional **Target doors** filter (knock status
@@ -240,8 +243,11 @@ campaign's **desk marks — a whole book or a single home.**
   round). So on a walk list with an active Round 1 and a draft Round 2 being cut, a Map-page mark lands on
   **Round 1** — mark from the Turf Cutting page to aim at the draft. An **archived round is refused**
   (phones never receive archived-round books, so the mark would flip the door's color without any
-  canvasser seeing it). A door still in **Intake** (no walk list) can't be marked at all — rounds belong
-  to walk lists, so no round could own the mark; assign the door to a walk list first.
+  canvasser seeing it). So is every door of an **archived walk list**, whatever round it would land on —
+  the walk list is read-only and its drafts are frozen with it — with *Walk list "North" is archived —
+  unarchive it to mark its doors.* Unmarking an existing desk mark still works there. A door still in
+  **Intake** (no walk list) can't be marked at all — rounds belong to walk lists, so no round could own
+  the mark; assign the door to a walk list first.
 - **Skips, same as a book:** a door **completed this round** (surveyed / lit dropped) keeps its result and
   isn't marked; a door **already restricted** is left alone; a **reached** door (not home / refused / no
   soliciting / wrong address, and **Not a target voter** where a campaign uses it) *is* marked — this
@@ -506,7 +512,11 @@ responses, door statuses, or the doors themselves (unless you explicitly check *
 and even then the cleared knocks go into the snapshot). The auto-saved **snapshot stores the books AND
 the assignments**: **Restore** (Undo / snapshots) re-creates both exactly, then you just re-activate
 the round on the Passes page — canvassers see their books again with all prior progress intact.
-(Restore is blocked while the pass has live books — discard those first.)
+(Restore is blocked while the pass has live books — discard those first — and on an archived pass,
+which you bring back first.) **Undo last discard** belongs to the pass the discard was made on; it used
+to restore that discard's books after you had switched to another pass. A Turf Cutting action that fails
+— Accept, Merge, renaming a book, deleting a snapshot, Remove or Re-include apartments, assigning —
+shows the server's reason instead of failing without a word.
 
 **Deleting a round deletes its snapshots.** A snapshot only ever goes back onto its own round, so when
 you delete a draft round — or a walk list whose rounds are all drafts — its snapshots go with it,
@@ -607,6 +617,7 @@ admin change:
 | A **pin move**, a door's **status**, or a door going **excluded/voted** | **Live — within ~30s.** A background delta patches their map in place. |
 | An **outcome button** turned on or off for the campaign, or who may **add a person** at the door | **Live — within ~30s of the phone being on the map.** The same background update carries the new setting; nothing reloads. A phone that is offline gets it on its first successful update after it reconnects, still with no refresh; one on an older version of the app gets it at its next full refresh (an older version has no **Not a target voter** button at all, so switching that outcome on reaches the phone only after the app updates). |
 | A door's **book** (move / merge / split / supplemental) or **who's assigned** a book | **Next full refresh** — pull-to-refresh, reopening/switching the campaign, a round activating, or a cold app start. |
+| A pass **ending** (its Archive button, its walk list archived, the next pass going live) or **coming back** (Bring back, Unarchive) | **Within ~30s while the map is open**, or the next time the app opens: the phone sees the set of live passes change and reloads its books. After the app update, a canvasser whose only book closed sees *No book right now*; a book brought back reappears on that same refresh. |
 
 So a **pin fix is near-live**, but **reshuffling books or reassigning people is not** — the phone keeps
 showing the old books until a full refresh. Nothing is lost or miscounted in the meantime (a door
@@ -730,10 +741,11 @@ Round 2 shows both. The **Turf Cutting page** is pass-scoped the same way (see *
 the cut map* below): pick a round in its dropdown and the house colors, the per-book progress and the
 coverage bar all re-scope to that round.
 
-**Archiving a round is one-way + guarded.** A round goes draft → active → archived and is **never
-reopened** (you make a new round). Archiving a **live or already-worked** round therefore needs a
-confirmation (knocks are kept either way); only the *auto*-archive when you activate the next round is
-silent.
+**Archiving a round is guarded, and can be undone.** A round goes draft → active → archived. Archiving
+a **live or already-worked** round needs a confirmation (knocks are kept either way), and **Bring back**
+undoes it until a newer round on that walk list goes live ([PASSES.md](PASSES.md)). Only the
+*auto*-archive when you activate the next round is silent — and that one is permanent: the new round is
+live.
 
 ## One active pass per walk list
 
@@ -741,7 +753,36 @@ Each **walk list** runs **one active pass at a time** — activating a pass arch
 pass *in that same walk list*, but other walk lists keep theirs. So a campaign can have **several active
 passes at once** (one per active walk list — see the banner above and [EFFORTS.md](EFFORTS.md)).
 Canvassers only ever see an **active** pass, and within it only the **books assigned to them**; passes
-sitting in draft or archived are never shown in the field.
+sitting in draft or archived are never shown in the field. **Archiving a walk list ends its live pass
+too**, and its drafts can't be cut or started until it is unarchived ([EFFORTS.md](EFFORTS.md)).
+
+## The Pass dropdown, and passes you can only look at
+
+Turf Cutting's **Pass** dropdown groups every pass by what it is — **Live**, **Drafts**, **Archived** —
+each labelled with its walk list (*North · Pass 3 · GOTV*), sorted by walk list name and then pass number.
+Every pass of an archived walk list sits under **Archived**, marked *· walk list archived* (and *(draft)*
+for a draft frozen there). The page still opens on the pass you're most likely there to work on, never
+under Archived unless every pass is.
+
+Picking an archived pass, any pass of an archived walk list, or any pass of an archived campaign opens it
+**view-only**: its books as they were, under one banner that says why and what you can do — for
+example *Pass 2 is archived. It ended Oct 12, when Pass 3 went live. You're looking at its books as they
+were.* with an **Open Pass 3** button.
+
+- **The banner's way out:** **Bring back Pass 2** when the rule allows it; **Unarchive West** when the
+  walk list is archived (the box opens right there); **Open Pass N**, the walk list's live pass, when it
+  has one; on an archived campaign, the campaign's own message.
+- **Gone while you look:** cutting, Accept, Discard, Add as new book, renaming, moving doors, merging,
+  Mark restricted, assigning, and restoring a snapshot (*Bring the pass back to restore a snapshot*, or
+  *Unarchive West to restore a snapshot* for a draft of an archived walk list). The book list still
+  shows who held each book.
+- **What stays:** deleting an old snapshot — the way to clear one rare Door Outcomes undo hold
+  ([CAMPAIGNS.md](CAMPAIGNS.md)) without bringing the pass back — and unmarking a desk mark, which stays
+  on the Map page.
+- **A page left open** while someone else archives the pass flips to view-only at the next change you
+  try: the server refuses it, and the page reloads the pass.
+
+Deep links to an archived pass (from Walk Lists, the Map or the Audit page) open the same view.
 
 ## How the numbers add up across passes
 
@@ -755,6 +796,42 @@ sitting in draft or archived are never shown in the field.
   it. So running another pass (or recutting) adds **knocks**, but doesn't change **coverage**.
 
 See [METRICS.md](METRICS.md) for the exact definitions.
+
+## Late knocks count in the pass they were made in
+
+A canvasser in a basement with no signal knocks 20 doors on Pass 3. Before they get signal back, you
+archive the walk list. When their phone reconnects, those 20 knocks reach Doorline.
+
+- **Since the October 2026 update they count in Pass 3**, the pass they were made in — not in the
+  "Legacy / no pass" row, where they used to land. Bring Pass 3 back and nothing is missing from its
+  numbers. The same goes for a pass archived by its own button, and for one ended by the next pass going
+  live: a knock made on Pass 3 *before* Pass 4 started counts in Pass 3, even if it arrives later — that
+  includes a knock made after you ended Pass 3 but before you started Pass 4. A phone that sends one
+  knock twice — its first try got through but the reply didn't — still counts it once, even if a pass
+  ended, started or came back in between, and a knock an admin struck stays struck.
+- **Knocks made after the next pass started count in the new pass** when it includes that door. A phone
+  in a dead zone that keeps showing yesterday's book while the canvasser knocks all morning after you
+  started Pass 4 at 6 am: those knocks count in Pass 4, so its crew sees those doors as done. When the new
+  pass doesn't include the door — or nothing is live, as after archiving the walk list — they count in the
+  book's own pass.
+- **It needs the phone update.** The phone now says which book each knock was made in. A phone without
+  the update keeps the old rule: the live book holding the door, else "Legacy / no pass".
+- **Per-pass numbers get more accurate, and can keep growing for a while.** A late knock counts once, in
+  its own pass, so the By pass report — and any per-door invoice built from it — can move by a few doors
+  either way compared with before. A pass's row can still grow after it ends, while offline phones catch
+  up: **invoice a finished pass once phones have synced, or by date range.** Doorline's own bill is a flat
+  price per campaign and doesn't change.
+- **A door knocked just before the switch** shows as done on that canvasser's phone for a few minutes,
+  then as not done in the new pass, because it counts in the old one.
+- **A late knock never moves a door's "last visit" backwards** when someone visited it more recently, and
+  teammates' phones still pick the change up.
+- **A late survey follows the usual rule for two canvassers in one pass:** if a teammate surveyed that
+  voter in the same pass meanwhile, the answer that reaches Doorline last is kept and the other is
+  preserved on the voter's profile, where an admin can restore it ([SURVEYS.md](SURVEYS.md)). Survey counts
+  don't change.
+- **Doorline can switch this part off** (a server setting, `LATE_KNOCK_ATTRIBUTION`), which puts every
+  knock back on the old rule. Knocks already saved keep their pass. Runbook in
+  [OPERATIONS.md](OPERATIONS.md).
 
 ## Adding new voters after a pass exists (worked scenario)
 
@@ -1102,10 +1179,11 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | Route | Behavior |
 |---|---|
 | `POST /campaigns/:campaignId/passes` | Create a round **within a walk list**: body `{ effortId, name? }` — `effortId` required (400 without; 404 if not this campaign's), blank `name` auto-labels "Pass {roundNumber}". `roundNumber` auto-increments **per walk list** (`createNextPass`; 409 if a number can't be allocated); starts `draft`. |
-| `POST /passes/:id/activate` ([:111](../server/src/routes/admin/passes.js#L111)) | 409 if archived ([:115-116](../server/src/routes/admin/passes.js#L115-L116)); 400 if no published books; **archives other active rounds of the same walk list only** ([:127-132](../server/src/routes/admin/passes.js#L127-L132)) — other walk lists keep their active rounds; sets `activatedAt` once ([:134](../server/src/routes/admin/passes.js#L134)). No campaign-level pointer is written — active rounds are **derived** (see the data-model table). |
-| `POST /passes/:id/archive` | **409 `archive-confirm-required`** `{ knockCount, isActive }` when the round is active **or** has knocks and `confirmArchive` isn't set (one-way + canvassers lose it — knocks kept). Else archive (`status:'archived'` + `archivedAt`, [:163-164](../server/src/routes/admin/passes.js#L163-L164)). |
+| `POST /passes/:id/activate` | `activatePass` in [passLifecycle.js](../server/src/services/passes/passLifecycle.js), under the walk list's lifecycle lock. **409 `pass-archived`** if archived (*… is archived — use Bring back.*), **409 `walk-list-archived`** on an archived walk list; 400 `no-books` if no published books, 400 `survey-required`; **archives other active rounds of the same walk list only** — other walk lists keep their active rounds — stamping each `archivedFrom: 'active'`, `archivedVia: 'next-pass'`, `archivedBy`, `endedByPassId` through a conditional update; sets `lastActivatedAt` every time and `activatedAt` once. A duplicate-key error on `one_live_pass_per_walk_list` → 409 `another-pass-live`. No campaign-level pointer is written — active rounds are **derived** (see the data-model table). No History row. |
+| `POST /passes/:id/archive` | `archivePass`. **409 `archive-confirm-required`** `{ knockCount, isActive }` when the round is active **or** has knocks and `confirmArchive` isn't set (canvassers lose it — knocks kept). 409 `already-archived`, `walk-list-archived`, `lifecycle-busy`, `recut-locked` (it takes the round's recut lock). Else archive (`status:'archived'`, `archivedAt`, `archivedFrom`, `archivedVia: 'pass'`, `archivedBy`) + a History row. Undone by Bring back. |
+| `POST /passes/:id/bring-back` | `bringBackPass` → `{ pass, to, downgraded }`; 409 with the refusal reason as `code` ([PASSES.md](PASSES.md) → *Bring back — the rules*). Redraws the round's book outlines best-effort, up to `TURF_BRING_BACK_REHULL_MAX_DOORS` booked doors (default 20,000). |
 | `GET /campaigns/:campaignId/passes` | Each pass row carries `turfCount` **and `knockCount`** (distinct `(household, pass)` over `KNOCK_ACTIONS`) for the Passes page. |
-| `GET /admin/households/:householdId/activity` | A door's `CanvassActivity` + `SurveyResponse` across all rounds, grouped by round (`{ currentPassId, rounds: [{ passId, roundNumber, name, status, entries }] }`) — powers the door-detail "History by round". Each knock entry carries **`via`** (`'bulk'` for a desk mark, `null` for a field row; survey entries carry none), each round its Pass **`status`**, and the top-level **`currentPassId`** (string \| null) is the round a desk mark with no explicit `passId` resolves to for THIS door (the door's effort's active round → its single non-archived round → null; Intake → null). The rounds list holds **only rounds with entries** (plus a `passId: null` "Before passes" pseudo-round for legacy null-pass rows), which is why the desk-mark UIs key on `scopePassId \|\| currentPassId` and never guess "newest/active". Full shape in [MAPS.md](MAPS.md) §D. |
+| `GET /admin/households/:householdId/activity` | A door's `CanvassActivity` + `SurveyResponse` across all rounds, grouped by round (`{ currentPassId, rounds: [{ passId, roundNumber, name, status, entries }] }`) — powers the door-detail "History by round". Each knock entry carries **`via`** (`'bulk'` for a desk mark, `null` for a field row; survey entries carry none), each round its Pass **`status`**, and the top-level **`currentPassId`** (string \| null) is the round a desk mark with no explicit `passId` is on for THIS door, resolved as an unmark resolves it (the door's effort's active round → its single non-archived round → null; Intake → null). A door of an archived walk list resolves to its frozen draft like any other — a new mark there is refused (409 `walk-list-archived`), so the clients turn Mark off from the walk list's own status; it read null from 2026-10-28 until code review round 2, which hid the draft's existing mark and its Unmark. The rounds list holds **only rounds with entries** (plus a `passId: null` "Before passes" pseudo-round for legacy null-pass rows), which is why the desk-mark UIs key on `scopePassId \|\| currentPassId` and never guess "newest/active". Full shape in [MAPS.md](MAPS.md) §D. |
 | `DELETE /passes/:id` ([passes.js](../server/src/routes/admin/passes.js)) | Draft-only — and, since 2026-10-20, only a draft with **no door history**: it refuses **400 `has-history`** while any field `CanvassActivity` (desk marks excepted — they're swept below), `SurveyResponse` or `SurveyResponseArchive` row carries the round's `passId`, because a discard that keeps the knocks and a snapshot restore both leave a *draft* round holding them, and deleting it left those rows under no round (the rounds list and per-round numbers stopped adding up to the campaign's) — the walk-list rule, [EFFORTS.md](EFFORTS.md). The Passes page offers Archive instead of Delete for a draft with knocks. It runs under the round's **re-cut lock** (`acquireRecutLock`, **409 `recut-locked`** while a discard, restore or snapshot delete holds it): unlocked, a restore landing mid-delete put knocks back under a deleted round and then failed on its deleted snapshot (code review after round 9). Since 2026-08-21 it also sweeps the round's **desk marks** — `{ passId, actionType:'restricted', via:'bulk' }` via `removeDeskRestrict` ([deskRestrict.js](../server/src/services/canvass/deskRestrict.js)) — so single-home marks made on a draft round (allowed, see the Books table) don't orphan: global status would otherwise stay restricted with no book-level undo left. Since 2026-10-20 it also deletes the round's **`TurfSnapshot`s** — books-only and knock-clearing alike — *after* the round itself (`deleteRoundSnapshots`, [snapshotRetention.js](../server/src/services/turf/snapshotRetention.js)): only their own round can restore them (Turf Cutting lists them on it; the restore 404s without it), so left behind they were cleared entries, surveys, notes and earlier answers no screen reached, until the campaign was deleted (code review round 9's privacy flag). The walk-list delete does the same for its draft rounds ([EFFORTS.md](EFFORTS.md)), and the nightly **`sweep-orphan-snapshots`** maintenance job (05:37, `SNAPSHOT_SWEEP_CRON`; [scheduler.js](../server/src/services/retention/scheduler.js)) deletes every snapshot whose round is gone — the ones left before this, and any a delete stopped short of. Nothing that still runs reads them: an Undo holds for a cleared round only while that round exists ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2, `roundClearedSince`). |
 
 **Books / turf** ([turfs.js](../server/src/routes/admin/turfs.js)):
@@ -1129,11 +1207,59 @@ powers `geometricSubdivide` (attribute mode, default flex) and `addSupplementalB
 | `POST .../turfs/unassign-bulk` `{ turfIds[], userIds[] }` ([:170](../server/src/routes/admin/turfs.js#L170)) | Campaign-scoped `TurfAssignment.deleteMany` for the given (book, user) pairs — powers both "unassign everywhere" (one person, many books) and "Unassign all" (everyone on the selected books). Touches no `Household`, no `CampaignAssignment` and no `CanvassActivity`. **Both arrays are required**: empty `userIds` is a **400**, never an "everyone" wildcard, so callers enumerate — and because `turfIds` alone pins the blast radius (re-scoped by campaign, then a turf × user cross-product delete), the clients deliberately send the **pass-wide** user set rather than a possibly-stale per-selection union. `deleted` counts **pairs**, not people. Guards + blast radius: `server/test/unassignBulk.int.test.js`. |
 | `POST .../turfs/restrict-bulk` `{ turfIds[], scope? }` | **Book-level desk mark.** 409 `not-accepted` if any book is a draft. Per book, `planDeskRestrict` ([services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js) — the ONE desk-mark writer, shared with `restrict-doors`) builds one `CanvassActivity { actionType:'restricted', via:'bulk' }` row per eligible door (`KNOCKABLE_DOOR_FILTER` + coords; the acting admin as `userId`, `coordinatorId:null`, the house's own pin with `accuracy:null` / `distanceFromHouseMeters:0`, `passId` = the book's round, `turfId` = the book as provenance, `effortId` from the door), skipping `completed` (surveyed / lit_dropped this round), `alreadyRestricted`, `ineligible`, and — under `scope:'unknocked'` — `reached`; `scope:'incomplete'` (the default) marks reached doors too, leaving the field row in place. **`reached` is defined by exclusion** — any per-round status but unknocked / surveyed / lit_dropped / restricted — so `not_target` joined it with no server edit and a desk mark overwrites it exactly as it overwrites `refused`. The clients' prompt lists are hand-kept and had to add it (2026-10-02): `REACHED_STATUSES` and the `RestrictModal` sum in [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx), `REACHED` in [mobile/lib/restrictBooks.js](../mobile/lib/restrictBooks.js) — a status missing there doesn't change what is marked, it makes the confirm under-report it. One `commitDeskRestrict`: `insertMany` → `recomputeHouseholdStatusesBatched` ([status.js](../server/src/services/canvass/status.js) — 500-door chunks, 2 round trips per chunk and one `bulkWrite`, not the per-document `…ByIds`: a map lasso hands this 1,000 doors in one request and serial saves sat at the edge of Heroku's 30 s router timeout; same answer, since `resolveStatus` is pure and `Household` declares no save hooks) → `Household.updateMany $set lastActionAt` (the delta-poll touch — a recomputed status can be unchanged, e.g. a door restricted in a PRIOR pass, and `/mobile/changes` filters on `updatedAt`; `lastActionBy` deliberately NOT set) → `recomputeCampaignStats`. Ignores `Campaign.disabledOutcomes`. → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, perTurf }`. Pinned by [bulkRestrict.int.test.js](../server/test/bulkRestrict.int.test.js) / [bulkRestrictScope.int.test.js](../server/test/bulkRestrictScope.int.test.js). |
 | `POST .../turfs/unrestrict-bulk` `{ turfIds[] }` | One `removeDeskRestrict` call whose filter is the `$or` of each book's `deskMarkFilterForBook(turf)` (a plain filter for one book) = delete `{ campaignId, passId: turf.passId, householdId: { $in: turf.householdIds }, actionType:'restricted', via:'bulk' }` per book → one recompute of statuses → `$currentDate updatedAt` → `recomputeCampaignStats` (one delete across the books, so `households` stays a DISTINCT door count across books and the recompute/stats pass runs once). **Re-keyed by `(passId, current book membership)`, not the stamped `turfId`** (2026-08-21): a single-home mark written while the book was a draft points at a `turfId` that dies on re-cut/discard, `move-door` leaves rows on the old book, snapshot restore and merge mint fresh ids — under `turfId` keying all of those marks vanished from the count and the undo; keyed by membership, a desk mark on a door in Book 4 counts under — and falls to — Book 4's Unmark whenever it was made. `GET /turfs` `bulkRestrictedCount` comes from one aggregate (`deskMarkCountsForPasses` — bounded by `{ campaignId, passId ∈ the non-archived books' rounds }`, not a 250k-id `$in`) grouped by `{passId, householdId}`, `n` summed over each non-archived book's `householdIds` (`countDeskMarksByBook`; archived books → 0); `GET /:turfId/households` `turf.bulkRestrictedCount` comes from **the same primitive** since 2026-08-24 (it was a second `countDocuments` implementation of "same keying as `GET /`", held together only by a comment, and it could not see superseded marks at all). **Counts are ROWS everywhere** (`$sum:1` / `countDocuments` / `deletedCount`): two desk rows on one (pass, door) are reachable (mark → canvasser knock → mark again; two admins racing; no unique index), and an **inert** desk row under a newer field knock stays on file — in `Unmark (N)`, `activityCount`, exports — until a book-level undo, same as bulk re-runs. **`bulkRestrictedSupersededCount`** (additive, 2026-08-24) names that inert subset — desk rows whose round no longer resolves to `restricted` — so the book chip can explain why its number exceeds the map's slate doors **without** re-defining `bulkRestrictedCount`, which must keep equalling what the delete removes (the confirm's "N marks will be removed" reconciles with the toast's `deletedCount`). Built by `deskMarkStateForPasses` = `deskMarkCountsForPasses` + one `getPassStatusMapMulti` over **only the doors that have desk rows**; above `DESK_MARK_STATE_MAX` (20 000 (pass, door) pairs) the status half is skipped and the field is **OMITTED**, never sent as a wrong `0`. → `{ unmarked (rows), households (distinct doors) }`. Field rows never match. **No new index** — the filters ride `{campaignId, passId, householdId}` + `actionType_1`. Behavior change pinned by the move-door case in `bulkRestrict.int.test.js`. |
-| `POST .../turfs/restrict-doors` `{ householdIds[] (1–1000), passId?, scope? }` | **Door-level desk mark** — one home, every unit at one pin, or a whole lassoed map selection (the web "Select doors" mode; mobile still sends exactly one id and no `scope`). Same row, same writer, same skip ladder, **no draft refusal** (allowed on draft books, accepted books and loose doors alike) and no `disabledOutcomes` check. **`passId` resolution** when omitted: the door's own effort's **active** round (`activePassIdForEffort`) → else the effort's **single** non-archived (draft) round → else `400 { code:'PASS_REQUIRED', unresolved:[{ id, reason:'intake' \| 'no-round' }] }` (all-or-nothing). An explicit `passId` must belong to the campaign (**404**) and must not be archived (**409 `pass-archived`** — phones only receive active-pass books, so an archived-round mark would flip global status while invisible to every canvasser). **Intake doors (`effortId:null`) can never be marked** — `Pass.effortId` is required, so no round can own them (reason `'intake'`, short-circuited before any query). A door whose `effortId` ≠ the pass's effort is `skipped.ineligible`. **`scope`** (added 2026-08-22 for the map selection, parsed by the identical line `restrict-bulk` uses — `req.body?.scope === 'unknocked' ? 'unknocked' : 'incomplete'`): omitted, null, unknown (`'sideways'`) and the literal `'incomplete'` all mean **`'incomplete'`**, i.e. byte-for-byte what this route did before the param existed, so no shipped client had to change; only the exact string `'unknocked'` switches ladders, marking the never-touched doors and leaving each **reached** door alone (no desk row, per-round status and field row intact) in `skipped.reached`. The ladder itself is unchanged — `planDeskRestrict` always understood both scopes; the route simply stopped hard-coding one. `turfId` on the row = the door's book in that pass at write time (draft or published; `null` for a loose dot) — **provenance only**, nothing reads it for counts/undo. Desk rows always carry a non-null `passId` (the module throws otherwise — `getPassStatusMap` matches `passId` exactly, so a null-pass row would flip global status but be invisible on every phone) and only ever `actionType:'restricted'` (a `via:'bulk'` row on a KNOCK action is contractually billable — `knocksByPass.int.test.js`). → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, passId, passIds }` — **shape unchanged**; `reached` (always 0 from this route before) now carries a real count under `scope:'unknocked'`, and a client that ignores it is unaffected. Archived campaign → 409 (router-wide). Tagged as an `AccessLog` subject per door. **One request, cap 1,000, never chunked** — the batch is refused WHOLE over the cap, never truncated (neither map payload is sorted, so "the first 1,000" would be an arbitrary, unrepeatable subset), and chunking would pay `recomputeCampaignStats`' whole-ledger recompute once per chunk; cost is otherwise fixed + O(pass groups), ~3 queries per walk list in the per-pass-group loop. Pinned by [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js) (19–20 the two scopes, 21 the default parse, 22 the 1000/1001 cap). |
+| `POST .../turfs/restrict-doors` `{ householdIds[] (1–1000), passId?, scope? }` | **Door-level desk mark** — one home, every unit at one pin, or a whole lassoed map selection (the web "Select doors" mode; mobile still sends exactly one id and no `scope`). Same row, same writer, same skip ladder, **no draft refusal** (allowed on draft books, accepted books and loose doors alike) and no `disabledOutcomes` check. **`passId` resolution** when omitted: the door's own effort's **active** round (`activePassIdForEffort`) → else the effort's **single** non-archived (draft) round → else `400 { code:'PASS_REQUIRED', unresolved:[{ id, reason:'intake' \| 'no-round' }] }` (all-or-nothing). An explicit `passId` must belong to the campaign (**404**) and must not be archived (**409 `pass-archived`** — phones only receive active-pass books, so an archived-round mark would flip global status while invisible to every canvasser). **A door of an archived walk list** — resolved, or through an explicit `passId` of one of its frozen drafts — answers **409 `walk-list-archived`** (*Walk list "North" is archived — unarchive it to mark its doors.*), answered **before** the `PASS_REQUIRED` branch: an already-released phone turns any non-Intake `PASS_REQUIRED` into "this walk list has no current round", which is the wrong advice there (`deskRoundForDoor` carries the distinct reason, [deskRestrict.js](../server/src/services/canvass/deskRestrict.js); 2026-10-28). **Intake doors (`effortId:null`) can never be marked** — `Pass.effortId` is required, so no round can own them (reason `'intake'`, short-circuited before any query). A door whose `effortId` ≠ the pass's effort is `skipped.ineligible`. **`scope`** (added 2026-08-22 for the map selection, parsed by the identical line `restrict-bulk` uses — `req.body?.scope === 'unknocked' ? 'unknocked' : 'incomplete'`): omitted, null, unknown (`'sideways'`) and the literal `'incomplete'` all mean **`'incomplete'`**, i.e. byte-for-byte what this route did before the param existed, so no shipped client had to change; only the exact string `'unknocked'` switches ladders, marking the never-touched doors and leaving each **reached** door alone (no desk row, per-round status and field row intact) in `skipped.reached`. The ladder itself is unchanged — `planDeskRestrict` always understood both scopes; the route simply stopped hard-coding one. `turfId` on the row = the door's book in that pass at write time (draft or published; `null` for a loose dot) — **provenance only**, nothing reads it for counts/undo. Desk rows always carry a non-null `passId` (the module throws otherwise — `getPassStatusMap` matches `passId` exactly, so a null-pass row would flip global status but be invisible on every phone) and only ever `actionType:'restricted'` (a `via:'bulk'` row on a KNOCK action is contractually billable — `knocksByPass.int.test.js`). → `{ marked, skipped:{ completed, alreadyRestricted, ineligible, reached }, passId, passIds }` — **shape unchanged**; `reached` (always 0 from this route before) now carries a real count under `scope:'unknocked'`, and a client that ignores it is unaffected. Archived campaign → 409 (router-wide). Tagged as an `AccessLog` subject per door. **One request, cap 1,000, never chunked** — the batch is refused WHOLE over the cap, never truncated (neither map payload is sorted, so "the first 1,000" would be an arbitrary, unrepeatable subset), and chunking would pay `recomputeCampaignStats`' whole-ledger recompute once per chunk; cost is otherwise fixed + O(pass groups), ~3 queries per walk list in the per-pass-group loop. Pinned by [restrictDoors.int.test.js](../server/test/restrictDoors.int.test.js) (19–20 the two scopes, 21 the default parse, 22 the 1000/1001 cap). |
 | `POST .../turfs/unrestrict-doors` `{ householdIds[], passId? }` | One `removeDeskRestrict` call over the `$or` of per-round filters `{ passId, householdId:{ $in } }` (a plain filter for one round) — **no knockable filter, no effort guard, no pass-status and no pass-existence check**: it deletes for whatever `passId` the client sends (the mark's own round, from `/activity`), so a mark whose draft round was later deleted or whose door was re-housed can always be removed. Omitted `passId` → the same resolution as mark. Field rows never match (`unmarked:0`, door stays restricted). **Takes no `scope` and ignores one if sent.** Because of the missing guards, an unmark payload must be filtered differently from a mark payload: drop only `effortId === null` (Intake) doors, and only when no `passId` is sent — a door desk-marked in March and excluded from books in April is still unmarkable today, and filtering it out on the knockable rule would strand its mark forever. → `{ unmarked, households, passId, passIds }`. The clients' **Unmark** is offered only for a desk mark (`via:'bulk'` on the round's latest entry); a field-recorded Restricted shows who/when and no desk action. |
 | `GET .../turfs/doors?passId=&withStatus=1` | The effort's knockable doors with coordinates, each tagged with its book (`turfId`) or `null`. **`withStatus=1`** (opt-in) adds **`passStatus`** — the door's status *for this round*, from `getPassStatusMap`. Distinct from the always-present `status`, which is `Household.status` (latest across **all** rounds). Opt-in because the mobile assign map (`slim=1`) colors by book and would pay an aggregate + a string per door across a 16k-door effort for nothing. Drives **dot color only, never a count**. **`format=geojson`** (additive — without it the response is byte-identical) returns the same doors as a `FeatureCollection`, for the mobile Books map's file-backed `ShapeSource` (see [ADMIN_APP.md](ADMIN_APP.md) → *The Books screen*). |
 | `GET .../turfs/progress?passId=` | **The single count oracle for the cut page.** Per book: `{ turfId, total, knocked, statusCounts }` over eligible doors (`KNOCKABLE_DOOR_FILTER`), from one `getPassStatusMap` sliced per turf. `statusCounts` (via `statusCountsFromMap`) sums to `total` by construction, and Σ over books is the round total — so the book status chips, the map labels, the completion tint and the coverage bar cannot drift apart. `passStatus` above resolves from the same map over the same pass, so a dot's color can't contradict what it contributes. The chips' matching rules — coverage/progress as two AND-composed groups, and the `restricted` bucket (a finished book whose `statusCounts.restricted + no_soliciting >= total` reads *Restricted*, not *Completed*) — are client-derived from this same payload in [client/src/lib/bookStatusFilter.js](../client/src/lib/bookStatusFilter.js), pinned by its test. `not_target` is deliberately outside that sum, as it is outside `OFF_LIMITS_STATUSES` ([cutMapDoors.js](../client/src/lib/cutMapDoors.js)): someone answered, so a book of only `not_target` doors reads *Completed* and the off-limits Layers toggle never hides one. (`statusCounts` is the nine-key `emptyStatusCounts()` shape, `not_target` included.) Also read by the mobile Books screen, whose status chips share the same matching rules via the [mobile/lib/bookStatusFilter.js](../mobile/lib/bookStatusFilter.js) mirror (change one, change both) and whose Mark-restricted confirm reads `statusCounts` (`restrictCountsFromStatusCounts`) — which now sums every status in its `REACHED` set; it once added `not_home + wrong_address + refused` by hand, so a book of no-soliciting doors read "nothing reached" and the prompt could offer a one-tap restrict that skipped the second confirm (fixed 2026-10-02, pinned by `restrictBooks.test.js`). |
 | `GET .../turfs/household/:householdId` | One door's address + members for the map popup. **Record-level audited**: a `router.param('householdId')` hook tags the household as an `AccessLog` subject, matching `/admin/households` and `/admin/voters` (this router previously had none). The popup's *round* detail — status/who/when and survey answers — comes from `/admin/households/:householdId/{activity,surveys}` instead, which are already lead-accessible, campaign-gated and subject-tagged. **Since 2026-08-22 the household object also carries `location` (`{ lng, lat }` \| null), `coordSource`, `coordConfidence` and `correctedAt`** (each `\|\| null`) — additive, so the mobile book map's call is unaffected — which is what the Turf Cutting popup's *Pin corrected · Aug 22* / *Approximate location* line and its **Move pin →** action read (the move itself is the existing `PATCH /admin/campaigns/:campaignId/households/:householdId/location`, §G). Since 2026-08-28 it also carries **`locationConfirmedAt`** (`\|\| null`, additive): the Pin Fixes confirm-in-place stamp, which the popup badge reads as *Location confirmed* (precedence corrected > confirmed > approximate — [MAPS.md](MAPS.md) §B). |
+
+**View-only archived passes, read-only archived walk lists (2026-10-28).** Every write in the tables above
+on an archived round, or on any round of an archived walk list (its frozen drafts included), answers
+**409 `pass-archived`** (*Pass 3 · GOTV is archived — bring it back to change it.*) or **409
+`walk-list-archived`** (*Walk list "North" is archived — unarchive it to change it.*), through
+`assertPassWritable` ([middleware/campaignWritable.js](../server/src/middleware/campaignWritable.js)) —
+the same 409-never-403 contract as `campaign-archived`, for the same already-shipped-phone reason.
+
+- **Refused:** generate (it used to check only that the pass existed), accept, rename and delete a book,
+  merge, split, `move-door`, `move-doors`, `restrict-bulk`, `restrict-doors`, `add-supplemental` (a bare
+  400 before), discard in every scope (a bare 409 before), `restore-snapshot`, exclude / re-include
+  apartments, and every assignment route (assign, unassign, `assign-bulk` — `replace` included —
+  `unassign-bulk`). Turf-scoped routes load the round from `turf.passId`. `move-door` also now requires
+  both books in one round (its `from` book used to be unconstrained): **400 `different-pass`**, as merge
+  answers.
+- **Still allowed:** `DELETE /turfs/snapshots/:id` (it changes no book, and it is the way out of a Door
+  Outcomes undo hold — [CAMPAIGNS.md](CAMPAIGNS.md)); `unrestrict-bulk` and `unrestrict-doors` (a
+  correction of the office's own marks, by design); every read.
+- **Under the recut lock, checked again.** Every recut-lock holder — discard, restore and the walk-list and
+  round deletes — re-reads the round after taking the lock and runs the guard again. Snapshot delete stays
+  allowed, so its re-check is its own result: a snapshot already gone by the time the lock is held answers
+  404.
+  Discard's revert of a live round is now conditional, `updateOne({ _id, status: 'active' }, { $set: {
+  status: 'draft' } })`: it read the status before taking the lock, and a stale revert could turn a
+  just-archived round back into a draft.
+- **Archived campaign.** The turfs router's `requireActiveCampaign` exempts `DELETE /turfs/snapshots/:id`
+  (beside flag review on the "NOT blocked" list), so a held Door Outcomes undo always has a way out
+  without Reactivate, which back-bills.
+- **Jobs.** `generateTurf` and `addSupplementalBooks` re-check the round, its walk list and the campaign
+  at start and right before their book insert, and throw BullMQ's `UnrecoverableError` on a refusal (the
+  job fails at once instead of retrying three times, and the Turf page's job line shows the guard's
+  message). `generateTurf`, which takes no lock, also re-checks right after its insert and deletes the
+  books **it created that are still `draft`** (and their Household mirror) if an archive landed in between;
+  an Accept landing during its mirror loop is never undone. A run killed mid-insert and redelivered fails
+  at its start check and can leave its drafts on the archived round, where they are harmless (never on a
+  phone, and the round is view-only). The claim job re-checks its TARGET walk list
+  ([EFFORTS.md](EFFORTS.md) §I).
+- **Client.** `viewOnly` = round archived || walk list archived || campaign archived: one banner (reason
+  plus Bring back / Unarchive <walk list> / Open Pass N / the campaign message), no Generate, target,
+  exclude or apartment panels, no Accept, Delete drafts, Discard, supplemental banner, rename or Select
+  doors; the popups lose move, mark, unmark and Move pin; `BookAssignmentPanel` lists holders only;
+  snapshots list with **Delete** only; the to-do nudges are hidden and the stat hints read neutral (*12
+  books had no canvasser*). A 409 `pass-archived`, `walk-list-archived`, `campaign-archived` or
+  `lifecycle-busy` from any write refetches passes, walk lists and the campaign, so a stale page flips to
+  view-only. The picker is `groupPassesByState` in [passPicker.js](../client/src/lib/passPicker.js) (Live
+  / Drafts / Archived; `pickDefaultPass` unchanged, its invariant now "never under Archived unless every
+  pass is"). "Undo last discard" keeps `{ passId, snapshotId }`, cleared on a pass switch, and renders
+  only on its own pass.
 
 ## D. Why new households are unassigned after import
 
@@ -1162,13 +1288,87 @@ So recutting or running another pass **adds knocks** (new `(house, pass)` bucket
 
 ## F. Offline pass attribution
 
-A knock submitted offline carries its original timestamp, but pass attribution is no longer
-time-based. At submission the server resolves attribution **from the door**: `resolveAttribution`
-([routes/mobile/canvass.js:72-82](../server/src/routes/mobile/canvass.js#L72-L82)) finds the
-**published book containing the household** among the campaign's currently-active rounds and stamps
-that book's `passId`/`turfId` (plus the door owner's `effortId`) on the activity row. `activatedAt`
-is still kept monotonic and preserved across recuts (per-round reporting depends on its half-open
-windows — [Pass.js:45](../server/src/models/Pass.js#L45)), and archived passes still own their
+A knock submitted offline carries its original timestamp, but pass attribution is not time-window
+based. At submission the server resolves attribution **from the door, and from the book the phone
+says it was in**: `resolveAttribution(campaign, household, { clientTurfId, tappedAt })` in
+[services/canvass/attribution.js](../server/src/services/canvass/attribution.js) (moved out of
+`routes/mobile/canvass.js` on 2026-10-28) decides in two steps and stamps the result's
+`passId`/`turfId` (plus the door owner's `effortId`) on the activity row.
+
+**Step 1 — the phone's book** (owner rulings 3 and 9). Runs when the switch is on and `clientTurfId` is
+a usable id: `typeof v === 'string' && mongoose.isObjectIdOrHexString(v)` (`usableClientTurfId`) — a
+number or an object would cast to a 500 that stalls the phone's queue, so only a string is tried.
+
+1. Find `Turf { _id: clientTurfId, campaignId, status: 'published', householdIds: household._id }` —
+   the book still exists, is published and still holds the door.
+2. Its `Pass` must belong to the door's walk list (`effortId === household.effortId`).
+3. A **live** pass: use that book.
+4. An **archived** pass: use it when the knock was tapped while it was live (`tappedAt <=
+   pass.archivedAt`), **or** when no live book holds the door, **or** when it was tapped before the live
+   book's pass first went live (`tappedAt <` that pass's `activatedAt` — one more read, only on this
+   branch). Otherwise fall to step 2 — a dead-zone canvasser working yesterday's book after Pass 4
+   started counts in Pass 4 when Pass 4 holds the door. The third test closes the gap between Pass 3
+   ending by hand and Pass 4 starting: without it, a knock from that gap delivered before Pass 4 started
+   (no live book → Pass 3) and retried after (→ Pass 4) counted in both, because the duplicate-delivery
+   check is per pass. Code review 2026-10-28; pinned by `lateKnocks.int.test.js` (3b).
+   `activatedAt` (first activation), not `lastActivatedAt`: ruling 9 moves knocks made after the next
+   pass *started*, and a bring-back doesn't restart it.
+
+**Step 2 — the old rule:** the door's published book among the campaign's currently-active rounds, else
+`passId: null` (the "Legacy / no pass" bucket).
+
+- **`tappedAt`** is the body's `timestamp` (the tap time the row already stores), else the server's now.
+  The phone clock is trusted here exactly as it already is for the row's own timestamp; a clock a few
+  minutes off only moves knocks made around a switch.
+- **Callers** — `recordHouseholdAction` and the survey route pass `clientTurfId` from the raw body
+  (`req.body?.turfId`, read before zod, like `missingLocation`) and `tappedAt`; the walk-up voter add passes
+  the same for its per-round stamp ([routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)).
+  The three body schemas are non-strict, so a server without this change strips an unknown `turfId`
+  silently, and a phone with the update is safe against an older server.
+- **A phone without the update** sends no `turfId` and gets step 2 exactly. An **invalid `turfId`** is
+  ignored, never refused — the offline queue deletes an item on any 4xx
+  ([offlineQueue.js](../mobile/lib/offlineQueue.js)), so a refusal would lose a real knock.
+- **No server-side fallback for old phones.** An earlier design filed late knocks into "the walk list's
+  most recently archived pass"; it was reproduced filing a discarded round's late knocks into the previous
+  round, where the replace deleted or overwrote that round's real answers. Step 1 can't: a discarded or
+  re-cut round's books are gone, and a door merged or split away is no longer in that book, so those fall
+  to step 2.
+- **Inside the attributed round everything keys on the same `passId`** — the replaceable-row read, the
+  `deleteMany`, the `SurveyResponse` filter, `supersededByNewer`, `healDuplicateDelivery`, the
+  `Campaign.stats` deltas and per-round status — including on an archived round. No route moves a book to
+  another round (restore, generate, split and supplemental mint new book ids). The response wire stays as
+  it was: `toWireHousehold` answers for the attributed round, and its only reader is the online path,
+  whose phone still shows the book it tapped in.
+- **One tap counts once across rounds.** Attribution is decided on arrival, so a retry (first reply lost;
+  `wasOfflineSubmission`) can resolve to a different round than its first delivery when a round ended,
+  started or came back in between — code review round 2 reproduced one tap in two rounds after the next
+  pass was archived, brought back, or discarded and re-activated. `supersededByNewer` reads only the
+  attributed round, so for replays `deliveredInAnotherPass` looks for the same tap in any OTHER round —
+  [sameTap.js](../server/src/services/canvass/sameTap.js) is the one identity (this canvasser and door,
+  the tap millisecond, the action or its `reclassified.from`, the voter for a survey): as its own row; as
+  an entry in a later save's `replaced.history` (knocks only — an entry names no voter); or, for a
+  survey, as this canvasser's `SurveyResponse` for that voter with `submittedAt` equal to the tap. Found,
+  it answers 200 `superseded` for the round it counted in, after `healDuplicateDelivery`. Only the same
+  tap: an older replay is never superseded by newer work in another round, since each round keeps its own
+  door state. The unknock tombstone gets the same treatment: `struckByUnknock` keys on the visit (door,
+  round, canvasser), so `tapStruckInAnyPass` ([unknock.js](../server/src/services/canvass/unknock.js))
+  also looks for THE tap among frozen rows of runs touching that door (an indexed `visitKeys` prefix) —
+  never by another round's visit key, which would strike that round's own unstruck knocks. Pinned by
+  `lateKnocks.int.test.js` (10), (10b), (10c).
+- **The switch.** `LATE_KNOCK_ATTRIBUTION`, read at call time: `String(v || '').trim().toLowerCase() ===
+  'off'` turns step 1 off (any spelling of "off"); anything else, unset included, means on. Saved knocks
+  keep their round. A retry that straddles a flip can resolve to a different round than its first
+  delivery, and is still recognized as the same tap (*One tap counts once across rounds*, above) — flip it
+  outside field hours unless knocks
+  are failing ([OPERATIONS.md](OPERATIONS.md)).
+- **Last visit only moves forward.** `Household.lastActionAt`/`lastActionBy` take the later of the stored
+  and the new time in the knock and survey routes (`stampLastAction`, as `healDuplicateDelivery` already
+  did), and the write always marks `lastActionAt` modified, so `updatedAt` moves and `/mobile/changes` still
+  ships the door to teammates — without it, an older replayed survey that completed the door this round
+  reached no teammate's phone ([CANVASSER_APP.md](CANVASSER_APP.md)).
+
+`activatedAt` is still kept monotonic and preserved across recuts (per-round reporting depends on its
+half-open windows — [Pass.js](../server/src/models/Pass.js)), and archived passes still own their
 historical knocks because activity rows keep their original `passId`.
 
 ## G. Post-cut book edits & field-app propagation
@@ -1203,7 +1403,8 @@ which, after every coordinate + `HouseholdLocationChange` row is committed, call
 end of the run). It never touches `Turf.householdIds`, `Household.turfId`/`walkOrder`/`status`, or
 `CanvassActivity` (the module must not import it — [AUDIT.md](AUDIT.md) §B.7 stays literally true). Per
 call: live passes (`Pass.status ≠ 'archived'` — explicit, because archiving a pass leaves its books
-`published`) → the moved doors' own draft/published books per pass (`{passId, householdIds}` index) →
+`published`; a pass brought back later has its outlines redrawn then, [PASSES.md](PASSES.md)) → the
+moved doors' own draft/published books per pass (`{passId, householdIds}` index) →
 **scale guard first** (Σ `doorCount` over the pass's books; over `TURF_REHULL_INLINE_MAX_DOORS`, default
 **60 000**, read at call time → `console.warn('[pin-move] skipped re-hull: pass <id> has N booked
 doors')` and that pass is left alone — the fixed cost is the whole-pass `turf.voronoi` move-door already

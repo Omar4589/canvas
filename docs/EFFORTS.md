@@ -11,7 +11,7 @@ passes. This supersedes the old "one active pass per campaign" model.
   attribution, per-walk-list survey/reporting, and the migration.
 
 Related: [PASSES.md](PASSES.md) (a walk list's **passes** — lifecycle, auto Pass 1, and where they're
-managed), [WALKLISTS.md](WALKLISTS.md) (build a saved search — by filter or uploaded Voter-ID CSV — to
+managed), [WALKLISTS.md](WALKLISTS.md) (build a saved search — by filter or an uploaded Voter-ID list, CSV or Excel — to
 seed/claim a walk list's doors), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting a pass's doors into
 books), [METRICS.md](METRICS.md) (per-walk-list reporting), [SURVEYS.md](SURVEYS.md) (per-walk-list
 survey), [IMPORTS.md](IMPORTS.md) (how new voters reach a walk list via Intake).
@@ -106,12 +106,94 @@ people leave when you unassign their book on the Turf page).
 - **Overlap round labels name their walk list** once a campaign has more than one — *North · Pass 2 ·
   GOTV* — because pass numbers restart per walk list, so "Pass 2" alone would be ambiguous.
 
+## Archiving a walk list, and undoing it
+
+Archive a walk list when its work is done. **Archiving ends its live pass**: its books leave canvassers'
+phones the next time their map refreshes, and every knock already recorded stays counted. Nothing is
+deleted — no knock, answer, note, book, assignment or snapshot.
+
+- **The box says what will end.** On the Walk Lists page, **Archive** opens a box naming the live pass,
+  how many books leave how many canvassers' phones, and how many knocks stay counted, plus any draft
+  passes (they stay drafts) and how many doors stay with the walk list. With a pass live you type
+  `archive` to confirm; with nothing live it's a plain **Archive** button.
+- **Undo, right away.** A line at the top of the page — *North archived — Pass 3 ended.* — carries an
+  **Undo** link that brings the walk list and its pass back in one click.
+- **Unarchive, later.** **Unarchive** sits on each archived walk list, on its Passes page, and in the Turf
+  Cutting banner. It asks about the pass that archiving ended: **Unarchive and bring Pass 3 back** returns
+  the same books to the same canvassers' phones on their next refresh; **Unarchive only** leaves the pass
+  ended, and it keeps its own **Bring back** button ([PASSES.md](PASSES.md)). When the pass can't come
+  back — say a survey campaign has no survey attached any more — the box says why and offers a single
+  **Unarchive**. When someone else is changing the walk list at that moment, it says *Someone else is
+  changing this walk list right now. Try again in a minute.* and changes nothing.
+- **Its draft passes stay drafts**, frozen while it's archived: they can't be cut or started until you
+  unarchive.
+- **Who can:** whoever can archive can undo — org admins, and team leads on the campaigns they manage.
+
+**An archived walk list is read-only**, like an archived campaign:
+
+- **Still allowed:** renaming it; claiming its doors **into another** walk list (a re-carve — archiving
+  never releases its doors, so they stay with it until you do); Door Outcomes, flag review, notes and
+  exports on its history; deleting an old Turf Cutting snapshot; unmarking a desk mark.
+- **Refused**, with *Walk list "North" is archived — unarchive it to change it.*: claiming doors into it,
+  adding or removing crew, changing its survey (a phone that was offline may still be sending answers to
+  that survey, and a changed survey would refuse them), adding, renaming, deleting or starting a pass,
+  and every book change on its passes (drafts included). Two refusals have their own sentence: bringing a
+  pass back except through Unarchive (*Its walk list is archived — unarchive the walk list to bring this
+  pass back.*) and desk marks on its doors (*Walk list "North" is archived — unarchive it to mark its
+  doors.*).
+- **Its history stays in every report.** Report filters keep it, marked "(archived)" and listed after the
+  open walk lists; pickers you use to do work — the phone's admin Books, print packets, Mark restricted —
+  leave it out.
+
+**On canvassers' phones** (after the app update), a canvasser whose only book closed sees *No book right
+now — The office closed or reassigned the book you were working. Anything you saved still counts.* Someone
+with books on another walk list goes to their book list. A survey already open, and anything waiting to
+send, still save, and count in the pass they were made in ([PASSES_AND_TURF.md](PASSES_AND_TURF.md) →
+*Late knocks*).
+
+**On an archived campaign** nothing here can change — walk lists can't be archived, unarchived, renamed,
+deleted or claimed into, and their passes can't change. Reactivate the campaign first.
+
+**Walk lists archived before this update (October 2026)** were only labelled archived: their pass could still be
+live. Until Doorline's one-time check ends it, such a walk list shows *Archived · Pass 3 still live* in
+amber, with **Unarchive** and **End Pass 3**; afterwards it reads *Archived · Pass 3 ended by the one-time
+check*, and Unarchive can bring the pass back.
+
+## The Walk Lists page
+
+Each walk list has **one status** — never "archived" and "Live" on the same row:
+
+| Status | What it means |
+|---|---|
+| *Live · Pass 3* | A pass is live. |
+| *Setting up · 4/5 · next: …* | No pass has gone live yet; it names the next setup step. |
+| *Between passes · Pass 1 ended Oct 20* | A pass has been live and none is live now (plus *· Pass 2 draft* when one is waiting). |
+| *No passes yet* | The walk list has no pass. |
+| *Archived Oct 27 by Ada · Pass 3 ended* | Archived, and archiving ended Pass 3. |
+| *Archived Oct 27 by Ada* | Archived with nothing live to end. |
+| *Archived · Pass 1 ended by the one-time check* | Archived before this update with a pass still live, which the one-time check ended. |
+| *Archived* | Archived before this update — no date or name was recorded then. |
+| *Archived · Pass 3 still live* (amber) | Archived before this update with its pass still live, until the one-time check runs; **End Pass 3** ends it now. |
+
+- **Archived walk lists fold away** into an *Archived walk lists (N)* section at the bottom, closed by
+  default. If every walk list is archived, the table says *No open walk lists — 2 archived below.* The
+  **Walk Lists** card at the top counts the open ones, with the archived ones under it: *3*, *+2
+  archived*.
+- **What each row offers:** an open walk list has **Manage · Archive · Delete**; an archived one **View ·
+  Unarchive · Delete**. **Delete** only shows when it can work — every pass of that walk list is still a
+  draft (doors recorded there also stop a delete; the server still checks, and says so).
+- **An archived walk list opens read-only.** You can rename it; everything else says *Unarchive North to
+  change this.*
+- **On an archived campaign** the page shows the campaign's archived banner, and archiving, unarchiving,
+  renaming, deleting, claiming and passes are all off.
+- The **Pass** column (it used to say *Active pass*) names the live pass.
+
 ## Step-by-step
 
 ### Create a walk list
 1. **Saved Searches** page → build a saved search for the area/voters this walk list covers — either with the
-   **filter builder** (precinct, party, district, etc.) or by **uploading a Voter-ID CSV** (an exact
-   list you already have) — and save it. See [WALKLISTS.md](WALKLISTS.md). *(Skip if you'll claim doors
+   **filter builder** (precinct, party, district, etc.) or by **uploading a Voter-ID list** (a CSV or
+   Excel file: an exact list you already have) — and save it. See [WALKLISTS.md](WALKLISTS.md). *(Skip if you'll claim doors
    another way.)*
 2. **Walk Lists** page → **New walk list** → enter a name; if it's a survey campaign, optionally
    pick a **survey override** (else it uses the campaign's survey); pick the saved search under **Seed
@@ -139,7 +221,10 @@ Your campaign starts as one default walk list ("Main") owning every door.
 2. **Walk Lists** → **New walk list** "North", seed from that saved search. Because those doors are currently owned
    by "Main", the app asks you to confirm a **move (re-carve)** — confirm it; the doors leave "Main"
    and join "North" (and drop out of Main's books cleanly).
-3. Repeat for each area. Rename or delete the leftover "Main" walk list when it's empty.
+3. Repeat for each area. Then rename the leftover "Main" walk list, or **archive** it once you're done
+   with it. Archiving ends its live pass, so any of its books still on canvassers' phones close on their
+   next map refresh — check nobody is still working one (Unarchive can bring the pass back). A walk list
+   whose passes are all still drafts, with nothing recorded, can be deleted instead.
 
 ### Run two crews (e.g. paid + volunteer) in one walk list
 When two teams work the **same** territory, you don't need two walk lists — walk lists own *disjoint
@@ -178,8 +263,8 @@ their doors to another crew later, add them back to the campaign first. See
 2. Decide who owns them — an **existing** walk list, or a **new walk list** you create for these doors (make
    it first on the Walk Lists page, then claim). Open that walk list → **Claim** → either claim a specific
    **saved search** or **Claim all Intake**.
-   - To route **exactly this CSV's** doors to their own walk list, build a **Saved Search from that CSV** after
-     the import (it matches by Voter ID — see [WALKLISTS.md](WALKLISTS.md)) and seed/claim the new walk list
+   - To route **exactly this file's** doors to their own walk list, build a **Saved Search from that file** after
+     the import (upload the same CSV or Excel file there; it matches by Voter ID — see [WALKLISTS.md](WALKLISTS.md)) and seed/claim the new walk list
      from it. **Claim all Intake** is the quick path *only* when all current Intake is just these new
      addresses — it grabs **every** unowned door, so use a saved search when other Intake is mixed in.
 3. **Turf Cutting** → that walk list's pass → **Add new doors → supplemental book** → **Accept** →
@@ -203,7 +288,7 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 
 | Model | File | Notes |
 |---|---|---|
-| `Effort` | [models/Effort.js](../server/src/models/Effort.js) | `campaignId`, `name`, `surveyTemplateId?` (override → falls back to `Campaign.surveyTemplateId`), `seededFromWalkListId?` (audit), `status` (draft/active/archived). |
+| `Effort` | [models/Effort.js](../server/src/models/Effort.js) | `campaignId`, `name`, `surveyTemplateId?` (override → falls back to `Campaign.surveyTemplateId`), `seededFromWalkListId?` (audit), `status` (`active` / `archived`; `draft` is in the enum but unused). Since 2026-10-28: `archivedAt` + `archivedBy` (cleared on unarchive — the campaign History keeps both; null on walk lists archived before the fields existed), `endedPassId` (the live pass the current archive ended, so Unarchive can offer it back — read only while archived) and `lifecycleLock { lockedAt, token }` (§I). |
 | `EffortMember` | [models/EffortMember.js](../server/src/models/EffortMember.js) | **Manual pre-stage list only**, unique `{effortId, userId}`. The displayed "crew" is *derived* (see §G), not this. |
 | `Household.effortId` | [models/Household.js](../server/src/models/Household.js) | **Source of truth for door ownership.** `null` = Intake. Index `{campaignId, effortId}`. Disjointness = one effortId per door. |
 | `Pass` (= Round) | [models/Pass.js](../server/src/models/Pass.js) | Gains `effortId` (required); `roundNumber` unique **per walk list** (`{effortId, roundNumber}`); `walkListId` retired (door-set comes from the walk list). |
@@ -240,18 +325,21 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   gutted books → Restore the `'move'` snapshot (books, memberships, and assignments return).
   Disjointness can never be violated silently.
 - **Saved searches are source-agnostic here.** A saved search from the filter builder and one from an uploaded
-  Voter-ID CSV are both just frozen `householdIds` (`SavedSearch.source` = `'filter' | 'csv'`), so
+  Voter-ID list are both just frozen `householdIds` (`SavedSearch.source` = `'filter' | 'csv'`; since
+  2026-10-28 `'csv'` covers an uploaded Excel file too — the value predates Excel uploads and is kept,
+  and the pages show it as **uploaded**), so
   seed/claim/re-carve treat them identically. See [WALKLISTS.md](WALKLISTS.md).
-- **Archiving doesn't release doors.** Archive is only a status flag — it does **not** set `effortId`
-  back to `null` (only **deleting** a walk list does, and a walk list with non-draft passes can't be
-  deleted). So a newly imported voter at an address an archived walk list already owns stays on that walk list
+- **Archiving doesn't release doors.** Archiving a walk list ends its live pass and makes it read-only
+  (§I), but it does **not** set `effortId` back to `null` (only **deleting** a walk list does, and a walk
+  list with non-draft passes can't be deleted). So a newly imported voter at an address an archived walk list already owns stays on that walk list
   (the importer never re-owns a door). To move such doors into a new walk list, claim them with a
-  **re-carve** — precisely targetable by uploading that voter list as a saved search
-  ([WALKLISTS.md](WALKLISTS.md)).
+  **re-carve** — claims OUT of an archived walk list still work (claims INTO one are refused) — precisely
+  targetable by uploading that voter list as a saved search ([WALKLISTS.md](WALKLISTS.md)).
 - **Deleting is ledger-guarded.** `DELETE /efforts/:id` refuses (400 `has-history`) while any
   `CanvassActivity` or `SurveyResponse` references the walk list or its rounds — draft-rounds-only is
   NOT proof of no history, because knocks stamp the door's owner at write time
-  (`resolveAttribution`, [mobile/canvass.js](../server/src/routes/mobile/canvass.js)); deleting the
+  (`resolveAttribution`, [services/canvass/attribution.js](../server/src/services/canvass/attribution.js));
+  deleting the
   doc would orphan those rows into the by-pass report's **"Legacy / no pass"** bucket (the 2026-08
   incident). A **desk mark** is such a row too: a single home marked restricted from the Turf Cutting
   map, the Map page or the mobile admin app on a **draft** round ([PASSES_AND_TURF.md](PASSES_AND_TURF.md))
@@ -272,6 +360,11 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   Campaign-gated on purpose: platform-wide, `passId: null` deliberately marks pre-rounds-era history.
   A round-less survey answer whose voter already answered in the target round is never folded
   (`{voterId, passId}` is unique — the voter genuinely answered twice); it's listed for manual review.
+  Since 2026-10-28 the delete runs under the walk list's **lifecycle lock** (§I, 409 `lifecycle-busy`
+  while another lifecycle change holds it), refuses on an archived campaign (409 `campaign-archived`),
+  and the Walk Lists page offers **Delete** only when `GET /efforts` says `canDelete` (every pass still a
+  draft) — the ledger check above still runs. Its rules are otherwise unchanged, so an archived walk list
+  that never went live can still be deleted.
 
 ## C. Passes & "active"
 
@@ -281,8 +374,12 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
   which scopes `roundNumber` per walk list (unique `{effortId, roundNumber}`, with an E11000 retry) and
   auto-labels a blank name `Pass {roundNumber}`. Called explicitly by `POST /passes` and implicitly
   (best-effort) by effort-create for **Pass 1**.
-- Activation ([passes.js](../server/src/routes/admin/passes.js)) archives other active passes **of the
-  same walk list only**. `GET /passes?effortId=` filters.
+- Activation (`activatePass` in [passLifecycle.js](../server/src/services/passes/passLifecycle.js), called
+  by [passes.js](../server/src/routes/admin/passes.js)) archives other active passes **of the same walk
+  list only**, stamping each `archivedVia: 'next-pass'` and `endedByPassId` — a pass ended that way never
+  comes back ([PASSES.md](PASSES.md)) — and refuses an archived walk list (409 `walk-list-archived`). At
+  most one live pass per walk list is also enforced by the `one_live_pass_per_walk_list` index (§I).
+  `GET /passes?effortId=` filters.
 - Turf cut scope ([generateTurf.js](../server/src/services/turf/generateTurf.js)) = the pass's
   **walk list's owned doors** (`{campaignId, isActive, effortId, coords}`, plus the restricted /
   no-soliciting boxes' `_id: { $nin }` from `cutExclusionParts` when `params.excludeRestricted` /
@@ -292,11 +389,20 @@ See [PASSES.md](PASSES.md) for the pass lifecycle in full.
 
 ## D. Attribution & per-walk-list survey (mobile write path)
 
-- **Deterministic attribution** ([canvass.js](../server/src/routes/mobile/canvass.js)
-  `resolveAttribution`): a door → its published book among the campaign's **active rounds** →
-  `passId`/`turfId`; `effortId` = the door's owner. Replaces the old `activatedAt` time-window (which
-  was ambiguous with several active rounds). Stamps `passId`/`turfId`/`effortId` on the activity /
-  response. Knock dedup key `(userId, householdId, passId)` is unchanged.
+- **Deterministic attribution** (`resolveAttribution`, in
+  [services/canvass/attribution.js](../server/src/services/canvass/attribution.js) since 2026-10-28 —
+  it lived in [canvass.js](../server/src/routes/mobile/canvass.js) before): `effortId` = the door's owner,
+  and the pass and book in two steps. **Step 1**, for a phone with the update (it sends the door's
+  `turfId` from its bootstrap, read at tap time) while `LATE_KNOCK_ATTRIBUTION` isn't `off`: that book,
+  if it is still published, still holds the door and belongs to a pass of the door's walk list — used as
+  is on a live pass, and on an archived pass only when the knock was tapped no later than the pass's
+  `archivedAt`, or before the live book's pass first went live (its `activatedAt`), or no live book holds
+  the door. **Step 2**, today's rule and all an older phone gets: the
+  door's published book among the campaign's **active rounds** → `passId`/`turfId`, else `passId: null`.
+  Replaces the old `activatedAt` time-window (which was ambiguous with several active rounds). Stamps
+  `passId`/`turfId`/`effortId` on the activity / response. Knock dedup key `(userId, householdId,
+  passId)` is unchanged. Full rules, the switch and the edge cases: [PASSES_AND_TURF.md](PASSES_AND_TURF.md)
+  §F.
 - **Survey** = `effort.surveyTemplateId || campaign.surveyTemplateId`; submit validates against it.
 - **Bootstrap** ([bootstrap.js](../server/src/routes/mobile/bootstrap.js)): unions the canvasser's
   `TurfAssignment`s across all active rounds; returns each book tagged with `effortId` +
@@ -405,9 +511,103 @@ The displayed crew is computed in [efforts.js](../server/src/routes/admin/effort
 
 | File | Renders |
 |---|---|
-| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | Walk Lists list/create, crew (derived) + pre-add, claim/re-carve, Intake banner + assign, survey override. Drawer embeds `<PassManager variant="compact">`. |
-| [client/src/components/PassManager.jsx](../client/src/components/PassManager.jsx) | All pass UI (new pass, activate, archive, per-pass detail). Shared by the drawer (compact) and the scoped page (full). |
-| [client/src/pages/PassesPage.jsx](../client/src/pages/PassesPage.jsx) | Thin wrapper at `/campaigns/:campaignId/efforts/:effortId/passes` — renders `<PassManager variant="full">` for one walk list (no picker). |
-| [client/src/pages/TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Turf cutting; PassPicker labels passes by walk list and defaults to an active pass. |
+| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | Walk Lists list/create, crew (derived) + pre-add, claim/re-carve, Intake banner + assign, survey override. One **Status** cell per walk list from `walkListState` ([client/src/lib/walkListState.js](../client/src/lib/walkListState.js), pure, first match wins over the nine states in Part 1) and the row's actions from `walkListActions`; archived walk lists in a collapsed *Archived walk lists (N)* section (its open state a per-viewer `localStorage` convenience, wrapped in try/catch); the inline *Undo* line above the table; Archive / Unarchive / End Pass N through the shared dialogs in `client/src/components/walkListLifecycle/`. Drawer embeds `<PassManager variant="compact">`; for an archived walk list only the name field is live. |
+| [client/src/components/PassManager.jsx](../client/src/components/PassManager.jsx) | All pass UI (new pass, activate, archive, **Bring back**, per-pass detail). Shared by the drawer (compact) and the scoped page (full). Read-only on an archived walk list, with an **Unarchive** banner. |
+| [client/src/pages/PassesPage.jsx](../client/src/pages/PassesPage.jsx) | Thin wrapper at `/campaigns/:campaignId/efforts/:effortId/passes` — renders `<PassManager variant="full">` for one walk list (no picker); its title carries the walk list's status. |
+| [client/src/pages/TurfsPage.jsx](../client/src/pages/TurfsPage.jsx) | Turf cutting; PassPicker groups passes **Live / Drafts / Archived** (`groupPassesByState`, [passPicker.js](../client/src/lib/passPicker.js)), labels them by walk list and defaults to an active pass. An archived pass, any pass of an archived walk list and an archived campaign open **view-only** ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)). |
+| [client/src/lib/walkListOptions.js](../client/src/lib/walkListOptions.js) (+ [mobile/lib/walkListOptions.js](../mobile/lib/walkListOptions.js), byte-identical below its header and held there by `walkListOptions.parity.test.js`) | How every picker lists walk lists: report filters use `walkListOptions` (open first, then archived ones labelled "North (archived)"), work pickers `openWalkLists`; `passOptionLabel` → "North · Pass 3 · GOTV". |
 | [client/src/pages/DashboardPage.jsx](../client/src/pages/DashboardPage.jsx) | Walk-list filter → passes `effortId` to the reports endpoints. |
 | [mobile/lib/doorSurvey.js](../mobile/lib/doorSurvey.js) | Resolves the survey per door from `books`/`surveys` (`surveyForDoor`, read by [mobile/app/(app)/voter/[id]/survey.jsx](../mobile/app/(app)/voter/[id]/survey.jsx)), and the surveys **Practice the survey** offers, one per distinct survey across the user's books, named by walk list (`practiceSurveys`). |
+
+## I. Archive, unarchive and the read-only walk list (2026-10-28)
+
+Built to [PROPOSAL_WALK_LIST_ARCHIVE.md](PROPOSAL_WALK_LIST_ARCHIVE.md) (plan v3). Every lifecycle write
+goes through ONE service, [services/passes/passLifecycle.js](../server/src/services/passes/passLifecycle.js):
+`archiveWalkList`, `unarchiveWalkList`, `archivePass`, `bringBackPass`, `activatePass` and the one-time
+`repairWalkList`. Nothing else writes `Pass.status` except `createNextPass` (new drafts), discard's
+conditional active → draft revert ([turfs.js](../server/src/routes/admin/turfs.js)), the demo seeder and
+the delete routes. Invariant: **a pass of an archived walk list is never live** — the one exception is a
+walk list archived before this change, until the one-time repair runs.
+
+- **The lifecycle lock.** Each export takes the walk list's `Effort.lifecycleLock` **once** (a
+  compare-and-set with the recut lock's token and 5-minute staleness rule), then runs unlocked internal
+  steps — the lock is not re-entrant, so an export calling another export would lose to itself. It
+  serializes archive, unarchive, archive-pass, bring-back, activation and the walk-list and draft-pass
+  deletes across **all** passes of one walk list, which per-pass recut locks can't (a bring-back of Pass 2
+  and an archive of the walk list take different ones). Busy → **409 `lifecycle-busy`** with `temporary:
+  true` (*Someone else is changing this walk list right now. Try again in a minute.*). Exports that end
+  or restore a pass also take that pass's recut lock (409 `recut-locked`, temporary); activation
+  deliberately doesn't, so starting the next pass never waits for a claim or supplemental job on the old
+  one. Jobs never take the lifecycle lock, and every lock is try-once, so nothing deadlocks.
+- **Archive** — `POST /efforts/:id/archive` `{ confirmArchive }` → `{ effort, endedPassId, endedPass }`
+  (`endedPass` `{ _id, roundNumber, name }` or null — the pass this archive ended, named, so the page's
+  notice and its Undo follow what the server did even when a pass went live after the box opened). With
+  a live pass and no `confirmArchive: true`: 409 `archive-confirm-required` (the web dialog sends the flag
+  only after the typed confirm, and re-asks on that 409). Then, in order: under the live pass's recut lock — every
+  live pass's, on data from before the one-live-pass index (409 `recut-locked`, and nothing changes) —
+  record `Effort.endedPassId` (the walk list is still open, and the field is read only while archived) and
+  end the pass (`status: 'archived'`, `archivedAt`, `archivedFrom: 'active'`, `archivedVia: 'walk-list'`,
+  `archivedBy`); with several live, the others first and the one Unarchive offers 1 ms after them
+  (`endPassesOfferingLast`: a pass from before `lastActivatedAt` counts as live until it ended, so ended
+  after the offered one it would block that one's bring back under rule 4b); archive the walk list
+  (`status`, `archivedAt`, `archivedBy`); write one History row. A
+  crash between the pass and the walk list leaves an open walk list with an ended pass (its own Bring back
+  fixes that); archiving again finds nothing live, keeps `endedPassId`, and archives. On a walk list
+  already archived **with** a live pass (the pre-repair amber state) the same call ends that pass — the
+  row's **End Pass N**; with nothing live it is 409 `already-archived`. Drafts, `Household.effortId`,
+  books, assignments, `EffortMember`, snapshots and the ledger are untouched. `GET
+  /efforts/:id/archive-preview` → `{ livePass: { _id, roundNumber, name, books, canvassers, knocks } | null,
+  drafts, doors }` is the only source of the dialog's stakes (knocks via `knocksPipeline(…, { byPass: true
+  })`, so they match the Passes panel).
+- **Unarchive** — `POST /efforts/:id/unarchive` `{ bringBack }` → `{ effort, broughtBack, to,
+  bringBackError? }`. 409 `not-archived`; with `bringBack: true` and no ended pass on file, 409
+  `nothing-to-bring-back`. The Bring back verdict ([PASSES.md](PASSES.md)) is checked **before** anything
+  changes, so a refusal leaves the walk list archived. Then it reopens the walk list **first** (`status:
+  'active'`, `archivedAt`/`archivedBy` cleared — History keeps them), brings the pass back as an internal
+  step under the lock it already holds (no History row of its own), clears `endedPassId`, and writes one
+  row. That order means a crash can leave an open walk list with an ended pass, never an archived walk
+  list with a live one. If the bring-back step fails after the reopen, the answer is still 200, with
+  `bringBackError: { code, error }` (*"North" is unarchived, but Pass 3 couldn't come back: …*), which the
+  dialog shows as a warning. `GET /efforts/:id/unarchive-preview` → `{ endedPass: null | { _id,
+  roundNumber, name, archivedAt, archivedVia, archivedByName, bringBack } }`.
+- **`GET /efforts`** adds per walk list `archivedAt`, `archivedByName` (through `hydrateCanvassers`, as
+  History does, so a deleted account reads as its tombstone), `endedPassId`, `canDelete` (every pass still a
+  draft — the delete route's own first rule; it still checks the ledger), `everLive` (some pass has an
+  `activatedAt`) and `lastEndedPass: { _id, roundNumber, name, archivedAt, archivedVia } | null` (its most
+  recently archived pass). `activeRound` and `setup` are computed as before; an archived walk list has an
+  `activeRound` only in the pre-repair state, and the page ignores `setup` for archived walk lists.
+  `lifecycleLock` is never sent.
+- **The guards** ([middleware/campaignWritable.js](../server/src/middleware/campaignWritable.js)), beside
+  `assertCampaignWritable` and with its 409-never-403 contract: `assertWalkListWritable(res, effort)`
+  (sync, returns a boolean) answers **409 `walk-list-archived`** (*Walk list "North" is archived —
+  unarchive it to change it.*); `assertPassWritable(res, pass, effort?)` (async) answers **409
+  `pass-archived`** (*Pass 3 · GOTV is archived — bring it back to change it.*) for an archived pass and
+  `walk-list-archived` for any pass of an archived walk list, which covers its frozen drafts. On the
+  efforts router they guard a claim INTO the walk list, roster add/remove and a `surveyTemplateId` PATCH —
+  a phone that was offline may still be sending answers to that survey, and the survey route refuses a
+  mismatch, which would drop them; `PATCH { name }` stays allowed. The passes router guards create, rename
+  and delete; the turf and assignment routes guard every book write ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)
+  §C); desk marks on its doors refuse in [deskRestrict.js](../server/src/services/canvass/deskRestrict.js)
+  ([MAPS.md](MAPS.md)). The claim job (`executeClaim`) re-checks that its TARGET walk list is open; donor
+  passes keep shrinking, locking and snapshotting as before, which is why a re-carve OUT of an archived
+  walk list still works.
+- **Archived campaign.** `requireActiveCampaign()` is mounted on the efforts and passes routers (after
+  `loadCampaign`), so every write there — archive, unarchive, rename, delete, claim, and every pass
+  action — answers 409 `campaign-archived`; reads stay open ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2).
+- **One live pass per walk list, enforced.** `Pass` index `one_live_pass_per_walk_list`: `{ status: 1,
+  effortId: 1 }`, unique, partial `{ status: 'active', effortId: { $type: 'objectId' } }`. Not `{
+  effortId: 1 }` — that key pattern already exists (`effortId`'s own index), and `migrate:build-indexes`
+  decides "missing" by key pattern alone, so it would never be built; the `$type` filter keeps live passes
+  from before walk lists existed from colliding on null. Production builds it with `npm run
+  migrate:build-indexes -- --apply` **after** the one-time repair ([OPERATIONS.md](OPERATIONS.md)); until
+  then the code behaves as before. A duplicate-key error from activation or a bring-back becomes 409
+  `another-pass-live`. Tests build it in [testIndexPreload.mjs](../server/scripts/testIndexPreload.mjs).
+- **History.** Each act writes one `CampaignChange` row with `source: 'walk_list_lifecycle'` — fields
+  `walkListArchived`, `walkListUnarchived`, `passArchived`, `passBroughtBack` — readable
+  `fromValue`/`toValue` for phones without the sentence renderer, and `details: { walkList, pass, outcome
+  }` for the ones with it ([CAMPAIGNS.md](CAMPAIGNS.md) Part 2). Activation writes none (routine, and it
+  would crowd the feed's 200-row cap).
+- **The one-time repair** — walk lists archived before this change with a pass still live, and any walk
+  list holding two live passes — is `npm run repair:archived-walk-lists`
+  ([migrations/repairArchivedWalkLists.js](../server/src/migrations/repairArchivedWalkLists.js); runbook in
+  [OPERATIONS.md](OPERATIONS.md)).

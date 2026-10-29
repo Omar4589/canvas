@@ -132,6 +132,51 @@ test('a dead or expired link drops the token and says so; a report, map or netwo
   }
 });
 
+test('a link to all your reports, once RETIRE_ALL_REPORTS_LINKS is on: a 410 SHARE_RETIRED on meta, unlock or a signed-in read ends the session in the server\'s words', async () => {
+  // The server's answer (routes/public/share.js). The page has no code of its own for it: any 410
+  // drops the token and titles the notice with the server's words (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §E).
+  const RETIRED = { error: 'This link no longer works. Ask the person who sent it for the link to the latest report.', code: 'SHARE_RETIRED' };
+  for (const [where, path] of [
+    ['meta', ''],
+    ['a signed-in read', '/reports/r1'],
+  ]) {
+    localStorage.clear();
+    answer = () => ({ status: 200, body: { accessToken: 'jwt-1' } });
+    const s = createShareSession(TOKEN);
+    await s.unlock({ password: 'pw', remember: true });
+    const before = s.getSnapshot().ends;
+    answer = () => ({ status: 410, body: RETIRED });
+    await assert.rejects(s.get(path), { status: 410, code: 'SHARE_RETIRED' });
+    const sent = calls[calls.length - 1];
+    assert.equal(sent.url, `/api/share/${TOKEN}${path}`);
+    assert.equal(sent.init.headers['X-Share-Token'], 'jwt-1', `${where}: sent signed in`);
+    const snap = s.getSnapshot();
+    assert.deepEqual(snap.fatal, { kind: 'expired', message: RETIRED.error }, `${where}: the server's own words`);
+    assert.equal(snap.accessToken, null, where);
+    assert.equal(snap.gate, null, `${where}: no password box — there is nothing left to sign in to`);
+    assert.equal(snap.ends, before + 1, `${where}: the page is told to forget what it read`);
+    assert.equal(localStorage.getItem(KEY), null, `${where}: the remembered token is dropped`);
+  }
+
+  // Unlock, from the password box: the server's words, never a password-box error. A token another tab
+  // remembered for this link meanwhile is dropped too.
+  localStorage.clear();
+  answer = () => ({ status: 410, body: RETIRED });
+  const s = createShareSession(TOKEN);
+  localStorage.setItem(KEY, 'jwt-other-tab');
+  const before = s.getSnapshot().ends;
+  assert.equal(await s.unlock({ password: 'correct horse battery', remember: true }), false);
+  assert.match(calls[calls.length - 1].url, new RegExp(`/api/share/${TOKEN}/unlock$`));
+  const snap = s.getSnapshot();
+  assert.deepEqual(snap.fatal, { kind: 'expired', message: RETIRED.error }, "unlock: the server's own words");
+  assert.equal(snap.unlockError, null);
+  assert.equal(snap.unlocking, false);
+  assert.equal(snap.accessToken, null);
+  assert.equal(snap.ends, before + 1, 'unlock: the session is ended, not just flagged');
+  assert.equal(localStorage.getItem(KEY), null, 'unlock: the remembered token is dropped');
+  assert.equal(getShareAccess(TOKEN), null, 'nothing is kept for this link');
+});
+
 test('every share read carries the token and goes through the handler; an abort is nobody\'s error', async () => {
   const s = createShareSession(TOKEN);
   await s.unlock({ password: 'pw' });

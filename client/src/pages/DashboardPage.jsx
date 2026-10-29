@@ -23,6 +23,7 @@ import { daysUntil, earlyVotingState, formatDateLabel } from '../lib/electionDat
 import { metricHelp } from '../lib/metricHelp.js';
 import { todayInTz, shiftDays } from '../lib/datePresets.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
+import { isArchivedWalkList, walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
@@ -293,11 +294,7 @@ export default function DashboardPage() {
   // picker). Polled: this page is under the Live-pill contract, and the options feed a filter
   // (the teamsQ precedent — a newly cut round should appear without a reload). When a walk-list
   // filter is set, only that list's passes are offered (the legacy bucket belongs to no list).
-  const { roundOptions: allRoundOptions } = useRoundOptions(campaignId, { poll: HOME_POLL });
-  const roundOptions = useMemo(
-    () => (effortId ? allRoundOptions.filter((r) => r.effortId === String(effortId)) : allRoundOptions),
-    [allRoundOptions, effortId]
-  );
+  const { roundOptions } = useRoundOptions(campaignId, { poll: HOME_POLL, effortId });
 
   // Every filter the Survey results section silently honours, spelled out. The server scopes
   // that section by date range, walk list, crew AND pass (reports.js /survey-results baseMatch),
@@ -508,8 +505,8 @@ export default function DashboardPage() {
               className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">All walk lists</option>
-              {efforts.map((ef) => (
-                <option key={ef._id} value={ef._id}>{ef.name}</option>
+              {walkListOptions(efforts).map((ef) => (
+                <option key={ef._id} value={ef._id}>{walkListLabel(ef)}</option>
               ))}
             </select>
           )}
@@ -590,7 +587,13 @@ export default function DashboardPage() {
       {isOrgAdmin && current && <ArchiveNudge campaigns={[current]} className="mb-6" />}
       {current && current.isActive !== false && (
         <div className="mb-6">
-          <SetupProgress campaignId={campaignId} />
+          {/* The campaign decides whether the reminder above is showing, which the no-pass-live note
+              must not repeat; with every walk list archived, that note's advice changes. */}
+          <SetupProgress
+            campaignId={campaignId}
+            campaign={current}
+            allWalkListsArchived={efforts.length > 0 && efforts.every(isArchivedWalkList)}
+          />
         </div>
       )}
 

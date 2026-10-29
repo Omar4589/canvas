@@ -52,8 +52,8 @@ Lit-drop campaigns skip this entirely. See [SURVEYS.md](SURVEYS.md).
 ### 4. Create a walk list and give it doors
 **Walk Lists → New walk list.** Name it and pick its **Doors** source:
 - **All remaining doors (Intake)** — the usual whole-district list (every unassigned door).
-- **From a saved search** — only that saved search's unowned doors (e.g. one precinct, or a CSV you
-  uploaded). Build saved searches on the **Saved Searches** tab.
+- **From a saved search** — only that saved search's unowned doors (e.g. one precinct, or a list of
+  Voter IDs you uploaded as a CSV or Excel file). Build saved searches on the **Saved Searches** tab.
 - **None** — an empty list; claim doors later from the walk list's **Claim** panel.
 
 Creating the walk list **auto-creates its Pass 1** — there's no separate "make a pass" step. The

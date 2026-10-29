@@ -10,6 +10,9 @@ export default function PasswordInput({
   autoComplete = 'current-password',
   className = '',
   disabled,
+  // For a box with no <label> of its own: what names it, and the lines under it that describe it.
+  'aria-labelledby': labelledBy,
+  'aria-describedby': describedBy,
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -22,6 +25,8 @@ export default function PasswordInput({
         required={required}
         autoComplete={autoComplete}
         disabled={disabled}
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
         className={`${FIELD_CLS} w-full pr-10 ${className}`}
       />
       <button

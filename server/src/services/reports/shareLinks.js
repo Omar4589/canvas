@@ -1,11 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { writeLinkHistory, LINK_FIELDS } from './clientReportHistory.js';
+import { sealSecret, openSecret, sealedSecretConfigured } from '../../utils/sealedSecret.js';
+import { isWellFormedText } from '../../utils/passwordText.js';
 
-// Client links, hardened (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 as overridden by §O7). Shared by
-// the public share routes (routes/public/share.js) and the admin panel's routes
-// (routes/admin/clientReportShares.js), so the budget the unlock enforces and the counts the panel
-// shows are read the same way.
+// Client links, hardened (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 as overridden by §O7), one per
+// report, with passwords that can be shown again (docs/PROPOSAL_CLIENT_REPORT_LINKS.md). Shared by the
+// public share routes (routes/public/share.js), the admin routes (routes/admin/clientReportShares.js)
+// and the demo seed, so the budget the unlock enforces, the counts Share shows, the switch for links to
+// all your reports and the sealing of passwords are read the same way everywhere.
 //
 // OLD LINKS LACK EVERY NEW FIELD until the migration (and the deploy comes first), so each one is
 // read through a helper here with an explicit fallback, every counter is written with a pipeline
@@ -36,6 +39,87 @@ export const generateSharePassword = () => {
 };
 
 export const passwordMeetsRule = (password) => typeof password === 'string' && password.length >= SHARE_PASSWORD_MIN;
+
+// ── Links to all your reports (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1) ──────────────────────────────
+
+/**
+ * A link that opens every published report of its campaign: reportId null, or missing on a link made
+ * before the field. No route makes one any more; the ones left are turned off by the switch below.
+ */
+export const isAllReportsLink = (link) => !link?.reportId;
+
+/**
+ * The release switch RETIRE_ALL_REPORTS_LINKS, read at call time like FBTIME_DOOR_COUNTS
+ * (services/fbtime/doorCounts.js): `on` / `true` / `1`, any case. Set in the Heroku dashboard (the
+ * dynos restart, no deploy), every link to all your reports, in every organization, answers 410
+ * SHARE_RETIRED — signed-in devices included — and can only be deleted. Unset is how the deploy ships;
+ * unsetting it again brings them back at once: nothing is ever written to a link by it.
+ */
+export const allReportsRetired = (raw = process.env.RETIRE_ALL_REPORTS_LINKS) =>
+  ['on', 'true', '1'].includes(String(raw ?? '').trim().toLowerCase());
+
+// ── Passwords that can be shown again (§B, §C3, contract K10) ─────────────────────────────────────
+
+// Each sealed copy is bound to the hash it was written beside: a copy left stale by code that changed
+// the hash without knowing this field, or a value sealed for anything else, never opens as this link's
+// password (round 2 ran each case).
+const linkAad = (passwordHash) => `report-link:${passwordHash}`;
+
+/**
+ * The password, sealed for its link — written in the same atomic update as `passwordHash`. null when
+ * sealing isn't possible (no CREDENTIAL_SEAL_KEY, or a malformed one): a link never fails over the key,
+ * its password just can't be shown later. Never throws.
+ */
+export const sealLinkPassword = (password, passwordHash) => {
+  if (!isWellFormedText(password) || !password || typeof passwordHash !== 'string' || !passwordHash) return null;
+  try {
+    return sealSecret(password, linkAad(passwordHash));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Open a link's sealed password: `{ password }`, or `{ password: null, reason }` — 'not_kept' (no
+ * sealed copy: a link made before this, one made without a key, a link to all your reports), 'no_key'
+ * (the key is absent or malformed now), 'unreadable' (it doesn't open: the key was replaced, the copy is
+ * stale or was sealed for something else). Never throws, and never hands back the error: the error
+ * handler sends err.message to the browser in production. Callers that SHOW the password also check it
+ * against the hash (bcrypt) — this opens; it doesn't verify.
+ */
+export const readLinkPassword = (sealed, passwordHash) => {
+  if (!sealed || typeof sealed !== 'string') return { password: null, reason: 'not_kept' };
+  if (!passwordHash) return { password: null, reason: 'unreadable' };
+  if (!sealedSecretConfigured()) return { password: null, reason: 'no_key' };
+  try {
+    const password = openSecret(sealed, linkAad(passwordHash));
+    return isWellFormedText(password) && password ? { password, reason: null } : { password: null, reason: 'unreadable' };
+  } catch {
+    return { password: null, reason: 'unreadable' };
+  }
+};
+
+/** The password, or null when it can't be opened (K10). Never throws. */
+export const openLinkPassword = (sealed, passwordHash) => readLinkPassword(sealed, passwordHash).password;
+
+/**
+ * Do two links use the same password? `{ passwordHash, password }` each, `password` being the opened
+ * sealed copy or null. The same opened text — a password copied with Same as …, or typed again by hand —
+ * or an identical hash (a copied link keeps its source's hash verbatim, so it matches even when nothing
+ * can be opened). The ONE rule for both the rows' samePasswordCount and Change password's "also change it
+ * on the other links", so the count a person is offered is the set that gets changed.
+ */
+export const sameLinkPassword = (a, b) =>
+  (!!a?.password && a.password === b?.password) || (!!a?.passwordHash && a.passwordHash === b?.passwordHash);
+
+/**
+ * Of a report's links, the one Share shows: the newest that works now (active, unexpired, not locked),
+ * else the newest. Most reports have one; a report that got two before one link per report keeps both.
+ */
+export const primaryLinkOf = (links, now = new Date()) => {
+  const newestFirst = [...links].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0) || String(b._id).localeCompare(String(a._id)));
+  return newestFirst.find((l) => l.isActive === true && !isExpired(l, now) && !lockOf(l, now).locked) || newestFirst[0] || null;
+};
 
 /** The credential version a share token must carry. Missing (a link from before it) reads as 0. */
 export const credentialVersionOf = (link) => (Number.isFinite(link?.credentialVersion) ? link.credentialVersion : 0);
@@ -217,7 +301,8 @@ export const recordWrongPassword = async ({ slot, now = new Date() }) => {
         },
       },
     ],
-    { new: true, timestamps: false, projection: { failedByDay: 1, organizationId: 1, campaignId: 1, label: 1 } }
+    // reportId: its History row names the link by its report (writeLinkHistory looks the report up).
+    { new: true, timestamps: false, projection: { failedByDay: 1, organizationId: 1, campaignId: 1, label: 1, reportId: 1 } }
   ).lean();
   const todays = (counted?.failedByDay || []).find((d) => d.day === today);
   if (counted && todays?.n === WRONG_PASSWORDS_ROW_AT) {

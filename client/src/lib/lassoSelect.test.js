@@ -208,12 +208,29 @@ test('planDoorSelection: per-round buckets partition the selection', () => {
   assert.equal(plan.completedThisRound, 1); // d
   assert.equal(plan.alreadyRestricted, 0); // b is counted once, under cannotMark
   assert.equal(plan.cannotMark, 3); // b excluded, c Intake, e do-not-knock
-  assert.deepEqual(plan.cannotMarkReasons, { intake: 1, excluded: 1, doNotKnock: 1 });
+  assert.deepEqual(plan.cannotMarkReasons, { intake: 1, archived: 0, excluded: 1, doNotKnock: 1 });
   assert.equal(
     plan.markable + plan.alreadyRestricted + plan.completedThisRound + plan.cannotMark,
     plan.total,
     'every selected door lands in exactly one bucket'
   );
+});
+
+test('planDoorSelection: a door of an archived walk list can\'t take a mark, but can still be unmarked', () => {
+  // The server refuses the WHOLE batch when one door's walk list is archived, so the plan drops those
+  // doors the way it drops Intake ones — and leaves Unmark alone (still allowed on an archived walk list).
+  const rows = [
+    { _id: 'x', effortId: 'open', status: 'unknocked' },
+    { _id: 'y', effortId: 'gone', status: 'unknocked' },
+    { _id: 'z', effortId: 'gone', status: 'restricted' },
+  ];
+  const plan = planDoorSelection(rows, { forRound: false, frozenEffortIds: new Set(['gone']) });
+  assert.deepEqual(plan.markIds, ['x']);
+  assert.deepEqual(plan.unmarkIds, ['x', 'y', 'z']);
+  assert.equal(plan.cannotMark, 2);
+  assert.deepEqual(plan.cannotMarkReasons, { intake: 0, archived: 2, excluded: 0, doNotKnock: 0 });
+  // No set given: nothing changes for any caller that doesn't pass one.
+  assert.deepEqual(planDoorSelection(rows).markIds, ['x', 'y', 'z']);
 });
 
 test('planDoorSelection: without a pass scope the per-round buckets are suppressed', () => {

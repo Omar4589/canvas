@@ -145,13 +145,25 @@ async function ownershipBreakdown(campaign, ownership) {
   return { intakeDoors, ownedDoors, ownedByEffort };
 }
 
+// A parse refusal, with its code, the tab and (for the code-less "Could not detect") the column list
+// and the title-row line — the same shape as the Early Voting and do-not-contact uploads.
+const parseFailure = (res, m) =>
+  res.status(400).json({
+    error: m.error,
+    code: m.code || null,
+    columns: m.columns || [],
+    sheetName: m.sheetName ?? null,
+    otherSheets: m.otherSheets ?? [],
+    headerRowHint: m.headerRowHint ?? null,
+  });
+
 // Dry-run: upload a Voter-ID CSV, match it to this campaign's voters (by stateVoterId),
 // and report the resolved door set + ownership breakdown. No save. Mirrors POST /preview.
 router.post('/from-csv/preview', uploadIdList, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
-    if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
+    if (m.error) return parseFailure(res, m);
     const r = await resolveHouseholdsFromVoterMatch(req.campaign, m.inCampaign);
     const { intakeDoors, ownedDoors, ownedByEffort } = await ownershipBreakdown(req.campaign, r.ownership);
     const sample = await Household.find(
@@ -161,6 +173,8 @@ router.post('/from-csv/preview', uploadIdList, async (req, res, next) => {
     res.json({
       idColumn: m.col,
       columns: m.columns,
+      sheetName: m.sheetName,
+      otherSheets: m.otherSheets,
       sampleIds: m.sampleIds,
       totalRows: m.totalRows,
       idsInFile: m.csvCount,
@@ -193,7 +207,7 @@ router.post('/from-csv', uploadIdList, async (req, res, next) => {
     if (!name) return res.status(400).json({ error: 'name is required' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name: "file")' });
     const m = await parseAndMatch(req.campaign, req.file.buffer, req.body?.idColumn);
-    if (m.error) return res.status(400).json({ error: m.error, columns: m.columns });
+    if (m.error) return parseFailure(res, m);
     const r = await resolveHouseholdsFromVoterMatch(req.campaign, m.inCampaign);
     const walkList = await SavedSearch.create({
       organizationId: req.campaign.organizationId,

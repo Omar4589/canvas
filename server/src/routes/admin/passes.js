@@ -20,6 +20,26 @@ import { deleteRoundSnapshots } from '../../services/turf/snapshotRetention.js';
 import { acquireRecutLock, releaseRecutLock } from '../../services/turf/recutLock.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { DESK_RESTRICT_MATCH } from '../../services/canvass/deskRestrict.js';
+import {
+  requireActiveCampaign,
+  assertWalkListWritable,
+  assertPassWritable,
+} from '../../middleware/campaignWritable.js';
+import {
+  activatePass,
+  archivePass,
+  bringBackPass,
+  bringBackVerdict,
+  bringBackCounts,
+  endingPassOf,
+  heldReply,
+  isRecutLockedDoc,
+  passLabel,
+  refusalMessage,
+  sendLifecycleError,
+  withLifecycleLock,
+} from '../../services/passes/passLifecycle.js';
+import { hydrateCanvassers } from '../../services/reports/canvasserIdentity.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, orgContext, requireCampaignManager);
@@ -45,6 +65,8 @@ async function loadCampaign(req, res, next) {
   }
 }
 router.use(loadCampaign);
+// Archived campaign ⇒ its passes are read-only too; reads stay open.
+router.use(requireActiveCampaign());
 
 // List a campaign's rounds, optionally scoped to one effort. roundNumber sorts
 // per effort. Returns the campaign's active round ids (one per active effort).
@@ -76,12 +98,58 @@ router.get('/', async (req, res, next) => {
       campaignId: req.campaign._id,
       passId: null,
     });
+    // How each archived pass ended and whether it can be brought back (docs/PROPOSAL_WALK_LIST_ARCHIVE.md
+    // §B.5) — answered for every archived pass from this one load, never a query per pass: the
+    // siblings are the passes listed here (a filter by effortId still lists all of that walk list's).
+    const archived = passes.filter((p) => p.status === 'archived');
+    const [effortDocs, bringBackFacts, people] = await Promise.all([
+      Effort.find({ campaignId: req.campaign._id }, { name: 1, status: 1 }).lean(),
+      bringBackCounts(archived.map((p) => p._id)),
+      hydrateCanvassers(archived.map((p) => p.archivedBy).filter(Boolean), req.campaign.organizationId),
+    ]);
+    const effortById = new Map(effortDocs.map((e) => [String(e._id), e]));
+    const siblingsOf = (p) => passes.filter((s) => String(s.effortId) === String(p.effortId) && String(s._id) !== String(p._id));
+    const nameOf = (id) => {
+      const u = id ? people.get(String(id)) : null;
+      return u ? [u.firstName, u.lastName].filter(Boolean).join(' ') || null : null;
+    };
+    const now = new Date();
+    const lifecycleOf = (p) => {
+      // Always present, null on passes from before these fields existed (the clients test === null).
+      const stamps = {
+        lastActivatedAt: p.lastActivatedAt ?? null,
+        archivedFrom: p.archivedFrom ?? null,
+        archivedVia: p.archivedVia ?? null,
+        archivedBy: p.archivedBy ?? null,
+        endedByPassId: p.endedByPassId ?? null,
+      };
+      if (p.status !== 'archived') return { ...stamps, archivedByName: null, endedByPassName: null };
+      const siblings = siblingsOf(p);
+      const ending = endingPassOf(p, siblings);
+      const bringBack = bringBackVerdict(p, {
+        campaign: req.campaign,
+        effort: effortById.get(String(p.effortId)) || null,
+        siblings,
+        booksWithDoors: bringBackFacts.booksByPass.get(String(p._id)) || 0,
+        canvassers: bringBackFacts.canvassersByPass.get(String(p._id)) || 0,
+        recutLocked: isRecutLockedDoc(p, now.getTime()),
+        now,
+      });
+      return {
+        ...stamps,
+        archivedByName: nameOf(p.archivedBy),
+        endedByPassName: ending ? passLabel(ending) : null,
+        bringBack,
+        ...(bringBack.ok ? {} : { bringBackMessage: refusalMessage(bringBack) }),
+      };
+    };
     res.json({
       legacyResponseCount,
       passes: passes.map((p) => {
         const k = kMap.get(String(p._id)) || null;
         return {
           ...p,
+          ...lifecycleOf(p),
           turfCount: cMap.get(String(p._id)) || 0,
           knockCount: k?.knocks || 0,
           surveyedKnocks: k?.surveyedKnocks || 0,
@@ -105,8 +173,9 @@ router.post('/', async (req, res, next) => {
   try {
     const { name, effortId } = req.body || {};
     if (!mongoose.isValidObjectId(effortId)) return res.status(400).json({ error: 'effortId is required' });
-    const effort = await Effort.findOne({ _id: effortId, campaignId: req.campaign._id }).select('_id').lean();
+    const effort = await Effort.findOne({ _id: effortId, campaignId: req.campaign._id }).select('_id name status').lean();
     if (!effort) return res.status(404).json({ error: 'Walk list not found' });
+    if (!assertWalkListWritable(res, effort)) return;
     const pass = await createNextPass({
       organizationId: req.campaign.organizationId,
       campaignId: req.campaign._id,
@@ -126,6 +195,8 @@ router.patch('/:id', async (req, res, next) => {
     const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id });
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status !== 'draft') return res.status(400).json({ error: 'Only draft passes can be edited' });
+    // A draft of an archived walk list is frozen with it.
+    if (!(await assertPassWritable(res, pass))) return;
     if (req.body.name) pass.name = String(req.body.name).trim();
     await pass.save();
     res.json({ pass });
@@ -134,73 +205,66 @@ router.patch('/:id', async (req, res, next) => {
   }
 });
 
+// Activation ends the walk list's current live pass (other walk lists keep theirs) and stamps how
+// it ended, so Bring back knows it can never come back. The rules — and the survey and
+// accepted-books requirements — live in services/passes/passLifecycle.js.
 router.post('/:id/activate', async (req, res, next) => {
   try {
-    const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id });
-    if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    if (pass.status === 'archived') {
-      return res.status(409).json({ error: 'Archived passes cannot be reactivated; create a new pass' });
-    }
-    // Survey requirement (moved here from campaign creation): a survey campaign can be built
-    // out freely, but a round can't go LIVE without a survey for canvassers to submit.
-    if (req.campaign.type === 'survey' && !req.campaign.surveyTemplateId) {
-      return res.status(400).json({ error: 'Add a survey to this campaign before activating a pass.', code: 'survey-required' });
-    }
-    const published = await Turf.countDocuments({ passId: pass._id, status: 'published' });
-    if (!published) return res.status(400).json({ error: 'Generate and accept books before activating this pass' });
-
-    const now = new Date();
-    // Archive only other active rounds OF THE SAME EFFORT — other efforts keep
-    // their active rounds (a campaign can have several active rounds at once).
-    await Pass.updateMany(
-      { campaignId: req.campaign._id, effortId: pass.effortId, status: 'active', _id: { $ne: pass._id } },
-      { $set: { status: 'archived', archivedAt: now } }
-    );
-    pass.status = 'active';
-    if (!pass.activatedAt) pass.activatedAt = now;
-    await pass.save();
+    const pass = await activatePass({ campaign: req.campaign, passId: req.params.id, userId: req.user._id });
     res.json({ pass });
   } catch (err) {
-    next(err);
+    if (!sendLifecycleError(res, err)) next(err);
   }
 });
 
+// Archiving asks for confirmation when the round is LIVE or has recorded knocks (canvassers lose its
+// books on their next refresh; knocks are kept). It can be undone with Bring back until a later pass
+// on the walk list goes live.
 router.post('/:id/archive', async (req, res, next) => {
   try {
-    const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id });
-    if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    // Guard: archiving is one-way (no reopen). Require explicit confirmation when
-    // the round is LIVE or has recorded knocks — otherwise canvassers lose a round
-    // mid-work with no undo. (Knock history is kept either way.)
-    if (!req.body?.confirmArchive) {
-      const knockCount = await CanvassActivity.countDocuments({ passId: pass._id });
-      if (pass.status === 'active' || knockCount > 0) {
-        return res.status(409).json({
-          error:
-            pass.status === 'active'
-              ? 'This pass is live. Confirm to archive it.'
-              : 'This pass has recorded knocks. Confirm to archive it.',
-          code: 'archive-confirm-required',
-          isActive: pass.status === 'active',
-          knockCount,
-        });
-      }
-    }
-    pass.status = 'archived';
-    pass.archivedAt = new Date();
-    await pass.save();
+    const pass = await archivePass({
+      campaign: req.campaign,
+      passId: req.params.id,
+      userId: req.user._id,
+      confirm: req.body?.confirmArchive === true,
+    });
     res.json({ pass });
   } catch (err) {
-    next(err);
+    if (!sendLifecycleError(res, err)) next(err);
   }
 });
 
+router.post('/:id/bring-back', async (req, res, next) => {
+  try {
+    res.json(await bringBackPass({ campaign: req.campaign, passId: req.params.id, userId: req.user._id }));
+  } catch (err) {
+    if (!sendLifecycleError(res, err)) next(err);
+  }
+});
+
+// Under the walk list's lifecycle lock, so an activation can't land on the draft mid-delete, answering
+// once it's released. A draft with no walk list (data from before walk lists) has no lock to take, and no
+// activation to race: activating one is refused.
 router.delete('/:id', async (req, res, next) => {
+  try {
+    const first = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id }, { effortId: 1 }).lean();
+    if (!first) return res.status(404).json({ error: 'Pass not found' });
+    const { reply, send } = heldReply();
+    await (first.effortId ? withLifecycleLock(first.effortId, () => deletePass(req, reply)) : deletePass(req, reply));
+    send(res);
+  } catch (err) {
+    if (!sendLifecycleError(res, err)) next(err);
+  }
+});
+
+const deletePass = async (req, res) => {
   let lockedId = null;
   try {
     const pass = await Pass.findOne({ _id: req.params.id, campaignId: req.campaign._id }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     if (pass.status !== 'draft') return res.status(400).json({ error: 'Only draft passes can be deleted' });
+    // A draft of an archived walk list is frozen with it.
+    if (!(await assertPassWritable(res, pass))) return;
     // Under the round's re-cut lock, as a discard and a snapshot restore are: a restore landing mid-delete
     // put knocks back under a round that was gone, then failed on its deleted snapshot (code review after
     // round 9).
@@ -242,13 +306,11 @@ router.delete('/:id', async (req, res, next) => {
     // sweep takes what a stopped delete left.
     await deleteRoundSnapshots(req.campaign._id, [pass._id]);
     res.json({ deleted: 1 });
-  } catch (err) {
-    next(err);
   } finally {
     // A no-op once the round is gone; a delete that stopped short lets the round go again.
     if (lockedId) await releaseRecutLock(lockedId).catch(() => {});
   }
-});
+};
 
 router.get('/:id/progress', async (req, res, next) => {
   try {

@@ -38,6 +38,12 @@ const FIELD_LABELS = {
   unknock: 'Entries',
   answerEdit: 'Survey answers edited',
   answerEditUndo: 'Survey answer edit undone',
+  // Walk-list and pass lifecycle rows (source 'walk_list_lifecycle'). Each reads as one sentence
+  // (walkListSentence below); a label shows only on a row without usable details.
+  walkListArchived: 'Walk list archived',
+  walkListUnarchived: 'Walk list unarchived',
+  passArchived: 'Pass archived',
+  passBroughtBack: 'Pass brought back',
 };
 
 const DATE_FIELDS = new Set(['goalDate', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd']);
@@ -139,11 +145,13 @@ export function teamMoveSummary(item) {
 // An actor whose account is deactivated or deleted still gets named — the server's
 // hydrateCanvassers never drops an id — but the feed says so, because "Lee Lead did this" reads
 // differently when Lee left in March. Folded into the sub line rather than given a pill: mobile's
-// StatusPill is hard-coded to DOOR statuses, and this is not one.
+// StatusPill is hard-coded to DOOR statuses, and this is not one. The History route names a row nobody
+// made "One-time check" (the one-time walk-list repair) with no status, so it reads as the plain name —
+// here and on phones without this code; 'system' is tolerated too.
 export function actorLabel(person) {
   if (!person) return 'Unknown user';
   const name = person.name || 'Unknown user';
-  return person.status && person.status !== 'active' ? `${name} (${person.status})` : name;
+  return person.status && person.status !== 'active' && person.status !== 'system' ? `${name} (${person.status})` : name;
 }
 
 // One sentence for an answer-edit row (and its undo), instead of "changed from … to …": the
@@ -156,4 +164,60 @@ export const answerEditSentence = (item) => {
     return { headline: 'Survey answer edit undone', detail: `${item.toValue || ''}${item.fromValue ? ` — ${item.fromValue}` : ''}` };
   }
   return { headline: 'Survey answers edited', detail: String(item.toValue || '') };
+};
+
+// The sentence for each walk-list lifecycle row, by field and then details.outcome, with the actor in
+// front. `list` is the walk list's name, `pass` the pass's own words ("Pass 3 · GOTV", written by the
+// server's passLabel). The same code is in client/src/lib/campaignHistory.js —
+// client/src/lib/walkListSentence.parity.test.js holds the two in step.
+const LIFECYCLE_SENTENCES = {
+  walkListArchived: {
+    ended: (who, list, pass) => `${who} archived walk list ${list} — ended ${pass}`,
+    'nothing-live': (who, list) => `${who} archived walk list ${list}`,
+  },
+  walkListUnarchived: {
+    'brought-back': (who, list, pass) => `${who} unarchived walk list ${list} — brought back ${pass}`,
+    'stayed-ended': (who, list, pass) => `${who} unarchived walk list ${list} — ${pass} stayed ended`,
+    'nothing-ended': (who, list) => `${who} unarchived walk list ${list}`,
+  },
+  passArchived: {
+    'by-hand': (who, where) => `${who} archived ${where}`,
+    repair: (who, where) => `${who} ended ${where}`,
+  },
+  passBroughtBack: {
+    live: (who, where) => `${who} brought back ${where}`,
+    draft: (who, where) => `${who} brought back ${where} as a draft`,
+  },
+};
+// The two outcomes that name no pass: nothing was live to end, nothing had ended to bring back.
+const NO_PASS_OUTCOMES = new Set(['nothing-live', 'nothing-ended']);
+
+// One sentence for a walk-list or pass lifecycle row (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.9), built
+// ONLY from the facts the server stores in `details` ({ walkList, pass, outcome }) with the fixed
+// templates above — walk list and pass names are free text, so nothing is ever cut out of
+// fromValue/toValue. The actor is the row's `by`, as on every row (the server names an actorless
+// repair row "One-time check"). null when the row has no usable details — an outcome this copy doesn't
+// know, say: the caller then shows the label and the from/to values, which the server writes readable
+// for exactly that case.
+//   "Ada archived walk list North — ended Pass 3 · GOTV"
+//   "Ada unarchived walk list North — Pass 3 · GOTV stayed ended"
+//   "One-time check ended North · Pass 3 · GOTV"
+export const walkListSentence = (item) => {
+  const d = item?.details;
+  const template = d && LIFECYCLE_SENTENCES[item?.field]?.[d.outcome];
+  if (!template) return null;
+  const who = item.by?.name || 'Someone';
+  const pass = d.pass ? String(d.pass) : null;
+  if (item.field === 'walkListArchived' || item.field === 'walkListUnarchived') {
+    if (!d.walkList || (!pass && !NO_PASS_OUTCOMES.has(d.outcome))) return null;
+    return template(who, String(d.walkList), pass);
+  }
+  if (!pass) return null;
+  // "North · Pass 3 · GOTV", or the pass alone if its walk list was gone when the row was written.
+  const where = d.walkList ? `${d.walkList} · ${pass}` : pass;
+  // The server names the actorless repair row "One-time check" (no id), so only a repair row carrying
+  // someone else's name — or none — needs to say where it came from.
+  const isCheck = item.by?.id == null && item.by?.name === 'One-time check';
+  const fromRepair = d.outcome === 'repair' && !isCheck ? ' (one-time check)' : '';
+  return `${template(who, where)}${fromRepair}`;
 };

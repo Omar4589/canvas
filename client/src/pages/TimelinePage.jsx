@@ -17,6 +17,7 @@ import TimelineGrid from '../components/TimelineGrid.jsx';
 import TimelineOverlaps from '../components/TimelineOverlaps.jsx';
 import TeamBreakdown from '../components/TeamBreakdown.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 
@@ -370,9 +371,9 @@ export default function TimelinePage() {
               className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">All walk lists</option>
-              {efforts.map((ef) => (
+              {walkListOptions(efforts).map((ef) => (
                 <option key={ef._id} value={ef._id}>
-                  {ef.name}
+                  {walkListLabel(ef)}
                 </option>
               ))}
             </select>

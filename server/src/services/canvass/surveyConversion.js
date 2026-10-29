@@ -368,7 +368,8 @@ export async function computeSurveyImpact({ campaign, rows, direction, answerMat
  * Every field except the answers describes the ORIGINAL KNOCK and is copied verbatim. Two of those
  * copies are load-bearing enough to name:
  *   • passId/turfId/effortId come off the ROW. Never call resolveAttribution here — it resolves
- *     against currently-ACTIVE passes, so it would re-home a months-old knock into today's round.
+ *     against the passes live NOW (or the book a phone names, at its tap time), so it would re-home a
+ *     months-old knock into today's round.
  *   • coordinatorId comes off the ROW. This is not the restamp SurveyResponse.js forbids; it is
  *     the same freeze the field path performs when it writes one resolved value to both ledgers.
  *     Calling coordinatorForWrite here would stamp the door with the ADMIN's crew.

@@ -26,6 +26,7 @@ import {
   isNotable,
   teamMoveSummary,
   answerEditSentence,
+  walkListSentence,
   actorLabel,
 } from '../../../lib/campaignHistory';
 import InsetGroup, {
@@ -39,8 +40,8 @@ import InsetGroup, {
 //
 // Read-only view of GET /admin/campaigns/:campaignId/history, which merges two write-side records:
 // CampaignChange (configuration edits — the door goal, the key dates, the invoice policy,
-// archiving) and CoordinatorChange (team reassignments, which move doors between teams without
-// anyone knocking one).
+// archiving, and walk lists and passes archived, unarchived or brought back) and CoordinatorChange
+// (team reassignments, which move doors between teams without anyone knocking one).
 //
 // The rows are INERT — both kinds are plain InsetRow, never InsetNavRow, because there is nothing
 // behind them to open (InsetGroup's three-kinds rule). All the words come from
@@ -91,6 +92,17 @@ function historyRow(item, tz, colors) {
         sub={[detail, `${who} · ${when}`].filter(Boolean).join(' · ')}
       />
     );
+  }
+
+  // A walk list or pass archived, unarchived or brought back reads as one sentence built from the
+  // row's details — the actor first, as on the web — so the line under it is when, plus the actor's
+  // standing if they've since left (the web's badge); without details it falls through to the
+  // label-and-values row below. No line limit: the sentence carries the walk list and pass names, and
+  // cutting one would lose which.
+  const lifecycle = walkListSentence(item);
+  if (lifecycle) {
+    const standing = item.by?.status && item.by.status !== 'active' && item.by.status !== 'system' ? item.by.status : null;
+    return <InsetRow key={item.id} label={lifecycle} badge={badge} sub={standing ? `${when} · ${standing}` : when} />;
   }
 
   return (

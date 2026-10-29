@@ -13,7 +13,7 @@ for **managing** a campaign afterward (editing, archiving, deleting) and **exten
 
 Related: [GETTING_STARTED.md](GETTING_STARTED.md) (the step-by-step first-run walkthrough),
 [EFFORTS.md](EFFORTS.md) (walk lists own the doors and passes), [IMPORTS.md](IMPORTS.md) (how a
-CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific CSV to one walk list),
+CSV matches and reaches Intake), [WALKLISTS.md](WALKLISTS.md) (route a specific file's doors to one walk list),
 [SURVEYS.md](SURVEYS.md) (attach a survey before activating a pass), [PASSES.md](PASSES.md) (passes:
 lifecycle + where they're managed), [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (cutting books),
 [METRICS.md](METRICS.md) (the numbers), [TIMEZONES.md](TIMEZONES.md) (why a timezone change matters),
@@ -172,6 +172,16 @@ unknocks read in plain words too (they printed raw keys before
 October 2026). On the phone these rows get the same words and highlight with its next app update;
 until then they show in the plain *changed from … to …* form.
 
+Since 2026-10-28 it also records **archiving and unarchiving a walk list, and archiving and bringing
+back a pass**, each as one sentence: *Ada archived walk list North — ended Pass 3 · GOTV*; *Ada
+unarchived walk list North — brought back Pass 3 · GOTV* (or *— Pass 3 · GOTV stayed ended*); *Ada
+archived North · Pass 3 · GOTV*; *Ada brought back North · Pass 3 · GOTV* (*… as a draft* when it came
+back as one). Rows written by Doorline's **one-time check** — which ended the passes still live on walk
+lists archived before this update — read *One-time check ended North · Pass 3 · GOTV*. A phone without
+the update shows all of these rows in the plain *changed from … to …* form, and names the check *One-time
+check*, never *Unknown user*. Starting the next pass is deliberately **not** recorded: it's routine, and it
+would crowd the feed.
+
 The feed also folds in **team reassignments**, which is the other way a number moves without anyone
 knocking a door: changing someone's coordinator re-stamps all of their past work onto the new team,
 so *"why did Bo's team jump by 3,907?"* is answerable here rather than only from a database console.
@@ -261,6 +271,14 @@ dismiss that confirmation with its **✕** — it then stays hidden for every ad
 also disappears on its own once real **knocks start coming in** — the dashboard is for monitoring
 from then on. (The one exception: if you later add a walk list that isn't live yet, a small nudge
 reappears — see "Add more doors" below.)
+
+**When nothing is live any more.** Once a campaign has canvassed and the only step left undone is a live
+pass — its passes ended, or its walk lists were archived — a short line replaces the checklist instead
+of the full list coming back: *No pass is live right now. Start one on Walk Lists.*, or, with every walk
+list archived, *No pass is live right now. Unarchive a walk list or create one.*, with a **Go to Walk
+Lists** button. Org admins also see *— or archive the campaign if you're done*, except while the Election
+Day archive reminder is already showing above it. Team leads never see that clause (they can't archive a
+campaign).
 
 **Check map pins** sits just before *Cut books*: *"N to look at"* while Pin Fixes has homes whose pin isn't
 the home (counting a condo complex once), with a warning that homes without a reliable spot land in the wrong
@@ -782,12 +800,16 @@ builder's internal note ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *The numbers*)
   can **Reactivate** it anytime. Read-only is literal, not shorthand for "hidden": canvassers stop
   seeing it, and the server itself refuses the writes that would change the field — assigning or
   unassigning books and turf, cutting or re-cutting them, adding or removing people from the
-  campaign, and moving a house pin — on the web dashboard and the phone alike. Everything that
+  campaign, moving a house pin, and (since 2026-10-28) every change to its **walk lists and passes**:
+  archiving, unarchiving, renaming or deleting a walk list, claiming doors, and creating, renaming,
+  starting, archiving or bringing back a pass — on the web dashboard and the phone alike. Everything that
   only *reads* stays open: every dashboard, map, Timeline, Notes, Overlaps, GPS audit and
   duplicate-survey report, and **exports keep working**, so a finished race is still yours to take
-  with you. Two things are deliberately not frozen: **reviewing a GPS flag** (that records a
-  decision about past work — it doesn't change the field) and **editing the campaign itself**,
-  which is how you reactivate it. This is the normal "we're done" action.
+  with you. Three things are deliberately not frozen: **reviewing a GPS flag** (that records a
+  decision about past work — it doesn't change the field), **deleting an old Turf Cutting snapshot**
+  (the way out of a rare held Door Outcomes undo, without reactivating — and reactivating bills again),
+  and **editing the campaign itself**, which is how you reactivate it. This is the normal "we're done"
+  action.
   **It is also what stops the campaign billing** — a live campaign bills every month whether or not
   anyone knocks, so a finished race left un-archived quietly keeps costing money. Once a campaign's
   `electionDay` has passed and it is still active, the Campaigns page and the campaign dashboard show
@@ -822,12 +844,12 @@ Common case: the first walk lists targeted specific precincts, and now you want 
 the city" without disturbing the completed work. The right move is a **new walk list** (walk lists
 own disjoint doors, so a new one stays cleanly separate). The flow:
 
-1. **Import the CSV first.** The import **preview** shows the split before you commit — *new doors*,
+1. **Import the file first** (CSV or Excel). The import **preview** shows the split before you commit — *new doors*,
    *existing doors* (updated in place, never duplicated, ownership untouched), *moved voters*, and
    *near-duplicates* (watch this — see the caveat below). New addresses land in Intake.
-2. **Build a saved search from that same CSV** (**Saved Searches → from CSV** — it matches by Voter
-   ID). This freezes exactly the doors in your file, and tells you how many are already in another
-   walk list.
+2. **Build a saved search from that same file** (**Saved Searches → Upload file**, which takes the CSV
+   or Excel file you imported — it matches by Voter ID). This freezes exactly the doors in your file,
+   and tells you how many are already in another walk list.
 3. **Create the new walk list** and **claim that saved search** (or seed it at creation). This claims
    only the list's doors — precise. Its **Pass 1** is created automatically.
 4. **Cut books (by precinct if you like) → accept → assign → activate.**
@@ -918,18 +940,31 @@ answer-edit pair stores **frozen English** (`toValue` = the run's `planSummary` 
 *(N more surveys)* for what a picked-up run changed after it stopped — `writeRunHistory` reports only
 what History hasn't, CAS'd on `historyCount`; the undo row's `toValue` = what it put back, `fromValue`
 = the plan summary, `byUserId` = whoever pressed Undo), because it quotes the survey's own wording as
-the admin saw it, which a label built later could not rebuild.
+the admin saw it, which a label built later could not rebuild. Since 2026-10-28 the walk-list archive
+acts write rows under `source: 'walk_list_lifecycle'`
+([passLifecycle.js](../server/src/services/passes/passLifecycle.js); [EFFORTS.md](EFFORTS.md) §I), keys
+`walkListArchived`, `walkListUnarchived`, `passArchived` and `passBroughtBack`, whose `fromValue`/`toValue`
+are readable strings for phones without the sentence renderer (*North · live (Pass 3 · GOTV)* → *North ·
+archived · Pass 3 · GOTV ended*), plus a declared **`details: Mixed`** holding `{ walkList, pass, outcome
+}` — the names frozen as they were — so the clients build sentences from fixed templates and never by
+splitting free-text names. `outcome` is `ended` / `nothing-live`, `brought-back` / `stayed-ended` /
+`nothing-ended`, `by-hand` / `repair`, or `live` / `draft`. The one-time repair writes `passArchived` rows
+with `outcome: 'repair'` and `byUserId: null`.
 
 **`isActive: false` is enforced, not decorative.** [middleware/campaignWritable.js](../server/src/middleware/campaignWritable.js)
 refuses field-mutating writes on an archived campaign with **409 `{ code: 'campaign-archived' }`**,
-mounted on the turf/books router, turf assignments, the campaign roster, and the campaign-nested
-household pin move — plus an inline assert on the second pin door in
+mounted on the turf/books router, turf assignments, the campaign roster, the campaign-nested
+household pin move, and (since 2026-10-28) the **efforts and passes routers**, after their
+`loadCampaign` — plus an inline assert on the second pin door in
 [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js), because an identical write must
 never be 200 through one door and 409 through the other. Deliberately **not** guarded: exports
 (a read, and the reason archiving isn't deletion — `middleware/entitlement.js` already exempts them
 for read-only *orgs*), flag review (bookkeeping about past work), the `*-preview` POSTs (they
-persist nothing), and campaign `PATCH` — guarding that last one would make an archived campaign
-impossible to reactivate. The guard gates on write METHODS so every read still passes, and it lives
+persist nothing), **`DELETE /turfs/snapshots/:id`** (exempted on the turfs router since 2026-10-28: it
+changes no book, and it is the way out of a `ROUND_CLEARED_SINCE` hold without Reactivate, which
+back-bills), and campaign `PATCH` — guarding that last one would make an archived campaign
+impossible to reactivate. The same file holds the walk-list and pass guards (`assertWalkListWritable`,
+`assertPassWritable`; [EFFORTS.md](EFFORTS.md) §I). The guard gates on write METHODS so every read still passes, and it lives
 at the **route layer only**: `deleteOrganization`, `deleteAccount`/`releaseAssignedWork`,
 `deleteCampaign`, coordinator re-stamp and the demo seeders all write assignments through the
 shared services and must keep working on orgs holding archived campaigns. 409 rather than 403 is
@@ -1330,9 +1365,19 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   held as unknocked, the run reading Undone); a books-only restore touches no entry or answer, and
   doesn't wait (round 8). An Undo also refuses **409 `ROUND_CLEARED_SINCE`** while a round it struck
   had its knocks cleared after it and that snapshot is still unrestored and can still be taken back — the
-  round on file, not archived, knocked nowhere since (`roundClearedSince`, the same file — by round, and
-  only snapshots made after the run; the refusal names the round and the day): undone in between, its
-  entries went back into the cleared round without their answers, which the snapshot held (round 8). Past
+  round on file, able to come back, knocked nowhere since (`roundClearedSince`, the same file — by round,
+  and only snapshots made after the run; the refusal names the round and the day): undone in between, its
+  entries went back into the cleared round without their answers, which the snapshot held (round 8).
+  **"Able to come back"** (since 2026-10-28): an open round, or an archived one that `couldComeBack`
+  ([PASSES.md](PASSES.md) → *Bring back — the rules*) — including a round of an archived walk list or an
+  archived campaign, since Unarchive and Reactivate are transient; skipping those let the undo through, and
+  the restore after a bring-back then refused for good. A round ended by the next one going live can never
+  come back and is skipped as before. For an archived round, or a draft of an archived walk list, the
+  refusal names both ways out: *… (archived) had its knocks cleared on Oct 20, after this change, and that
+  snapshot could still come back with it — so this can't be undone yet. Delete that snapshot on Turf
+  Cutting (Undo / snapshots), or unarchive North and bring the round back, then restore it, then undo this
+  change.* Deleting the snapshot is allowed on an archived round, walk list and campaign, so clearing the
+  hold never means putting a finished round back on phones. Past
   a snapshot its round can no longer take back, the undo goes ahead and leaves that round alone: its
   entries stay off there, held, counted not put back — as for a round no longer on file (round 9: the
   refusal held such an undo for good, or sent the admin to a restore that doubled a re-worked round's
@@ -1484,7 +1529,11 @@ and the type-change clear, `everEnabledOutcomes`, the gate and the replay rule, 
   guessing which campaign they belonged to would invent history. Actor names come from
   `hydrateCanvassers`, which never drops an id, so an edit by someone since deleted still renders
   with a name and a standing. Returns `{ items[], truncated, createdAt, createdBy }`; the creation
-  pair anchors the bottom of the feed so an unedited campaign still reads as a timeline.
+  pair anchors the bottom of the feed so an unedited campaign still reads as a timeline. A
+  `walk_list_lifecycle` row ships its `details` additively, and one with no actor (the one-time repair)
+  gets `by: { id: null, name: 'One-time check' }` rather than a null actor — and no `status`, because a
+  shipped phone appends any status but `active` to the name — so every phone, including one without the
+  sentence renderer, prints *One-time check*, never *Unknown user*.
 - **Where the GOAL surfaces — deliberately narrower.** `doorGoal`/`goalDate` ride the lean spread on
   GET `/admin/campaigns`, and both that route and the rollup additionally attach a computed **`goal`
   block** (below). They are **NOT** added to `/mobile/campaigns` or `/mobile/bootstrap`: canvassers
@@ -1561,7 +1610,14 @@ The label used to be a fixed "add on Users →", which also sat on the Pin Fixes
   returns that object plus `hasCanvassed` and `effortsNeedingSetup` (non-archived efforts without an
   active pass). Polled by [SetupProgress.jsx](../client/src/components/SetupProgress.jsx), which
   renders the hub, collapses to "Live" when `complete && !hasCanvassed`, and returns the
-  efforts-needing-setup nudge (or `null`) when `complete && hasCanvassed`.
+  efforts-needing-setup nudge (or `null`) when `complete && hasCanvassed`. Since 2026-10-28 one more
+  branch comes first: when `hasCanvassed` and every step but `roundActivated` is done (or skipped),
+  `noPassLiveNote` — a pure function, so it is tested — renders a slim `NextStepBanner` instead of the
+  checklist (*No pass is live right now. Start one on Walk Lists.*; with every walk list archived, *…
+  Unarchive a walk list or create one.*; *— or archive the campaign if you're done* for org admins only,
+  and not while `isStale(campaign)` — the exported [ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx)
+  test — has DashboardPage showing the archive reminder). DashboardPage passes the campaign and whether
+  every walk list is archived; no server change.
 - The list/rollup share [campaignSummaries.js](../server/src/services/reports/campaignSummaries.js)
   (one helper feeding the campaign-rollup and the campaigns list — same source of truth as the hub).
 - **Per-effort** readiness is [effortSetupSteps.js](../server/src/services/reports/effortSetupSteps.js)
@@ -1690,7 +1746,11 @@ The label used to be a fixed "add on Users →", which also sat on the Pin Fixes
   it put back› — ‹summary›*) instead of "changed from … to …"; `isNotable` highlights all four. The
   phone's mirror and [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) carry the same and
   ship with the next over-the-air update; until then an older phone falls back to its de-camel-cased
-  label and the raw values.
+  label and the raw values. The walk-list archive rows (2026-10-28) render through `walkListSentence(item)`
+  beside `answerEditSentence`, built from `details` with fixed templates (*Ada archived walk list North —
+  ended Pass 3 · GOTV*, *One-time check ended North · Pass 3 · GOTV*), with labels (*Walk list archived*,
+  *Walk list unarchived*, *Pass archived*, *Pass brought back*) as the fallback for a row without
+  `details`; the phone's mirror gains the same with the next over-the-air update.
 - **The edit drawer is open to LEADS**, not just org admins — the server has always accepted
   `name`/`surveyTemplateId`/`timeZone` from them and now takes the goal too, so withholding the
   drawer entirely left a lead unable to reach a field they own. `canEditAdminFields={isOrgAdmin}`

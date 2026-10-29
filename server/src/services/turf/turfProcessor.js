@@ -17,6 +17,15 @@ import { acquireRecutLock, renewRecutLock, releaseRecutLock } from './recutLock.
 // (worker.js maxStalledCount): generate wipes prior drafts, claim sweeps by
 // ownership + dedupes its snapshots on jobId, supplemental re-reads ownBooks and
 // skips already-booked doors.
+//
+// A REFUSAL — the campaign archived or being deleted, the pass or its walk list (for a
+// claim, the target walk list) archived while the job waited or ran — is thrown by the
+// services as BullMQ's UnrecoverableError (generateTurf.js assertTurfJobWritable,
+// docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.5), which fails the job at once instead of
+// spending its 3 attempts on the same answer. So nothing here may catch or wrap a
+// service's error: it has to reach BullMQ as thrown (the supplemental's try/finally
+// only releases the lock). A busy recut lock stays an ordinary Error: that one is
+// temporary, and the retries are what it needs.
 export async function processTurfJob(job) {
   if (job.name === 'claim') {
     const { campaignId, effortId, walkListId, all, force, requestedBy } = job.data;

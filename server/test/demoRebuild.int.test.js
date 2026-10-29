@@ -16,6 +16,12 @@ import mongoose from 'mongoose';
 // a bad password env throws at call time rather than crashing the dyno at boot; the request-path
 // floors refuse rather than half-build; and the rebuild both repairs injected drift and leaves the
 // review accounts' books unwalked.
+//
+// And the demo's ONE client link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5): Rebuild demo day points
+// the same link at the new report (same _id, address and password — a viewer stays signed in); which
+// link is the demo's; the one-time replacement of a link to all the reports; a plain apply leaving it
+// as it is; a report that already has a link of its own; no shown report; the env password sealed when
+// it matches; the password refusal before any write; and --rebuild's new link on the new campaign.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-demo-rebuild';
 // A dead port, as every other integration suite pins it: queues/connection.js otherwise defaults to
 // 127.0.0.1:6379, and this suite must never reach a developer's own Redis.
@@ -33,7 +39,15 @@ const { Voter } = await import('../src/models/Voter.js');
 const { Turf } = await import('../src/models/Turf.js');
 const { TurfAssignment } = await import('../src/models/TurfAssignment.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
+const { Effort } = await import('../src/models/Effort.js');
+const { Pass } = await import('../src/models/Pass.js');
+const { archiveWalkList } = await import('../src/services/passes/passLifecycle.js');
+const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
+const { ClientReport } = await import('../src/models/ClientReport.js');
+const { openLinkPassword, sealLinkPassword } = await import('../src/services/reports/shareLinks.js');
 const { DEMO_ORG_SLUG } = await import('../src/utils/demoData/namePools.js');
+const { default: bcrypt } = await import('bcryptjs');
+const { randomBytes } = await import('node:crypto');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -196,6 +210,22 @@ test('the rebuild heals drifted assignments and never walks a review book', { sk
   assert.equal(knocksOnReviewerBooks, 0, 'a review account\'s book must never be staged');
 });
 
+test('the rebuild reopens a demo walk list someone archived — never "Archived · Pass 2 still live"', { skip }, async () => {
+  const effort = await Effort.findOne({ campaignId: ctx.campaign._id, name: 'Beaverdale' }).lean();
+  const live = await Pass.findOne({ effortId: effort._id, status: 'active' }).lean();
+  assert.ok(live, 'the demo has a live pass');
+  await archiveWalkList({ campaign: ctx.campaign, effortId: effort._id, userId: null, confirm: true });
+  assert.equal((await Effort.findById(effort._id).lean()).status, 'archived');
+
+  const res = await post('/super-admin/demo/refresh-day', ctx.token, { confirm: 'rebuild' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  const after = await Effort.findById(effort._id).lean();
+  assert.equal(after.status, 'active');
+  assert.equal(after.archivedAt, null);
+  assert.equal(after.endedPassId, null);
+  assert.equal((await Pass.findById(live._id).lean()).status, 'active', 'the same pass is live again');
+});
+
 test('the rebuild does not touch review-account passwords', { skip }, async () => {
   const before = await User.findOne({ email: 'demo-canvasser@doorline.app' }, 'passwordHash').lean();
   const prev = process.env.SEED_DEMO_CANVASSER_PASSWORD;
@@ -227,10 +257,13 @@ test('the response carries no credentials', { skip }, async () => {
 });
 
 test('the demo link follows the hardened link rules: its fields, its one-year life on reset, a renewal when the life is up', { skip }, async () => {
-  const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
   const DAY = 24 * 60 * 60 * 1000;
   const reset = () => seedDemoOrg({ apply: true, reset: true, allowImport: false, syncPasswords: false, requireExisting: true, log: () => {} });
   const link = await ReportShareLink.findOne({ campaignId: ctx.campaign._id, isActive: true }).lean();
+  // The demo report's own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5), never one to all the reports.
+  assert.strictEqual(link.label, 'Client demo link');
+  assert.ok(link.reportId && (await ClientReport.exists({ _id: link.reportId, status: 'published' })), 'it opens the demo report');
+  assert.strictEqual(link.oneLinkGuard, true, 'in the one-link guard, as every new link is');
   assert.ok(link.lifetimeStartAt, 'a one-year life from when it was made');
   assert.equal(link.credentialVersion, 0);
   assert.equal(link.passwordMeetsRule, true, 'the generated password is 12 characters');
@@ -280,43 +313,263 @@ test('the demo link follows the hardened link rules: its fields, its one-year li
   assert.equal(after.credentialVersion, 2);
 });
 
-// docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D: the reset deletes the campaign's reports, so it deletes
-// their one-report links too; and the demo link is always a link to ALL the reports — a seed that finds
-// no active one makes one, never adopting a one-report link that happens to be the only active link.
-test('a link to one report is never the demo link: the reset deletes it, and a seed never adopts it', { skip }, async () => {
-  const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
-  const { ClientReport } = await import('../src/models/ClientReport.js');
-  const seed = (reset) => seedDemoOrg({ apply: true, reset, allowImport: false, syncPasswords: false, requireExisting: true, log: () => {} });
-  const demo = await ReportShareLink.findOne({ campaignId: ctx.campaign._id, isActive: true }).lean();
-  assert.ok(demo && !demo.reportId, 'the demo link opens every report');
-  const oneReport = async (token) => {
-    const report = await ClientReport.findOne({ campaignId: ctx.campaign._id, status: 'published' }).lean();
-    assert.ok(report, 'the demo has a published report');
-    return ReportShareLink.create({
-      organizationId: ctx.org._id, campaignId: ctx.campaign._id, token, label: 'Board', passwordHash: demo.passwordHash,
-      expiresAt: new Date(Date.now() + 5 * 86400e3), isActive: true, reportId: report._id,
-    });
-  };
+// ── The demo's one client link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5) ───────────────────────────
+// The tests below run in order on the one demo campaign; each leaves one demo link with a known password.
 
-  // The reset: the report and its one-report link go; the demo link stays, same address.
-  const board = await oneReport('demo-board-link');
+const DAY = 86400e3;
+const PW = 'demo-link-password';
+const SEAL_KEY = randomBytes(32).toString('base64');
+// Config vars for one step, put back as they were after it.
+const withEnv = async (vars, fn) => {
+  const prev = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  const put = (entries) => entries.forEach(([k, v]) => (v === undefined ? delete process.env[k] : (process.env[k] = v)));
+  put(Object.entries(vars));
+  try {
+    return await fn();
+  } finally {
+    put(Object.entries(prev));
+  }
+};
+// The CLI's reset (true) or plain apply (false), on the button's floors, its log kept.
+const seed = (reset, lines = []) =>
+  seedDemoOrg({ apply: true, reset, allowImport: false, syncPasswords: false, requireExisting: true, log: (l) => lines.push(l) });
+const campaignLinks = () => ReportShareLink.find({ campaignId: ctx.campaign._id }).select('+passwordSealed').sort({ createdAt: 1, _id: 1 }).lean();
+const theDemoLink = async () => {
+  const links = await campaignLinks();
+  assert.strictEqual(links.length, 1, `one link on the demo campaign: ${JSON.stringify(links.map((l) => l.token))}`);
+  return links[0];
+};
+const shownReports = () => ClientReport.find({ campaignId: ctx.campaign._id, status: 'published', takenDownAt: null }).lean();
+const setPassword = async (id, pw = PW) => {
+  const passwordHash = await bcrypt.hash(pw, 4);
+  await ReportShareLink.updateOne({ _id: id }, { $set: { passwordHash, passwordSealed: null } });
+  return passwordHash;
+};
+const shareCall = async (method, path, { body, access } = {}) => {
+  const res = await fetch(`${base}/share/${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(access ? { 'X-Share-Token': access } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
+const unlock = async (token, password = PW) => {
+  const res = await shareCall('POST', `${token}/unlock`, { body: { password } });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  return res.body.accessToken;
+};
+const extraLink = (fields) =>
+  ReportShareLink.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, passwordHash: 'x', expiresAt: new Date(Date.now() + 5 * DAY), isActive: true, ...fields,
+  });
+const reportLike = (r, extra = {}) =>
+  ClientReport.create({
+    organizationId: ctx.org._id, campaignId: ctx.campaign._id, seriesId: r.seriesId, weekStart: r.weekStart, weekEnd: r.weekEnd,
+    timeZone: r.timeZone, rangeStartUtc: r.rangeStartUtc, rangeEndUtc: r.rangeEndUtc, status: 'published', publishedAt: new Date(), ...extra,
+  });
+
+test('Rebuild demo day points the same link at the new report — same _id, address and password — and a viewer stays signed in', { skip }, async () => {
+  const demo = await theDemoLink();
+  const hash = await setPassword(demo._id);
+  const [report] = await shownReports();
+  assert.strictEqual(String(demo.reportId), String(report._id), 'it opens the demo report');
+  const access = await unlock(demo.token);
+  // Beside it: a report made during a pitch with its own link from Share, and an old link to all the reports.
+  const pitch = await reportLike(report);
+  await extraLink({ token: 'demo-pitch-link', reportId: pitch._id, oneLinkGuard: true });
+  await extraLink({ token: 'demo-board-link', label: 'Board' });
+
+  const res = await post('/super-admin/demo/refresh-day', ctx.token, { confirm: 'rebuild' });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  const after = await theDemoLink(); // the reset took every other link with the reports
+  const [fresh] = await shownReports();
+  assert.ok(![String(report._id), String(pitch._id)].includes(String(fresh._id)), 'a new report');
+  assert.deepStrictEqual(
+    [String(after._id), after.token, after.passwordHash, after.credentialVersion, String(after.reportId), after.oneLinkGuard],
+    [String(demo._id), demo.token, hash, demo.credentialVersion, String(fresh._id), true]
+  );
+  assert.deepStrictEqual([res.body.share.reportId, res.body.share.url, res.body.share.note], [String(fresh._id), `/r/${demo.token}`, null]);
+  // The viewer who signed in before is still signed in — on the new report.
+  const page = await shareCall('GET', `${demo.token}/reports/${fresh._id}`, { access });
+  assert.strictEqual(page.status, 200, JSON.stringify(page.body));
+  assert.deepStrictEqual((await shareCall('GET', `${demo.token}/reports`, { access })).body.reports.map((r) => r.id), [String(fresh._id)]);
+});
+
+test('which link is the demo’s: SEED_DEMO_SHARE_TOKEN, else the newest active “Client demo link”, else the newest so labelled', { skip }, async () => {
+  const demo = await theDemoLink();
+  const labelled = (token, fields = {}) => extraLink({ token, label: 'Client demo link', passwordHash: demo.passwordHash, ...fields });
+
+  // A newer one that's turned off isn't it while an active one is labelled so — the reset takes it.
+  await labelled('tie-off', { isActive: false });
   await seed(true);
-  assert.equal(await ReportShareLink.exists({ _id: board._id }), null, 'deleted with its report');
-  const kept = await ReportShareLink.findById(demo._id).lean();
-  assert.equal(kept.token, demo.token);
-  assert.equal(kept.isActive, true);
+  assert.strictEqual(String((await theDemoLink())._id), String(demo._id));
 
-  // The demo link disabled, a one-report link the only active link: the seed makes a new link to all
-  // the reports and leaves the one-report link exactly as it was (never renewed, never re-passworded).
-  await ReportShareLink.updateOne({ _id: demo._id }, { $set: { isActive: false } });
-  const donor = (await oneReport('demo-donor-link')).toObject();
-  await seed(false);
-  const untouched = await ReportShareLink.findById(donor._id).lean();
-  assert.equal(untouched.token, 'demo-donor-link');
-  assert.equal(+untouched.expiresAt, +donor.expiresAt);
-  assert.equal(untouched.passwordHash, donor.passwordHash);
-  const active = await ReportShareLink.find({ campaignId: ctx.campaign._id, isActive: true, reportId: null }).lean();
-  assert.equal(active.length, 1, 'a new link to all the reports');
-  assert.notEqual(String(active[0]._id), String(donor._id));
-  assert.equal(active[0].label, 'Client demo link');
+  // A newer active one is — here an old link to all the reports, so it's replaced at its own address.
+  await labelled('tie-newer');
+  await seed(true);
+  let left = await theDemoLink();
+  assert.strictEqual(left.token, 'tie-newer');
+  assert.strictEqual(String(left.reportId), String((await shownReports())[0]._id));
+
+  // SEED_DEMO_SHARE_TOKEN pins it, however new the others are.
+  await labelled('tie-pinned');
+  await labelled('tie-newest');
+  await withEnv({ SEED_DEMO_SHARE_TOKEN: 'tie-pinned' }, async () => {
+    await seed(true);
+    left = await theDemoLink();
+    assert.strictEqual(left.token, 'tie-pinned');
+    // Given a New address in the app, it no longer matches the token, and its label still finds it.
+    await ReportShareLink.updateOne({ _id: left._id }, { $set: { token: 'rotated-in-app' } });
+    await seed(false);
+    const rotated = await theDemoLink();
+    assert.deepStrictEqual([String(rotated._id), rotated.token], [String(left._id), 'rotated-in-app']);
+  });
+
+  // None active: the newest so labelled — still the demo link, still turned off, and the log says so.
+  await ReportShareLink.updateOne({ _id: left._id }, { $set: { isActive: false } });
+  const lines = [];
+  const summary = await seed(false, lines);
+  const off = await theDemoLink();
+  assert.deepStrictEqual([String(off._id), off.isActive, summary.share.isActive], [String(left._id), false, false]);
+  assert.ok(lines.some((l) => /client portal: .*turned off — turn it on in Share/.test(l)), lines.join('\n'));
+  await ReportShareLink.updateOne({ _id: left._id }, { $set: { isActive: true } });
+});
+
+test('the first run after the deploy replaces a link to all the reports with the report’s own link — same address, password and sealed copy; then a plain apply leaves it as it is', { skip }, async () => {
+  await withEnv({ CREDENTIAL_SEAL_KEY: SEAL_KEY }, async () => {
+    const demo = await theDemoLink();
+    const passwordHash = await bcrypt.hash(PW, 4);
+    const passwordSealed = sealLinkPassword(PW, passwordHash);
+    assert.ok(passwordSealed);
+    await ReportShareLink.updateOne({ _id: demo._id }, { $set: { reportId: null, passwordHash, passwordSealed }, $unset: { oneLinkGuard: 1 } });
+    const access = await unlock(demo.token);
+
+    const lines = [];
+    await seed(false, lines); // nothing published: it's the run, not the reset, that replaces it
+    const [report] = await shownReports();
+    const after = await theDemoLink();
+    assert.notStrictEqual(String(after._id), String(demo._id), 'a new link');
+    assert.deepStrictEqual(
+      [after.token, after.passwordHash, after.passwordSealed, after.label, String(after.reportId), after.oneLinkGuard],
+      [demo.token, passwordHash, passwordSealed, 'Client demo link', String(report._id), true]
+    );
+    assert.strictEqual(openLinkPassword(after.passwordSealed, after.passwordHash), PW, 'Share can show the same password');
+    assert.strictEqual(await ReportShareLink.exists({ campaignId: ctx.campaign._id, reportId: null }), null, 'no link to all the reports survives');
+    assert.ok(lines.some((l) => /demo link replaced/.test(l)), lines.join('\n'));
+    // Its viewers sign in once more, with the same password at the same address.
+    assert.strictEqual((await shareCall('GET', `${demo.token}/reports/${report._id}`, { access })).status, 401);
+    const again = await unlock(demo.token);
+    assert.strictEqual((await shareCall('GET', `${demo.token}/reports/${report._id}`, { access: again })).status, 200);
+
+    // From then on a plain apply leaves it as it is.
+    await seed(false);
+    const kept = await theDemoLink();
+    const same = (l) => [String(l._id), l.token, String(l.reportId), l.passwordHash, l.passwordSealed, l.credentialVersion, l.isActive];
+    assert.deepStrictEqual(same(kept), same(after));
+  });
+});
+
+test('a report that already has a link made in the app keeps the demo link where it is', { skip }, async () => {
+  const demo = await theDemoLink();
+  const own = await ClientReport.findById(demo.reportId).lean();
+  // A report made during a pitch, with its own link from Share; the demo's report taken down.
+  const pitch = await reportLike(own);
+  await extraLink({ token: 'demo-pitch-share', reportId: pitch._id, oneLinkGuard: true });
+  await ClientReport.updateOne({ _id: own._id }, { $set: { takenDownAt: new Date() } });
+  try {
+    const lines = [];
+    const summary = await seed(false, lines);
+    assert.strictEqual(String((await ReportShareLink.findById(demo._id).lean()).reportId), String(own._id), 'it stays where it is');
+    assert.match(summary.share.note, /already has a link made in the app, so the demo link stays where it is/);
+    assert.ok(lines.some((l) => /client portal: .*already has a link made in the app/.test(l)), lines.join('\n'));
+  } finally {
+    await ReportShareLink.deleteOne({ token: 'demo-pitch-share' });
+    await ClientReport.deleteOne({ _id: pitch._id });
+    await ClientReport.updateOne({ _id: own._id }, { $set: { takenDownAt: null } });
+  }
+});
+
+test('no shown report: the demo link isn’t touched, and the summary says so', { skip }, async () => {
+  const demo = await theDemoLink();
+  await ClientReport.updateMany({ campaignId: ctx.campaign._id }, { $set: { takenDownAt: new Date() } });
+  try {
+    const lines = [];
+    const summary = await seed(false, lines);
+    assert.deepStrictEqual(await theDemoLink(), demo, 'not even its expiry moved');
+    assert.deepStrictEqual(
+      [summary.share.url, summary.share.note, summary.report],
+      [`/r/${demo.token}`, 'no report is shown, so the demo link was left as it is', null]
+    );
+    assert.ok(lines.some((l) => /client portal: .*no report is shown/.test(l)), lines.join('\n'));
+  } finally {
+    await ClientReport.updateMany({ campaignId: ctx.campaign._id }, { $set: { takenDownAt: null } });
+  }
+});
+
+test('SEED_DEMO_SHARE_PASSWORD never replaces the link’s own password — and when it matches, it’s sealed so Share can show it', { skip }, async () => {
+  const demo = await theDemoLink();
+  const hash = await setPassword(demo._id);
+  await withEnv({ CREDENTIAL_SEAL_KEY: SEAL_KEY, SEED_DEMO_SHARE_PASSWORD: 'a-different-password' }, () => seed(false));
+  let after = await theDemoLink();
+  assert.deepStrictEqual([after.passwordHash, after.passwordSealed], [hash, null], 'another password: the link keeps its own, nothing sealed');
+  await withEnv({ CREDENTIAL_SEAL_KEY: SEAL_KEY, SEED_DEMO_SHARE_PASSWORD: PW }, async () => {
+    await seed(false);
+    after = await theDemoLink();
+    assert.strictEqual(after.passwordHash, hash, 'the same hash');
+    assert.strictEqual(openLinkPassword(after.passwordSealed, after.passwordHash), PW);
+  });
+});
+
+test('no demo link password, no SEED_DEMO_SHARE_PASSWORD and no seal key: Rebuild demo day refuses before any write', { skip }, async () => {
+  const demo = await theDemoLink();
+  const state = async () => ({
+    reports: (await ClientReport.find({ campaignId: ctx.campaign._id }, '_id').lean()).map((r) => String(r._id)).sort(),
+    activities: await CanvassActivity.countDocuments({ campaignId: ctx.campaign._id }),
+    assignments: await TurfAssignment.countDocuments({ campaignId: ctx.campaign._id }),
+    links: (await campaignLinks()).map((l) => [String(l._id), l.passwordHash ?? null, String(l.reportId), +l.expiresAt]),
+  });
+  const press = () => post('/super-admin/demo/refresh-day', ctx.token, { confirm: 'rebuild' });
+  await withEnv({ SEED_DEMO_SHARE_PASSWORD: undefined, CREDENTIAL_SEAL_KEY: undefined }, async () => {
+    // A demo link without a password …
+    await ReportShareLink.updateOne({ _id: demo._id }, { $set: { passwordHash: null, passwordSealed: null } });
+    let before = await state();
+    let res = await press();
+    assert.deepStrictEqual([res.status, res.body.code], [409, 'SHARE_PASSWORD_UNSET'], JSON.stringify(res.body));
+    assert.deepStrictEqual(await state(), before, 'nothing wiped, nothing restaged');
+    // … or none at all.
+    await ReportShareLink.deleteOne({ _id: demo._id });
+    before = await state();
+    res = await press();
+    assert.deepStrictEqual([res.status, res.body.code], [409, 'SHARE_PASSWORD_UNSET']);
+    assert.deepStrictEqual(await state(), before);
+  });
+  // With a seal key a generated password is kept where Share can show it, so there's no refusal.
+  await withEnv({ SEED_DEMO_SHARE_PASSWORD: undefined, CREDENTIAL_SEAL_KEY: SEAL_KEY }, async () => {
+    const res = await press();
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    const made = await theDemoLink();
+    const [report] = await shownReports();
+    assert.deepStrictEqual([made.label, String(made.reportId), made.oneLinkGuard], ['Client demo link', String(report._id), true]);
+    const pw = openLinkPassword(made.passwordSealed, made.passwordHash);
+    assert.ok(pw && (await bcrypt.compare(pw, made.passwordHash)), 'its generated password can be shown');
+    assert.ok(!JSON.stringify(res.body).includes(pw), 'and never crosses the API boundary');
+  });
+});
+
+test('--rebuild deletes the campaign through the shared cascade, and the seed makes a new demo link on the new campaign', { skip }, async () => {
+  const old = await theDemoLink();
+  await withEnv({ SEED_DEMO_SHARE_TOKEN: 'demo-pinned-address', SEED_DEMO_SHARE_PASSWORD: PW }, async () => {
+    const summary = await seedDemoOrg({ apply: true, rebuild: true, log: () => {} });
+    const campaign = await Campaign.findOne({ organizationId: ctx.org._id, isActive: true });
+    assert.notStrictEqual(String(campaign._id), String(ctx.campaign._id), 'a new campaign');
+    assert.strictEqual(await ReportShareLink.exists({ _id: old._id }), null, 'the old link went with its campaign');
+    const links = await ReportShareLink.find({ organizationId: ctx.org._id }).lean();
+    const [report] = await ClientReport.find({ campaignId: campaign._id, status: 'published' }).lean();
+    assert.deepStrictEqual(
+      links.map((l) => [l.token, l.label, String(l.campaignId), String(l.reportId), l.oneLinkGuard]),
+      [['demo-pinned-address', 'Client demo link', String(campaign._id), String(report._id), true]]
+    );
+    assert.ok(await bcrypt.compare(PW, links[0].passwordHash), 'the env password');
+    assert.deepStrictEqual([summary.share.url, summary.share.reportId], ['/r/demo-pinned-address', String(report._id)]);
+  });
 });

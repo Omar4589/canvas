@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getToken, getActiveOrgId } from '../../api/client.js';
 import { createAutoSaver } from './autoSave.js';
 import { buildPollInterval, freshestBuild, isLiveBuild } from './buildState.js';
 
 // The Client Reports pages' small hooks. Every effect here that starts something stops it: media
-// listeners, timers, the beforeunload guard, the saver (whose detach flushes with keepalive).
+// listeners, timers, the beforeunload guard, the saver (whose detach flushes with keepalive), a link
+// password's request (aborted). The focus one starts nothing.
 
 export const reportKey = (id) => ['admin', 'client-report', id];
 export const reportsKey = (campaignId) => ['admin', 'client-reports', campaignId];
@@ -50,6 +51,145 @@ export const useCopy = () => {
     return Promise.resolve();
   }, []);
   return { copied, copy };
+};
+
+// ── Client links (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D1) ─────────────────────────────────────────
+
+/**
+ * A link's new row, put into the campaign's links list at once: Share, the rows' link lines and the
+ * old-links card all read that list, so each follows a change before the list is read again. A row the
+ * list hasn't got yet (a link just made) goes first — the list is newest first.
+ */
+export const putShareRow = (qc, campaignId, row) => {
+  if (!row?.id) return;
+  qc.setQueryData(sharesKey(campaignId), (d) => {
+    if (!d?.shares) return d;
+    const has = d.shares.some((s) => s.id === row.id);
+    return { ...d, shares: has ? d.shares.map((s) => (s.id === row.id ? row : s)) : [row, ...d.shares] };
+  });
+};
+
+/** A deleted link leaves the list at once. */
+export const dropShareRow = (qc, campaignId, id) =>
+  qc.setQueryData(sharesKey(campaignId), (d) => (d?.shares ? { ...d, shares: d.shares.filter((s) => s.id !== id) } : d));
+
+/**
+ * Refusals that mean the link changed somewhere else (code review CC-4): deleted (SHARE_NOT_FOUND),
+ * renewed (SHARE_NOT_EXPIRED), extended or changed (SHARE_CHANGED), expired meanwhile
+ * (SHARE_NEEDS_RENEW), or turned off for everyone by the switch (ALL_REPORTS_LINK, on the old-links
+ * card). The screen is showing a link that no longer stands, so the list is read again — otherwise it
+ * would keep offering what the server will refuse every time.
+ */
+export const LINK_MOVED_CODES = new Set(['SHARE_NOT_FOUND', 'SHARE_NOT_EXPIRED', 'SHARE_CHANGED', 'SHARE_NEEDS_RENEW', 'ALL_REPORTS_LINK']);
+
+/**
+ * One request on one link — extend, renew, new address, unlock, turn on, change password, delete:
+ * `mutate({ path, method, body })` on /admin/client-reports/shares/:id. The answer's row goes into the
+ * links list at once (a deleted link leaves it), then `onChanged` reads the list and History again — as
+ * it does after a refusal that means the link changed elsewhere (LINK_MOVED_CODES).
+ * `onBusy(true | false)` follows the request, for a dialog that must stay open until its answer lands.
+ * A changed password rides the answer, so the mutation leaves react-query's cache the moment nothing
+ * watches it (gcTime 0): it lives no longer than the screen that shows it.
+ */
+export const useLinkAction = ({ campaignId, linkId, onChanged, onBusy }) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ path = '', method = 'POST', body }) => api(`/admin/client-reports/shares/${linkId}${path}`, { method, body }),
+    gcTime: 0,
+    onMutate: () => onBusy?.(true),
+    onSettled: () => onBusy?.(false),
+    onSuccess: (res, { method }) => {
+      if (method === 'DELETE') dropShareRow(qc, campaignId, linkId);
+      else if (res?.share) putShareRow(qc, campaignId, res.share);
+      onChanged?.();
+    },
+    onError: (err) => {
+      if (LINK_MOVED_CODES.has(err?.code)) onChanged?.();
+    },
+  });
+};
+
+/**
+ * The keyboard's next stop after a press that changes what's on screen (code review V2-1, N1). Share and
+ * the old-links card swap their controls as a request lands — Turn on goes once the link is on, Renew
+ * once it's renewed, Delete with its link, a confirm or a panel once it's done — and a focused button that
+ * goes drops the keyboard to <body>, outside the dialog's Tab loop. `focusAfter(find)`, called as the
+ * button is pressed, says where it goes instead. It waits while the element that had the keyboard then is
+ * still on screen — the answer that takes it away hasn't been drawn yet — and react-query's notification
+ * and the screen's own state can be drawn in either order, so it looks again after every render. Then
+ * `find()` reads what's drawn: `undefined` while what it wants isn't there yet, else the element to focus
+ * (null: none). A request is dropped once the keyboard has moved on by itself (a Tab or a click
+ * elsewhere, Copy password taking it as it appears), and a later one replaces it. Focus only: nothing to
+ * stop.
+ */
+export const useFocusAfter = () => {
+  const [want, setWant] = useState(null); // { find, from }
+  // No dependency list on purpose: what's drawn can catch up on any render.
+  useEffect(() => {
+    if (!want) return;
+    const { activeElement, body } = document;
+    const from = want.from && want.from !== body ? want.from : null;
+    if (activeElement && activeElement !== body && activeElement !== from) {
+      setWant(null);
+      return;
+    }
+    if (from?.isConnected) return;
+    const el = want.find();
+    if (el === undefined) return;
+    el?.focus();
+    setWant(null);
+  });
+  return useCallback((find) => setWant({ find, from: typeof document === 'undefined' ? null : document.activeElement }), []);
+};
+
+/**
+ * Show (§D1): a link's password, fetched into this component's state — never a react-query cache
+ * entry — and gone when it unmounts. `shown` is null, or { id, status, password }: 'loading', 'shown',
+ * 'failed' (Try again), 'unavailable' (409 PASSWORD_NOT_VIEWABLE: no copy Doorline can open) or 'staff'
+ * (403: Doorline staff never see one). One request at a time: a new Show, `hide` and the unmount each
+ * abort the one in flight, and an answer for anything but the latest Show is dropped. A 404 means the
+ * link was deleted somewhere else: `onChanged` reads the links list again (code review CC-4), so the
+ * link — and its Try again — leave the screen instead of failing forever.
+ */
+export const useLinkPassword = ({ onChanged } = {}) => {
+  const [shown, setShown] = useState(null);
+  const ctrl = useRef(null);
+  // Read at answer time: `show` is made once, and the screen's handler is often an inline arrow.
+  const changedRef = useRef(onChanged);
+  changedRef.current = onChanged;
+  useEffect(
+    () => () => {
+      ctrl.current?.abort();
+      ctrl.current = null;
+    },
+    []
+  );
+  const show = useCallback((id) => {
+    ctrl.current?.abort();
+    const c = new AbortController();
+    ctrl.current = c;
+    setShown({ id, status: 'loading', password: null });
+    api(`/admin/client-reports/shares/${id}/password`, { signal: c.signal }).then(
+      (res) => {
+        if (ctrl.current !== c) return;
+        ctrl.current = null;
+        setShown({ id, status: 'shown', password: String(res?.password ?? '') });
+      },
+      (err) => {
+        if (ctrl.current !== c || err?.name === 'AbortError') return;
+        ctrl.current = null;
+        const status = err?.status === 403 && err?.code === 'STAFF_CANNOT_VIEW_PASSWORD' ? 'staff' : err?.status === 409 ? 'unavailable' : 'failed';
+        setShown({ id, status, password: null });
+        if (err?.status === 404) changedRef.current?.();
+      }
+    );
+  }, []);
+  const hide = useCallback(() => {
+    ctrl.current?.abort();
+    ctrl.current = null;
+    setShown(null);
+  }, []);
+  return { shown, show, hide };
 };
 
 /**

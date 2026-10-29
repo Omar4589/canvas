@@ -82,6 +82,11 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
     `app.js`, the only place that HTML is served; pinned in `staticPages.int.test.js`), and so does every
     `/api/share` response, beside `Cache-Control: no-store`. The client-side meta stays. The revoke-legacy
     switch now also bumps each swept link's credential version.]*
+    *[v7 2026-10-28, item 44: "Legacy links otherwise remain live" stays true only
+    until `RETIRE_ALL_REPORTS_LINKS` is set (date pending; stamp it here). Every legacy link is a link to
+    all of a campaign's reports, and from that day each one answers `410 SHARE_RETIRED`. Until then none
+    can be made, and each can only be deleted, given a new password or given a new address. The
+    revoke-legacy switch still answers, but nothing in the app calls it any more.]*
 11. **Device storage**: the bootstrap moved to `FileSystem.cacheDirectory` (excluded from iCloud and
     Android backup; a startup migration removes the old Documents copy; sign-out clears every copy),
     and `android.allowBackup: false` landed in `app.json`. **allowBackup is native-build-contingent**
@@ -98,6 +103,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
 - *"cannot open … without an individual, time-limited support-access grant"* — stated **absolutely**;
   true only while `requirePersonOrgGrant` + the `orgContext` vendor branch stay mounted. (The audit
   half is correctly hedged *"designed to be recorded."*)
+  *[v7 2026-10-28, item 44: re-verified for Show, `GET /admin/client-reports/shares/:id/password`, the one route that
+  hands back a credential which opens customer data outside the product's own gates (a report, through
+  `/share`): it answers `403 STAFF_CANNOT_VIEW_PASSWORD` under a support grant, staff can't type a link
+  password either, and a password made up for them never reaches them, so a grant can't be turned into
+  lasting access to a report. Still true absolutely.]*
 - Geocodio: *"we send only the street address — never anyone's name."*
 - Write-ins: *"only as the word 'Other,' never the typed text"* — `publicPointAnswer` + the scrub
   migration (run it in prod).
@@ -927,6 +937,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   (privacy.html:106 now "each work shift's start time and hours worked"; DPA §6 now
   "shift-level time records, of which Doorline retains each shift's start time and its
   worked-hours figures").]*
+  *[v7 2026-10-28, item 44, true from the deploy: the FbTime key is no longer the only kind of value sealed under
+  `CREDENTIAL_SEAL_KEY`. Client report link passwords are sealed with the same key (with the link's
+  bcrypt hash as associated data, so neither kind opens as the other), and those ARE read back in full,
+  by Share's Show, to the campaign's admins and leads. An FbTime key's display prefix is still all
+  that is ever shown of it. Never replace or remove the key: both kinds would stop opening.]*
   **What LEAVES.** Doorline sends the provider only date ranges and a timezone; canvasser
   identities are matched by email locally, from the roster FbTime already holds. No voter data,
   knock data, or survey data ever flows to FbTime — the integration is read-only inbound.
@@ -1155,6 +1170,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   hub's own row already carries as `id`) and `gone`; the report's `single`; and the earlier-totals line's `before` (this
   report's own first day, a civil date). No hidden question, no other report, no instant, no new id.
   The lines above still hold; a link to all reports serves exactly what it did.]*
+  *[v7 2026-10-28, item 44: "a link to all reports serves exactly what it did" stays true only until
+  `RETIRE_ALL_REPORTS_LINKS` is set (date pending); from then on it serves nothing, `410 SHARE_RETIRED`
+  on every route. No new link to all reports is made from the deploy, and every link made since opens
+  one report. The client payloads gained no field.]*
 - *(v6 2026-10-24)* **Automatic pause (item 39).** Lines the code keeps true, each with its owner:
   - privacy.html `:94` ("We collect location only at the time an action is recorded"): the rule reads only
     the stamps of recorded actions (`services/audit/paceRule.js`); no trail, no extra capture. A design that
@@ -1185,6 +1204,33 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   `client/src/lib/personAccess.js`), and `/crews` only for the switch-off warning. The phone's member
   sheet reads the same campaign-scoped routes, and its profile labels a lead's totals **On your
   campaigns** without miles. The line above still holds.]*
+- *(v7 2026-10-28)* **One link per report, link passwords and the switch for old links (item 44).** Lines
+  the code keeps true, each with its owner:
+  - privacy.html `:101` "Links created before that date remain accessible until the customer revokes
+    them" — true until `RETIRE_ALL_REPORTS_LINKS` is set. From that day the sentence the owner chooses
+    (the plan's: "Links created before that date no longer work.") is owned by `loadShare`'s
+    `SHARE_RETIRED` rule under the switch (`routes/public/share.js`), pinned by
+    `clientReportLinksRetired.int.test.js` and `reportSecurity.int.test.js` (unset → 200, on → 410,
+    unset → 200). The switch and the sentence change on the same day; unsetting it (the rollback) means
+    putting the old sentence back in the next deploy. terms.html `:118`'s legacy sentence moves with it.
+  - privacy.html `:112` and terms.html `:91`, for link passwords: "under a support grant, staff can't
+    view or set link passwords" — owned by `403 STAFF_CANNOT_VIEW_PASSWORD` and `403
+    STAFF_CANNOT_SET_PASSWORD` (`routes/admin/clientReportShares.js`) and by a made-up password being
+    left out of every answer to staff, pinned by `clientReportLinkStaff.int.test.js`. A new route that
+    returns or accepts a link password re-verifies here. The Help Center makes the same promise to
+    customers — `faq/doorline-staff-access.md` ("Client report link passwords are never shown to
+    Doorline staff, even during a support session."), `faq/lost-client-link-password.md` and
+    `guides/client-reports.md` — owned by the same refusals; re-verify them together. (A Doorline staff
+    account a customer adds as a member acts as a member and can Show, 44(k).)
+  - privacy.html `:101` "a link's password can be changed, or the link rotated" — owned by **Change
+    password** and **New address** in Share and, until the switch, on the old-links card (a PATCH with
+    only a password, and `POST /shares/:id/rotate`, both allowed on a link to all reports while it
+    still works).
+  - privacy.html `:101` "may revoke a link at any time" — owned by **Delete link** in Share, the extra
+    link's **Delete** and the card's **Delete** (`DELETE /shares/:id`, every kind of link, switch or
+    not). No rule may refuse deleting a link.
+  - Re-verified with these: the first bullet above (privacy.html `:112`, "stated absolutely"), for
+    the new Show route (stamped there).
 
 ## Remaining honest gaps (v3) — supersedes the v2 list
 
@@ -1278,6 +1324,13 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    `requireAuth` now has its own verifier (`verifySessionToken`, which ignores expiry and checks it
    after the user lookup); share unlocks keep `verifyToken` and their 24-hour expiry, pinned by
    `test/sessionLifetime.int.test.js`.]*
+   *[v7 2026-10-28, item 44: closed on the date `RETIRE_ALL_REPORTS_LINKS` is set (pending; stamp it here). Every
+   legacy link is a link to all reports, and the switch, not revoke-legacy, is now the control: it turns
+   them all off, in every organization, without writing to them. Until then they still work, and none
+   can be made. The phantom "migration" comment in `routes/public/share.js` (`loadShare`) was rewritten
+   in this build to name the switch; the `models/ReportShareLink.js` comments on `passwordHash`,
+   `expiresAt` and `isLegacyOpen` that say a migration finds open links are still there — the switch,
+   not a migration, is what ends these links.]*
 6. **The offline queue**: no TTL, no cap, survives sign-out, and 4xx-failed items are still silently
    dropped (account deletion now flushes the queue first, closing the billable-knock loss). On iOS it
    rides device backups.
@@ -3209,6 +3262,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       lifetime start, and an expired link is renewed to a new address. **Policy text:** privacy.html
       `:101` is true as written for these points once this deploys; no Privacy Policy, Terms or DPA edit.
       The new stores and records this upgrade adds are item 38.]*
+      *[v7 2026-10-28, item 44: stale wording — the links panel is gone; Share offers the same 30, 90, 180 or 365
+      days (default 90) when it makes a report's link, and Extend and Renew sit in Share. The facts
+      stand.]*
 
 35. **[v6 2026-10-24 — Per-person report drills returned other organizations' people, and let a team
     lead open anyone in their own organization. FIXED 2026-10-24; deploy pending (stamp the deploy
@@ -3436,6 +3492,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       can hold several links, so Before you publish still names every shown report that could narrow an
       area report down (`areaNarrowing`, `services/reports/clientReportChecks.js`, whose comment says the
       same).]*
+      *[v7 2026-10-28, item 44: stale — every report now has its own link, and a link to all reports opens them all
+      only until `RETIRE_ALL_REPORTS_LINKS` is set. One person can still hold several links, so Before you
+      publish still names every shown report that could narrow an area report down, now worded "other
+      reports your client can open".]*
     - **(b) `SurveyTemplate.depsEver`**: every question-to-question dependency a survey has ever had, as
       question-key pairs. Survey structure, no personal data; it only ever keeps a follow-up off a client's
       map. Seeded by `migrate:client-report-visibility` (step 0), kept by survey create, edit and Duplicate.
@@ -3463,6 +3523,10 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       both are frozen at their before-the-upgrade values, which the panel shows as "N views before
       per-link counts" (`recordReportOpen`, `services/reports/reportOpens.js`; pinned by
       `clientReportOpens.int.test.js`).]*
+      *[v7 2026-10-28, item 44: stale wording — the opens line is now the report row's (and the builder's): "About 5
+      visits · your organization: 2 visits", every link's visits summed (an old link to all reports, an
+      extra link and a deleted one included), then Doorline staff's and "N views before per-link counts"
+      when above zero. Same counts, same readers, nothing new stored.]*
     - **(d) Wrong-password counts and times on each link.** `ReportShareLink.failedUnlockAt` (the times of
       up to 50 wrong passwords within the last 24 hours, each with a random id), `failedByDay` (counts per
       UTC day, the last 7), `failedUnlocksTotal` (lifetime), `lockedUntil` and `lastLockedAt`, plus
@@ -3474,16 +3538,24 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       password) can view the report" is broader than the code during a lock, when a new device is refused
       until the oldest of the 50 is a day old or someone presses Unlock now or rotates: a risk disclosure,
       and the plan (§I, §O7) proposes no edit.
+      *[v7 2026-10-28, item 44: stale — the link panel is gone; Share shows these counts, to the same readers.]*
     - **(e) `passwordMeetsRule`**, a boolean on each link: true for every password set or generated under
       the 12-character rule; on an older link `null` until its next successful unlock, which records only
       whether the entered password's length met the rule (`notePasswordRule`, pinned to the hash it was
       checked against). The password is never stored; only its bcrypt hash, as before.
+      *[v7 2026-10-28, item 44: FALSE from the deploy — every link password set since is ALSO stored sealed
+      (`passwordSealed`, AES-256-GCM under `CREDENTIAL_SEAL_KEY`, bound to its hash), so the campaign's
+      admins and leads can see it again. What `notePasswordRule` stores is unchanged: a length check,
+      never the entered password. Item 44(b).]*
     - **(f) Keep me signed in on this device** (opt-in on the password screen): the share token lasts 30
       days instead of 24 hours and sits in the browser's `localStorage` instead of `sessionStorage`, on the
       client's own device. It ends at any credential change (password change, rotate, renew, disable: the
       token's `cv`), when the link expires, is deleted or the organization is suspended (the page drops it),
       and at **Sign out on this device**. Covered by privacy.html `:97`'s "We use local storage on your
       device to keep you signed in."
+      *[v7 2026-10-28, item 44: two more ends — a change everywhere (each link whose password it changes bumps its
+      credential version), and, on a link to all reports, `RETIRE_ALL_REPORTS_LINKS` (every route answers
+      `410 SHARE_RETIRED`, which drops the token).]*
     - **(g) The Client Reports tab's History, customer-facing.** `CampaignChange` rows with source
       `client_report` (`services/reports/clientReportHistory.js`): report events (created, published,
       edited, numbers refreshed or discarded, taken down, put back up, deleted, switched to areas), team
@@ -3510,6 +3582,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       label as it read at the time. Operator data (a team name, which crew leads it covers), no canvasser
       beyond the crew-lead ids those rows already held. Same readers (the organization's admins and the
       campaign's leads), same cascades.]*
+      *[v7 2026-10-28, item 44: two report events, "Archived" and "Unarchived" (`clientReport.archived` /
+      `unarchived`, with the actor); link rows now stamp their report's id, tab and period, so they read by
+      the report; and three new link-row keys, `alsoChanged` (a count), `changedTogether` and `allReports`
+      (flags) — none a credential. A Show writes no row. Same readers, same cascades, same Erase. Item
+      44(i), (j).]*
     - **(h) `OrgBranding`** (new collection): one logo per organization, stored as a fresh PNG the server
       writes from the upload's validated pixels (`services/branding/png.js`), so no metadata or other chunk
       of the uploaded file is kept; its size, and who changed it last. Admins write; it shows on the
@@ -3605,6 +3682,17 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       every link did. Readers of the share rows (the campaign's admins and leads) now see which report a
       link opens (its dates and its tab's name). Pinned by `clientReportSingleLinks.int.test.js`; a link to
       all reports renders byte for byte as before (`publicReportAllLinks.snapshot.json`).
+      *[v7 2026-10-28, item 44: four sentences here change. "null or missing = all reports" is still how a link
+      to all reports is told apart, but none is made from the deploy, and from the date
+      `RETIRE_ALL_REPORTS_LINKS` is set (pending) none opens anything: "a link to all reports renders byte
+      for byte as before" holds only until then. "Never adopts one as the demo link (`ensureShareLink`
+      queries `reportId: null`)" is false from the first Rebuild demo day after the deploy: the demo link
+      becomes the demo report's own link (item 44(h)). "Each link keeps its own password" is false from
+      the deploy: Same as … gives a new link its source's password, and Change password can change it on
+      every link that uses it. Every link still has its own expiry, lock, sign-in tokens and open
+      counts. And "set when the link is made and never changed" has one exception from the deploy: the
+      demo organization's link, which the seed re-points at the demo's newest report in place
+      (`ensureDemoLink`, item 44(h)).]*
     - **What reaches a link holder is otherwise less than before**: a door's street line only when tapped
       (`…/map/doors`, at most 200 per request, from the live snapshot only), coordinates rounded to six
       decimal places (about 4 in, still exact for a house), no internal ids or keys, and dates as civil
@@ -3663,6 +3751,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       before this week (`knockedBeforeThisWeek`, computed, not stored), the duplicate guard's flag
       (`ClientReport.dupGuard`), and the race answer's `createdByName`, a teammate's name shown to another
       operator of the same organization, which History already shows. The guide's flag is under (l).]*
+      *[v7 2026-10-28, item 44: stale — Share no longer has Make a link or "New link": it makes the report's one
+      link with a password made up, typed (12 or more characters) or copied with Same as …, and still
+      offers 30–365 days, 90 by default; `:101` holds. The demo organization's link keeps the one-year
+      life above, now as the demo report's own link (`ensureDemoLink`), replaced once by the first
+      Rebuild demo day after the deploy and re-pointed after that (item 44(h)).]*
     - **Watchlist:** the 2026-10-24 client-reports bullet in *New policy sentences to keep true*.
 39. **[v6 2026-10-24 — Automatic pause: Doorline pauses a canvasser's recording when their doors come in
     faster than anyone could knock them. BUILT 2026-10-24, uncommitted; deploy pending, and it acts only once
@@ -4020,6 +4113,300 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `client/src/lib/rosterView.test.js`, `rosterView.parity.test.js` and `mobile/lib/rosterView.test.js`.
     - **Watchlist:** the tenant-isolation bullet's 2026-10-27 line (item 41's sub-bullet) in *New policy
       sentences to keep true*.
+43. **[v7 2026-10-28 — Archiving a walk list ends its live pass, with undo: Unarchive and Bring back, read-only
+    archived walk lists and view-only archived passes, and late knocks counted in the pass they were made in.
+    BUILT 2026-10-28, uncommitted; deploy pending (stamp the date here when it ships). NOT privacy-affecting in
+    what the product collects, keeps or shares: no new personal data, no retention or deletion change, no new
+    access, no new third party, nothing newly exposed, and no published Privacy Policy, Terms or DPA sentence
+    changes. Recorded here as every new History source is (the v5 `CampaignChange` entry; `survey_conversion`,
+    `answer_edit`, `client_report`), because it adds an audit trail carrying actor ids, plus one staff console
+    output.]** Plan, owner rulings and two review rounds: [PROPOSAL_WALK_LIST_ARCHIVE.md](PROPOSAL_WALK_LIST_ARCHIVE.md)
+    (§J is this item's source). Everything below was read from the code.
+    - **(a) A new History source.** `CampaignChange` rows with `source: 'walk_list_lifecycle'`, written by
+      `services/passes/passLifecycle.js` — one per act: archiving or unarchiving a walk list, archiving or
+      bringing back a pass. Four fields (`walkListArchived`, `walkListUnarchived`, `passArchived`,
+      `passBroughtBack`) whose `fromValue`/`toValue` are walk list and pass names with a state (*North · live
+      (Pass 3 · GOTV)* → *North · archived · Pass 3 · GOTV ended*), a declared `details` object `{ walkList,
+      pass, outcome }` holding the same facts, and the actor id (`byUserId`). Walk list and pass names are
+      operator-written labels — free text, the same exposure class as a campaign name — not data about a
+      person. Starting the next pass writes no row.
+    - **(b) Who reads it:** the existing History gate. `GET /admin/campaigns/:campaignId/history`, gated by
+      `canManageCampaign` (org admins; a team lead for campaigns they manage), on the web and the phone. Never
+      a canvasser, a share link, a client report or an export. The route adds `details` to these rows only.
+    - **(c) Retention:** no TTL; deleted with the campaign and with the organization like every
+      `CampaignChange` row (`CAMPAIGN_SCOPED` in `deleteCampaign.js`, `ORG_SCOPED` in
+      `deleteOrganization.js` — the v5 entry's cascades, unchanged).
+    - **(d) Rows with no actor.** The one-time repair writes `passArchived` rows with `byUserId: null` and
+      `outcome: 'repair'`; the History route shows their actor as *One-time check* (`by: { id: null, name:
+      'One-time check' }` — no `status`, so a phone without the update prints the plain name), never a person
+      and never *Unknown user*.
+    - **(e) New actor ids.** `Effort.archivedBy` and `Pass.archivedBy` (who archived it; cleared on unarchive
+      or bring back — History keeps the act; null for the repair and for anything archived before the
+      fields existed). `archivedByName` on `GET …/efforts`, `GET …/passes` and `GET
+      …/efforts/:id/unarchive-preview` resolves them through `hydrateCanvassers` (organization-scoped; a
+      deleted account reads as its tombstone) and reaches exactly the people who already see History's actor
+      names, under the same `requireCampaignManager` gate. One fact is new on screen: a pass ended because
+      the next pass went live carries the ACTIVATOR as `archivedBy`, so the Passes panel reads *Ended Oct 12
+      by Ada · when Pass 3 went live* — who started each pass, which History deliberately doesn't record
+      ((a)). It is shown to the same people (org admins; leads, who may be client staff — the same people
+      who already see every History actor's name), so no new recipient.
+    - **(f) The phone names a book.** Knocks, surveys and the walk-up add carry an optional `turfId`: an
+      internal id of a book the phone already holds in its bootstrap. Not personal data and not a new stored
+      field — it only decides which round the row's existing `passId`/`turfId` name. Archiving deletes
+      nothing (no knock, answer, note, book, assignment or snapshot), and the delete rules for walk lists and
+      passes are unchanged.
+    - **(g) The one-time repair's console output** (`npm run repair:archived-walk-lists`, the Heroku Run
+      console) crosses customer organizations outside any support-access grant. Per organization and
+      campaign it prints walk list, pass, campaign and organization names, counts of books and canvassers
+      (a canvasser count under 3 as *fewer than 3* — item 39's rule: staff can see an organization's member
+      list, so a 1 would point at a person), the last knock's date and a *knocked in the last 2 days* flag —
+      operator metadata, never a canvasser's name, a voter, an address or an answer. It is not "in the
+      product" and opens no voter or canvassing record, so privacy.html `:112` (staff open customer data only
+      under a grant) holds. Owner ruling 10: `--apply` ends every listed pass, customers' included, and the
+      owner tells the customers it lists before running it. **For the owner (code review round 2):** DPA §3
+      lists "time-limited and reason-logged controls on Doorline staff access to Customer Data, and audit
+      logging of that access" among the safeguards. The dry run reads aggregates of customer campaigns, and
+      `--apply` changes them (it ends the listed passes) without a support grant; its trail is the History
+      row it writes per pass in each campaign it changes, plus the owner's notice to those customers
+      beforehand. Whether a one-time platform repair like this sits inside that sentence is the owner's
+      reading to make; no published sentence changes either way.
+    - **(h) Claims checked:** privacy.html `:105` (available according to role; never other customer
+      organizations) — true: every new route sits on the efforts, passes or campaigns routers behind
+      `requireCampaignManager` and the campaign's organization. `:118` and `:122` (retention while active;
+      what deletion removes) — true: nothing is deleted or kept longer, and the new rows die with the campaign
+      and the organization. `:106` and DPA §6 — no new subprocessor, no notice event. Nothing was exposed, so
+      no DPA §5 question arises.
+    - **Pinned by** (the plan's §H; check the names when stamping the deploy) `server/test/walkListArchive.int.test.js`
+      (the History row with `details`), `repairArchivedWalkLists.int.test.js` (the dry run grouped with counts
+      and no names; its History rows), `walkListArchive.int.test.js` again (the repair's row through
+      `GET /history` names *One-time check*, no id and no status), and the clients' `campaignHistory.test.js`
+      (`walkListSentence`).
+44. **[v7 2026-10-28 — One link per report: link passwords kept sealed and shown again to the campaign's
+    admins and leads (never to Doorline staff under a support grant), Archive, and a switch that turns
+    every old link to all of a campaign's reports off. BUILT 2026-10-28, uncommitted; code reviews pending;
+    deploy pending (stamp the date here when it ships). Privacy-affecting — a credential now stored in a
+    form that can be read back, who can read it, a staff-facing cross-organization console output, and,
+    on a day the owner picks, links that stop working in every organization, with two published sentences
+    changing the same day — but no new collection, no new recipient and no new subprocessor (DPA §6
+    unchanged, no subprocessor notice). PENDING THE OWNER: the DPA §4 decision, (e), before the deploy; the
+    switch's date, the customer email and the legal sentences, (f), before the switch.]** Plan, the
+    owner's answers and picks, three review rounds and *As built*:
+    [PROPOSAL_CLIENT_REPORT_LINKS.md](PROPOSAL_CLIENT_REPORT_LINKS.md) (§G is this item's source); doc of
+    record [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Sharing a report*, §K. Numbered 44 because the walk-list
+    archive record, written the same day, is 43. Everything below was read from the code.
+    - **(a) One link per report.** `POST /admin/client-reports/shares` requires a `reportId` (`400
+      REPORT_REQUIRED`) and looks first: a report that already has a link answers `409 REPORT_HAS_LINK`
+      with that link, before any hashing; a partial unique index, `report_one_link_guard` on `{ reportId }`
+      over `oneLinkGuard: true` (`models/ReportShareLink.js`; built at boot and nightly by
+      `services/reports/clientReportIndexes.js`), catches two made at once. The report is read inside the
+      requester's organization and campaign first, so the 409 never reveals another organization's link.
+      A link opens its one report through item 38(m)'s routes, unchanged; a report that got two links
+      before keeps both, each in Share with Delete. It reaches less than a link to all reports did: one
+      report, never another week, team or walk list.
+    - **(b) Link passwords, sealed and shown again.** `ReportShareLink.passwordSealed`: the password,
+      sealed with AES-256-GCM by `utils/sealedSecret.js` under `CREDENTIAL_SEAL_KEY` (a Heroku config var,
+      kept at a different company from the database), with `report-link:<its bcrypt hash>` as associated
+      data, so a copy left behind when the hash changes, or a value sealed for anything else, never opens
+      as that link's password; written in the same atomic write as the hash
+      (`services/reports/shareLinks.js` `sealLinkPassword`); `select: false`; never in a share row, a
+      public response, History, an error body or a log. **Where it's shown:** Share's **Show** (`GET
+      /admin/client-reports/shares/:id/password`, `no-store`, opened and checked against the hash with
+      bcrypt, so a stale or foreign copy is never shown as current), and once, right after a password is
+      made up, typed or changed. **Who:** the campaign's managers (`requireOrgRole('admin', 'lead')` and
+      `canManageCampaign`): the organization's admins and the campaign's team leads; never Doorline staff
+      under a grant, (c). **Not logged:** a Show writes no History row (everyone who can Show can already
+      open the report and change the password; recorded as a gap in the plan, the owner's to add). **What
+      a copy of the database alone reveals:** no password, since the key isn't in it; each password's
+      length, since the sealed copy's size follows it (padding was judged low value in the plan's review);
+      and that links copied with Same as … share a password, since they share a hash verbatim. A typed
+      password is kept the same way, so Share warns under Type my own: "Everyone who manages this campaign
+      can see this password later. Don't use one you use anywhere else." Links made before this have no
+      sealed copy and "can't be shown"; nothing is migrated. Without the key nothing is sealed, and nothing
+      can be shown or copied. Replacing the key would make every sealed copy unreadable, and every FbTime
+      key with it: never replace or remove it ([OPERATIONS.md](OPERATIONS.md)).
+    - **(c) Doorline staff under a support grant can neither view nor type a link password.** Show is `403
+      STAFF_CANNOT_VIEW_PASSWORD`; a typed password on create or change is `403 STAFF_CANNOT_SET_PASSWORD`
+      (and any password change on a link to all reports); a password made up for them is left out of every
+      answer (`generatedPassword` on create, `password` on PATCH); without a seal key, making one up is
+      `403 PASSWORDS_NOT_KEPT`, since nobody could ever see it; they may copy one with Same as …
+      (`passwordFrom`) without learning it. So under a grant staff never learn a password, and can't keep
+      opening a report through `/share` after the grant ends — the hole round 1 of the plan's review
+      reproduced on the code before this (privacy.html `:112`). Pinned by
+      `server/test/clientReportLinkStaff.int.test.js` (both 403s, nothing generated in an answer,
+      `PASSWORDS_NOT_KEPT`, Show working in an internal organization, where staff are members) and
+      `clientReportLinksRetired.int.test.js` (no password change on a link to all reports under a grant).
+    - **(d) A client given a team-lead account** sees every link password on that campaign, other
+      recipients' included, since a lead may be the client (item 38(g) already treats what a lead reads as
+      customer-facing); and, like any manager who leaves, a person still knows the season password after
+      leaving. Share offers **Also change it on the other links that use this password** (`PATCH
+      /shares/:id` with `alsoChanged`: a compare-and-set per link, each link's sessions ended), and the
+      Help Center tells the operator to change it when a manager leaves
+      (`server/src/content/help/faq/lost-client-link-password.md`).
+    - **(e) DPA §4 ("shall not materially decrease the overall protection of Personal Information") —
+      THE OWNER'S DECISION, PENDING, due before the deploy** (passwords become viewable at the deploy, not
+      on the switch's date). *Weaker:* before, nobody, Doorline included, could recover a link's password;
+      now someone holding both the database and the server's settings could; every admin and lead of the
+      campaign can see it and still knows it after leaving; by default one password covers a campaign's
+      links all season; a typed password is stored in a form that can be shown. *Unchanged or stronger:*
+      checking a password is unchanged; each link keeps its own unguessable address; a database copy
+      alone reveals no password; the database already holds the reports the password protects; links to
+      all reports go away; staff can't see or type passwords, (c). The plan's read: not a material
+      decrease, given (c). Record the owner's answer here. No published sentence says a link's password
+      can't be shown, so the Privacy Policy needs no change for this.
+    - **(f) Links to all your reports: none made from the deploy; turned off in every organization by
+      `RETIRE_ALL_REPORTS_LINKS`.** Read at call time (`allReportsRetired()`, shareLinks.js: `on`, `true`
+      or `1`), unset at the deploy. Until it's set, those links keep working, and can be deleted, given a
+      new password (never sealed, never by staff under a grant) or a new address, and nothing else (`409
+      ALL_REPORTS_LINK`), so privacy.html `:101`'s "a link's password can be changed, or the link
+      rotated" stays true for every live link. Once set, every public route answers `410 SHARE_RETIRED`
+      ("This link no longer works. Ask the person who sent it for the link to the latest report."), devices
+      signed in included, before the expiry and billing checks, and they can only be deleted. Nothing is
+      written to any link, so unsetting it brings them back at once. **PENDING, to complete on the date:**
+      the date it was set; the email the owner sent (its text, to which organizations and how many) or
+      the decision to send none; the owner's answer on whether this is a "material change" (Terms §15,
+      the Privacy Policy's "Changes to this policy"); the sentences chosen for privacy.html `:101` ("Links
+      created before that date remain accessible until the customer revokes them, and we provide
+      customers a tool to revoke them." → the plan's "Links created before that date no longer work.") and
+      terms.html `:118` ("Links created before password protection was introduced remain accessible until
+      revoked, and the Customer can revoke them at any time." → the plan's "Since [Month D, 2026], links
+      that opened all of a campaign's reports — including every link created before password protection
+      was introduced — no longer work."); both pages' "Last updated"; and the legal-text test
+      (`staticPages.int.test.js`: the new sentences match, the old ones don't; the plan's §E), committed
+      with them. Both sentences stay true until the switch and must change the day it's set; the legal
+      pages are the owner's to edit, deliberately, never as a side effect of code.
+    - **(g) The read-only check, a staff-facing, cross-organization output.** `npm run
+      report:all-reports-links` (`server/src/migrations/reportAllReportsLinks.js`, the Heroku Run console)
+      reads every organization's links outside any support grant and prints, per organization with a link
+      to all reports, its **name** and **counts** only: how many still work, are off because of billing,
+      are turned off or have expired; on how many campaigns; the date one was last opened; how many of its
+      reports have more than one link; totals, and a count for links whose organization no longer exists.
+      No campaign, label, token, slug, id or person. Read-only: it connects with `autoIndex` and
+      `autoCreate` off, and `reportAllReportsLinks.int.test.js` runs it as a child process with the
+      profiler on and sees reads only. It isn't "in the product" and opens no voter or canvassing record,
+      so privacy.html `:112` holds; operator metadata, like `report:tab-weeks` and item 43(g)'s output.
+    - **(h) The demo organization's link** (Doorline's internal organization, synthetic data). The first
+      Rebuild demo day after the deploy **replaces** its link to all reports with a link to the demo's
+      report at the same address and password (deleted, then made again with the same token, hash and
+      sealed copy), so no link that opened all reports survives anywhere the seed runs; from then on it is
+      re-pointed at the demo's report in place (`services/platform/seedDemoOrg.js` `ensureDemoLink`), the
+      one place a link's report ever changes. A `SEED_DEMO_SHARE_PASSWORD` that matches the kept hash is
+      sealed, so Share can show it. Pinned by `demoRebuild.int.test.js`.
+    - **(i) Archive, operator-side only.** `ClientReport.archivedAt` and `archivedBy` (an actor id): a
+      report folded under Archived on its tab. No public route, the PDF, Next, the period math, the
+      duplicate guards or earlier totals read it, so an archived report's link keeps opening it, and
+      `status` is never touched. History rows `clientReport.archived` / `unarchived`, one per change, with
+      the actor, under item 38(g)'s readers and cascades; deleted with the report's campaign and
+      organization like every `CampaignChange` row.
+    - **(j) History.** Link rows now carry their report's id, tab and period (`writeLinkHistory`,
+      `services/reports/clientReportHistory.js`), so the drawer names a link by its report, and three new
+      `toValue` keys (`alsoChanged: n`, `changedTogether: true`, `allReports: true`), none a credential
+      (`withoutSecrets` still drops any key matching token, password or hash). Same readers, same
+      cascades, still out of the phone's feed.
+    - **(k) Outside this plan, noted.** A support-grant holder can still create a non-staff admin account
+      (`services/memberships/vendorGuards.js` `refuseVendorStaffTarget` refuses only staff targets),
+      which is logged and visible on Users; and a Doorline staff account that a customer adds as a member
+      acts as a member, and so can Show a password like any member. Both were so before; neither changes
+      here.
+    - **(l) Found in passing, shipped alone first: a password that could crash the web server.** Not a
+      data matter; availability. A password with a lone surrogate (half of a UTF-16 pair, which no keyboard
+      types but a crafted request can send) made bcryptjs 2.4.3 run out of memory and the whole process
+      exit, so one request to sign-in (with any real account's email) or to a client link's password page
+      took the single web dyno down. `utils/passwordText.js` `isWellFormedText` now runs before every
+      bcrypt call on those paths: `User.verifyPassword` (sign-in: a wrong password), `User.hashPassword`
+      (password change, reset, a member's temporary password: `400 PASSWORD_INVALID`), the public unlock
+      (a wrong password, before any slot is reserved) and the link password routes (`400
+      SHARE_PASSWORD_INVALID`). Pinned by `passwordText.test.js` and `passwordText.int.test.js` (a missing
+      guard kills the test process). Handed over 2026-10-28 as its own patch, to ship before the rest of
+      this item; stamp its deploy date here. No published sentence speaks to availability, and DPA §4
+      names no availability promise.
+    - **Claims checked.** privacy.html `:101` (a unique link; a password and an expiry, 90 days by default
+      or up to a year; "a link's password can be changed, or the link rotated, but a password can never be
+      removed"; "may revoke a link at any time"): true for every link that still opens, before and after
+      the switch; once it's set, a link to all reports opens nothing and can only be deleted, (f). Share
+      always sets a password and offers 30–365 days (90 by default); Change password and New address are
+      in Share and, until the switch, on the old-links card; Delete is in Share, on an extra link's line
+      and on the card. Its last sentence stays true until the switch and is false from the moment it's
+      set, (f). `:112` (staff can't open customer data without a grant): strengthened by (c), and (g)
+      opens no customer record. terms.html `:91` (staff access time-limited and reason-logged): unchanged.
+      `:118` (§6): its legacy sentence stays true until the switch, then must change, (f); "Anyone with an
+      unrevoked, unexpired link (and its password) can view the report" holds. DPA §4: (e), pending. DPA
+      §6: no new subprocessor (sealing runs in our own server; the key is a config var at Heroku, an
+      existing subprocessor). No DPA §5 question: nothing was exposed.
+    - **Pinned by** `server/test/clientReportOneLink.int.test.js`, `clientReportLinksRetired.int.test.js`,
+      `clientReportLinkPasswords.int.test.js` (no password, hash or sealed copy in a row, History, an error
+      body or a public response), `clientReportLinkStaff.int.test.js`,
+      `clientReportChangeEverywhere.int.test.js`, `clientReportArchive.int.test.js`,
+      `reportAllReportsLinks.int.test.js`, `demoRebuild.int.test.js` and `linkPasswordSeal.test.js`; on the
+      web, `clientReportShareLinks.smoke.test.js` and `campaignHistory.test.js`.
+    - **Watchlist:** the 2026-10-28 bullet in *New policy sentences to keep true*.
+45. **[v7 2026-10-28 — Excel files on the three Voter-ID list uploads (Early Voting, the Do-not-contact
+    list, a saved search from a list), and Early Voting's *Count only rows where*. BUILT 2026-10-28,
+    uncommitted; deploy pending (stamp the date here when it ships). Treated as privacy-relevant because
+    it changes how an uploaded voter file is read; but nothing new is kept about a person, no retention
+    or deletion change, no new access, no new third party, nothing newly exposed, and no published
+    Privacy Policy, Terms or DPA sentence changes. No customer notice.]** Plan, the owner's three calls
+    (all ruled yes 2026-10-28) and two review rounds: [PROPOSAL_ID_LIST_EXCEL.md](PROPOSAL_ID_LIST_EXCEL.md)
+    (§E is this item's source); doc of record [EARLY_VOTING.md](EARLY_VOTING.md) Part 2 §B. Numbered 45
+    because the walk-list archive and client-report-link records, written the same day, are 43 and 44.
+    Everything below was read from the code.
+    - **(a) What is read.** The six upload routes (`POST /admin/campaigns/:id/voted/preview` and
+      `/import`, `POST /admin/dnc/preview` and `/import`, `POST /admin/campaigns/:id/walklists/from-csv/preview`
+      and `/from-csv`) now read an `.xlsx` as well as a CSV, the format decided by the file's first bytes
+      (`readIdList`, `services/import/parseVoterIdList.js`; the Excel reader is
+      `services/import/readIdColumn.js`). From a workbook, only the first visible tab's **row-1 column
+      names** and its **Voter ID column** are used — plus, with Early Voting's *Count only rows where*,
+      **one more column the admin picks**: its values decide which rows go on to matching, and that
+      column's distinct values with their row counts go back in the preview to the uploader's own
+      screen. No per-person value from that column is stored. What the preview returns after *Count
+      these rows* — its counts, its sample IDs and its unmatched-ID download (up to 10,000) — covers only
+      the rows that counted, so ticking one value narrows those to the IDs that carry it: still only to
+      the uploader, from their own file, and never kept. Rows 1–10 are read
+      whole (capped at 1 MB of text) only to find the column names and, when no Voter ID column is
+      found, which row they seem to be in — a row number goes back, never a cell. The CSV path is
+      unchanged (Papa still parses every column; only the ID column, and with *Count only rows where*
+      the chosen one, is used).
+    - **(b) Held in memory, never written to disk.** The workbook arrives through `uploadIdList` (multer
+      `memoryStorage`, 50 MB), as a CSV does, and is read from that buffer: `unzipper.Open.buffer` only
+      slices it, saxes has no file access, and nothing is spooled; the buffer goes when the request
+      ends. Unlike the Voter Import's `streamParse`, which writes an `xlsx-norm-*.zip` rewrite and an
+      exceljs `tmp-*` spool of the unpacked sheet for workbooks like Nebraska's CD-2 (the v5 2026-08-04
+      *transient voter-file copies on dyno ephemeral disk* entry, *What changed since v2*).
+    - **(c) Stored: the counting column's NAME and a count, never the ticked values.** `VotedUpload`
+      gains `keepColumn` and `keptRows` (`models/VotedUpload.js`), written only when rows were actually
+      left out (`routes/admin/voted.js`); the upload history shows *Ballot_Status: 3,224 of 3,260
+      rows*. **Never which values were ticked:** every `VotedVoter` row carries its `uploadId`, so stored
+      values would describe each voter the upload marked — with a ballot-type column, how they voted,
+      which Doorline otherwise never stores (H16(e)). The owner's ruling on call A, 2026-10-28: the
+      column and the count only. A column name is operator metadata from the customer's own file, the
+      same class as the `idColumn` already kept. The IDs parked as `VotedPendingId` are now only those
+      of the rows that counted. `DncUpload` and `SavedSearch` gain nothing (`SavedSearch.source` stays
+      `'csv'` for an uploaded Excel file).
+    - **(d) Returned to the uploader, never stored:** the tab read (`sheetName`) and the other visible
+      tabs' names (`otherSheets`), on the preview and on every refusal; the row the column names seem to
+      be in (`headerRowHint`); the counting column's values and row counts (`keep.values`); and, after
+      *Count these rows*, the sample and unmatched IDs of only the rows that counted (see (a)). Each goes
+      only to the person who uploaded the file, in the answer to their own request.
+    - **(e) One log line per Excel read**, `[id-list] xlsx …` (`logRead`, `parseVoterIdList.js`): the
+      file's size, the tab's and the shared strings' unpacked sizes, a row count and the time, or a
+      refusal code in their place; never a file, tab or column name, a value or an ID. Heroku's log
+      retention, like every other line. A CSV read logs nothing.
+    - **(f) No new third party.** `unzipper` and `saxes` were already direct dependencies — recorded as
+      **not a subprocessor event** in the v5 2026-08-04 entry (*What changed since v2*). In-process
+      parsing only: no network call, no new service, customer data never leaves the web dyno. DPA §6
+      unchanged.
+    - **(g) Who can upload is unchanged:** Early Voting and saved searches behind
+      `requireCampaignManager`, the do-not-contact list behind `requireOrgRole('admin')`, as before.
+    - **Assessment: no published Privacy Policy, Terms or DPA sentence changes.** The policy lists
+      "voting-participation records" among what customers upload (privacy.html `:91`) and says nothing
+      about file formats or how an upload is read; `:122`'s "uploaded files" in what deletion covers is
+      untouched (these uploads were never kept). No customer notice. H16(e) still holds — participation
+      only — and carries a dated stamp for the parser's new reach. If the owner ever rules that the
+      history should show the ticked values, this item and that stamp must instead say the upload
+      records them, and why that describes each marked voter.
+    - **Pinned by** (the plan's §D; check the names when stamping the deploy): the reader's unit tests
+      and the uploads' integration suites, including that a `VotedUpload` records the column and
+      `keptRows`, not the values. Both code review rounds (the plan's §J.1, §J.2) changed how the file is
+      parsed and refused, never what is read, kept, returned or logged: nothing above changed.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -4156,6 +4543,8 @@ These survive the remediation and are the list to take to counsel:
 6. **The audit write is best-effort.** See the carve-out above.
 7. **Legacy `/r/` report links** created before the password/expiry change remain open and non-expiring
    until an operator revokes them (now at least `noindex` + robots-disallowed).
+   *[v7 2026-10-28, item 44: closed on the date `RETIRE_ALL_REPORTS_LINKS` is set (pending; stamp it here) — every
+   such link is a link to all reports, and the switch turns them all off.]*
 8. **The currently-published `PrivacyPolicyPage.jsx` still contains statements this brief shows are false**
    (notably "no third-party analytics/tracking" and the aggregate-only report description). It was left
    **untouched by instruction** — correcting it is the policy-rewrite pass, not this code remediation.
@@ -4628,7 +5017,7 @@ inherit it. Full reasoning in the v5 2026-08-11 watchlist entry.]*
 
 **Also exportable, driven by survey answers:** walk-list filters include `surveyResponse` exists/not-exists, per-question `answerFilters`, and cross-question `answerTagFilters` (`resolveWalkList.js:89-128`). So "every voter who answered X" or "every voter tagged Supporter" can be resolved to a named, addressed, phone-bearing CSV.
 
-**Client-side (browser-generated) downloads not counted above:** a jsPDF client-report PDF (`client/src/lib/reportPdf.js:33`), unmatched-voter-ID CSVs (`WalkListsPage.jsx:227-231`, `EarlyVotingPage.jsx:84-88`), and a billing-statement CSV (`client/src/components/OrgBillingPanel.jsx` → `downloadCsv()` — **platform-staff only**, rendered solely from the super-admin Organizations page; campaign-level counts and dollars, no personal data).
+**Client-side (browser-generated) downloads not counted above:** a jsPDF client-report PDF (`client/src/lib/reportPdf.js:33`), unmatched-voter-ID CSVs (`downloadUnmatched` in `WalkListsPage.jsx`, `EarlyVotingPage.jsx` and `DoNotContactPage.jsx`, plus `downloadOutside` in `DoNotContactPage.jsx`; cited by name since line numbers drift), and a billing-statement CSV (`client/src/components/OrgBillingPanel.jsx` → `downloadCsv()` — **platform-staff only**, rendered solely from the super-admin Organizations page; campaign-level counts and dollars, no personal data).
 
 **Not exportable by any route:** full `SurveyResponse` documents (the voters-by-answer CSV carries only the **drilled** question's snapshot answer(s) — or the tag's matching entries — plus the response's door note, never the response's whole answer set), `VoterNote` bodies, tags, turf/book definitions, flag reviews, import history. **The original uploaded voter file cannot be re-downloaded** — `loadRawImport()` is called only by the background import worker (`services/import/importProcessor.js:56`) and is exposed by no route.
 
@@ -4860,11 +5249,11 @@ No voter name, no canvasser name or user id, no timestamps, no party, no phone, 
 | Control | Status |
 |---|---|
 | **Token entropy** | **VERIFIED STRONG.** 24 bytes from Node's CSPRNG, base64url → 32 chars = **192 bits** (`routes/admin/clientReports.js:151-153`). Not brute-forceable. *(Exception: the demo-org seeder uses `SEED_DEMO_SHARE_TOKEN` verbatim if set — `utils/seedDemoOrg.js:525` — in which case entropy is whatever an operator chose.)* |
-| **Password on NEW links** | **VERIFIED.** Every link created through the admin API gets a bcrypt-hashed password; if the operator supplies none, a 12-char random one is generated and returned once (`clientReports.js:180-184`, `:231`, `:240`, `:247`). *[v6 2026-10-24: the link routes moved to `routes/admin/clientReportShares.js` and the generator to `services/reports/shareLinks.js`; an operator-set password must now be 12 or more characters too, on create and on change (`SHARE_PASSWORD_TOO_SHORT`), and an older short one is flagged after its next successful unlock (`passwordMeetsRule`, item 38(e)).]* |
+| **Password on NEW links** | **VERIFIED.** Every link created through the admin API gets a bcrypt-hashed password; if the operator supplies none, a 12-char random one is generated and returned once (`clientReports.js:180-184`, `:231`, `:240`, `:247`). *[v6 2026-10-24: the link routes moved to `routes/admin/clientReportShares.js` and the generator to `services/reports/shareLinks.js`; an operator-set password must now be 12 or more characters too, on create and on change (`SHARE_PASSWORD_TOO_SHORT`), and an older short one is flagged after its next successful unlock (`passwordMeetsRule`, item 38(e)).]* *[v7 2026-10-28, item 44: a generated password is still returned in the clear only at creation (never to Doorline staff under a grant), but it is no longer "returned once": it is kept sealed and Share's Show returns it again to the campaign's admins and leads (item 44(b)). A link now also takes a typed password or a copy of another link's (Same as …).]* |
 | **Expiry on NEW links** | **VERIFIED.** `expiresAt = now + SHARE_LINK_DEFAULT_DAYS` (default **90**, `clientReports.js:173`, `:241`). Expired links return **410** before any report data (`share.js:35-40`). Expiry cannot be extended or cleared via the API. *[v6 2026-10-24: superseded — expiry is now chosen (30, 90, 180 or 365 days; default still 90) and can be **extended**, never past one year from the link's lifetime start (`lifetimeStartAt ?? createdAt`, compared inside the write, so it never shortens either); an **expired** link can't be extended (`SHARE_NEEDS_RENEW`) but is **renewed**: a new URL token, a new one-year life, the credential version bumped, so a URL forwarded long ago stays dead. Extend also gives a legacy never-expiring link its first expiry. Expiry still can't be cleared. `routes/admin/clientReportShares.js`.]* |
-| **LEGACY links** | **VERIFIED OPEN.** Links created **before this release** have `passwordHash: null` and `expiresAt: null` and **remain fully live**. `share.js:57` waves through any link with a null password hash; `share.js:35` treats a null `expiresAt` as unexpired. **No migration remediates them** — I listed all 24 files in `server/src/migrations/` and grepped for `ShareLink`/`passwordHash`: **zero hits.** The code comments at `share.js:33` and `models/ReportShareLink.js:35` refer to "the migration" **as if it exists. It does not.** *[v3: still no migration, and the phantom comments are still in the code — but an operator bulk kill switch now exists (`POST /admin/client-reports/shares/revoke-legacy`, dry-run unless `confirm:true`, deliberately not automatic), and the policy now discloses the pre-July-15 links honestly. Legacy links stay live until an operator flips it.]* |
+| **LEGACY links** | **VERIFIED OPEN.** Links created **before this release** have `passwordHash: null` and `expiresAt: null` and **remain fully live**. `share.js:57` waves through any link with a null password hash; `share.js:35` treats a null `expiresAt` as unexpired. **No migration remediates them** — I listed all 24 files in `server/src/migrations/` and grepped for `ShareLink`/`passwordHash`: **zero hits.** The code comments at `share.js:33` and `models/ReportShareLink.js:35` refer to "the migration" **as if it exists. It does not.** *[v3: still no migration, and the phantom comments are still in the code — but an operator bulk kill switch now exists (`POST /admin/client-reports/shares/revoke-legacy`, dry-run unless `confirm:true`, deliberately not automatic), and the policy now discloses the pre-July-15 links honestly. Legacy links stay live until an operator flips it.]* *[v7 2026-10-28, item 44: they stay live only until `RETIRE_ALL_REPORTS_LINKS` is set (date pending; stamp it here): every legacy link is a link to all reports, and from that day each answers `410 SHARE_RETIRED`. Until then none can be made, and each can only be deleted, given a new password or given a new address.]* |
 | **Search-engine indexing** | **VERIFIED: NO PROTECTION.** *[v6 2026-10-24: the control is now the `X-Robots-Tag: noindex, nofollow` header, on every `/r/` HTML response (the SPA fallback in `app.js`) and every `/api/share` response; robots.txt **no longer disallows `/r/`**, because a crawler it keeps out never sees a noindex and can still list a forwarded link's bare URL. Pinned in `staticPages.int.test.js`. The v3 stamp that follows is history.]* *[v3: protection added — `robots.txt:7` now has `Disallow: /r/`, and `PublicReportLayout.jsx` injects `<meta name="robots" content="noindex, nofollow">` on every `/r/` page. Precision: the noindex is client-JS-injected only (no `X-Robots-Tag` header, no server-rendered meta), so robots.txt is the load-bearing control against non-JS crawlers.]* No `noindex` meta tag, no `X-Robots-Tag` header, no noindex directive anywhere in the client or server (grep: zero hits). `client/public/robots.txt` is `User-agent: * / Allow: / / Disallow: /api` — **`/r/` is not disallowed.** *Mitigating: the URL is unguessable, and the page is client-rendered with its data fetched from `/api/share/...`, which robots.txt does disallow — so a compliant crawler like Googlebot would likely index the URL and shell but be blocked from the report content. **robots.txt is advisory only.** It does not bind scrapers, archivers, or link-preview/unfurl bots, none of which are prevented from retrieving the full report JSON from an open legacy link.* |
-| **Revocation** | **PARTIAL.** Deactivate / delete / rotate work on the next request (`share.js:28`). A **bulk** revoke exists but targets **only** the legacy/open subset and is a **dry run unless `confirm: true`** (`clientReports.js:261-286`). It is **not automatic**. It also skips the per-campaign authorization check every other route in the file performs, so a team lead can revoke legacy links across campaigns they do not manage. *[v6 2026-10-24: the sweep has been admin-only since 2026-08-07 (item 10 of *What changed since v2*), lives in `routes/admin/clientReportShares.js`, and now bumps each swept link's credential version; disable, rotate, renew and a password change likewise end every open session at once (the `cv` stamp on the row below). Take down hides a single report from every link without touching the link.]* |
+| **Revocation** | **PARTIAL.** Deactivate / delete / rotate work on the next request (`share.js:28`). A **bulk** revoke exists but targets **only** the legacy/open subset and is a **dry run unless `confirm: true`** (`clientReports.js:261-286`). It is **not automatic**. It also skips the per-campaign authorization check every other route in the file performs, so a team lead can revoke legacy links across campaigns they do not manage. *[v6 2026-10-24: the sweep has been admin-only since 2026-08-07 (item 10 of *What changed since v2*), lives in `routes/admin/clientReportShares.js`, and now bumps each swept link's credential version; disable, rotate, renew and a password change likewise end every open session at once (the `cv` stamp on the row below). Take down hides a single report from every link without touching the link.]* *[v7 2026-10-28, item 44: Delete works on every link, from Share, an extra link's line and the old-links card; there is no bulk delete, and nothing in the app calls revoke-legacy any more. On the date `RETIRE_ALL_REPORTS_LINKS` is set (pending), every link to all reports is refused at once, in every organization.]* |
 | **Password change ≠ revocation** | **VERIFIED.** The unlock JWT carries only `{shareId, campaignId}` with a 24h TTL (`services/auth/tokens.js:22-30`) and is never re-checked against the password (`share.js:63-68`). An already-unlocked viewer retains access for up to 24 hours after a password change. *(Link **revocation**, by contrast, does take effect immediately, because `loadShare` re-queries `isActive` on every request.)* *[v6 2026-10-24: fixed — the share token now carries the link's credential version (`cv`), bumped in the same write by a password change, rotate, renew, disable and the revoke-legacy sweep, and `requireShareAccess` refuses a token whose `cv` doesn't match, so every device is signed out at once (`routes/public/share.js`, `services/auth/tokens.js`; pinned in `shareLinks.int.test.js`). Tokens last 24 hours, or 30 days with Keep me signed in (item 38(f)).]* |
 | **Password can be REMOVED from any link, today** | **VERIFIED.** `shareUpdateSchema` accepts `password: null` (`clientReports.js:197`), and `:310-312` sets `passwordHash` back to `null`. Passwordless links are **not** a closed legacy set. *[v3: fixed — a falsy password now 400s with `SHARE_PASSWORD_REQUIRED` ("replace it, or rotate the link"); removal is unsupported, which is what lets the policy say new links are password-protected as a class.]* |
 | **Metadata is never gated** | **VERIFIED.** `GET /share/:token` (campaign name, organization name, link label) has **no** `requireShareAccess` (`share.js:84`). *[v6 2026-10-24: fixed — `GET /share/:token` now returns only `{ requiresPassword }`; the campaign and organization names and whether there is a logo ride `GET /share/:token/reports`, behind access, and the link's label is never sent. "Last opened" is stamped only when access is granted, never by the password screen or a wrong guess.]* |
@@ -4872,8 +5261,9 @@ No voter name, no canvasser name or user id, no timestamps, no party, no phone, 
 > **Do NOT write:** *"Report links are password-protected and expire."* **False** as a statement about links as a class.
 > **Write:** *"Report links created since [date] are protected by a password and expire after 90 days by default. Links created before that date may remain accessible without a password and do not expire until an administrator revokes them."*
 > **COULD NOT DETERMINE:** how many open legacy links exist in production. That requires a database query. **Ask engineering before this sentence ships.**
+> *[v7 2026-10-28, item 44: the "Write" sentence above becomes false on the date `RETIRE_ALL_REPORTS_LINKS` is set (pending): from then on links created before that date no longer work. The owner chooses the replacement for privacy.html `:101` and terms.html `:118` (item 44(f)). The count of such links, by organization, is what `npm run report:all-reports-links` prints.]*
 
-**One thing an unguessable token is not:** it is a **capability**, not access control. It survives forwarding, it does not expire on a legacy link, and there is no rate limit or logging preventing its reuse by anyone who obtains it. The only rate limit on this surface throttles failed **password** attempts, not token access (`share.js:106-114`). *[v6 2026-10-24: password guessing is now also budgeted **per link**: a slot is reserved before bcrypt runs, so no link checks more than 50 wrong passwords in any 24 hours however many addresses the guesses come from, and the 50th locks it for new sign-ins (never ending a session already open) until the oldest of the 50 is a day old, Unlock now or a rotate (`reserveUnlockSlot`, `services/reports/shareLinks.js`; 300 concurrent guesses meet exactly 50 compares in `shareLinks.int.test.js`). The per-IP limiter stays. Logging: every link change, each UTC day's 10th wrong password and every lock write a History row (no IP or user agent, item 38(g)), and the report counts its opens per link (item 38(c)). The capability point stands: a valid link and password, or a session already open, are neither limited nor logged by who uses them.]*
+**One thing an unguessable token is not:** it is a **capability**, not access control. It survives forwarding, it does not expire on a legacy link, and there is no rate limit or logging preventing its reuse by anyone who obtains it. The only rate limit on this surface throttles failed **password** attempts, not token access (`share.js:106-114`). *[v6 2026-10-24: password guessing is now also budgeted **per link**: a slot is reserved before bcrypt runs, so no link checks more than 50 wrong passwords in any 24 hours however many addresses the guesses come from, and the 50th locks it for new sign-ins (never ending a session already open) until the oldest of the 50 is a day old, Unlock now or a rotate (`reserveUnlockSlot`, `services/reports/shareLinks.js`; 300 concurrent guesses meet exactly 50 compares in `shareLinks.int.test.js`). The per-IP limiter stays. Logging: every link change, each UTC day's 10th wrong password and every lock write a History row (no IP or user agent, item 38(g)), and the report counts its opens per link (item 38(c)). The capability point stands: a valid link and password, or a session already open, are neither limited nor logged by who uses them.]* *[v7 2026-10-28, item 44: "it does not expire on a legacy link" holds only until `RETIRE_ALL_REPORTS_LINKS` is set (pending); then no legacy link opens at all.]*
 
 ---
 
@@ -5233,7 +5623,7 @@ The `Person` layer **is** now org-scoped: `organizationId` is required and index
 
 | # | Party | What it receives | Confidence |
 |---|---|---|---|
-| 1 | **MongoDB Atlas** | The entire production database: voter/Person records (names, DOB, phone, party), household addresses and coordinates, canvasser GPS-stamped knock activity, survey answers, free-text notes, user accounts and bcrypt password hashes, AccessLog, SupportAccessGrant. Plus, **transiently**, the raw uploaded voter file (GridFS). | VERIFIED |
+| 1 | **MongoDB Atlas** | The entire production database: voter/Person records (names, DOB, phone, party), household addresses and coordinates, canvasser GPS-stamped knock activity, survey answers, free-text notes, user accounts and bcrypt password hashes, AccessLog, SupportAccessGrant. Plus, **transiently**, the raw uploaded voter file (GridFS). *[v7 2026-10-28, item 44: and, from the deploy, client report link passwords sealed with AES-256-GCM (`ReportShareLink.passwordSealed`); the key is a Heroku config var, never in the database, so Atlas alone holds no readable password.]* | VERIFIED |
 | 2 | **Heroku** | Hosts both the web dyno and the worker dyno — **all data in transit and in process memory.** Plus an **HTTP access log for every request** (see below). | VERIFIED |
 | 3 | **GEOCODIO** (`api.geocod.io`) | **VOTERS' FULL HOME STREET ADDRESSES.** | VERIFIED — **MUST BE DISCLOSED AS A SUBPROCESSOR** |
 | 4 | **Mapbox** | Map tiles + a public token from web **and** mobile. **Web additionally sends usage telemetry with a persistent identifier.** | VERIFIED (asymmetric — see below) |
@@ -5395,7 +5785,8 @@ The currently-published policy states *"Voters do not interact with the Services
 
 **Two corrections to an obvious misreading:**
 - **`voteMethod` is a DEAD field.** It is declared (`VotedVoter.js:14`) but **never assigned by any write path** — the import route, the sticky re-apply service, and the seeder all `$setOnInsert` a field set that omits it, and the CSV parser reads **only a single voter-ID column** and discards every other column of the customer's file. **Do NOT write that Doorline stores how a person voted.** It stores **participation**, not method and not ballot content.
-- **`votedAt` is the INGEST timestamp, not the date the person voted** (`routes/admin/voted.js:132` — `new Date()`).
+  *[v7 2026-10-28 — item 45: the sentence above now covers an Excel upload too. The same reader takes a CSV or an `.xlsx` (`readIdList`, `services/import/parseVoterIdList.js`), and from a workbook it keeps only the Voter ID column, with the row-1 column names. With Early Voting's **Count only rows where**, it also reads **one admin-chosen column per row** (a ballot status, say), used only to decide which rows count and **never stored**: `VotedUpload` keeps that column's name and how many rows counted (`keepColumn`, `keptRows`), never which values were ticked, because every `VotedVoter` row points back to its upload and stored values would say how each marked voter's row read — with a ballot-type column, how they voted. Doorline still stores participation only.]*
+- **`votedAt` is the INGEST timestamp, not the date the person voted** (`routes/admin/voted.js`, `POST /import`'s `$setOnInsert` — `new Date()`; *[v7 2026-10-28: cited by route, not line — the old `:132` had rotted to 141 at `44bb72d` and is 186 after item 45's build]*).
 
 `VotedPendingId` separately persists raw `stateVoterId`s from the customer's voted file that matched **no voter in the org's universe** — i.e. voting-participation identifiers for individuals not otherwise in the customer's data at all.
 
@@ -5548,7 +5939,7 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 
 8. **No opt-out from platform device backup.** Voter names, addresses and coordinates likely ride into canvassers' personal iCloud/Google backups. (Disclosures, item 2)
 9. **Voter names, addresses and public report tokens are written to the Heroku access log in cleartext,** and it is unknown whether a log drain forwards them onward. (G15)
-10. **Legacy report share links are open, unauthenticated and non-expiring.** The remediation left them live on purpose. The code comments refer to "the migration" that sunsets them — **the migration does not exist.** Nobody knows how many are out there. (D11)
+10. **Legacy report share links are open, unauthenticated and non-expiring.** The remediation left them live on purpose. The code comments refer to "the migration" that sunsets them — **the migration does not exist.** Nobody knows how many are out there. (D11) *[v7 2026-10-28, item 44: closed on the date `RETIRE_ALL_REPORTS_LINKS` is set (pending; stamp it here); `npm run report:all-reports-links` counts them per organization before then.]*
 11. **Legacy links have no `noindex`.** robots.txt does not disallow `/r/`. (D11)
 12. **On-device retention is unbounded.** The offline queue has no TTL, no cap, and **survives logout**, holding GPS coordinates, survey answers and free-text notes. (C9)
 13. **A grant-holding staff member can mint themselves a Membership and become permanently ungated and unlogged.** (E13, Hole 3 — inferred, needs engineering review)

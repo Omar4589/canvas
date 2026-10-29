@@ -232,6 +232,10 @@ const TEAMS_NOT_READY = {
   code: 'TEAM_ATTRIBUTION_NOT_READY',
 };
 
+// A whole report as the builder reads it, archivedAt included either way (null when not archived — a
+// lean read of a report from before the field has no key at all).
+const withArchivedAt = (r) => ({ ...r, archivedAt: r.archivedAt ?? null });
+
 // Compact row for the report list (drops the heavy per-window breakdowns).
 function adminListRow(r) {
   const scope = scopeOf(r);
@@ -250,6 +254,9 @@ function adminListRow(r) {
     timeZone: r.timeZone,
     status: r.status,
     takenDownAt: r.takenDownAt || null,
+    // Archived (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4): folded under Archived (N) on its tab; null on
+    // every report never archived, a report from before the field included.
+    archivedAt: r.archivedAt || null,
     mapPointCount: r.mapPointCount || 0,
     areaCellCount: r.areaCellCount || 0,
     hasSnapshot: !!r.snapshotId,
@@ -662,27 +669,35 @@ const insertDraftWithBuild = async ({ _id = new mongoose.Types.ObjectId(), doc, 
 
 // No accidental doubles (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E). Of the reports a tab already has
 // for these dates (more than one only from before the guard, or made on purpose), the one most worth
-// opening: a draft, then one the client sees, then one taken down — the newest of each.
+// opening: a draft, then one the client sees, then one taken down — then one that isn't archived
+// (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4: an archived report still holds its dates, it's just not the
+// one to name first) — the newest of each.
 const openFirst = (r) => (r.status === 'draft' ? 0 : r.status === 'published' && !r.takenDownAt ? 1 : 2);
-const existingOf = (list) => [...list].sort((a, b) => openFirst(a) - openFirst(b) || new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
+const existingOf = (list) =>
+  [...list].sort((a, b) => openFirst(a) - openFirst(b) || !!a.archivedAt - !!b.archivedAt || new Date(b.createdAt) - new Date(a.createdAt))[0] || null;
 const aOrAn = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
 // 409 REPORT_EXISTS: what New report needs to name that report and open it, or make a second one. An
 // all-time report (§N) is named by its last day: "an all-time Whole campaign report through Oct 28, 2026".
+// An archived one says so, and carries archivedAt so New report can offer Unarchive beside Open it.
 const REPORT_EXISTS = (r, scopeLabel) => {
   const period = periodLabelOf(r);
   const what = r.allTime ? `all-time ${scopeLabel} report through ${dayLabelOf(r.weekEnd)}` : `${scopeLabel} report for ${period}`;
   const kind = `${aOrAn(what)} ${what}`;
+  const archived = r.archivedAt ? ' — it’s archived' : '';
   return {
     error:
       r.status === 'draft'
-        ? `You already have a draft ${what}.`
+        ? `You already have a draft ${what}${archived}.`
         : r.takenDownAt
-          ? `You already published ${kind}, taken down.`
-          : `You already published ${kind}. To bring its numbers up to date, open it and press Refresh numbers.`,
+          ? `You already published ${kind}, taken down${archived}.`
+          : r.archivedAt
+            ? `You already published ${kind}${archived}.`
+            : `You already published ${kind}. To bring its numbers up to date, open it and press Refresh numbers.`,
     code: 'REPORT_EXISTS',
     reportId: String(r._id),
     status: r.status,
     takenDown: !!r.takenDownAt,
+    archivedAt: r.archivedAt || null,
     weekStart: r.weekStart,
     weekEnd: r.weekEnd,
     allTime: !!r.allTime,
@@ -736,7 +751,7 @@ router.post('/', async (req, res, next) => {
       : { organizationId: orgId, campaignId: campaign._id, seriesId: series._id, weekStart, weekEnd: data.weekEnd, allTime: { $ne: true } };
     const guard = data.allTime ? 'allTimeGuard' : 'dupGuard';
     if (!data.allowDuplicate) {
-      const there = existingOf(await ClientReport.find(key, { status: 1, takenDownAt: 1, weekStart: 1, weekEnd: 1, allTime: 1, createdAt: 1 }).lean());
+      const there = existingOf(await ClientReport.find(key, { status: 1, takenDownAt: 1, archivedAt: 1, weekStart: 1, weekEnd: 1, allTime: 1, createdAt: 1 }).lean());
       if (there) return res.status(409).json(REPORT_EXISTS(there, label));
     }
     const template = await resolveTemplate(orgId, campaign);
@@ -849,7 +864,8 @@ router.get('/:id', async (req, res, next) => {
       mapContextFor(report),
     ]);
     res.json({
-      report,
+      // archivedAt always present (null when not archived): a report from before the field lacks it.
+      report: withArchivedAt(report),
       campaignName: campaign?.name || '',
       orgName: req.activeOrg?.name || '',
       seriesLabel: report.seriesId ? labels.get(String(report.seriesId)) || null : null,
@@ -1404,6 +1420,37 @@ router.post('/:id/put-back-up', async (req, res, next) => {
   }
 });
 
+// Archive and Unarchive (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4): out of the operator's list and back,
+// nothing more — the client's link keeps working, and `status` is never touched (its 'archived' value is
+// one no public reader would show). Drafts too. Each is a CAS on archivedAt — archive only while it is
+// null (or missing, on a report from before it), unarchive only while it isn't — so a repeat (a double
+// click, a second tab) changes nothing, writes no second History row, and answers the report as it is.
+// The History row comes from the write's own pre-image, as Take down's does.
+const archiveRoute = (archive) => async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const report = await loadReportInOrg(req, res);
+    if (!report) return;
+    const orgId = activeOrgId(req);
+    const pre = await ClientReport.findOneAndUpdate(
+      { _id: report._id, organizationId: orgId, archivedAt: archive ? null : { $ne: null } },
+      { $set: archive ? { archivedAt: new Date(), archivedBy: req.user._id } : { archivedAt: null, archivedBy: null } },
+      { returnDocument: 'before' }
+    ).lean();
+    if (pre) {
+      await writeReportHistory(pre, archive ? REPORT_FIELDS.archived : REPORT_FIELDS.unarchived, { by: req.user._id }).catch(() => {});
+    }
+    const current = await ClientReport.findOne({ _id: report._id, organizationId: orgId }).lean();
+    // Deleted between the read above and the write.
+    if (!current) return res.status(404).json({ error: 'Report not found', code: 'REPORT_NOT_FOUND' });
+    res.json({ report: withArchivedAt(current) });
+  } catch (err) {
+    fail(res, next)(err);
+  }
+};
+router.post('/:id/archive', archiveRoute(true));
+router.post('/:id/unarchive', archiveRoute(false));
+
 // Preview EXACTLY what the client will see — through the public shapers. POST carries the builder's
 // ON-SCREEN state as an overlay on the saved report (C5: preview used to show the last save); GET
 // previews what is saved. The map follows the live snapshot, never the overlay.
@@ -1421,9 +1468,12 @@ const preview = async (req, res, next) => {
       ...(overlay.supportQuestionKey !== undefined ? { supportQuestionKey: overlay.supportQuestionKey } : {}),
       visibility: { ...(report.visibility || {}), ...(overlay.visibility || {}) },
     };
+    // The earlier-totals line as a link to one report words it (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C8) —
+    // "Totals from before <its start> were updated by …", naming no other report — since every report's
+    // own link reads it that way; the hub's "since <period>" wording is for old links to all your reports.
     const [{ inputs }, earlierTotals, nav, labels] = await Promise.all([
       mapContextFor(report),
-      earlierTotalsLine(report),
+      earlierTotalsLine(report, { oneReport: true }),
       seriesNav(report),
       currentSeriesLabels([report]),
     ]);
@@ -1700,12 +1750,14 @@ router.delete('/:id', async (req, res, next) => {
     // Its links to just this report stop working for good (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D):
     // deleted AFTER the report, so a link made at the same moment is either seen here or sees the
     // report gone and deletes itself (routes/admin/clientReportShares.js). A History row each, "deleted
-    // with its report" — a flag inside toValue, as the legacy sweep's (CampaignChange has no `via`).
+    // with its report" — a flag inside toValue, as the legacy sweep's (CampaignChange has no `via`) — named
+    // by the deleted report, handed over since it can no longer be looked up
+    // (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C7).
     const reportLinks = await ReportShareLink.find({ organizationId: orgId, campaignId: pre.campaignId, reportId: pre._id }).lean();
     for (const link of reportLinks) {
       const gone = await ReportShareLink.deleteOne({ _id: link._id, organizationId: orgId });
       if (gone.deletedCount) {
-        await writeLinkHistory(link, LINK_FIELDS.deleted, { by: req.user._id, toValue: { label: link.label || '', reportDeleted: true } }).catch(() => {});
+        await writeLinkHistory(link, LINK_FIELDS.deleted, { by: req.user._id, toValue: { label: link.label || '', reportDeleted: true }, report: pre }).catch(() => {});
       }
     }
     const wantsErase = req.body?.eraseHistory === true || req.query.eraseHistory === '1';

@@ -521,6 +521,9 @@ survey with its own**.
   survey-centric view, with per-walk-list response counts) or the **Walk Lists** page's **Survey
   override** dropdown (defaults to "Campaign default"). They edit the same setting. Point one walk
   list at "GOTV" and leave another on the default, and each group gets its own questionnaire.
+- **An archived walk list's survey choice is locked** (*Unarchive to change*) until it's unarchived. A
+  phone that was offline could still be sending answers to that survey, and a changed survey would
+  refuse them. The campaign default can still change.
 - In the field the app resolves the survey **per door** (household → its book → its walk list's
   override, else the campaign default), so a canvasser working doors from two walk lists sees a
   walk-list switcher and always gets the right questions for the door in front of them. The server
@@ -634,7 +637,9 @@ sidebar — a whole-page workspace for one drill:
 
 - **Filters** across the top: survey (when more than one has responses), question, the answer as
   clickable **chips** (each with its live count), canvasser, walk list, and a date range that opens
-  on **Today** (see [DATE_FILTERS.md](DATE_FILTERS.md)).
+  on **Today** (see [DATE_FILTERS.md](DATE_FILTERS.md)). Archived walk lists stay in the walk-list
+  filter, marked "(archived)" and listed last, and the round list follows the walk list you pick, each
+  round named with its walk list (*North · Pass 2*).
 - **Headline numbers** for the drilled answer: how many, what share of the question, and how many
   canvassers recorded it.
 - **Voters** — a table of every matching entry (voter, address, canvasser, exact time, note,
@@ -763,7 +768,10 @@ trade places, nothing is deleted). The same goes for answers an admin typed in a
 canvasser surveys that voter again, the typed answers are kept on the profile too. Answers an admin
 **removed** on Door Outcomes — by unknocking the visit, or changing it from Surveyed — can't be
 restored from the profile; the card says why, and undoing that change on Door Outcomes brings them
-back (never over a newer survey). Opening a survey at a door already marked with a different result
+back (never over a newer survey). Since the October 2026 update the same holds after a pass has ended:
+a survey a phone sends late counts in the pass it was given in, so if a teammate surveyed that voter
+there meanwhile, the one that reached Doorline last is kept and the other is preserved the same way
+([PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Late knocks*). Opening a survey at a door already marked with a different result
 this round — **Not home**, say, by this canvasser or a teammate — asks first too: *"This door is
 already marked Not home this round. Take a survey instead?"* (**Cancel** goes back, **Continue**
 opens the survey). The office's desk **Restricted** mark is the exception, since that door's card
@@ -953,7 +961,12 @@ campaign default **or** any `Effort` walk-list override). Archive/unarchive/dele
 > survey's coverage count** as `intakeResponseCount + Σ responseCount` of efforts **without** an
 > override — exact even when the default template is also some walk list's override (a per-survey
 > total would double-count there). Guard is `requireCampaignManager`, so leads who run the campaign
-> can read counts and set overrides (`PATCH …/efforts/:id { surveyTemplateId }`).
+> can read counts and set overrides (`PATCH …/efforts/:id { surveyTemplateId }`). Since 2026-10-28 that
+> PATCH answers **409 `walk-list-archived`** on an archived walk list (a rename still goes through), and
+> the coverage table's dropdown is disabled there with *Unarchive to change*
+> ([CampaignSurveyPage.jsx](../client/src/pages/CampaignSurveyPage.jsx)) — a phone that was offline may
+> still be sending answers to that survey, and the survey route refuses a mismatch, which would drop them
+> ([EFFORTS.md](EFFORTS.md) §I).
 >
 > **Attach is validated + scoped (2026-08-08).** Setting `surveyTemplateId` — campaign default
 > (`PATCH /admin/campaigns/:id`) or walk-list override (efforts POST/PATCH, via a shared
@@ -1872,7 +1885,8 @@ stamp**, which is exact by construction, bounded in memory, and correct for a ha
 `timestamp`), `wasOfflineSubmission` and `passId`/`turfId`/`effortId` all come **verbatim off the
 `CanvassActivity` row**. `editedBy`/`editedAt` stay `null` — the response was *authored*, not edited.
 
-1. **Never call `resolveAttribution`.** It resolves against currently-ACTIVE passes, so it would
+1. **Never call `resolveAttribution`** ([services/canvass/attribution.js](../server/src/services/canvass/attribution.js)
+   since 2026-10-28). Without a phone's book it resolves against currently-ACTIVE passes, so it would
    re-home a months-old knock into today's round.
 2. **Never call `coordinatorForWrite`.** It would stamp the door with the ADMIN's crew. Copying the
    row's already-frozen `coordinatorId` is not the restamp `SurveyResponse.js` forbids — it is the
@@ -2047,11 +2061,18 @@ again after, while a clear-knocks snapshot made after the run, still unrestored,
 [answerEditRuns.js](../server/src/services/canvass/answerEditRuns.js)): undone in between, it found
 nothing of that round to take back and read *undone*, and the restore then brought back a door stamped by
 an undone run with its copy kept after the undo, out of every tool's reach (round 8). Only a snapshot its
-round can still take back holds the undo — the round on file, not archived, and knocked nowhere since;
-past any other the round's cleared work went with its snapshot, and the undo goes ahead (round 9: the
-refusal held an undo for good once the round was deleted or archived, and sent the admin to a restore that
-put old knocks beside a re-worked round's new ones and failed part-way). The refusal names the round and
-the day it was cleared; restoring that snapshot on Turf Cutting lets the undo through, and the restore
+round can still take back holds the undo — the round on file, able to come back, and knocked nowhere
+since; past any other the round's cleared work went with its snapshot, and the undo goes ahead (round 9:
+the refusal held an undo for good once the round was deleted or archived, and sent the admin to a restore
+that put old knocks beside a re-worked round's new ones and failed part-way). "Able to come back" (since
+2026-10-28, `couldComeBack` in [passLifecycle.js](../server/src/services/passes/passLifecycle.js)): an
+open round, or an archived one Bring back or Unarchive could still restore — a round of an archived walk
+list or an archived campaign included, since both are undoable; a round ended by the next one going live
+can never come back and is skipped as before ([PASSES.md](PASSES.md) → *Bring back — the rules*). The
+refusal names the round and the day it was cleared — for an archived round it also says so and names both
+ways out: delete that snapshot on Turf Cutting (allowed on an archived round, walk list and campaign), or
+unarchive the walk list and bring the round back, then restore it. Restoring that snapshot on Turf Cutting
+lets the undo through, and the restore
 itself now refuses old knocks over new ones (`SNAPSHOT_ROUND_KNOCKED`) and a snapshot holding the work of
 a change undone after it (`SNAPSHOT_HOLDS_UNDONE_CHANGE`) — [PASSES_AND_TURF.md](PASSES_AND_TURF.md). A
 relabel's Undo refuses the same way: it stamps its entries as a conversion does (round 9: undone between a

@@ -478,11 +478,13 @@ const holdFirst = (obj, methods) => {
 };
 const within = (p, ms, what) => Promise.race([p, sleep(ms).then(() => { throw new Error(`${what} never happened`); })]);
 
-// A round of its own at door `d`, with one book and Cara's entry (and survey) there.
+// A round of its own at door `d`, with one book and Cara's entry (and survey) there. Live beside round
+// 1, so on a walk list of its own: one live pass per walk list (models/Pass.js). The door stays North's.
 let roundNo = 100;
 const freshRound = async (d, { actionType = 'survey_submitted' } = {}) => {
   roundNo += 1;
-  const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.effort._id, roundNumber: roundNo, name: `Round ${roundNo}`, status: 'active' });
+  const side = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, name: `Side ${roundNo}` });
+  const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: side._id, roundNumber: roundNo, name: `Round ${roundNo}`, status: 'active' });
   await Turf.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, passId: p._id, name: `Book ${roundNo}`, mode: 'manual', status: 'published', householdIds: [ctx.homes[d]._id], doorCount: 1 });
   const at = new Date(Date.now() - 3600_000);
   const e = await CanvassActivity.create({

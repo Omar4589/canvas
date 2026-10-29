@@ -81,8 +81,12 @@ much of the turf is done." Field: `homesKnocked`.
 
 Knocks honor the date filter. We bill **per knock**, not per house. Field: `knocks`.
 
-> Legacy / no-pass data: knocks recorded before turf/passes existed (`passId = null`) collapse
-> to **one knock per house**. Use passes to get per-pass billing.
+> **Legacy / no pass** (`passId = null`) holds the knocks **no book claims**: those recorded before
+> turf/passes existed, at a door no live book held (an Intake door, a door left out of the cut), and a
+> knock that arrived after its pass ended with no live book holding the door — from a phone without the
+> October 2026 update, or once the book it was made in is gone (discarded, re-cut, or the door moved
+> out). They collapse to **one knock per house**. Use passes to get per-pass billing. Since 2026-10-28 a
+> late knock from an updated phone counts in its own pass instead (see *By pass* below).
 
 > **An export's visit columns are EVENTS, not knocks — never reconcile one with an invoice.** The
 > **Results by voter** file ([EXPORTS.md](EXPORTS.md)) prints **Address visits** — every field visit
@@ -513,12 +517,25 @@ door count wherever a house held several voters), **Conn %**, and **New homes re
 **TOTAL** row underneath. On a campaign that uses **Not a target voter**, a **Not a target** column
 sits before Conn % (and each row of the mobile card adds "N not target"). The same
 per-pass numbers appear on each walk list's Passes panel, and the mobile admin campaign screen has
-a matching **By pass** card. Knocks recorded before passes existed show as one **"Legacy / no
-pass"** row.
+a matching **By pass** card. Knocks no pass's book claims — recorded before passes existed, or at a
+door no book held — show as one **"Legacy / no pass"** row.
 
 Because every row is counted by the same rule as the headline (one knock = one distinct house ×
 round), **the rows always sum exactly to the campaign total** — the breakdown can never disagree
 with the number it breaks down.
+
+**Late knocks count once, in their own pass** (since 2026-10-28, on phones with the app update). A knock
+made before the next pass started counts in its own pass even when it reaches Doorline after the pass
+ended — archived by hand, with its walk list, or by the next pass going live; one made on an old book
+after the next pass started counts in the new pass when that pass holds the door. Before, such a knock landed in
+"Legacy / no pass" or in the next pass ([PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Late knocks*). Two
+consequences for anyone reading these rows:
+
+- **Per-pass rows can move by a few doors either way** compared with a copy taken before the update —
+  a late knock now counts once, in its own pass — and so can a per-door invoice built from them.
+- **A pass's row can keep growing after it ends**, while offline phones catch up. Invoice a finished pass
+  once phones have synced, or by date range. Doorline's own bill is a flat price per campaign and doesn't
+  move.
 
 **A long table folds.** A campaign with a walk list per precinct can have dozens of passes, and in a
 short range like Today most of them have nothing. So the passes with nothing in the range fold into
@@ -1551,8 +1568,9 @@ resolver-not-direct-read pattern). The rules, in full in
   by construction (every knocker is in M). N counts people who actually **knocked** — a
   restricted-only row has activity but no knock.
 
-- **Null `passId`** → one synthetic legacy bucket per household (pre-turf data = 1 knock/house;
-  overlaps still flag 2+ distinct canvassers).
+- **Null `passId`** → one synthetic legacy bucket per household (pre-turf data, and knocks no book
+  claimed at write time — `resolveAttribution`, [PASSES_AND_TURF.md](PASSES_AND_TURF.md) §F — = 1
+  knock/house; overlaps still flag 2+ distinct canvassers).
 - **Range fields differ by metric:** knocks/lit/events range on `timestamp`; surveys and surveyed
   voters range on `submittedAt`. Don't mix them in one `$match`.
 - **`/overview` is all-time**, `/campaign-rollup` honors the range. The campaign page pulls

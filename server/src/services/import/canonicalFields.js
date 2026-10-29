@@ -129,6 +129,12 @@ const namesOf = (field) => [...(EXACT_ALIASES[field.key] || []), ...(FIELD_ALIAS
 const EXACT_ONLY = new Set(Object.values(EXACT_ALIASES).flat());
 const ALL_NAMES = CANONICAL_FIELDS.flatMap((f) => namesOf(f).map((name) => ({ key: f.key, name })));
 
+// Every name above that means State Voter ID, normalized. The Voter-ID list uploads look for these,
+// WHOLE, in rows 2-10 of a file whose row 1 is a title (services/import/parseVoterIdList.js): exact
+// names only there, because a data cell like "No voter ID provided" must never read as a header.
+export const VOTER_ID_NAMES = new Set(namesOf(CANONICAL_FIELDS.find((f) => f.key === 'stateVoterId')));
+export const normalizeHeaderName = norm;
+
 // For each field's name: the longer names of OTHER fields that contain it, longest first. 'state'
 // sits in Voters_StateVoterID only as part of 'statevoterid' — stateVoterId's hit, not State's.
 const SHADOWS = new Map(
@@ -157,7 +163,9 @@ const WORD_ALIAS_MAX = 4;
 const wordsOf = (header) =>
   String(header ?? '')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    // A lookahead, not `([A-Z]+)([A-Z][a-z])`: same split, but that one backtracks quadratically on a
+    // long run of capitals (1.5 s for 32,767 of them, blocking the web dyno); this is linear.
+    .replace(/([A-Z])(?=[A-Z][a-z])/g, '$1 ')
     .replace(/([A-Za-z])([0-9])/g, '$1 $2')
     .replace(/([0-9])([A-Za-z])/g, '$1 $2')
     .toLowerCase()

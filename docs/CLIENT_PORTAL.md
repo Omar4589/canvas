@@ -2,32 +2,37 @@
 
 How you send a client the report you used to put together by hand: headline numbers, a voter-contact
 breakdown, survey and support breakdowns, your written observations, and a map of where the team has
-been. You build a report for a period, check the preview, and publish it. Your client opens a link,
-types the password you gave them, and reads every report you've put up for that campaign, newest
-first, with no account to create; a link can also open just one report, for someone who should see
-only that one. **A published report is frozen: its numbers change only when you press Refresh
+been. You build a report for a period, check the preview, and publish it. **Every published report has
+its own link**: Share makes it, and your client opens it, types the password you gave them, and reads
+that report, with no account to create. Next week's report gets a link of its own, which can keep the
+same password. **A published report is frozen: its numbers change only when you press Refresh
 numbers, and the report then says so.**
 
 - **Part 1 — For everyone** is plain language: what your client sees, building and publishing a
-  report, changing one after it's published, team reports, the area view, client links, branding and
+  report, changing one after it's published, your reports list and Archive, team reports, the area
+  view, sharing a report (its link and its password), old links to all your reports, branding and
   History.
 - **Part 2 — Technical reference** is for developers (and Claude): the models, the snapshot build on
   the worker and its state machine, the visibility rules, series and team reports, the share-link
-  security model, opens, branding, History, the endpoints and error codes, and the migration and
-  deploy steps.
+  security model (one link per report, passwords kept sealed so they can be shown again, the switch
+  that turns old links to all your reports off), opens, branding, History, the endpoints and error
+  codes, and the migration and deploy steps.
 
 Related: [PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md) (the October 2026
 upgrade: audit, owner rulings, review log, and its "As built" section),
 [PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md](PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md) (the follow-up built
 2026-10-25: the page's guide, your organization's report week, links to one report, no accidental
-doubles), [METRICS.md](METRICS.md) (how
+doubles), [PROPOSAL_CLIENT_REPORT_LINKS.md](PROPOSAL_CLIENT_REPORT_LINKS.md) (built 2026-10-28: one
+link per report, passwords you can see again, Archive, the switch for old links to all your reports;
+its "As built" section, §K), [METRICS.md](METRICS.md) (how
 every number is counted), [SURVEYS.md](SURVEYS.md) (where the survey and support breakdowns come from,
 follow-up questions, tags), [MAPS.md](MAPS.md) (the shared map rendering), [EFFORTS.md](EFFORTS.md)
 (walk lists), [USERS.md](USERS.md) and [ROLES.md](ROLES.md) (crews, coordinators and team leads),
 [TIMEZONES.md](TIMEZONES.md) (how a report's days are anchored), [OPERATIONS.md](OPERATIONS.md) (the
 build queue, the nightly sweep, the migration), [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)
 (D11; item 34, the audit's findings, closed in code; item 38, what this upgrade stores, shows and
-keeps), [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md)
+keeps; item 44, one link per report and the passwords Doorline now keeps sealed),
+[PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md)
 (the breakdown's conditional Not a target voter row).
 
 ---
@@ -38,9 +43,9 @@ keeps), [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md)
 
 You send your client two things, separately: a link like `https://doorline.app/r/<token>` and its
 password. Anyone you give both to (the candidate, a consultant, the campaign manager) can open it.
-There is no account to create. A link opens **all your reports** for the campaign (the usual kind:
-next week's report shows up on it too) or **just one report** (for someone who should see only that
-one, like a donor or a board member); each link has its own password.
+There is no account to create. **A report's link opens that one report**, the one you pressed Share
+on, and never another: next week's report gets its own link. Share offers the same password as your last link
+on that tab, so a client can keep one password all season (see *Sharing a report*).
 
 **The password screen** says only "A report has been shared with you" until the password is right.
 It doesn't show the campaign, your organization or the link's label. Under the password box is
@@ -48,22 +53,24 @@ It doesn't show the campaign, your organization or the link's label. Under the p
 phones clear it sooner); unticked, only until the tab closes. Once signed in, every page has
 **Sign out on this device** (just **Sign out** on a phone's narrow screen).
 
-**The report hub** comes next: your organization's logo at the top if you've added one, the campaign
-and organization names, and the reports. When the campaign has more than one kind of report, tabs
-separate them: **Whole campaign**, each team, and each walk list (a dropdown on a phone). Each tab
-shows its latest report with its headline numbers ("Totals since the campaign began. The + figures are
-for Oct 13 – Oct 19."), a small chart of the doors knocked in each report, and every report newest
-first. With nothing up, it says "No reports are available on this link right
-now."
+**The report** comes next, straight away: your organization's logo at the top if you've added one,
+the campaign and organization names, then the report, with no list of other reports, no "‹ All
+reports" and no Older or Newer. The heading says "This link opens this report only." Back leaves the
+page rather than landing on a list, and the browser tab reads "{Campaign} · Report". If that report is
+taken down, the link says "This report was taken down or removed. Ask the person who sent it."; put
+back up, it works again. If the report is deleted, its link is deleted with it, so the link then says
+"This link isn't available. It may have been replaced or switched off — ask the person who sent it."
 
-**A link to just one report** skips the hub: it opens straight on its report, with no list of other
-reports, no "‹ All reports" and no Older or Newer, and the heading says "This link opens this report
-only." Back leaves the page rather than landing on a list, and the browser tab reads "{Campaign} ·
-Report" (a link to all your reports keeps "· Reports"). If that report is taken down, the link says
-"This report was taken down or removed. Ask the person who sent it." (with no "see all reports"); put
-back up, it works again. If the report is deleted, its one-report links are deleted with it, so the
-link then says "This link isn't available. It may have been replaced or switched off — ask the person
-who sent it."
+**An old link to all your reports** (the kind made before each report had its own link; none can be
+made now) opens the **report hub** instead, for as long as Doorline hasn't turned those links off (see
+*Old links to all your reports*): the same header, then every published report of the campaign. When
+the campaign has more than one kind of report, tabs separate them: **Whole campaign**, each team, and
+each walk list (a dropdown on a phone). Each tab shows its latest report with its headline numbers
+("Totals since the campaign began. The + figures are for Oct 13 – Oct 19."), a small chart of the doors
+knocked in each report, and every report newest first; the browser tab reads "{Campaign} · Reports".
+With nothing up, it says "No reports are available on this link right now." Once Doorline has turned
+those links off, opening one says "This link no longer works. Ask the person who sent it for the link
+to the latest report." instead, and a device signed in to it is signed out.
 
 **A report** reads top to bottom as a document:
 
@@ -110,23 +117,24 @@ report was published and last changed ("Published Oct 20 · Edited Oct 21", "Num
 
 - "**Numbers as of Oct 24 — the period was still running.**" when the numbers were taken before the
   period ended.
-- "**Earlier totals were updated by −120 doors since the Oct 13 – Oct 19 report.**" when the totals of
-  the previous report in the same tab changed after it was sent: a knock that arrived late, an answer
-  edited or unknocked, a canvasser moved between teams. It names the cards that moved and never says
-  why. If you later refresh that earlier report's numbers (or switch its map to areas), the line
-  disappears, since the two no longer compare like for like, until this report's numbers are built
-  again. On a link to just this report, which names no other report, the same counts read "**Totals
-  from before Oct 19 were updated by −120 doors after they were first reported.**" (Oct 19 being this
-  report's first day), on the page and in the PDF. On a Latest progress report they read "**Totals
-  through Oct 25 were updated by −120 doors after they were first reported.**" (Oct 25 being the last day
-  of the report they were first sent in).
+- "**Totals from before Oct 19 were updated by −120 doors after they were first reported.**" (Oct 19
+  being this report's first day) when the totals of the previous report in the same tab changed after
+  it was sent: a knock that arrived late, an answer edited or unknocked, a canvasser moved between
+  teams. It names the cards that moved and never says why, and it names no other report, since the
+  link opens this report alone; the page, the PDF and the builder's preview all read the same. On a
+  Latest progress report it reads "**Totals through Oct 25 were updated by −120 doors after they were
+  first reported.**" (Oct 25 being the last day of the report they were first sent in). If you later
+  refresh that earlier report's numbers (or switch its map to areas), the line disappears, since the
+  two no longer compare like for like, until this report's numbers are built again. On an old link to
+  all your reports, while it still works, the same counts name the earlier report: "**Earlier totals
+  were updated by −120 doors since the Oct 13 – Oct 19 report.**"
 - "**A home both teams visited counts in each team's report.**" on a team report.
 
-**Older** and **Newer** step through the reports in the same tab, in the hub's order (two reports
-that start the same day each point to the other), and **Download PDF** saves the report as a PDF: your
-logo at the top, the same notes, Doorline's red for Doors knocked, the door-goal bar and any bar without
-its own colour, "Powered by Doorline" at the foot, and no map. Long names and headings
-wrap onto the next line.
+**Download PDF** saves the report as a PDF: your logo at the top, the same notes, Doorline's red for
+Doors knocked, the door-goal bar and any bar without its own colour, "Powered by Doorline" at the foot,
+and no map. Long names and headings wrap onto the next line. (On an old link to all your reports, while
+it still works, **Older** and **Newer** also step through the reports in the same tab, in the hub's
+order; two reports that end the same day each point to the other.)
 
 ### The map
 
@@ -173,10 +181,10 @@ address.** A single-choice question shows its answers area
 by area only when every area has at least five answers to it; otherwise that report shows only the
 question's overall chart, and its areas read "No answers to show". How each door went shows for every
 area, even one with a single home. Two things are worth knowing: where every home that answered in an
-area gave the same answer, that tells you how each of them answered; and other reports on a link to
-all your reports (other weeks, teams or walk lists, or an exact-doors report) can narrow things down.
-A link to just one report shows only that report, but one person can hold more than one link, so
-*Before you publish* still names every shown report that could.
+area gave the same answer, that tells you how each of them answered; and other reports your client can
+open (other weeks, teams or walk lists, or an exact-doors report) can narrow things down. Each report
+has its own link, but one person can hold several links (and an old link to all your reports, while it
+works, opens them all), so *Before you publish* names every shown report that could.
 
 ### When something has changed
 
@@ -184,13 +192,15 @@ The page says what happened instead of going blank or claiming nothing was publi
 
 | What happened | What your client reads |
 |---|---|
-| You changed the password | The password screen again: "This link needs its password. If it no longer works, ask the person who sent it — it may have changed." |
-| You rotated, renewed, disabled or deleted the link (on its old address) | "This link isn't available. It may have been replaced or switched off — ask the person who sent it." |
+| You changed the password (on this link, or on every link that used it) | The password screen again: "This link needs its password. If it no longer works, ask the person who sent it — it may have changed." |
+| You gave the link a new address, renewed it, turned it off or deleted it (on its old address) | "This link isn't available. It may have been replaced or switched off — ask the person who sent it." |
 | The link expired | "This report link has expired. Ask your campaign contact for a new one." |
 | 50 wrong passwords in a day | "This link is locked after too many wrong passwords. Try again later, or ask the person who sent it." |
 | Too many tries from one connection | "Too many tries from this connection — wait 15 minutes." |
-| You took the report down, or deleted it | "This report was taken down or removed", with a way back to all reports. Your client stays signed in. |
-| The same, on a link to just that report | "This report was taken down or removed. Ask the person who sent it." No way to other reports; put back up, it opens again. Deleting the report deletes its one-report links, so they then read "This link isn't available…". |
+| You took the report down | "This report was taken down or removed. Ask the person who sent it." Put back up, it opens again. |
+| You deleted the report | Its link was deleted with it: "This link isn't available. It may have been replaced or switched off — ask the person who sent it." |
+| On an old link to all your reports, while it still works: you took a report down, or deleted it | "This report was taken down or removed", with a way back to all reports. Your client stays signed in. |
+| Doorline turned off old links to all your reports (an old link, once that happens) | "This link no longer works. Ask the person who sent it for the link to the latest report." A device signed in to it is signed out. (A link you had already turned off keeps saying "This link isn't available…".) |
 | The report's map changed while the page was open, and a door was tapped before the page read the report again | "This report was just updated — reload." |
 
 If your organization's access to Doorline is suspended or canceled, every link stops opening ("This
@@ -208,11 +218,12 @@ a page with no reports, where "No reports yet" would be):
    on your newest report makes the following one in one click, with your settings and notes copied.
 2. **Check it, then publish** — the preview is exactly what your client will see. Once it's
    published, its numbers stay as they are until you press Refresh numbers.
-3. **Share it** — Share gives you a message with the link to paste into your email or text; send the
-   link's password separately. Or open the report and press Download PDF.
+3. **Share it** — Share makes the report's link and a message to paste into your email or text. Next
+   week's link keeps this week's password, so you send a password only the first time, or after you
+   change it. Or open the report and press Download PDF.
 
 On a phone the steps are shorter: "Make a report — usually Last week; then Next report each week.",
-"Check the preview, then publish.", "Share the link; send its password separately." **More in the
+"Check the preview, then publish.", "Share its link; send the password the first time." **More in the
 Help Center →** (not on a phone) opens the Help Center's client-reports guide. **Got it** hides the
 guide for you, in this browser (a private window shows it again), and puts the keyboard on **How it
 works**, which brings it back.
@@ -221,7 +232,8 @@ Open the campaign, go to its **Client Reports** tab, and press **New report**:
 
 - **Covers:** **Whole campaign**, or **A team** (pick one, or make one with **+ New team**; see *Team
   reports*), and optionally **Only one walk list**. A walk list's name appears on your client's report,
-  so name walk lists accordingly.
+  so name walk lists accordingly. New report now opens on an open (not archived) walk list and marks
+  archived ones "(archived)", listed last.
 - **Dates:** a list of choices, each with its dates written out, the first one picked. Report dates
   follow **your organization's report week**, Monday to Sunday unless an admin changes it (below).
   - **A line above the choices says what the dates decide:** "Your report shows totals for the whole
@@ -298,9 +310,12 @@ before making another: "You already have a draft Whole campaign report for Oct 1
 **Open the draft** or **Make a second one**; for a published one, "You already published a Whole
 campaign report for Oct 19 – Oct 25. To bring its numbers up to date, open it and press Refresh
 numbers." with **Open it** or **Make a second one**; for one that's taken down, "You already published
-a Whole campaign report for Oct 19 – Oct 25, taken down." Under the buttons: "Your client sees both
-once both are published." (for a taken-down one, "Your client sees only the new one; the taken-down
-one stays hidden unless you put it back up."). **Make a second one** makes exactly what you pressed
+a Whole campaign report for Oct 19 – Oct 25, taken down." An archived one still holds its dates and says
+so ("You already published a Whole campaign report for Oct 19 – Oct 25 — it's archived."; a draft or a
+taken-down one ends the same way), with **Unarchive** beside **Open it**, which puts it back in your
+list right there. Under the buttons: "Each one gets its own link once it's published." (beside a
+taken-down one, "The taken-down one stays hidden until you put it back up. The new one gets its own
+link once it's published."). **Make a second one** makes exactly what you pressed
 Create draft for: the same tab, dates and title. Typing a title or your own dates while the question is
 up takes it away, as picking another date choice does — press **Create draft** again with what's on
 screen. If two people press **Create draft** for the same tab
@@ -366,14 +381,13 @@ publishing:
 - a shown follow-up chart whose parent question is hidden ("its total shows how many took that
   path"), or a shown voter group that counts answers to a hidden question;
 - on an area report, a question that shows no answers by area ("Large areas usually fix it" — said
-  only when the numbers were built in small areas), and other reports on the same link that could
-  narrow down what its areas keep hidden;
+  only when the numbers were built in small areas), and other reports your client can open that could
+  narrow down what its areas keep hidden ("“Support Smith?”: other reports your client can open could
+  narrow down the answers its areas keep hidden — …", naming each one);
 - answers given under an earlier version of your survey, from before Doorline kept a record of its
   follow-up questions, when a chart is hidden and the map is on: "If a map question used to be a
   follow-up of a question you hide, its answers could hint at the hidden one — check your map
   questions";
-- no link your client could open, and the fix ("No link yet — after you publish, Share makes one.",
-  "Your only link expired — renew it.", …);
 - notes copied by **Next report** that you haven't reviewed, with **I've reviewed the copied notes**
   (the reminder pointing here shows on drafts only — Publish warns about unreviewed notes, and once
   a report is out there's nothing left to tick);
@@ -394,7 +408,8 @@ publishing:
   **entered on Door Outcomes** instead of a canvasser collecting them at a door. Both count like any
   other answer.
 
-None of this reaches your client.
+None of this reaches your client. Nothing here is about links: a draft never has one, and Share makes
+the report's link once it's published.
 
 **Worth a look**, on a published report. Before you publish is for drafts; once a report is out, a
 short **Worth a look** box keeps the three checks that can still matter, and only when they apply:
@@ -411,20 +426,13 @@ short **Worth a look** box keeps the three checks that can still matter, and onl
 
 ## Publishing
 
-**Publish…** opens a confirm that repeats what matters (a period not over, numbers over an hour old
-with **Recompute first**, knocks that arrived during the build, mock-GPS flags, copied notes), then
-"Your client sees exactly the preview" and which links will show it: "It shows on 2 links: Candidate,
-Consultant", or why none can. Only links that can open this report count: every link to all your
-reports, and this report's own one-report links (a link to another report never does). With none
-that works, a link that could open this report decides the words, since each names a fix: "Your only
-link expired — renew it.", "Every link is locked — unlock or rotate one.", "Your only link is
-disabled — enable it." and so on. Only when no link of any kind opens this report: "No link opens
-this report yet. After you publish, Share makes one." if the campaign has links to other single
-reports, or "No link yet — after you publish, Share makes one." if it has no link at all (the confirm
-offers nothing to make a link with; **Share** does, once the report is up). The same line shows in
-*Before you publish*, and on a published report's row, where the other-reports case reads "No link
-opens this report — your links open other reports. Share makes one." and no link at all reads "No
-link yet — create one."
+**Publish…** opens a confirm, "Publish this report?", whose subtitle says what happens next: "Oct 19 –
+Oct 25 — after you publish, Share makes its link for your client." (while an old link to all your
+reports still works, "Oct 19 – Oct 25 — your old link to all your reports shows it as soon as you
+publish; Share makes its own link."). It repeats what matters (a period not over, numbers over an hour
+old with **Recompute first**, knocks that arrived during the build, mock-GPS flags, copied notes), then
+"Your client sees exactly the preview." A draft never has a link of its own, so the confirm counts
+none.
 
 **Publishing is instant and freezes exactly what your screen shows.** Pressing **Publish…** while
 you're still typing waits until your last change is saved. If a recompute is still queued or running,
@@ -496,40 +504,12 @@ server confirms it, so a later change by someone else is never offered back to y
 out of Doorline, with a change still waiting to save only makes the browser ask first; it doesn't save
 it.
 
-Once it's up, the builder says "Published. Your client can see it now." with **Copy the message for
-your client**. When no link can open this report yet, it says "Published — create a link so your
-client can open it." instead, with **Share**.
+Once it's up, the builder says "Published — Share makes its link for your client." with **Share**.
 
-**Share** is on every report your client can see: on its row, and in the builder's header (not on a
-draft or a taken-down report, and not while an edit is open: "Finish or cancel the edit first.").
-Its title names the report ("Share "Oct 19 – Oct 25 · Whole campaign""), and it says "Paste the
-message into your own email or text. It never includes the password — send that separately." It
-waits for your links list ("Loading links…", or "Couldn't load the links." with the reason and **Try
-again**; opening Share again after a failure reads the list again too), so it never offers to make a
-link the report already has.
-
-- **Link**: the links that can open this report, links to all your reports first, each named by who
-  it's for and what it opens ("Candidate — opens all your reports", "Board — opens only this
-  report"), with the address and **Copy link**.
-- **Make a link** is always there (pressed, it opens with the keyboard on its first choice), and it's
-  the main action, already open with *All your reports* picked, when no link opens the report: "**All
-  your reports** (the usual choice) — one link and one password; next week's report shows up on it
-  too." or "**Just this report** — for someone who should
-  see only this one (a donor, a board member). It has its own password, and next week's report won't
-  be on it." Then "Label (only you see it)", **Expires**, "A password is shown once, right after the
-  link is made — copy it then.", and **Create link**. The password is made for you and shown once,
-  right there, with the keyboard on its **Copy password**: "Password for Board: … **Copy password** —
-  shown once. Send it separately from the message. Lost it? Change password on the link." Every link
-  you make in one Share keeps its own password line there until you press **Done**, so making a second
-  link doesn't hide the first one's password. (To set your own password, use **+ New link** in the
-  links panel.) An existing link's password can't be shown again.
-- **Message (no password in it)**, with **Copy message**: the report, its dates and its headline
-  numbers, with a link straight to the report. For example: *"The Volunteer team report for Oct 13 –
-  Oct 19 is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). Open it here:
-  https://doorline.app/r/…/reports/… — use the password I sent you."* Its last words follow the link:
-  "— use the password I sent you." on a link to all your reports, "— use the password I sent you for
-  this report." on a one-report link made before, and "— I'll send you its password separately." on a
-  link made just now in Share.
+**Share** is on every published report, shown or taken down: on its row, and in the builder's header
+(not on a draft, and not while an edit is open: "Finish or cancel the edit first."). It makes the
+report's link the first time and manages it after that, and gives you the message to send: see
+*Sharing a report*.
 
 ## Changing a published report
 
@@ -581,18 +561,31 @@ own confirm:
 - **Take down** hides the report from your client but keeps it exactly as it was (numbers, map and
   publish date), and cancels any build or new numbers waiting for review. **Put back up** shows it
   again, unchanged, with its original publish date. A taken-down report still changes only through
-  Edit or Refresh numbers. Its confirm names the report's own one-report links that someone could
-  still open: "Board, a link to just this report, shows "taken down" until you put it back up." (for
-  several, "Board and Donor, links to just this report, show "taken down" until you put it back
-  up."). While it's down, each of those links says so in the links panel too: "Its report is taken
-  down — the link shows “taken down” until you put it back up."
-- **Delete** (from the row's menu) removes it for good. On a report your client can see, the warning
-  names the links it shows on (only links that can open it) and suggests Take down instead. **Deleting
-  a report deletes its one-report links**, and the warning says so: "Its link Board (just this
-  report) stops working for good." Anyone opening such a link then reads "This link isn't available.
-  It may have been replaced or switched off — ask the person who sent it." Each one gets a History row,
-  "Board · Link deleted", with "Deleted with its report" under it. An admin can tick **Also erase its
-  earlier text from History** in the same step.
+  Edit or Refresh numbers. Its confirm (on the row and in the builder) adds, when the report has a
+  link someone could still open: "Its link shows “taken down” until you put it back up." While it's
+  down, the row's link line says the same, and Share still manages the link but won't copy its message.
+- **Delete** (the last button on the row) removes it for good, **and its link with it**. The warning
+  follows the report and its link:
+  - shown, with a link: "Your client can open the Oct 19 – Oct 25 report right now. Deleting it also
+    deletes its link — anyone who opens it then reads “This link isn't available.” To hide it but keep
+    it, use Take down instead. This can't be undone." (the first sentence only while that link still
+    opens; a report that got two links before one link per report reads "its links — anyone who opens
+    one");
+  - shown, no link of its own: "The Oct 19 – Oct 25 report has no link of its own, so this deletes only
+    the report. This can't be undone." — or, while an old link to all your reports still works, "The
+    Oct 19 – Oct 25 report has no link of its own, but your old link to all your reports shows it —
+    deleting it takes it off that too. This can't be undone.";
+  - taken down, with a link: "Your client already can't see the Oct 19 – Oct 25 report — it was taken
+    down. Deleting it also deletes its link, for good. This can't be undone." (with none, "…Deleting it
+    removes it for good.");
+  - a draft: "The Oct 19 – Oct 25 draft and its numbers are deleted. This can't be undone."
+
+  Before the links list has loaded it says only "The Oct 19 – Oct 25 report and any link of its own
+  are deleted for good. This can't be undone." Anyone who opens a deleted report's link reads "This
+  link isn't available. It may have been replaced or switched off — ask the person who sent it." The
+  link's History row names its report, "Oct 19 – Oct 25, 2026 · Whole campaign report · Link deleted",
+  with "Deleted with its report" under it. An admin can tick **Also erase its earlier text from
+  History** in the same step.
 
 **Example: fixing answers after the report went out.** A canvasser picked *Volunteer Request*
 whenever a voter turned down a yard sign, and last week's report already went to the client. An org
@@ -601,6 +594,44 @@ admin fixes the answers on Door Outcomes with **Edit answers…** (see
 until someone opens it and presses **Refresh numbers**. The dialog shows the headline cards unchanged
 (an answer edit keeps every voter surveyed); **Apply** puts the corrected answer counts in front of
 the client, marked "Numbers refreshed".
+
+## Your reports list, and Archive
+
+Each tab lists its reports newest first, by their last day, and a line between two reports marks any
+days no report covers. A row shows the period ("All time · Sep 14 – Oct 28" on a Latest progress
+report), **Draft**, **Published** or **Taken down Oct 26**, when it was edited or refreshed, and its
+headline numbers. Under the numbers a published report has two short lines:
+
+- **How its link is doing**: "Link: active · expires Jan 25", "No link of its own yet — Share makes
+  one.", "Link expired Jan 25 — Share to renew it.", "Link locked after 50 wrong passwords — Share to
+  unlock it.", "Link turned off — Share to turn it on.", or, on a taken-down report with a link, "Its
+  link shows “taken down” until you put it back up." Nothing on a draft, nor on a taken-down report with
+  no link, nor until your links list has loaded.
+- **Its visits**: "About 5 visits · your organization: 2 visits" (see *Who opened it*).
+
+**Every action is a button**, with nothing hidden behind a ⋮. On the left: **Open**, **Share** (on a
+published report, shown or taken down) and **Next report** (on the newest report of its kind). On the
+right: **Archive** (or **Unarchive**), **Take down** (or **Put back up**) and **Delete**, last. On a
+phone the two groups sit on two lines. A draft has Open, Next report when it's the newest, Archive and
+Delete.
+
+**Archive tidies your list and nothing else.** Your client's link keeps working, and the report still
+counts for its dates. Archive moves the report into a folded **Archived (N)** list at the bottom of its
+tab and says "Archived — it's under Archived (4) at the bottom. Undo". **Unarchive**, on the report
+under Archived, brings it back. Drafts can be archived too. A tab's count leaves archived reports out,
+and a tab whose reports are all archived and folded away says "Every report here is archived — open
+Archived below, or press New report."
+
+- **The newest report of a tab, and its newest Latest progress report,** aren't offered Archive (that's
+  where Next report lives), and they're never folded away: if one ends up archived (say, a newer one was
+  deleted), it stays in the list, marked **Archived**, with Unarchive.
+- **An archived report still counts for its dates**: the lines that mark days no report covers count
+  it, and New report still knows those dates are taken ("… — it's archived.", with **Unarchive**; see
+  *No accidental doubles*).
+- **Opened in the builder**, an archived report says "Archived — it's out of your list. Nothing changes
+  for your client." with **Unarchive**; so does the report Next report lands on when it's archived.
+- **Delete** is unchanged: the report is gone for good, and its link with it (see *Changing a published
+  report*).
 
 ## Next report
 
@@ -622,8 +653,10 @@ builder says so.
   named.
 - **Pressed twice, it still makes one draft**, and both presses open it. If the tab already has a
   report for exactly the next dates (made in New report, or by another press), Next opens that one
-  instead of making another; any other later report in the tab means this isn't the latest report any
-  more: "A later report of this series already exists — open it instead."
+  instead of making another, even one that's archived (the builder then says "Archived — it's out of
+  your list. Nothing changes for your client." with **Unarchive**); any other later report in the tab
+  means this isn't the latest report any more: "A later report of this series already exists — open
+  it instead."
 
 ## Latest progress
 
@@ -638,9 +671,12 @@ in New report, or with **Pick dates** and no first day.
   when its numbers were built after that day ended). The headline cards show the totals with no "+N"
   pill; everything else (contact breakdown, support, survey charts, voter groups, door goal, map) reads
   as on any report. There is no "Numbers as of … the period was still running" note and no quiet-week
-  note. The PDF matches, named "…-all-time-report-2026-09-14-to-2026-10-28.pdf". On the client's list it
-  shows "All time" beside its dates, with no "+" figure, and the Latest card says "Totals since the
-  campaign began, as of Oct 28."
+  note. The PDF matches, named "…-all-time-report-2026-09-14-to-2026-10-28.pdf". On an old link to all
+  your reports, while it still works, the client's list shows "All time" beside its dates, with no "+"
+  figure, and the Latest card says "Totals since the campaign began, as of Oct 28."
+- **Its link shows the totals through its last day**, like any report's. For newer totals, press
+  **Next report** on it: the new Latest progress report gets its own link to send, and Share offers the
+  same password.
 - **Your weekly reports carry on unaffected**, even when both kinds share dates (in a campaign's first
   week, "This week" and Latest progress can): each kind's "you already have this report" check and
   double-press guard look only at its own kind. New report's first choice, the week nudge, the "not
@@ -652,9 +688,9 @@ in New report, or with **Pick dates** and no first day.
   if that already runs through today, and otherwise says a later report already exists.
 - **Before you publish** says what "through today" leaves out: "Today isn't over yet: doors knocked
   after these numbers were built aren't in them."
-- **Lists go by the last day**, newest first — the reports list, the client's list and its Older /
-  Newer — so today's Latest progress report sits on top. For reports that don't overlap, that's the same
-  order as before.
+- **Lists go by the last day**, newest first — your reports list, and on an old link to all your
+  reports the client's list and its Older / Newer — so today's Latest progress report sits on top. For
+  reports that don't overlap, that's the same order as before.
 - The Share message quotes its totals only: "The report through Oct 28 is up: 3,412 doors knocked so far
   and 1,980 surveys. Open it here: …"
 
@@ -724,73 +760,187 @@ confirm warns ahead, the Refresh review names them before you apply, and **Worth
 once the areas are up. On a draft, the choice takes effect at the next Recompute. On a published
 report, **Switch to areas** is an edit, and going back is a Refresh.
 
-## Client links
+## Sharing a report
 
-The **Client links** panel on the tab holds the campaign's links: "A link opens all your reports, or
-just one. Each has its own password — send it separately." A campaign can have several (one for the
-candidate, one for a consultant, one for a board member's single report), each with its own password,
-expiry and counts. Links to all your reports are listed first; links to one report fold under **Links
-to one report (N)**, closed until you open it. Each row says what it opens: "Opens all your reports",
-or "Opens only the Oct 19 – Oct 25 report (Whole campaign)", and while that one report is taken down,
-"Its report is taken down — the link shows “taken down” until you put it back up." If the list can't
-be read, the panel says "Couldn't load the links." with **Try again**.
+**Every report has one link of its own**, and **Share** is where you make it and manage it: on every
+published report, shown or taken down, on its row and in the builder's header. Your client's link goes
+straight to that report; it never shows another report, and next week's report never appears on it.
+Share's title names the report ("Share “Oct 19 – Oct 25 · Whole campaign”"), and it says "Paste the
+message into your own email or text. It never includes the password." It waits for your links list
+("Loading links…", or "Couldn't load the links." with the reason and **Try again**; opening Share again
+after a failure reads the list again too), so it never offers to make a link the report already has.
 
-- **+ New link**: **Opens**: **All your reports**, or **One report only** with the report picked from
-  the ones your client can see now ("— next week's report won't be on it."; with none published yet,
-  "— publish a report first"; while your reports are still loading, "— loading your reports…"; if
-  they couldn't be loaded, "Couldn't load your reports." with **Try again**, and opening New link
-  again reads them again too). A
-  one-report link is always made for the report the box shows, and **Create link** waits until
-  there is one: it never quietly becomes a link to all your reports. Then a **Label** (only you see
-  it), **Expires** after 30, 90, 180 or 365 days
-  (90 by default; "You can extend it later, up to a year from today"), and a **Password**: **Generate
-  a strong one (shown once)** (12 characters, without look-alike letters) or **Set my own** (12 or
-  more characters). A link to one report can only be made for a published report that isn't taken
-  down. **Link ready** then shows the whole address and the password once, with **Copy link** and
-  **Copy message** ("Here's the link to our reports: … — I'll send the password separately.", or "…to
-  this report…" for a one-report link); the password is stored scrambled and can't be shown again
-  (lost it? **Change password**). **Share** makes links too, from a report (see *Publishing*).
-- **A link to one report** reaches that report and nothing else: no list of other reports, no Older or
-  Newer, and none of their maps or door details. It's made for one report and never changes to
-  another; next week's report won't be on it. Deleting the report deletes it.
-- **Extend** offers only later dates, each shown as a date, up to a year from when the link was made.
-  An **expired** link offers only **Renew** (no Rotate, Unlock now or lock warnings): it gets a **new
-  address** and a new year, keeps its password, and you send your client the new link. The old address,
-  and every copy of it ever forwarded, stays dead. Renewing a disabled link keeps it disabled until you
-  enable it.
-- **Change password** (12 or more characters), **Rotate** (a new address, same password), **Renew**
-  and **Disable** all **sign everyone out**. The confirms say what stays: Rotate's "It gets a new
-  address, and everyone using the old one is signed out. The password stays the same. It still expires
-  Jan 21" (adding "It also lifts the lock" on a locked link, and on a disabled link that the new address
-  stays closed until you enable it); Disable's "Nobody can open it until you enable it again. Everyone
-  using it now is signed out — once you enable it, they need the password again." Adding a password to a
-  link that never expired also gives it an expiry, which you can extend. **Enable** turns a disabled
-  link back on; **Delete** removes it for good. A password can be replaced but never removed.
-- **Last opened** is the last time someone signed in to the link opened it. Reaching the password
-  screen, or guessing wrong, doesn't count.
+**No link yet.** Share opens on "Make this report's link":
 
-**Wrong passwords.** The row shows a link's wrong passwords whenever there are any, on a locked or
-expired link too, counting only what's above zero: "12 wrong passwords since Oct 24, 9:12 AM EDT · 30
-this week · 41 in total", "3 wrong passwords this week · 41 in total", or "41 wrong passwords in
-total". The amber **Wrong passwords** badge is only for the last 24 hours (and not on a locked or
-expired link, which has its own). **No link accepts more than 50 wrong passwords in any 24 hours.** At 50 it locks ("Locked until Oct 25, 9:12 AM after 50 wrong passwords. Devices
-already signed in still work"), and since 50 wrong passwords is never your client, it says "Someone
-else has this link" and suggests **Rotate**. **Unlock now** lets the right password in again at once.
-Rotating also clears the week's count; the lifetime total stays.
+- **Password**, one of:
+  - **Same as your last link**, picked for you when this report's tab has a link whose password
+    Doorline kept: "Same as your last link (Paid team · Oct 12 – Oct 18)". When only another tab has
+    one, it's offered but not picked, "Same as the Whole campaign · Oct 12 – Oct 18 link", since that
+    tab may go to someone else, and Make one up for me is picked instead.
+  - **Make one up for me**: 12 characters, without look-alike letters.
+  - **Type my own**: 12 or more characters ("12 or more characters" under the box; "Use at least 12
+    characters." if you press Create link with fewer). Under it, always: "Everyone who manages this
+    campaign can see this password later. Don't use one you use anywhere else."
+- **Expires**: 30, 90, 180 or 365 days, each with its date ("90 days — until Jan 25, 2027"), 90 unless
+  you pick another.
+- **Create link**. There's no label to type and no "which reports" choice. New links have no label;
+  older links keep theirs.
+
+Right after **Create link**, a password made up or typed shows in plain text with **Copy password**,
+"Its password: k7Hq9mXrW2pZ", until you press **Done**, so it's never unseen, even when Doorline can't
+keep a copy. Not after Same as …: your client already has that one. If someone else made this report's
+link a moment before you, Share shows theirs: "Someone made this report's link a moment ago — here it
+is. Its password is the one they chose." If Same as …'s password can't be copied any more: "Your last
+link's password can't be copied any more — choose Make one up for me or Type my own."
+
+**Has its link.** From then on, Share always shows that same link:
+
+- **Link**: its address, with **Copy link**.
+- **Password**: dots, with **Show** ("Showing…"; "Couldn't show the password." with **Try again**),
+  which puts the password on screen with **Copy password** beside it; it's gone again when Share
+  closes. Then **Change password** (below).
+- **Its state**: a badge (**Active**, or "Expires in 5 days" / "Expires today" in its last week;
+  **Turned off**, **Expired**, **Locked**, **Wrong passwords**, **Short password**), "Expires Jan 25"
+  and "Last opened Oct 26" (or "Not opened yet"), and a sentence where one helps: "Nobody can open it
+  until you turn it on.", "Renew gives this link a new address — send your client the new link.",
+  "Locked until Oct 25, 9:12 AM after 50 wrong passwords. Devices already signed in still work.",
+  "This link's password is shorter than 12 characters — change it.", then its wrong passwords, if any
+  (*Wrong passwords*, below).
+- **Buttons**: **Extend** (or **Renew**, once it has expired), **Unlock now** when it's locked, **New
+  address** (not on an expired link) and **Delete link**, plus **Turn on** on a link that's turned off.
+  There's no Turn off: **Take down** does that job for one report, and only a link from before can be
+  off. New address and Delete link ask first, right there in Share: "Give this link a new address?" —
+  "It gets a new address, and everyone using the old one is signed out. The password stays the same.
+  It still expires Jan 25, 2027." (adding "It also lifts the lock." on a locked link) and "Send your
+  client the new link afterwards." (on a link that's turned off, "It stays turned off — nobody can open
+  the new address until you turn it on."); "Delete this link?" — "Anyone using it loses access for
+  good. This can't be undone."
+- **Message (no password in it)**, with **Copy message** (below). The message is only made from a link
+  your client can open: on a link that's turned off, expired or locked, Copy message is off and the line
+  says what to do first — "Turn it on before you send it.", "Renew it before you send it." or "Unlock it
+  before you send it."
+
+**Passwords you can see again.** Doorline keeps each new link's password, encrypted, so the people who
+manage the campaign, its org admins and the campaign's team leads, can **Show** it later and copy it
+again. When it can't be shown, a link made before this change (Doorline only ever kept a scrambled
+check of its password) or a moment when Doorline's key isn't available, Share says: "This link's
+password can't be shown. To have one you can see, change it — then send your client the new password."
+Showing a password isn't written to History: everyone who can show one can already open the report and
+change the password.
+
+**Change password** sets a new one: **Make one up for me** or **Type my own** (with the same warning).
+When other links of the campaign use the same password (copied with Same as …, or typed again by
+hand), it offers to change those too, ticked: "Also change it on the 3 other links that use this
+password (Whole campaign, Paid team)", so a leaked season password is replaced in one step. Links made
+before this change aren't included (change those one by one), and nor are old links to all your
+reports. Under it: "Changing it signs out anyone using the old one — send your client the new
+password." and, while an old link to all your reports still works, "Your old link to all your reports
+keeps its own password — if that leaked too, change it or delete it under Old links to all your
+reports." The new password shows straight away ("Its password: …", with Copy password). If someone
+else changed some of those links in the same moment: "Changed on 1 of the 3 other links — the rest were
+changed by someone else a moment ago; check their passwords." (none of them: "It wasn't changed on the
+other link — someone changed it a moment ago; check its password.", or "It wasn't changed on the other 3
+links — someone changed them a moment ago; check their passwords."). **When someone who manages the campaign
+leaves, change the password the same way**, since they still know it.
+
+**Doorline staff can't see or type link passwords.** Working in your organization under a support
+grant, staff can make a link with Make one up for me or Same as …, and change a password by making one
+up, but never see one and can't type one in. Share leaves Type my own out for them (making a link, it
+says "Doorline staff can't type a link password — make one up or use Same as …"), says "Doorline staff
+can't view link passwords — the campaign's admins and leads can see it in Share." where a new password
+would show, and "Doorline staff can't view link passwords." in place of Show. Without Doorline's key
+(see *Passwords you can see again*), a password staff made up could be seen by nobody, so staff can't
+make one up then, nor change one; and Same as … needs the key too.
+
+**The message** you paste into your own email or text names the report, its dates and its headline
+numbers, with a link straight to it: *"The Volunteer team report for Oct 13 – Oct 19 is up: 3,412 doors
+knocked so far (+412 in that period) and 1,980 surveys (+260). Open it here: https://doorline.app/r/… —
+use the password I sent you."* It never includes the password. Its last words follow what Share just
+did: a password made up or typed there, "— I'll send you its password separately"; right after Change
+password, "— I'll send you the new password separately"; Same as …, or a link opened again later, "—
+use the password I sent you". A Latest progress report's message quotes its totals only: "The report
+through Oct 28 is up: 3,412 doors knocked so far and 1,980 surveys. Open it here: …".
+
+**A taken-down report** keeps Share, so you can still manage its link, but its message can't be copied
+until it's back up: "This report is taken down — its link shows “taken down” until you put it back
+up." (with no link yet, "This report is taken down. Put it back up, then make its link.").
+
+**A report that got two links before this change** keeps both, and both keep working. Share manages the
+main one (the newest that works, else the newest) and lists the other under it, "Also opens this report:
+Board · made Oct 25 · Delete" ("a link made Oct 25" without a label), so it can still be revoked.
+
+**Extend** offers only later dates, each shown as a date, up to a year from when the link was made ("This
+link already lasts as long as it can — a year from when it was made. When it expires, Renew gives it a
+new address and a new year."). An **expired** link offers only **Renew** (no New address, Unlock now or
+lock warnings): it gets a **new address** and a new year, keeps its password, and you send your client
+the new link. The old address, and every copy of it ever forwarded, stays dead. Renewing a link that's
+turned off leaves it off until you turn it on. **Change password**, **New address**, **Renew** and a link
+being turned off all **sign everyone out**. A password can be changed but never removed.
+
+**Last opened** is the last time someone signed in to the link opened it. Reaching the password screen,
+or guessing wrong, doesn't count.
+
+### Wrong passwords
+
+Share shows a link's wrong passwords whenever there are any, on a locked or expired link too, counting
+only what's above zero: "12 wrong passwords since Oct 24, 9:12 AM EDT · 30 this week · 41 in total",
+"3 wrong passwords this week · 41 in total", or "41 wrong passwords in total". The amber **Wrong
+passwords** badge is only for the last 24 hours (and not on a locked or expired link, which has its
+own). **No link accepts more than 50 wrong passwords in any 24 hours.** At 50 it locks ("Locked until
+Oct 25, 9:12 AM after 50 wrong passwords. Devices already signed in still work."), and since 50 wrong
+passwords is never your client, Share says "Someone else has this link — 50 wrong passwords is never your
+client. Give it a new address." (or, after 50 in a week, "50 or more wrong passwords this week — someone
+else may have this link. Give it a new address."). **Unlock now** lets the right password in again at
+once. A new address also clears the week's count; the lifetime total stays.
 
 **Older links.** A link whose password turns out to be shorter than 12 characters is flagged **Short
-password** the next time it's used. A link from before mid-July 2026 may carry **No password** ("Add a
-password") or **Never expires** ("Set an expiry"); adding a password also gives it an expiry, and
-Extend gives a never-expiring link its first one. An admin can switch off every remaining open link in
-the organization at once (the revoke-legacy switch; Part 2).
+password** the next time it's used. A link from before mid-July 2026 that has no password is always an
+old link to all your reports: its row on the *Old links to all your reports* card (below) offers **Add a
+password** while it still works, and adding one gives it an expiry too.
 
-**Who opened what.** Each published report's row says how often it was opened: "Opened via Candidate:
-about 2 visits" (the line waits for the links list, which names the links). The page counts a visit
-once per browser, per report, per day, so it's an estimate.
-Visits by people signed in to your organization, and by Doorline staff, are listed apart ("your
-organization: 3 visits"), so checking your own work doesn't inflate your client's number. A report
-published before these counts existed also shows "N views before per-link counts": the old total,
-which no longer changes.
+### Old links to all your reports
+
+Before each report had its own link, a link could open **all** of a campaign's published reports, on
+every tab (whole campaign, teams and walk lists), and each new report appeared on it the moment it was
+published. None can be made now. **Doorline is turning them off, for every organization at once**;
+until it does, they keep working as before. Once it does, anyone who opens one reads "This link no longer
+works. Ask the person who sent it for the link to the latest report.", and a device signed in to one is
+signed out at once (a link that was already turned off keeps saying "This link isn't available…").
+
+While a campaign has any, they sit in a small card above your reports, at every width, **Old links to
+all your reports**:
+
+- **While they still work**: "Each report now has its own link: press Share on a report to send it.
+  Doorline will turn these old links off." Each row says what the link does now: "Candidate · still
+  opens every report · last opened Oct 26", "A link made Jul 3 · expired Oct 30", "Board · turned off".
+  One that still works has **Change password** (**Add a password** on one without) and **New address**;
+  every row has **Delete**. A new password or a new address shows right there, once, with its Copy
+  button ("Its password: …", "Its new address: … Copy link"): an old link's password is never kept, so
+  it can't be shown again later. Delete on a working link asks first: "Your client loses every report on
+  it now, not on the day Doorline turns these off. Send them each report's own link first. This can't be
+  undone." (on any other: "Nobody can open it. This removes it from your list.").
+- **Once Doorline has turned them off**, it's titled "Old links to all your reports — turned off": "These
+  opened every report of this campaign and no longer work. Each report now has its own link: press Share
+  on a report to send it." Each row is the link and when it was last opened, with **Delete** ("It no
+  longer works. This removes it from your list.").
+
+None can be turned back on, renewed or extended. Doorline staff under a support grant aren't offered
+Change password on one: its new password could be seen by nobody.
+
+**Moving a client over.** On each tab your client follows, press **Share** on the newest published report
+and send its link. To keep the password your client already has, choose **Type my own** and type it (it
+needs 12 or more characters; a shorter one can't be kept, so make up a new one and send it); on that
+client's other tabs, choose **Same as** that link.
+
+### Who opened it
+
+Each published report's row, and the builder's header, say how often it was opened: "About 5 visits ·
+your organization: 2 visits". That's every visit the report ever had, through any link it ever had: its
+own, an extra one from before, an old link to all your reports, or a link since deleted. The page counts
+a visit once per browser, per report, per day, so it's an estimate. Visits by people signed in to your
+organization, and by Doorline staff ("Doorline staff: 1 visit"), are counted apart, so checking your own
+work doesn't inflate your client's number. A report published before these counts existed also shows "N
+views before per-link counts": the old total, which no longer changes.
 
 ## Report branding
 
@@ -804,17 +954,25 @@ Team leads see the logo, "Set by an admin.", or "No logo yet."
 ## History
 
 **History** on the tab opens the client-report history: drafts created, publishes, edits, refreshes,
-take-downs, deletes, team changes and every link change (including a day with 10 or more wrong
-passwords, and each lock), newest first, each with who did it and when.
+take-downs, archives and unarchives, deletes, team changes and every link change (including a day with
+10 or more wrong passwords, and each lock), newest first, each with who did it and when.
 A report's row names its period and its tab, so four tabs' reports for one week read apart: "Oct 12 –
 Oct 18, 2026 · Paid team report · Published", "Oct 12 – Oct 18, 2026 · Whole campaign report ·
-Published" (a row from before tabs reads by its period alone). Team rows name the team: "Volunteer
-team · Team ended", "Volunteer team · Team continued" (with how many crews it continues with), "Paid
-team · Crews changed" ("1 crew → 2 crews"). A row carries the name the team had at the time; an older
-"Team ended" or "Crews changed" row uses the team's current name, or "A team". A one-report link that
-went with its report reads "Board · Link deleted", with "Deleted with its report" under it. It shows
-the latest 200. These rows never appear in the campaign's general History or in the phone app, and a
-link row never holds the link's address or password.
+Archived" (a row from before tabs reads by its period alone). **A link's row names its report the same
+way**, since new links have no label: "Oct 12 – Oct 18, 2026 · Paid team report · Link created", then
+"Link password changed — everyone was signed out", "Link given a new address — everyone was signed
+out", "Link turned off — everyone was signed out", "Link turned on", "Expired link renewed — new
+address", "Link deleted". A password changed on several links at once says so: the link you changed
+reads "Also changed on 3 other links that used the same password", and each of the others "Changed
+along with other links that used the same password". A link deleted with its report adds "Deleted
+with its report"; a deleted old link to all your reports reads "An old link to all your reports · Link
+deleted"; a link row from before links were named by their report reads by the link's label, or "A
+client link". Team rows name the team: "Volunteer team · Team ended", "Volunteer team · Team
+continued" (with how many crews it continues with), "Paid team · Crews changed" ("1 crew → 2
+crews"). A row carries the name the team had at the time; an older "Team ended" or "Crews changed" row
+uses the team's current name, or "A team". It shows the latest 200. These rows never appear in the
+campaign's general History or in the phone app, and a link row never holds the link's address or
+password. Showing a link's password isn't written here.
 
 **Team leads on the campaign can read it, including the earlier text of every edit.** Anyone who can
 edit the report can **Restore** an earlier text, as a new edit. The confirm says when your client sees
@@ -828,9 +986,14 @@ if **Next report** copied it into a later draft, the confirm offers to remove it
 ## Who can do what
 
 Org admins, and team leads on campaigns they run, can do everything on this tab (owner ruling
-2026-10-23: full control), with four exceptions that are admins only: the report logo, the
-organization's report week (leads see it, "set by an admin"), Erase in History, and switching off
-every legacy open link in the organization at once.
+2026-10-23: full control), Show a link's password and Archive included, with three exceptions that are
+admins only: the report logo, the organization's report week (leads see it, "set by an admin") and
+Erase in History. A team lead sees the password of every link on the campaigns they run, links sent to
+other people included, so a client given a team-lead account can see them too.
+
+**Doorline staff** working in your organization under a support grant can make a link (with a password
+made up, or Same as …) and change a password by making one up, but can never see a link's password or
+type one in.
 
 ## What this doesn't change
 
@@ -845,7 +1008,7 @@ only; and the phone app, which shows nothing from this tab. No new company recei
 
 | Concern | Files |
 |---|---|
-| Admin routes | [routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js) (reports, series, builds, preview), [routes/admin/clientReportShares.js](../server/src/routes/admin/clientReportShares.js) (links, mounted at `/admin/client-reports/shares` **ahead of** the reports router in [routes/index.js](../server/src/routes/index.js) so `/:id` never reads `shares`), [routes/admin/clientReportSettings.js](../server/src/routes/admin/clientReportSettings.js) (the organization's report week, mounted at `/admin/client-reports/settings`, also ahead of it), [routes/admin/branding.js](../server/src/routes/admin/branding.js), History in [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js) |
+| Admin routes | [routes/admin/clientReports.js](../server/src/routes/admin/clientReports.js) (reports, series, builds, preview, Archive), [routes/admin/clientReportShares.js](../server/src/routes/admin/clientReportShares.js) (links, Show and Change password, mounted at `/admin/client-reports/shares` **ahead of** the reports router in [routes/index.js](../server/src/routes/index.js) so `/:id` never reads `shares`), [routes/admin/clientReportSettings.js](../server/src/routes/admin/clientReportSettings.js) (the organization's report week, mounted at `/admin/client-reports/settings`, also ahead of it), [routes/admin/branding.js](../server/src/routes/admin/branding.js), History in [routes/admin/campaigns.js](../server/src/routes/admin/campaigns.js) |
 | Report weeks and the next period | [services/reports/reportPeriods.js](../server/src/services/reports/reportPeriods.js) (server copy) and [reportDates.js](../client/src/components/clientReports/reportDates.js) (client copy), pinned to each other by one fixture table, [test/fixtures/reportPeriods.json](../server/test/fixtures/reportPeriods.json) (§F) |
 | Public routes | [routes/public/share.js](../server/src/routes/public/share.js), mounted at `/share` before the `requireAuth` gate |
 | Visibility | [services/reports/reportVisibility.js](../server/src/services/reports/reportVisibility.js) |
@@ -855,11 +1018,11 @@ only; and the phone app, which shows nothing from this tab. No new company recei
 | Readers and shapers | [services/reports/clientReportMap.js](../server/src/services/reports/clientReportMap.js) (map payloads and their in-process cache, the map version, `mapContextFor` and `legacyTemplatesFor`), [services/reports/clientReportView.js](../server/src/services/reports/clientReportView.js) (the client payload), [services/reports/clientReportRead.js](../server/src/services/reports/clientReportRead.js) (earlier totals, older/newer, current series labels) |
 | Before you publish | [services/reports/clientReportChecks.js](../server/src/services/reports/clientReportChecks.js) |
 | History | [services/reports/clientReportHistory.js](../server/src/services/reports/clientReportHistory.js) |
-| Links | [services/reports/shareLinks.js](../server/src/services/reports/shareLinks.js), [services/auth/tokens.js](../server/src/services/auth/tokens.js) (`signShareToken`) |
+| Links | [services/reports/shareLinks.js](../server/src/services/reports/shareLinks.js) (the switch `allReportsRetired`, `sealLinkPassword` / `readLinkPassword`, `sameLinkPassword`, `primaryLinkOf`, the failure budget), [utils/sealedSecret.js](../server/src/utils/sealedSecret.js) (AES-256-GCM under `CREDENTIAL_SEAL_KEY`, with optional associated data), [utils/passwordText.js](../server/src/utils/passwordText.js) (`isWellFormedText`, the guard before every bcrypt call), [services/auth/tokens.js](../server/src/services/auth/tokens.js) (`signShareToken`) |
 | Opens | [services/reports/reportOpens.js](../server/src/services/reports/reportOpens.js), [services/auth/resolveSessionUser.js](../server/src/services/auth/resolveSessionUser.js) |
 | Branding | [services/branding/png.js](../server/src/services/branding/png.js), [services/branding/orgLogo.js](../server/src/services/branding/orgLogo.js) |
-| Sweep, indexes | [services/reports/clientReportSweep.js](../server/src/services/reports/clientReportSweep.js), [services/reports/clientReportIndexes.js](../server/src/services/reports/clientReportIndexes.js) |
-| Migration, console | [migrations/clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js); [migrations/reportTabWeeks.js](../server/src/migrations/reportTabWeeks.js) (`npm run report:tab-weeks`, read-only, §R) |
+| Sweep, indexes | [services/reports/clientReportSweep.js](../server/src/services/reports/clientReportSweep.js), [services/reports/clientReportIndexes.js](../server/src/services/reports/clientReportIndexes.js) (the report guards and the one-link guard, §B) |
+| Migration, console | [migrations/clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js); [migrations/reportTabWeeks.js](../server/src/migrations/reportTabWeeks.js) (`npm run report:tab-weeks`, read-only, §R); [migrations/reportAllReportsLinks.js](../server/src/migrations/reportAllReportsLinks.js) (`npm run report:all-reports-links`, read-only, §R) |
 | Test oracles | [services/reports/computeReport.js](../server/src/services/reports/computeReport.js): `computeWindowStats` and `buildFrozenMapPoints` are no longer called by any route; they stay as the parity oracles the build is pinned against. `computeSurveyBreakdowns`, `computeTagBreakdowns` and `publicPointAnswer` are still the live implementations. |
 
 The phone app calls no client-report, share or branding endpoint. It does call `GET
@@ -880,7 +1043,8 @@ reportVisibility.js).
 | `effortId`, `effortName` | Walk-list scope (`null` = not a walk-list report). `effortName` is frozen at creation. |
 | `weekStart`, `weekEnd`, `timeZone`, `rangeStartUtc`, `rangeEndUtc` | The period: civil days in the campaign's zone, and the half-open UTC range the build reads (`zonedDayRange`). Any run of days, despite the names. |
 | `allTime` | `true` on an all-time report (Latest progress, 2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N): its `weekStart` is the day of the campaign's first knock (`allTimeStartOf`), so its period equals its running total and it reads with no "+N". **Declared with no default**: absent = a dated report, every report from before. The weekly chain (New report's first choice and nudge, the gap lines, Next's later-report check on a dated report, `report:tab-weeks`) ignores it. |
-| `status` | `draft` or `published` (`archived` is in the enum and unused). |
+| `status` | `draft` or `published` (`archived` is in the enum and unused: every public reader filters `status: 'published'`, so Archive never touches it). |
+| `archivedAt`, `archivedBy` | Archive (2026-10-28, PROPOSAL_CLIENT_REPORT_LINKS.md §C4): when and by whom the report was folded under Archived on its tab, `null` when it isn't (missing on every report from before, which reads the same; `{ archivedAt: null }` matches it). **Operator-side only**: no public route, the PDF, Next, the period math, the duplicate guards or earlier totals read it, and Publish, Take down and Put back up leave it alone. Written only by `POST /:id/archive` and `/unarchive` (§F). |
 | `observations` | `[{ heading, body }]`. |
 | `stats.cumulative`, `stats.period` | Each `{ totals, contactBreakdown, coverage, surveyBreakdowns, tagBreakdowns, provenance }` (§D). `coverage` is `{}` on everything built since October 2026. |
 | `supportQuestionKey`, `goalSnapshot` | The headline question; frozen goal progress (§D). |
@@ -899,7 +1063,7 @@ reportVisibility.js).
 | `dupGuard` | `true` on every report New report or Next made without "Make a second one" (2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): it puts the report inside the unique partial index `report_period_guard` (below), one guarded report per tab and period. **Declared with no default** on purpose: absent means outside the guard (every report from before the field, and every deliberate second one); undeclared, strict mode would drop it on create and `strictQuery` from filters, and the guard would hold nothing. Dates never change after creation, so a report's key never moves; deleting it frees the key. |
 | `eraseEpoch` | Bumped by every Erase; Restore's CAS requires it unchanged (§M). |
 | `views` | `{ byLink: Map<shareId, { opens, firstOpenedAt, lastOpenedAt }>, members: { admins, leads, others, staff } }` (§L). A Map of a declared subschema, because a plain nested object would be stripped. |
-| `viewCount`, `lastViewedAt` | The pre-upgrade per-report counter, **frozen**: no open moves it since per-link counts began (code review ADMINUX-12), so the panel's "N views before per-link counts" is exactly that. |
+| `viewCount`, `lastViewedAt` | The pre-upgrade per-report counter, **frozen**: no open moves it since per-link counts began (code review ADMINUX-12), so the opens line's "N views before per-link counts" is exactly that. |
 | `createdBy`, `publishedAt`, `publishedBy`, `openMockFlagsAtPublish` | `openMockFlagsAtPublish` is the open mock-GPS flags in the report's scope at the moment of publish: operator-only, never shaped. |
 
 **[ClientReportMapPoint](../server/src/models/ClientReportMapPoint.js)**, one reached door of a pins
@@ -931,10 +1095,34 @@ budget), `failedUnlocksTotal`, `failedByDay: [{ day, n }]` (UTC days, last 7), `
 `lastLockedAt` (the latest lock, for the record) and `lifetimeStartAt`. Old links lack all of them
 until the migration; every reader goes through shareLinks.js. Since 2026-10-25 also `reportId`
 (ObjectId, ref `ClientReport`, default `null`): `null` or missing (every link made before it) opens
-every published report of the campaign; set, the link opens that one report only (§K). Set at
-creation, never changed. A declared path on purpose: `strictQuery` would drop an undeclared
-`{ reportId: … }` filter key and match every link. No index of its own: queries by `{ campaignId,
-reportId }` ride the existing `{ campaignId, isActive }` index (a campaign has a handful of links).
+every published report of the campaign, an **all-reports link** (`isAllReportsLink`), which no route
+makes since 2026-10-28 and `RETIRE_ALL_REPORTS_LINKS` turns off (§K); set, the link opens that one
+report only. Set at creation and never changed, except the demo seed's re-point of its own link (§K).
+A declared path on purpose: `strictQuery` would drop an undeclared `{ reportId: … }` filter key and
+match every link. Queries by `{ campaignId, reportId }` ride the existing `{ campaignId, isActive }`
+index (a campaign has a handful of links). Since 2026-10-28 (PROPOSAL_CLIENT_REPORT_LINKS.md §B), two
+more, neither migrated:
+
+- `passwordSealed` (String, `default: null`, **`select: false`**): the password, sealed with
+  [sealedSecret.js](../server/src/utils/sealedSecret.js) under `CREDENTIAL_SEAL_KEY`, with
+  `report-link:<passwordHash>` as its associated data, so a copy left behind when the hash changed (by
+  code that didn't know this field), or a value sealed for anything else, never opens as this link's
+  password. Every password write is bcrypt, then the seal, then **one atomic write of both** (create,
+  change, the change-everywhere fan-out, the demo seed). `null` when sealing isn't possible (no key, or
+  a malformed one: a link never fails over the key), always `null` on an all-reports link (its password
+  is never shown or copied), and missing on every link made before ("can't be shown"). A read carries
+  it only when it asks: `'+passwordSealed'` (an inclusive projection drops it, so `'passwordHash
+  +passwordSealed'`); `aggregate`, `collection.*` and a created document's `toObject()` ignore `select:
+  false`, so a created document is never spread into a response. Never in a share row, a public
+  response, History or a log. Its length follows the password's, so a database copy alone reveals each
+  password's length (never the password); padding it was judged low value.
+- `oneLinkGuard` (Boolean, **declared, no default**): `true` on every link made since one link per
+  report, which puts it inside `report_one_link_guard` (`REPORT_ONE_LINK_GUARD`): `{ reportId: 1 }`,
+  unique, `partialFilterExpression: { oneLinkGuard: true }`, declared on the schema so
+  `migrate:build-indexes --sync` never drops it. Undeclared, Mongoose would drop it on create and the
+  guard would hold nothing; a default would put every legacy link in it. Links from before sit outside
+  it, a report's second link from then included, which is also why it builds over them. Built at boot
+  (below).
 
 **[Organization](../server/src/models/Organization.js)** `reportWeekStartsOn` (Number 0–6, 0 = Sunday,
 default 1): the organization's report week (§F). Read through `reportWeekStartsOnOf` (`?? 1`, and
@@ -1006,6 +1194,20 @@ was missing, their shared key failed every later build for good):
 The schema declares the index too (`REPORT_PERIOD_GUARD` in ClientReport.js), so
 `migrate:build-indexes` lists it as built and its `--sync` never drops it; changing the definition
 would fail the boot build until the old index is dropped by hand.
+
+**The one-link guard** (2026-10-28, PROPOSAL_CLIENT_REPORT_LINKS.md §C2) is built the same way, by the
+same code: `clientReportIndexes.js` gives each guard a model (`ClientReport` unless it names one), and
+`ensureOneLinkGuard` builds `report_one_link_guard` on `ReportShareLink` from `syncClientReportIndexes`
+(the web dyno's boot, the worker's) and from the nightly maintenance run (`scheduler.js`, after the
+report guards), retrying and healing as above. Healing takes `oneLinkGuard` off the later of two guarded
+links of one report, which stays an ordinary second link (Share lists it under the first). Its log lines
+read "ReportShareLink report_one_link_guard: a duplicate key failed the build; N link(s) sharing a
+report with an earlier one now sit outside the guard, as second links (ids) — building it again" and
+the same "index built" / "index failed" lines. Like the report guards, a deliberate exception to the
+build-indexes rule: partial, tiny, and it never drops anything. (The integration-test preload's
+`ENFORCED` list in `server/scripts/testIndexPreload.mjs`, which builds unique indexes before any
+fixture, lists it with exactly `REPORT_ONE_LINK_GUARD`'s spec; `liveIndex.int.test.js` fails if the two
+ever differ.)
 
 ## C. Visibility, enforced on the server
 
@@ -1447,14 +1649,26 @@ map row with its id, writes a `deleted` History row, and with `?eraseHistory=1` 
 earlier text (§M). A live build's heartbeat misses and it stops; the sweep catches anything left.
 Since 2026-10-25 it also deletes the report's one-report links (`ReportShareLink` with `reportId` =
 the report), each with a `reportLink.deleted` History row whose `toValue` is `{ label, reportDeleted:
-true }` (a flag inside `toValue`, as the legacy sweep's: `CampaignChange` has no `via`), shown as
-"Board · Link deleted" with "Deleted with its report" under it (§M). They go AFTER the report, so a
-link being made at the same moment is either seen here or finds the report gone and deletes itself
-(§K). A holder of a deleted link gets `loadShare`'s `404 SHARE_NOT_FOUND`, "This link isn't
-available. It may have been replaced or switched off — ask the person who sent it." (and the device
-forgets its session); the hub's `gone` and "This report was taken down or removed…" cover a deleted
-report only until its links are gone (later in the same request). Drafts can't have links, so ending a
-team and Next's losing request need nothing.
+true }` (a flag inside `toValue`, as the legacy sweep's: `CampaignChange` has no `via`). Since
+2026-10-28 the cascade hands `writeLinkHistory` the report's pre-image, so the row is stamped with the
+report's id, tab and period although the report is already gone, and reads "Oct 19 – Oct 25, 2026 ·
+Whole campaign report · Link deleted" with "Deleted with its report" under it (§M). They go AFTER the
+report, so a link being made at the same moment is either seen here or finds the report gone and
+deletes itself (§K). A holder of a deleted link gets `loadShare`'s `404 SHARE_NOT_FOUND`, "This link
+isn't available. It may have been replaced or switched off — ask the person who sent it." (and the
+device forgets its session); on an old all-reports link the hub's `gone` and "This report was taken
+down or removed…" cover a deleted report. Drafts can't have links, so ending a team and Next's losing
+request need nothing.
+
+**Archive** (`POST /:id/archive`) and **Unarchive** (`POST /:id/unarchive`), since 2026-10-28
+(PROPOSAL_CLIENT_REPORT_LINKS.md §C4), behind `loadReportInOrg` (the campaign's admins and leads): one
+CAS each on `archivedAt` (archive only while it is null or missing, setting `archivedAt` and
+`archivedBy`; unarchive only while it isn't, clearing both), so a repeat (a double click, a second tab)
+changes nothing, writes no second History row and answers `200 { report }` as it stands. The History
+row (`clientReport.archived` / `clientReport.unarchived`) comes from the write's own pre-image, as Take
+down's does; a report deleted between the read and the write answers `404 REPORT_NOT_FOUND`. Drafts can
+be archived. `status` is never touched, and nothing a client reaches reads `archivedAt`, so an archived
+report's link keeps opening it. Publish, Take down and Put back up leave `archivedAt` as it is.
 
 **Next** (`POST /:id/next`): if the source's `nextReportId` still exists, that draft comes back
 (`200 { report, build, existing: true }`). Otherwise the series is re-validated (ensured for a report
@@ -1585,12 +1799,17 @@ Built 2026-10-25 (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E). A tab is its `series
 - **Look first.** `POST /admin/client-reports` finds the reports with the same `organizationId`,
   `campaignId`, `seriesId`, `weekStart` and `weekEnd` (the organization and campaign keep the query on
   the campaign index; `{ seriesId, … }` alone was a collection scan) and answers `409 { code:
-  'REPORT_EXISTS', error, reportId, status, takenDown, weekStart, weekEnd, scopeLabel }`, naming the one
-  most worth opening (a draft, then one the client sees, then one taken down, the newest of each;
-  `scopeLabel` is the tab's current name), unless the body has `allowDuplicate: true` (**Make a second
-  one**). `error`: "You already have a draft {tab} report for {period}." / "You already published
-  a(n) {tab} report for {period}. To bring its numbers up to date, open it and press Refresh numbers."
-  / "…, taken down."
+  'REPORT_EXISTS', error, reportId, status, takenDown, archivedAt, weekStart, weekEnd, scopeLabel }`,
+  naming the one most worth opening (`existingOf`: a draft, then one the client sees, then one taken
+  down; within each, since 2026-10-28, one that isn't archived first; then the newest; `scopeLabel` is
+  the tab's current name), unless the body has `allowDuplicate: true` (**Make a second one**). `error`:
+  "You already have a draft {tab} report for {period}." / "You already published a(n) {tab} report for
+  {period}. To bring its numbers up to date, open it and press Refresh numbers." / "…, taken down." An
+  archived one ends "— it's archived." instead ("You already published a(n) {tab} report for {period}
+  — it's archived.", "…draft … — it's archived.", "…, taken down — it's archived."), and New report
+  offers **Unarchive** beside Open it (`archivedAt`); `duplicateText` in newReportChoices.js words it
+  the same way. An archived report still holds its dates: the guards and the look-first never read
+  `archivedAt`.
 - **The race** is closed by the database, not by comparing ids (round 1 of the plan's review showed id
   order isn't arrival order): every create without `allowDuplicate`, and Next's insert, sets
   `dupGuard: true`, and `report_period_guard` (§B) lets one guarded report per tab and period in (an
@@ -1640,9 +1859,11 @@ every zoom: not clustering.
   `GET /:id/build` returns them top-level, the Refresh review and **Worth a look** name them, and the
   switch's confirm warns before it starts. *Before you publish* also names, per question, the other
   shown reports of the campaign that map it (door by door or by area) or chart it for a narrower scope
-  (`areaNarrowedBy`), since a link to all your reports shows them all. A link to one report shows only
-  that report, but one person can hold several links, so every shown report still counts (the
-  `areaNarrowing` comment in clientReportChecks.js says the same).
+  (`areaNarrowedBy`): each report has its own link, but one person can hold several, and an old
+  all-reports link, until the switch turns it off, opens every one, so every shown report still counts
+  (the `areaNarrowing` comment in clientReportChecks.js says the same). The builder words it "“Support
+  Smith?”: other reports your client can open could narrow down the answers its areas keep hidden — …"
+  (BeforePublish.jsx; it said "the same link" before 2026-10-28).
 
 ## H. Series and team reports
 
@@ -1785,13 +2006,15 @@ earlier report moved, the check returns `earlierReportRefreshed: { weekStart, we
 look** names it ("… Refresh numbers to compare again.") with Refresh numbers (code review round 2,
 P-2; round 1 computed it there but never showed it).
 
-**On a link to one report** (§K) the line names no other report: `earlierTotalsLine(report, {
-oneReport: true })` returns the same `changes` with `since: null` and `before: <this report's
-weekStart>`, and reportDerive.js words it "Totals from before Oct 19 were updated by −120 doors after
-they were first reported." (the same nouns as the usual line), on the page and in the PDF (which
-prints what reportDerive returns, folding − to -). An all-time report (§N) returns `through: <the earlier
-report's weekEnd>` instead of `before`: "Totals through Oct 25 were updated by −120 doors after they were
-first reported."
+**On a link to one report** (§K), which since 2026-10-28 is every link Share makes, the line names no
+other report: `earlierTotalsLine(report, { oneReport: true })` returns the same `changes` with `since:
+null` and `before: <this report's weekStart>`, and reportDerive.js words it "Totals from before Oct 19
+were updated by −120 doors after they were first reported." (the same nouns as the hub's line), on the
+page and in the PDF (which prints what reportDerive returns, folding − to -). An all-time report (§N)
+returns `through: <the earlier report's weekEnd>` instead of `before`: "Totals through Oct 25 were
+updated by −120 doors after they were first reported." **The builder's preview** reads the one-report
+form too (`clientReports.js`, the preview route, since 2026-10-28: it used to build the hub's wording,
+which a client now meets only on an old all-reports link until the switch turns those off).
 
 ## J. The client's payload and the map readers
 
@@ -1825,7 +2048,11 @@ public routes and the admin preview alike, so the preview is what the client get
 - `shapeReportListRow` (the hub): id, title, period, `campaignType` (null on a report from before that
   field; when no report in a tab has one, the hub judges lit drop from the totals, `hubShowsLit`),
   `effortName`, scope, the dates, map mode and count, and the headline totals. No `campaignId`, no
-  breakdowns.
+  breakdowns. Since 2026-10-28 every link Share makes opens one report, so the hub's multi-report
+  branch (the list of every report, `nav`, and the earlier-totals line's hub wording) serves only old
+  all-reports links, and is **unreachable once `RETIRE_ALL_REPORTS_LINKS` is on** (`loadShare` answers
+  410 first, §K). It stays in code, tested, until the switch has been on a while
+  (PROPOSAL_CLIENT_REPORT_LINKS.md §J).
 - `mapFilterSurvey`: the served map questions with their options and counts (the filter legend).
 
 **The map readers** ([clientReportMap.js](../server/src/services/reports/clientReportMap.js)) read the
@@ -1882,21 +2109,76 @@ The admin preview reads the same payload through `/admin/client-reports/:id/prev
 
 ## K. Share links
 
+Since 2026-10-28 (PROPOSAL_CLIENT_REPORT_LINKS.md, built that day) **every report has one link of its
+own**, made and managed in Share; a link that opens all of a campaign's reports is no longer made, and
+the ones left are turned off by a switch. The passwords are kept sealed, so the campaign's admins and
+leads can see them again, and Doorline staff under a support grant can neither see nor type one.
+
 **Tokens and passwords.** `newShareToken()` is 24 random bytes, base64url. Every new link gets a bcrypt
-password: the operator's (at least `SHARE_PASSWORD_MIN` = 12 characters on create and PATCH, `400
-SHARE_PASSWORD_TOO_SHORT`) or a generated 12-character one from a 56-character alphabet without
-look-alike glyphs, returned once as `generatedPassword`. A password can't be removed (`400
-SHARE_PASSWORD_REQUIRED`). `passwordMeetsRule` is set true on every compliant or generated password;
-for an older link it stays `null` until the next successful unlock, which records whether the entered
-password's length meets the rule (`notePasswordRule`, a CAS pinned to the hash it was checked against;
-the password is never stored). The panel flags only `false`.
+password, one of three (`POST /admin/client-reports/shares`): typed (`password`, at least
+`SHARE_PASSWORD_MIN` = 12 characters on create and PATCH, `400 SHARE_PASSWORD_TOO_SHORT`), copied from
+another link of the campaign (`passwordFrom`, below), or, with neither, generated: 12 characters from a
+56-character alphabet without look-alike glyphs, returned in the clear as `generatedPassword` (never to
+Doorline staff under a grant). Both at once is `400 PASSWORD_AND_SOURCE`. A typed password must be
+well-formed text (`isWellFormedText`, [utils/passwordText.js](../server/src/utils/passwordText.js))
+before it reaches bcrypt, else `400 SHARE_PASSWORD_INVALID` ("That password has a character that can't
+be used. Try another."): a lone surrogate makes bcryptjs 2.4.3 run out of memory and the whole process
+exit, which a try/catch can't stop (found in the plan's review, round 3; fixed on its own first, with the
+same guard in sign-in, password changes and the public unlock). The password checks run before
+`REPORT_REQUIRED`. A password can't be removed (`400 SHARE_PASSWORD_REQUIRED`). `passwordMeetsRule` is
+set true on every compliant or generated password (a copied one copies its source's); for an older link
+it stays `null` until the next successful unlock, which records whether the entered password's length
+meets the rule (`notePasswordRule`, a CAS pinned to the hash it was checked against; it stores only
+that yes or no, never the entered password). Share flags only `false`.
+
+**Kept sealed, shown again** (§B `passwordSealed`). Every password write is bcrypt, then
+`sealLinkPassword(password, hash)` ([shareLinks.js](../server/src/services/reports/shareLinks.js): AES-256-GCM
+through [sealedSecret.js](../server/src/utils/sealedSecret.js) under `CREDENTIAL_SEAL_KEY`, with
+`report-link:<hash>` as associated data; `null`, never a throw, when sealing isn't possible), then one
+atomic write of both. `readLinkPassword(sealed, hash)` opens it inside a try/catch and returns `{
+password }` or `{ password: null, reason }`: `not_kept` (no sealed copy: a link made before, one made
+without a key, an all-reports link), `no_key` (the key is absent or malformed now) or `unreadable` (the
+key was replaced, or the copy is stale or sealed for something else). It never hands back the error,
+since the error handler sends `err.message` to the browser in production. An empty associated data
+equals none, so FbTime's sealed keys and their single-argument callers are unchanged, as is the `v1:`
+format.
+
+- **Show** is `GET /shares/:id/password` → `{ password }` with `Cache-Control: no-store`, for the
+  campaign's admins and leads (`loadShareInOrg`). Under a support grant, `403
+  STAFF_CANNOT_VIEW_PASSWORD` ("Doorline staff can't view link passwords.") before anything is read;
+  on an all-reports link, `409 ALL_REPORTS_LINK`. Otherwise it opens the sealed copy and checks it
+  against the hash with `bcrypt.compare` (about 70 ms), so a stale or foreign copy is never shown as
+  current: no copy, a failed open or a mismatch is `409 PASSWORD_NOT_VIEWABLE` with `reason` (`not_kept`,
+  `no_key`, `unreadable`, `mismatch`), never a 500. The value is never logged, and a Show writes no
+  History row.
+- **Same as …** is `passwordFrom: <linkId>` on create. The source is read with `{ _id, organizationId:
+  <active org>, campaignId }` (the organization filter is what keeps it inside one organization;
+  `canManageCampaign` alone doesn't); missing is `404 SOURCE_NOT_FOUND`. It mustn't be an all-reports
+  link, and its sealed copy must open and match its hash, else `409 PASSWORD_NOT_VIEWABLE` (no `reason`
+  here). Both answer "Your last link's password can't be copied any more — choose Make one up for me or
+  Type my own." The new link takes `passwordHash`, `passwordSealed` and `passwordMeetsRule` verbatim (no
+  bcrypt run; the same sealed copy opens under the same hash). Staff may use it: they never learn the
+  password. A link made at the very instant someone changes that password everywhere can keep the old
+  one; Show tells you, and the next change everywhere finds it by its password.
+- **Doorline staff under a support grant** (`req.supportGrant`, set by `orgContext`): a typed `password`
+  on create or PATCH is `403 STAFF_CANNOT_SET_PASSWORD` ("Doorline staff can't type a link password —
+  make one up or use Same as …"); a generated one is never in the answer to them (`generatedPassword`
+  on create, `password` on PATCH); Show is 403 (above). So under a grant staff never learn a link's
+  password, and can't keep opening a report through `/share` after the grant ends. Without a seal key a
+  password staff made up could be seen by nobody, so it is `403 PASSWORDS_NOT_KEPT` on create ("Doorline
+  can't keep link passwords right now, so nobody could see one made up here. The campaign's admins and
+  leads can make this link.") and on PATCH ("Doorline can't keep link passwords right now, so nobody could
+  see a new one. The campaign's admins and leads can change it."), checked before the write. (Without a
+  key, Same as … isn't offered either: no copy opens — hence the pointer to the campaign's own admins and
+  leads, who see a made-up password once, right after it's made.) The rows say `passwordHiddenReason:
+  'staff'` for them.
 
 **Credential version.** `credentialVersion` (missing = 0) is bumped in the same atomic write by a
-password change (a legacy open link's first password included), rotate, renew, disable and the
-revoke-legacy sweep. The share JWT ([tokens.js](../server/src/services/auth/tokens.js)) is `{ kind:
-'share', link, cv, iat, exp }`, where `link` is `shareLinkKey(shareId)`, an HMAC-SHA256 of the link's
-id under the server's secret. A JWT's payload is readable by whoever holds it, so since code review
-round 2 (PRIV-2) it carries no ObjectId (each carried a creation time to the second) and no campaign
+password change (a legacy open link's first password included, and each link a change everywhere
+reaches), rotate, renew, disable and the revoke-legacy sweep. The share JWT
+([tokens.js](../server/src/services/auth/tokens.js)) is `{ kind: 'share', link, cv, iat, exp }`, where
+`link` is `shareLinkKey(shareId)`, an HMAC-SHA256 of the link's id under the server's secret. A JWT's
+payload is readable by whoever holds it, so since code review round 2 (PRIV-2) it carries no ObjectId (each carried a creation time to the second) and no campaign
 id (a link belongs to one campaign for life). `requireShareAccess` checks `shareTokenNamesLink(payload,
 share)` and requires `(payload.cv ?? 0) === credentialVersionOf(share)`, so any of those signs every
 device out at once. A token issued before PRIV-2 (`{ kind: 'share', shareId, campaignId, cv }`) is
@@ -1921,8 +2203,8 @@ the stored stamp. **A lock never ends a session already open**: `requireShareAcc
 **What clears what.** Unlock now clears the 24-hour budget only (`CLEARED_BUDGET`: the entries and
 `lockedUntil`). Rotate and Renew also clear the week's `failedByDay`, since the advice to rotate is about
 the address that drew the guesses (`CLEARED_FOR_NEW_ADDRESS`). A password change or disable clears
-neither. `failedUnlocksTotal` is never cleared. The panel's `rotateAdvice` is true on a lock or when
-the last 7 days hold 50 or more.
+neither. `failedUnlocksTotal` is never cleared. A row's `rotateAdvice` (Share's "Give it a new address"
+advice) is true on a lock or when the last 7 days hold 50 or more.
 
 **Expiry and the one-year life.** `expiresAt` may never pass `lifetimeStart(link) + 365 days`
 (`lifetimeStartAt ?? createdAt`). Create takes `expiresInDays` (the picker offers 30, 90, 180 or 365;
@@ -1935,10 +2217,13 @@ SHARE_NOT_EXPIRED`) is a rotate: a new token, a new life, `expiresAt = now + day
 budget and week cleared, the password kept. **Rotate** is a new token, `cv` bumped, budget and week
 cleared, expiry and life unchanged.
 
-**Legacy links** (`isLegacyOpen`: no password or no expiry) keep working. Adding a password also sets
-an expiry (the default life from now) and `lifetimeStartAt`, so the link leaves `isLegacyOpen`. `POST
+**Legacy links** (`isLegacyOpen`: no password or no expiry) are all links to all your reports: every one
+predates links to one report. Until the switch (below), adding a password also sets an expiry (the
+default life from now) and `lifetimeStartAt`, so the link leaves `isLegacyOpen`. `POST
 /shares/revoke-legacy` (admins only; it is org-wide) is a dry run unless `{ confirm: true }`, then
-disables every active legacy link in the organization and bumps their `cv`.
+disables every active legacy link in the organization and bumps their `cv`. Nothing in the app calls it
+since the links panel went (2026-10-28); it still answers, and goes with the switch's leftovers (§J of
+PROPOSAL_CLIENT_REPORT_LINKS.md).
 
 **Unlock and keep signed in.** `POST /share/:token/unlock { password, remember }` returns a share JWT for
 24 hours, or **30 days** when `remember === true` ("Keep me signed in on this device"). The page keeps
@@ -1946,63 +2231,175 @@ it in `sessionStorage` (this tab) or, remembered, `localStorage`, one copy only
 ([shareAccess.js](../client/src/lib/shareAccess.js)), and drops it on a 401, a 410, or a 404 with
 `SHARE_NOT_FOUND` ([shareSession.js](../client/src/lib/shareSession.js)); a remembered sign-out in one
 tab follows to the others. A legacy open link is unlocked without a password so every read works the
-same way.
+same way. A password that isn't well-formed text is answered `401 SHARE_PASSWORD_WRONG` before a slot is
+reserved and before bcrypt (`isWellFormedText`): no real password contains a lone surrogate, and one
+would take the process down.
 
 **Nothing before the password.** `GET /share/:token` returns `{ requiresPassword }` only. The campaign
 name, organization name and `hasLogo` ride `GET /share/:token/reports`, behind access; the link's label
 is never sent.
 
-**Links to one report** (2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D). A link with a `reportId`
-(§B) opens that report and nothing else; one without opens every published report of the campaign,
-as before (byte for byte: the client pages are pinned by
-[publicReportAllLinks.snapshot.json](../client/src/lib/publicReportAllLinks.snapshot.json)).
+**One link per report** (2026-10-28, PROPOSAL_CLIENT_REPORT_LINKS.md §C2; links to one report since
+2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D). A link with a `reportId` (§B) opens that report and
+nothing else; one without, an all-reports link, opens every published report of the campaign as before
+(byte for byte: the client pages are pinned by
+[publicReportAllLinks.snapshot.json](../client/src/lib/publicReportAllLinks.snapshot.json)), until the
+switch turns it off.
 
-- **Made** by `POST /admin/client-reports/shares` with `reportId`: a valid id (else `400 Invalid
-  reportId`) of a report in this organization and campaign (else `404 REPORT_NOT_FOUND`, "Report not
-  found") that the client can see now, published and not taken down, else `409 REPORT_NOT_SHOWN {
-  error, code, status, takenDown }`: "This report isn't published yet. Publish it, then make its link."
-  or "This report is taken down. Put it back up, then make its link." (a taken-down report is still
-  `status: 'published'`, and a link to it would only ever say "taken down"). Never changed after. If
-  the report is deleted while its link is being made, the new link deletes itself, with a "deleted
-  with its report" History row, and the request answers `404`: Delete takes the report's links after
-  the report, so one of the two always sees the other.
-- **Every share row** (the list and every link action's answer) adds `reportId` (a string, or `null`
-  on a link to all the reports) and `report: { id, weekStart, weekEnd, scopeLabel, takenDown }` (its
-  tab's current name; `takenDown`, `!!takenDownAt`, since the simplify build's code review round 2,
-  FRESH-6, so the links panel can say the link reads "taken down"), or `null` beside a `reportId` when
-  that report was deleted mid-race. The rows are staff-only (`requireOrgRole('admin', 'lead')` and
-  `canManageCampaign`), and `takenDown` is the report's own state, which the same readers already see
-  on the reports list (`takenDownAt` on each row).
+- **Made** by `POST /admin/client-reports/shares`, in order: validate (the password checks above, then
+  `400 REPORT_REQUIRED`, "Each link opens one report — say which report this link is for.", without a
+  `reportId`, and `400 Invalid reportId` for a malformed one); load the campaign (not one being deleted)
+  and the report in this organization and campaign (else `404 REPORT_NOT_FOUND`, "Report not found"), so
+  nothing below can reveal another organization's link; **look first**: any link already on the report,
+  guarded or not, in any state, answers `409 REPORT_HAS_LINK { error: "This report already has its
+  link.", share: <row> }` with the report's **primary** link (`primaryLinkOf`: the newest that works now,
+  else the newest), before the not-shown refusal and before any hashing; then `409 REPORT_NOT_SHOWN {
+  error, code, status, takenDown }` unless the report is published and not taken down ("This report
+  isn't published yet. Publish it, then make its link." / "This report is taken down. Put it back up,
+  then make its link."; a taken-down report is still `status: 'published'`, and its link would only ever
+  say "taken down"); then the password, and the create with `oneLinkGuard: true`. An E11000 on the guard
+  (`isOneLinkGuardError`, never confused with a token collision, whose key pattern is `{ token: 1 }`)
+  answers the same 409 with the link that won, or `404 REPORT_NOT_FOUND` when the winner went with its
+  report a moment ago; when the winner went alone, the key is free again and it tries once more, and
+  losing twice is `409 SHARE_CHANGED` ("This report's link just changed. Look again, then share it.").
+  `label` is still accepted (Share sends none). If the report is deleted while its link is being made,
+  the new link deletes itself, with a "deleted with its report" History row, and the request answers
+  `404`: Delete takes the report's links after the report, so one of the two always sees the other. The
+  answer is `201 { share: <row>, generatedPassword? }`, `Cache-Control: no-store`.
+- **Reports that already had two or more links** (made before one link per report) keep every one
+  working; their links sit outside the guard. Share manages the primary and lists the rest ("Also opens
+  this report: …", with Delete), without which a second link would be on no screen and couldn't be
+  revoked. `npm run report:all-reports-links` counts such reports (§R).
+- **Every share row** (`GET /shares` and every link action's answer: POST, PATCH, extend, renew, rotate,
+  unlock) comes from `rowsOf`, which always reads the campaign's links itself, sealed copies included,
+  because each row's flags are worked out against the others; so a one-row answer is as complete as the
+  list. To `shareRow` it adds `reportId` (a string, or `null` on an all-reports link), `report: { id,
+  weekStart, weekEnd, scopeLabel, takenDown, seriesId }` (its tab's current name and id; `null` beside a
+  `reportId` when that report was deleted mid-race), `allReports`, `passwordCopyable` (its sealed copy
+  opens under its own hash, whoever is asking: what Same as … needs; an AES open per link, which the
+  plan's review measured at about 1 ms for 100), `passwordViewable` (copyable, and the request isn't
+  staff under a grant), `passwordHiddenReason` (`'staff'`, checked first, or `'unavailable'`; `null`
+  when viewable) and `samePasswordCount` /
+  `samePasswordTabs` (the campaign's other links, never an all-reports link, that use the same password
+  by `sameLinkPassword`, the same opened text or an identical hash, compared in memory and never
+  returned, with the tabs they're on). `GET /shares` also returns `allReportsRetired` (the switch) and
+  `staffUnderGrant`. Never a hash, a sealed copy or a password. The rows are for the campaign's managers
+  only (`requireOrgRole('admin', 'lead')` and `canManageCampaign`), and `takenDown` is the report's own
+  state, which the same readers see on the reports list.
 - **Public routes.** `reportScope(req)` stays the campaign's shown reports and never carries an `_id`:
   spread beside the URL's own `_id` in `loadReport`, it would be overwritten by it or overwrite it
-  (both happened in the plan's review). Instead `loadReport` checks first, for every route behind it
-  (the report, its map, doors, areas and the opened ping): on a one-report link, another report's id
-  answers `404 REPORT_NOT_FOUND`, "This report was taken down or removed.", exactly as a taken-down one
-  does. The hub queries `{ ...reportScope(req), $and: [{ _id: <its report> }] }` (no key of the scope
-  can be overwritten) and answers `single: true`, `reportId` and `gone` (true when that report isn't
-  shown: taken down, unpublished or deleted; put back up, it is there again); the report route answers
-  `single` with `nav: null` and the earlier-totals line's `before` form (§I). Meta, unlock and the logo
-  read no report. Share tokens, Keep me signed in, the credential version and the open counts were
-  already per link.
+  (both happened in the simplify plan's review). Instead `loadReport` checks first, for every route
+  behind it (the report, its map, doors, areas and the opened ping): on a one-report link, another
+  report's id answers `404 REPORT_NOT_FOUND`, "This report was taken down or removed.", exactly as a
+  taken-down one does. The hub queries `{ ...reportScope(req), $and: [{ _id: <its report> }] }` (no key
+  of the scope can be overwritten) and answers `single: true`, `reportId` and `gone` (true when that
+  report isn't shown: taken down, unpublished or deleted; put back up, it is there again); the report
+  route answers `single` with `nav: null` and the earlier-totals line's `before` form (§I). Meta, unlock
+  and the logo read no report. Share tokens, Keep me signed in, the credential version and the open
+  counts were already per link. Nothing public reads `archivedAt`.
 - **The client pages.** On `single`, PublicReportListPage `Navigate replace`s to the report (Back leaves
   instead of landing on a hub), or shows "This report was taken down or removed. Ask the person who
   sent it." when `gone` or there is no row; PublicReportDetailPage hides "‹ All reports" and Older/Newer,
   puts "This link opens this report only." under the heading, and shows the same taken-down sentence
   with no "see all reports" (a moment's "Loading…" while the hub hasn't answered, rather than a guess).
-  The browser tab title reads "{Campaign} · Report" on a one-report link (`hub.single`; "· Reports"
-  on a link to all reports, as before).
-- **Which links can open a report.** `linkState` in clientReportChecks.js (`checks.links`) counts only
-  `reportId: { $in: [null, report._id] }` (which matches a link without the field too). With none
-  usable, the reason comes from THOSE links first, since each names a fix for this report: `disabled`
-  (none active), `locked` (an active, unexpired one), else `expired`. Only when no link of any state
-  opens this report: `other_reports` if the campaign has other links (each a link to one other report),
-  `no_link` if it has none. (Before code review round 1 of the simplify build, LINK-2, `other_reports`
-  won whenever a link to another report was usable, so an expired link to all the reports read "your
-  links open other reports" rather than "renew it".) The client does the same through `linksFor` (§Q).
-- **Deleted with its report** (`DELETE /:id`, §F). The demo reset deletes the demo campaign's
-  one-report links, and both `ensureShareLink` queries in
-  [seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js) add `reportId: null`, so the demo link
-  is never a one-report link. Campaign and organization deletion already delete every link.
+  The browser tab title reads "{Campaign} · Report" on a one-report link (`hub.single`; "· Reports" on
+  an all-reports link). No client change came with one link per report: every link Share makes is
+  `single`.
+- **No link check at publish time.** A draft can never have a link, so the server's `linkState` and
+  `checks.links` (clientReportChecks.js) and the client's `reportLinksLine`, `reportLinkReason`,
+  `expiringSoon` and `hasUsableLink` were removed on 2026-10-28, not re-scoped.
+- **Deleted with its report** (`DELETE /:id`, §F). Campaign and organization deletion already delete
+  every link.
+
+**Change it everywhere** (`PATCH /shares/:id` with `alsoChanged: true` beside a new `password` or
+`generatePassword: true`, the server making one up; the two at once is `400 PASSWORD_AND_SOURCE`):
+
+1. the link's own write returns its pre-image with `+passwordSealed`: its hash and, when that copy
+   opens, its password;
+2. the candidates are the campaign's other links that aren't all-reports links (`reportId: { $ne: null
+   }`) whose hash is that hash or whose sealed copy opens to that password (`sameLinkPassword`, the rule
+   the rows' count uses), so a password copied with Same as … and one typed again by hand are both
+   found; a link made before passwords were sealed matches only an identical hash, so in practice never;
+3. each is changed by its own compare-and-set on the hash it had when read, setting the new hash and
+   sealed copy, `passwordMeetsRule: true` and `cv + 1`: a result means it changed (its own History row,
+   `toValue.changedTogether: true`), none means someone changed it meanwhile, and it is skipped, never
+   overwritten. One bcrypt run and one seal serve every link.
+
+The answer carries `changed` and `skipped` (only when `alsoChanged` was sent and a password changed),
+and the hand-changed link's History row `toValue.alsoChanged: n` (only when n is above 0). Two
+overlapping changes everywhere can split the links between the two new passwords, which neither may see
+as a skip, so Share holds `changed` against the count its offer showed ("Changed on 1 of the 3 other
+links…"). A generated password comes back as `password` (never to staff). Every answer that carries a
+password is `no-store`.
+
+**Links to all your reports, and the switch** (§C1 of the plan). An all-reports link has `reportId` null
+or missing (`isAllReportsLink`). From the deploy, switch or not: `POST /shares` requires a `reportId`
+(`400 REPORT_REQUIRED`), so none is made any more; `DELETE /shares/:id` works as always (its History
+row carries `toValue.allReports: true`, since older rows carry nothing that tells the two kinds apart);
+and **until the switch** so do a password change (a PATCH with only `password` or `generatePassword`,
+which writes `passwordSealed: null`, since such a password is never shown or copied, and refuses
+`alsoChanged`) and `POST /:id/rotate`, because the Privacy Policy promises "a link's password can be
+changed, or the link rotated" and these links still work. Under a support grant the password change is
+refused outright, typed or made up: `403 STAFF_CANNOT_SET_PASSWORD`, "Doorline staff can't change the
+password of a link to all your reports — nobody could see the new one."; a rotate isn't. Everything else
+(unlock, extend, renew, turning it on or off, a label, Show, and anything but DELETE once the switch is
+on) is `409 ALL_REPORTS_LINK`: "Links that open all your reports can only get a new password or a new
+address, or be deleted." before the switch, "Links that open all your reports can only be deleted
+now." after it. There is no "delete all" route.
+
+**The switch** is the config var `RETIRE_ALL_REPORTS_LINKS`, read at call time by `allReportsRetired()`
+(shareLinks.js), like `FBTIME_DOOR_COUNTS`: `on`, `true` or `1`, trimmed, in any case; anything else, or
+unset, is off, which is how the deploy ships. Set in the Heroku dashboard (**Settings → Reveal Config
+Vars**; saving restarts the dynos, no deploy), it turns every all-reports link off **in every
+organization at once**: `loadShare` answers `410 SHARE_RETIRED`, "This link no longer works. Ask the
+person who sent it for the link to the latest report.", right after the token lookup and before the
+expiry and billing checks, so a retired link always says why. Every public route runs `loadShare` first,
+so a device signed in to one is refused at once too, and the page needs no change: any 410 ends the
+session and titles its notice with the server's words (`shareErrors.js`, `shareSession.js`). A link
+already turned off answers `404 SHARE_NOT_FOUND` first ("This link isn't available…"), as before.
+**Nothing is written to any link**, at the deploy or at the switch, so unsetting it brings them back at
+once (a device that visited meanwhile signs in again). With it on, the hub's multi-report branch (§J),
+the open-link branches in share.js, a first password on an open link, Extend's "set an expiry" (already
+unreachable: a link that never expires is an all-reports link, and Extend refuses those) and the seed's
+open-link upgrade can't be reached; they go, with their tests, once the switch has been on a while (§J of
+the plan). The Doorline-side steps: [OPERATIONS.md](OPERATIONS.md) → *Release: one link per report — and
+the switch that turns old links off*.
+
+**The demo link** ([seedDemoOrg.js](../server/src/services/platform/seedDemoOrg.js) `ensureDemoLink`,
+§C5 of the plan): the demo campaign keeps one link and points it at the demo's report. The demo link is
+the campaign's link with token `SEED_DEMO_SHARE_TOKEN` when that's set, else the newest active one
+labelled "Client demo link", else the newest so labelled (links made in the app have no label, and the
+demo organization's slug is unique, so no customer's link, and no link made during a pitch, can match;
+a demo link given a New address no longer matches the token, but its label still finds it). The report it
+opens is the one just published, else the one it already opens if that's still shown, else the newest
+shown report. Then:
+
+- **no demo link**: one is made for that report, in the guard, with token `SEED_DEMO_SHARE_TOKEN` or a
+  new one, labelled "Client demo link", and `SEED_DEMO_SHARE_PASSWORD` or a generated password (sealed
+  when the key is set). `--rebuild` comes here: the shared deletion cascade took the old link with its
+  campaign, and its viewers sign in again;
+- **an all-reports demo link** (the first run after the deploy) is **replaced, once**: deleted, and a
+  new one-report link made with the same token, password hash and sealed copy, on/off state and label,
+  so no link that opened all the reports survives. Same address and password; its viewers sign in once
+  more (a share token names its link's `_id`). If that create fails, the old link goes back exactly as it
+  was;
+- **from then on it's re-pointed in place**: `updateOne({ _id }, { $set: { reportId, oneLinkGuard: true }
+  })`, the one place a link's report ever changes (demo organization only). Same `_id`, token, password,
+  sessions and counts, so **Rebuild demo day** (the reset) signs nobody out;
+- **that report already has another link** (made in the app during a pitch): the demo link stays where
+  it is, and the seed's log (its `client portal:` line) and the summary's `share.note` say so (and Rebuild
+  demo day's message ends with the same note, "Client link: …"; on its path, a reset, the campaign's other
+  links are deleted first, so this case comes up on a plain `--apply`);
+- **nothing shown**: nothing changes, not even the expiry (an all-reports link is never extended).
+
+The link keeps its own password. `SEED_DEMO_SHARE_PASSWORD` is used only for a link without one, and when
+it matches the kept hash it is sealed beside it, so Share can show the demo password. An env password
+that isn't well-formed text is refused (`409 SHARE_PASSWORD_INVALID`) before any write, and so, on Rebuild
+demo day's path, is a run with no demo link with a password, no `SEED_DEMO_SHARE_PASSWORD` and no seal key
+(`SHARE_PASSWORD_UNSET`). A link that stays put gets the usual expiry refresh; one turned off stays off
+(the `client portal:` line says "turned off — turn it on in Share"). The summary's `share` is `{ token,
+url, expiresAt, reportId, isActive, note }`. The super-admin's Rebuild demo day confirm says the share
+link keeps its URL and password and "opens the demo's report".
 
 **"Last opened"** (`stampLinkAccess`) is stamped only when access is granted (a correct password, a
 valid share token, a legacy open link), at most once a minute per link, never by the password screen
@@ -2018,14 +2415,16 @@ noindex, nofollow`; the `/r/` HTML gets `X-Robots-Tag: noindex, nofollow` from t
 never sees a noindex, and can still list a forwarded link's bare URL. `/api` stays disallowed.
 
 **Billing.** `loadShare` answers `410 SHARE_UNAVAILABLE` when the organization's access is suspended
-or canceled (`shareLinksBlocked`); links survive `past_due`.
+or canceled (`shareLinksBlocked`); links survive `past_due`. Its order: no active link with the token
+(`404 SHARE_NOT_FOUND`), then a retired all-reports link (`410 SHARE_RETIRED`), then expiry (`410
+SHARE_EXPIRED`), then billing.
 
 ## L. Opens
 
 No new collection: counts live on the report in `views`. The report page sends `POST
 /share/:token/reports/:id/opened` (behind `requireShareAccess`) once per report per browser per day,
-marked in `localStorage` under one key per link holding the day and the report ids, so the panel says
-"about". The route answers `204` first. Only afterwards does `recordReportOpen` look at an
+marked in `localStorage` under one key per link holding the day and the report ids, so the row's opens
+line says "About". The route answers `204` first. Only afterwards does `recordReportOpen` look at an
 `Authorization: Bearer` session token, which the page sends when this browser is signed in to Doorline
 (`identifyIfSignedIn` on `api()`, which keeps the call out of the session-ended handling).
 `resolveSessionUser` runs `requireAuth`'s checks (ended sessions, password changed, deleted or inactive
@@ -2036,8 +2435,8 @@ who is the client shows under leads); anyone else, including an ended or stale s
 organization's member, under the link. It never grants or refuses anything. The write is one pipeline
 update with `$min`/`$max` dates and null-safe counters, with timestamps off. No IP address, no device.
 It no longer touches the report's old `viewCount` and `lastViewedAt` (code review ADMINUX-12): they are
-frozen at what they were before per-link counts, so the panel's "N views before per-link counts"
-(`linkState.js`) is a before-the-upgrade number.
+frozen at what they were before per-link counts, so the opens line's "N views before per-link counts"
+(`linkState.js` `opensLine`) is a before-the-upgrade number.
 
 ## M. History
 
@@ -2045,19 +2444,36 @@ Rows ride `CampaignChange` with `source: 'client_report'`
 ([clientReportHistory.js](../server/src/services/reports/clientReportHistory.js)):
 
 - `clientReport.created | published | edited | numbersRefreshed | refreshDiscarded | takenDown |
-  putBackUp | deleted | remapped` (with `clientReportId`, `seriesId` and `periodLabel`: other rows name
-  the report's period, never its title);
+  putBackUp | deleted | remapped | archived | unarchived` (with `clientReportId`, `seriesId` and
+  `periodLabel`: other rows name the report's period, never its title; `archived` and `unarchived` since
+  2026-10-28, one per CAS that changed something, §F);
 - `clientReportSeries.created | renamed | crewsChanged | ended | continued` (`continued` since code
   review round 2, WALK-3: written when a PATCH ends an ended team's `endedAt`, holding `{ label,
   coordinatorIds }` in `toValue`, the team's name and its coordinators' user ids, like the created and
   crews-changed rows; the ended and crews-changed rows now carry `label` in `toValue` too);
 - `reportLink.created | passwordChanged | rotated | renewed | extended | disabled | enabled |
-  wrongPasswords | locked | unlocked | deleted` (with `shareLinkId`; never the URL token, a password or
-  its hash, and no IP or user agent; values are filtered once more for any key that looks like a
-  credential). A one-report link deleted with its report (§F) writes `deleted` with `toValue: { label,
-  reportDeleted: true }`, which the drawer shows as "Board · Link deleted" with "Deleted with its
-  report" under it (`clientReportHistoryLine` in campaignHistory.js: the subject, then the headline,
-  then the `detail` line).
+  wrongPasswords | locked | unlocked | deleted` (with `shareLinkId`; never the URL token, a password, its
+  hash or its sealed copy, and no IP or user agent; `withoutSecrets` drops every value key matching
+  `/token|password|hash/i`). Since 2026-10-28 `writeLinkHistory(link, field, { …, report })` also stamps
+  the link's report, `clientReportId`, `seriesId` and `periodLabel`, as a report's own rows carry them:
+  from the report handed over (the delete cascade and POST's cleanup hand it over, since the report is
+  gone by then), else looked up from `link.reportId` (`recordWrongPassword`'s read carries it); `null`
+  on an all-reports link, and with the report gone and not handed over, `clientReportId` alone, from the
+  link. Three `toValue` keys, chosen to survive `withoutSecrets`: `alsoChanged: n` on the link whose
+  password was changed by hand with change everywhere (only when n > 0), `changedTogether: true` on each
+  link it reached, and `allReports: true` on a deleted all-reports link (older rows carry nothing that
+  tells the two kinds apart). A one-report link deleted with its report (§F) writes `deleted` with
+  `toValue: { label, reportDeleted: true }`.
+
+The drawer (`clientReportHistoryLine` in campaignHistory.js: the subject, then the headline, then the
+`detail` line) names a link row with a `periodLabel` by its report, as a report row: "Oct 12 – Oct 18,
+2026 · Paid team report · Link created"; a deleted all-reports link "An old link to all your reports";
+an older row by its label, else "A client link". One vocabulary with Share: "Link given a new address —
+everyone was signed out" (rotated), "Link turned off — everyone was signed out" / "Link turned on"
+(disabled / enabled), "Link password changed — everyone was signed out", "Expired link renewed — new
+address"; details "Also changed on 3 other links that used the same password", "Changed along with
+other links that used the same password", "Deleted with its report". `REPORT_ROW` gains "Archived" and
+"Unarchived". A Show writes nothing here.
 
 An `edited` row (published reports only) keeps only the **earlier** text, in `fromValue`, taken from
 the write's own pre-image; `toValue` stays null because the current text lives on the report, so each
@@ -2140,7 +2556,7 @@ for any campaign id (§H):
 | `GET /series/:seriesId/team-changed?reportId=` | The team-changed card's data, counted against that report (optional; §H) |
 | `GET /series/affected?campaignId=&coordinatorIds=` | The campaign's active teams with a report whose crews (current or past) include those coordinators, as `{ teams: [{ seriesId, label }] }`: labels only. The coordinator-change confirm on the Team tab ([CoordinatorConfirm.jsx](../client/src/components/CoordinatorConfirm.jsx)) names them: "This also changes the numbers in the Paid team client report." |
 | `POST /` | Create a draft `{ campaignId, weekStart, weekEnd, title?, seriesId?, effortId?, teamSeriesId?, seriesLabel?, confirmLabel?, allowDuplicate?, allTime? }` (with `allTime: true`, `weekEnd` alone: the server sets `weekStart`, §F) and claim its first build: `201 { report, build, warnings }` (`['STARTS_AFTER_TODAY']` when it starts after today in the campaign's zone, else `[]`); `409 REPORT_EXISTS` when the tab has a report for those dates (unless `allowDuplicate`), `200 { report, build, existing: true, createdByName }` when a simultaneous create got in first (§F) |
-| `GET /?campaignId=&seriesId=` | The list (no breakdowns, no build result), with each row's series key, current series label, `campaignType` (null on a report from before the field), build view, views and dates |
+| `GET /?campaignId=&seriesId=` | The list (no breakdowns, no build result), with each row's series key, current series label, `campaignType` (null on a report from before the field), build view, views and dates, and `archivedAt` (`null` when not archived, a report from before the field included) |
 | `GET /:id` | The report, campaign and org names, current series label, scoped `openMockFlags`, the build (with `live` and `queuePosition`), `checks` (*Before you publish*) and `liveInputs: { showMap, mapMode, areaSize, mapKeys, questionDeps }`, what the live snapshot was built with as the server reads it (`mapContextFor`, so a legacy published report's comes through every survey its answers can have come from; code review contract C4). The builder's question table, map ticks, Refresh dialog and preview map follow it instead of guessing from the stored settings |
 | `PATCH /:id` | Edit (§F), with optional `ifStatus` (`409 STATUS_CHANGED` on a mismatch) and `ifEditVersion` (`409 CHANGED_ELSEWHERE` with `{ editVersion, report }` on a mismatch; contract C8) |
 | `POST /:id/recompute` · `POST /:id/refresh` | Claim a build: `202 { build }` |
@@ -2152,19 +2568,21 @@ for any campaign id (§H):
 | `GET /:id/preview` · `POST /:id/preview` | The client payload; POST overlays the on-screen settings; plus internal `provenance` |
 | `GET /:id/preview/map` · `/preview/map/doors` · `/preview/areas` | The live snapshot's map, as the client reads it |
 | `POST /:id/next` | The next period's draft (`nextPeriod`, §F; on an all-time report, the next all-time report through today), idempotent: `201 { report, build, warnings? }` new; `200 { …, existing: true }` for the draft it already made, an exact later report or a lost race; `409 NEXT_GAP_TOO_LONG { catchUp, suggested }`, `409 NOT_LATEST_REPORT`, `409 ALREADY_THROUGH_TODAY` |
-| `DELETE /:id` | Delete; `?eraseHistory=1` (admins) erases its earlier text |
+| `POST /:id/archive` · `/unarchive` | Archive and Unarchive (§F): one CAS on `archivedAt` each, `200 { report }` (with `archivedAt`), a repeat changing nothing; drafts too |
+| `DELETE /:id` | Delete, and the report's own links with it (§F); `?eraseHistory=1` (admins) erases its earlier text |
 
 **Admin links**, `/admin/client-reports/shares`, the same gate:
 
 | Endpoint | Does |
 |---|---|
-| `GET /?campaignId=` | Rows: token, label, password and expiry flags, `lifetimeEndsAt`, `passwordMeetsRule`, `lock`, `failures { last24h, since, last7d, total }`, `rotateAdvice`, `lastAccessedAt`, and what the link opens, `reportId` and `report: { id, weekStart, weekEnd, scopeLabel, takenDown } \| null` (§K). Never the password or its hash. |
-| `POST /` | `{ campaignId, label?, password?, expiresInDays?, reportId? }`; `generatedPassword` once when generated. With `reportId`, a link to that one report: `409 REPORT_NOT_SHOWN` unless it's published and not taken down, `404 REPORT_NOT_FOUND` (§K) |
-| `PATCH /:id` | `{ label?, password?, isActive? }` |
-| `POST /:id/extend` · `/renew` | `{ expiresInDays }` |
-| `POST /:id/rotate` · `/unlock` | |
-| `DELETE /:id` | |
-| `POST /revoke-legacy` | Admins only; dry run unless `{ confirm: true }` |
+| `GET /?campaignId=` | `{ shares, allReportsRetired, staffUnderGrant }`. Rows: token, label, password and expiry flags, `lifetimeEndsAt`, `passwordMeetsRule`, `lock`, `failures { last24h, since, last7d, total }`, `rotateAdvice`, `lastAccessedAt`, `createdAt`, what the link opens (`reportId`, `report: { id, weekStart, weekEnd, scopeLabel, takenDown, seriesId } \| null`, `allReports`), and `passwordCopyable`, `passwordViewable`, `passwordHiddenReason`, `samePasswordCount`, `samePasswordTabs` (§K). Never the password, its hash or its sealed copy. |
+| `POST /` | `{ campaignId, reportId, password? \| passwordFrom?, expiresInDays?, label? }` → `201 { share, generatedPassword? }` (`generatedPassword` only when made up, and never to staff under a grant; `no-store`). `reportId` is required (`400 REPORT_REQUIRED`); `409 REPORT_HAS_LINK { share }` when the report has a link already, `409 REPORT_NOT_SHOWN` unless it's published and not taken down, `404 REPORT_NOT_FOUND`; the password refusals: `400 SHARE_PASSWORD_TOO_SHORT`, `SHARE_PASSWORD_INVALID`, `PASSWORD_AND_SOURCE`; `403 STAFF_CANNOT_SET_PASSWORD`, `PASSWORDS_NOT_KEPT`; `404 SOURCE_NOT_FOUND`, `409 PASSWORD_NOT_VIEWABLE` (§K) |
+| `GET /:id/password` | Show: `{ password }`, `no-store`; `403 STAFF_CANNOT_VIEW_PASSWORD` under a support grant, `409 PASSWORD_NOT_VIEWABLE { reason }`, `409 ALL_REPORTS_LINK` (§K) |
+| `PATCH /:id` | `{ label?, password? \| generatePassword?, alsoChanged?, isActive? }` → `{ share, password?, changed?, skipped? }` (`password` when made up, never to staff; `changed` and `skipped` with `alsoChanged`; `no-store` when a password changed). On an all-reports link only a password change, until the switch (§K) |
+| `POST /:id/extend` · `/renew` | `{ expiresInDays }`; `409 ALL_REPORTS_LINK` on an all-reports link |
+| `POST /:id/rotate` · `/unlock` | Rotate works on an all-reports link until the switch; unlock never does (`409 ALL_REPORTS_LINK`) |
+| `DELETE /:id` | Any link, an all-reports one included, switch or not |
+| `POST /revoke-legacy` | Admins only; dry run unless `{ confirm: true }`. Nothing in the app calls it since 2026-10-28 |
 
 **Branding** and **History**: §N and §M.
 
@@ -2182,9 +2600,10 @@ for any campaign id (§H):
 | `GET /:token/mapbox-token` | The public `pk.` token |
 | anything else | `404 NOT_FOUND` |
 
-All but the first two run `loadShare` then `requireShareAccess` (a valid `X-Share-Token` for this link at
-its current `cv`, else `401 password-required`; legacy open links pass), and report routes `loadReport`
-(the link's campaign, published, not taken down).
+Every route above but the last runs `loadShare` first (so, with the switch on, an all-reports link
+answers `410 SHARE_RETIRED` on all of them); all but the first two then run `requireShareAccess` (a valid
+`X-Share-Token` for this link at its current `cv`, else `401 password-required`; legacy open links
+pass), and report routes `loadReport` (the link's campaign, published, not taken down).
 
 ## P. Error codes
 
@@ -2193,8 +2612,9 @@ its current `cv`, else `401 password-required`; legacy open links pass), and rep
 | `SHARE_NOT_FOUND` | 404 | No active link with that token (public); no link with that id (admin) |
 | `SHARE_EXPIRED` | 410 | Past `expiresAt` |
 | `SHARE_UNAVAILABLE` | 410 | The organization's access is suspended or canceled |
+| `SHARE_RETIRED` | 410 | An all-reports link once `RETIRE_ALL_REPORTS_LINKS` is on, on every public route: "This link no longer works. Ask the person who sent it for the link to the latest report." (§K) |
 | `password-required` | 401 | No valid share token for this link and `cv` |
-| `SHARE_PASSWORD_WRONG` · `SHARE_PASSWORD_MISSING` | 401 · 400 | Unlock |
+| `SHARE_PASSWORD_WRONG` · `SHARE_PASSWORD_MISSING` | 401 · 400 | Unlock (`SHARE_PASSWORD_WRONG` also for a password that isn't well-formed text, before any slot or bcrypt) |
 | `SHARE_LOCKED` · `rate-limited` | 429 | The link's budget is full · the per-IP limiter |
 | `REPORT_NOT_FOUND` | 404 | Taken down, deleted or never published, or another report on a one-report link (public); not found (admin, link create with `reportId` included) |
 | `INVALID_ID` | 400 | A malformed report id |
@@ -2202,10 +2622,20 @@ its current `cv`, else `401 password-required`; legacy open links pass), and rep
 | `SNAPSHOT_KEY_REQUIRED`, `ROWS_REQUIRED`, `TOO_MANY_ROWS`, `ROWS_INVALID` | 400 | `…/map/doors` |
 | `NOT_FOUND` | 404 | Any other `/share` path |
 | `SHARE_PASSWORD_TOO_SHORT` · `SHARE_PASSWORD_REQUIRED` | 400 | Admin link create or PATCH |
-| `SHARE_NEEDS_RENEW` · `SHARE_NOT_EXPIRED` · `SHARE_CHANGED` | 409 | Extend an expired link · Renew a live one · a racing change |
-| `REPORT_NOT_SHOWN` | 409 | A link to one report made for a report that isn't published, or is taken down (`{ status, takenDown }`) |
+| `SHARE_PASSWORD_INVALID` | 400 · 409 | A typed link password that isn't well-formed text (create, PATCH) · the demo seed's `SEED_DEMO_SHARE_PASSWORD`, refused before any write |
+| `PASSWORD_AND_SOURCE` | 400 | Create with both `password` and `passwordFrom`; PATCH with both `password` and `generatePassword` |
+| `REPORT_REQUIRED` | 400 | Link create without a `reportId`: "Each link opens one report — say which report this link is for." |
+| `STAFF_CANNOT_SET_PASSWORD` | 403 | Doorline staff under a support grant typing a link password (create, PATCH), or changing an all-reports link's password at all |
+| `STAFF_CANNOT_VIEW_PASSWORD` | 403 | Show (`GET /shares/:id/password`) under a support grant |
+| `PASSWORDS_NOT_KEPT` | 403 | A password made up under a support grant with no usable seal key (create, PATCH) |
+| `SOURCE_NOT_FOUND` | 404 | Same as …'s `passwordFrom` isn't a link of this organization and campaign |
+| `PASSWORD_NOT_VIEWABLE` | 409 | Show, with `reason` (`not_kept`, `no_key`, `unreadable`, `mismatch`); Same as …'s source whose copy doesn't open or match (no `reason`) |
+| `REPORT_HAS_LINK` | 409 | Link create on a report that already has a link (`{ share }`, its primary link) |
+| `ALL_REPORTS_LINK` | 409 | Anything but Delete on an all-reports link (until the switch, a password change and a rotate still work) |
+| `SHARE_NEEDS_RENEW` · `SHARE_NOT_EXPIRED` · `SHARE_CHANGED` | 409 | Extend an expired link · Renew a live one · a racing change (and a link create that lost the one-link guard twice) |
+| `REPORT_NOT_SHOWN` | 409 | A link made for a report that isn't published, or is taken down (`{ status, takenDown }`) |
 | `INVALID_WEEK_START` · `FORBIDDEN_ROLE` | 400 · 403 | `PATCH /admin/client-reports/settings`: not a weekday 0–6 · a lead |
-| `REPORT_EXISTS` | 409 | Create, when the tab already has a report for those dates (`{ reportId, status, takenDown, weekStart, weekEnd, scopeLabel }`) |
+| `REPORT_EXISTS` | 409 | Create, when the tab already has a report for those dates (`{ reportId, status, takenDown, archivedAt, weekStart, weekEnd, scopeLabel }`) |
 | `TEAM_ATTRIBUTION_NOT_READY` | 400 | Teams without team attribution |
 | `WALK_LIST_LABEL_HAS_NAME` | 400 | Confirmable (`confirmLabel`) |
 | `TEAM_LABEL_HAS_NAME`, `SERIES_LABEL_INVALID`, `SERIES_LABEL_FIXED`, `TEAM_NEEDS_CREW`, `TEAM_CREW_INVALID`, `TEAM_CREW_NOT_RUNNING`, `NOT_A_TEAM` | 400 | Series |
@@ -2228,11 +2658,12 @@ Build failures carry their own codes on `build.error` (§E).
 
 - **Admin tab:** [ClientReportsPage.jsx](../client/src/pages/ClientReportsPage.jsx) (`/campaigns/:campaignId/reports`:
   the intro line and its **How it works** link, tabs per series, rows, gap lines between reports of a
-  series, links and branding beside), with
+  series, the old-links card above them and branding beside), with
   [components/clientReports/](../client/src/components/clientReports/): `HowItWorks` (+
   `howItWorksCopy.js`, below), `ReportRow`, `NewReportDialog` (+ `newReportChoices.js`, §F),
-  `TeamDialog`, `TeamChangedCard`, `ClientLinksPanel` (+ `linkState.js`: usable, badges, failures line,
-  extend choices, opens line, and which links open a report, below), `ShareDialog` (+ `copyMessage.js`),
+  `TeamDialog`, `TeamChangedCard`, `ShareDialog` (+ `linkParts.jsx`, `copyMessage.js` and `linkState.js`:
+  usable, badges, failures line, extend choices, the row's link and opens lines, and which links are a
+  report's, below), `RetiredLinksCard` (the old-links card),
   `BrandingCard` (+ `logoImage.js`), `HistoryDrawer`, `buildState.js` (the build states' words) and `hooks.js`
   (`useBuildPoll`, shared by the builder and the list rows: every 3 s while queued or running, 15 s
   while waiting; since code review ADMINUX-7 a `404` or `403` stops it and re-reads the report and the
@@ -2294,8 +2725,11 @@ Build failures carry their own codes on `build.error` (§E).
   - **Next's sentence** (FRESH-3): `initial.notice`, the `NEXT_GAP_TOO_LONG` answer's `error`, shows in
     an info box at the top of Dates, above the choices (and above "Loading the dates…").
   - **A taken-down duplicate** (FRESH-5): when `REPORT_EXISTS` names a taken-down report (`takenDown`),
-    the prompt's last line is "Your client sees only the new one; the taken-down one stays hidden unless
-    you put it back up." instead of "Your client sees both once both are published."
+    the prompt's last line differs. Since 2026-10-28 it reads "The taken-down one stays hidden until you
+    put it back up. The new one gets its own link once it's published.", and otherwise "Each one gets its
+    own link once it's published." (they read "Your client sees only the new one; …" and "Your client
+    sees both once both are published.", true only on a link to all your reports). An archived one
+    (`archivedAt`) ends "— it's archived." and adds **Unarchive**.
   **What the dates decide** (§M, 2026-10-25): above the date choices, `totalsSentence`
   (newReportChoices.js) says the totals run from the campaign's first door through the last day picked,
   for the whole campaign or the tab's `scopeLabel` once its team or walk list is picked, with the
@@ -2323,7 +2757,7 @@ Build failures carry their own codes on `build.error` (§E).
   card no "+" figures and the totals line; the Share message is "The report through Oct 28 is up: … so far
   and …"; Refresh numbers drops its "In the period" column; Publish and Before you publish say "Today
   isn't over yet: doors knocked after these numbers were built aren't in them." (one running to a later
-  day reads as any period not over); the links panel's report picker and the builder's heading say "All
+  day reads as any period not over); the builder's heading says "All
   time · …". A half-typed first day in Pick dates reads '' as an empty one does, and React fires onChange
   only when the value changes (typing into an EMPTY date input leaves it '' until the day is whole), so the
   dialog reads the box's `validity.badInput` on change, on every key and on blur, and once more as Create
@@ -2342,7 +2776,7 @@ Build failures carry their own codes on `build.error` (§E).
   reopens on the team with the dates and title kept. `TeamDialog`'s Continue settles a departed lead's past doors in a first PATCH (kept or
   removed), then sends `{ continue: true, coordinatorIds }` with any rename and the past doors that must
   leave; on `TEAM_CREW_NOT_RUNNING`, `CREW_IN_OTHER_TEAM`, `TEAM_NEEDS_CREW` or `SERIES_CHANGED` it
-  re-reads the picker. `TeamChangedCard` sends `?reportId=`. Link confirms (`ClientLinksPanel`) offer an
+  re-reads the picker. `TeamChangedCard` sends `?reportId=`. Share offers an
   expired link only Renew (ADMINUX-8), and the History drawer's Restore confirm branches on
   `takenDownAt` (ADMINUX-9).
 - **Builder:** [ClientReportBuilderPage.jsx](../client/src/pages/ClientReportBuilderPage.jsx)
@@ -2435,59 +2869,103 @@ Build failures carry their own codes on `build.error` (§E).
   from `result.mapKeys` and lists `areaWithoutAnswers`, and the expanded outcome rows use the client's
   labels (`contactLabel`, WALK-6). The switch-to-areas confirm names the single-choice map questions
   that may show no answers by area, and an Update that only switches drops the "right away" sentence
-  (WALK-7, WALK-8). With no link that opens this report, publishing reads "Published — create a link so
-  your client can open it." (WALK-5), since 2026-10-25 with **Share**, which makes one; with one, the
-  "Published." banner's **Copy the message for your client** opens Share too.
-- **Share and links to one report** (2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D):
-  [ShareDialog.jsx](../client/src/components/clientReports/ShareDialog.jsx) replaces the deleted
-  `CopyMessageDialog`, on every shown report's row and in the builder's header (never on a draft or a
-  taken-down report; disabled while an edit is open, "Finish or cancel the edit first.", and while the
-  links list loads). It lists the usable links that open this report, all-reports links first, picks
-  one, builds the message with `copyMessageFor({ report, link, origin, justMade })` (its ending by link:
-  all reports, this report only, or made just now), and offers **Make a link** (`POST …/shares`, with
-  `reportId` for Just this report; the password is always generated there, and shown once with Copy
-  password). `linkMessageFor` (Link ready) says "to this report" for a one-report link, "to our
-  reports" otherwise. Since the simplify build's code review round 2: every link made in one Share
-  stays in `made` with its own line until Done, "Password for {label}: … Copy password — shown once.
-  Send it separately from the message. Lost it? Change password on the link." (FRESH-7: a second link
-  used to replace the first one's password, with no way back); Make a link moves focus to the panel's
-  first radio and Create link to the newest Copy password (FRESH-4: focus fell to `<body>`); and
-  "Couldn't load the links." has **Try again** (`refetchQueries` on the links key), opening Share
-  while the list has failed reads it again once, and "Loading links…" shows while a read is on its way
-  (`useIsFetching`) (VER-2: a dead end, with no retry and no request on reopening).
-- **Which links open a report** (contract K8): every place that asks filters the campaign's links
-  through `linksFor(shares, reportId)` (all-reports links plus this report's own) FIRST, then the
-  existing helpers (`usableLinks`, `noUsableLinkReason`, `linksLine`). They all live in
-  [linkState.js](../client/src/components/clientReports/linkState.js) (`linksFor`, `singleLinksOf`,
-  `linkOpens`, `linkName`, `deleteLinksText`, and, since code review round 1, `reportLinkReason`,
-  `reportLinksLine`, `takeDownLinksText` and one shared `andList`, moved out of parts.jsx): the report
-  row, the builder and its post-publish banner, *Before you publish*, the Publish confirm, the Take down
-  and Delete confirms, and Share. `reportLinkReason` mirrors the server's rule: when any link opens this
-  report, those links decide the reason (renew, unlock or rotate, enable); only when none does, the
-  `other_reports` words if the campaign has other links ("No link opens this report — your links open
-  other reports. Share makes one." / on a draft "No link opens this report yet. After you publish,
-  Share makes one."), else "No link yet — create one." on a published report and, since the simplify
-  build's code review round 2 (FRESH-8), "No link yet — after you publish, Share makes one." on a
-  draft (`NO_LINK_DRAFT`: *Before you publish* and the Publish confirm offer no way to make a link,
-  and "create one" sent a brand-new admin looking for one); before the links list loads, the server's
-  `checks.links` decides (its `no_link` worded the same way). "Opened via …" on a row still names any
-  of the campaign's links, and waits for the links list (it read "a deleted link" while the list
-  loaded). The links panel lists all-reports links first and folds the rest under "Links to one report
-  (N)"; a row whose `report.takenDown` is true adds "Its report is taken down — the link shows “taken
-  down” until you put it back up." under what it opens (round 2, FRESH-6: it read only "Active · Opens
-  only the … report"); the panel's own "Couldn't load the links." has **Try again** (`q.refetch()`,
-  round 2, VER-2). New link offers "Opens: All your reports / One report only" over the shown reports
-  (`shownReportsOf`). Since code review round 1 (LINK-1) the report it sends is the one its box shows
-  (`chosen`, worked out from the list as it is now), Create link waits while there is none, and while
-  the reports load the choice reads "— loading your reports…": opened before the list arrived, it used
-  to send no `reportId` and make a link to every report. Since round 2 (VER-2) a failed reports list
-  reads "Couldn't load your reports." with **Try again** (`refetchQueries` on the reports key; opening
-  New link while it has failed reads it again once), where "— loading your reports…" stayed forever;
-  that line now shows only while the list is being read (the first read, or a Try again). Share waits
-  for the links list too (LINK-3): it gets `null` while the list loads and shows "Loading links…" (no
-  Make a link, Copy message off) or "Couldn't load the links." with the error (and, since round 2,
-  **Try again**: above), where it used to offer to make an all-reports link the campaign already had.
-- **Smaller round-2 changes (the upgrade's code review):** the link row prints `failureLine` whenever a
+  (WALK-7, WALK-8). Publishing reads "Published — Share makes its link for your client." with **Share**
+  (since 2026-10-28; before, "Published — create a link so your client can open it.", WALK-5, or
+  "Published. Your client can see it now.").
+- **Share, one link per report** (2026-10-28, PROPOSAL_CLIENT_REPORT_LINKS.md §D1; first built
+  2026-10-25 as a message picker, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D):
+  [ShareDialog.jsx](../client/src/components/clientReports/ShareDialog.jsx) is the report's link manager,
+  on every published report's row and in the builder's header, shown or taken down (disabled while an
+  edit is open, "Finish or cancel the edit first.", and while the links list loads). Props (contract
+  K12): `report` (`messageReportOf(row)` plus `campaignType`, `status`, `takenDownAt`), `shares` (the
+  campaign's rows, `null` until loaded: "Loading links…", or "Couldn't load the links." with **Try
+  again**, `refetchQueries` on the links key, and opening Share while the list has failed reads it again
+  once), `allReportsRetired`, `staffUnderGrant`, `linksError`, `campaignId`, `tz`, `onClose`,
+  `onLinksChanged`, `onReportChanged` (code review round 2, V2-2: Create's `409 REPORT_NOT_SHOWN` and
+  `404 REPORT_NOT_FOUND` mean the report itself changed elsewhere, so the page re-reads the reports, History
+  and the report, and the builder its report; for a deleted report Share replaces the form with "This
+  report was deleted — there's nothing to share.", no Create link and Copy message off, until Done). With no link (`primaryLinkOf` null) it shows `MakeLinkForm`: the password radios
+  (`PasswordChoice` in linkParts.jsx; Same as … from `sameAsSourceOf(shares, report)`, picked only when
+  it's this report's tab, by `seriesId`, else the old series key; Make one up for me; Type my own, never
+  for staff) and the expiry (`ExpiryOptions`), `POST …/shares` with `reportId` and `password` or
+  `passwordFrom` or neither. With one it shows `LinkManager`: address and Copy link; the password as
+  dots with **Show** (`useLinkPassword` in hooks.js: `GET …/shares/:id/password` into component state,
+  never a react-query cache entry, an AbortController aborted on unmount and on a second Show; 403
+  `STAFF_CANNOT_VIEW_PASSWORD` → "staff", 409 → "unavailable", anything else → "failed", "Couldn't show
+  the password." with Try again), then **Copy password**, a plain click-time copy (Safari refuses a
+  clipboard write after an awaited request); the state badges and sentences (`linkBadges`,
+  `failureLine`, `lockAdvice`); Extend/Renew, Unlock now, New address, Delete link and, on a link that's
+  off, Turn on, each confirm in place (`InlineConfirm`: a dialog over Share's dialog would close both on
+  Escape); and `ChangePasswordPanel` with the also-change line (`alsoChangeLine`, ticked), the sign-out
+  line and, while an old link still works (`hasWorkingAllReportsLink`), the old link's own-password
+  line. **Focus** (code review rounds 1–2, CC-6, V2-1, N1): no press leaves the keyboard on `<body>`.
+  `useFocusAfter` (hooks.js) lets a press name its target and focuses it once the pressed control has left
+  the screen and the target is drawn — dropped if the user moved on: after Create, Copy link (or Copy
+  password when a password shows), whichever lands first, the list's answer or Share's own state (no
+  mount-time `autoFocus` on Copy link); Turn on and Unlock now → Copy link; Renew and an Extend date →
+  Extend; Delete link → the make-a-link form's first choice; an extra link's Delete → the next extra's,
+  else the previous one's, else the dialog; on the card, a Delete → the next row's first button, else the
+  previous row's, and the card's last → the reports heading (the card's optional `afterRef`). A password
+  made up, typed or changed shows in `PasswordReveal` ("Its password: …", Copy password, focused as it
+  appears) until Done; the create's and PATCH's answers have `gcTime: 0`, so the
+  password leaves react-query's cache when Share closes. What Share just did (`did`: the link, the
+  message ending, the reveal, the count offered and `changed`) picks the ending (`copyMessageFor({
+  report, link, origin, ending })`, `'new' | 'changed' | 'sent'`) and `fewerChangedLine`. Create's own
+  refusals: `REPORT_HAS_LINK` puts the winner in the list (`putShareRow`) with "Someone made this
+  report's link a moment ago — …"; `PASSWORD_NOT_VIEWABLE` / `SOURCE_NOT_FOUND` read `createErrorText`'s
+  sentence, re-read the list, and grey that Same as … out; anything else reads the server's sentence.
+  Extra links (`extraLinksOf`) get `ExtraLink`: `extraLinkLine` and Delete. A taken-down report holds
+  the message (Copy message off) and says why.
+- **The old-links card** ([RetiredLinksCard.jsx](../client/src/components/clientReports/RetiredLinksCard.jsx),
+  contract K12: `campaignId tz shares allReportsRetired staffUnderGrant onChanged`, plus `afterRef`, where
+  the keyboard goes when its last link is deleted; renders nothing
+  without all-reports links or before the list loads) sits above the reports card at every width. Its
+  rows are `allReportsLinksOf(shares)`, worded by `oldLinkLine` and the switch; a working link
+  (`isWorkingOldLink`) offers Change password (Add a password without one; never to staff) and New
+  address, every row Delete, with `oldLinkDeleteText`'s confirm in a `ConfirmDialog`. A new password or
+  address shows on the row (`PasswordReveal`, "Its new address: … Copy link") until the page goes.
+- **Which links are a report's** ([linkState.js](../client/src/components/clientReports/linkState.js),
+  contract K11): `linksFor(shares, reportId)` is the report's own links, never an all-reports link (it
+  was "all-reports links plus this report's own" before 2026-10-28); `primaryLinkOf` (newest usable,
+  else newest, as the server's) and `extraLinksOf`; `allReportsLinksOf`; `hasWorkingAllReportsLink(shares,
+  allReportsRetired)` (active and unexpired, a locked one included, and never once the switch is on),
+  read by the Publish subtitle, Delete's wording and Change password. The row's two lines are
+  `linkStatusLine({ shares, report, now, tz, allReportsRetired })` → `{ text, tone } | null` (the switch
+  changes only one thing: "No link of its own yet — Share makes one." is muted while an old link still
+  shows the report, warning otherwise) and `opensLine(report)` (every link's visits summed, the
+  organization apart, then Doorline staff's and the pre-per-link views when above zero). Take down's
+  line is `takeDownLinksText(linksFor(…))` ("Its link…", even for a report with two). Gone on
+  2026-10-28: `reportLinksLine`, `reportLinkReason`, `expiringSoon`, `hasUsableLink`, `linkOpens`,
+  `linkName`, `linksLine`, `noUsableLinkReason`, `deleteLinksText`, `disableConfirmText`, `opensSummary`,
+  `reportUrl`, `linkMessageFor` and the Link ready dialog, the "No password" and "Never expires" badges,
+  and `ClientLinksPanel.jsx` itself (its reusable pieces moved to
+  [linkParts.jsx](../client/src/components/clientReports/linkParts.jsx)). `singleLinksOf` stays, an alias
+  of `linksFor`. hooks.js adds `putShareRow`, `dropShareRow`, `useLinkAction` and `useLinkPassword`.
+- **The reports list** ([ReportRow.jsx](../client/src/components/clientReports/ReportRow.jsx),
+  ClientReportsPage.jsx; §D2–§D3 of the plan): every action a button, the `RowMenu` gone. Left, bordered:
+  Open, Share (published), Next report (newest of its kind). Right, one `ml-auto flex flex-wrap gap-1`
+  group that wraps as a unit: Archive (never on the newest of its kind) or Unarchive, Take down or Put
+  back up, and Delete, last, drawn in danger text in a small Button's shape (`DANGER_GHOST`: a ghost
+  Button's own `text-fg-muted` wins in the built CSS). `deleteWarning({ row, shares, allReportsRetired
+  })` words Delete's confirm by state, as paragraphs. The page folds each tab (`foldOf`): `listed` is
+  every report that isn't archived plus the newest dated and newest all-time report whatever they are;
+  `folded` the rest, under **Archived (N)**; gap lines still come from `gapsAbove` over every report of
+  the tab; tab counts leave archived reports out; Archive's line ("Archived — it's under Archived (4) at
+  the bottom. Undo", Undo being Unarchive) stays while that report is folded; "Every report here is
+  archived — open Archived below, or press New report." shows when all are archived and some are
+  folded.
+- **Publish and the builder** (§D4–§D5): `PublishDialog`'s subtitle by `hasWorkingAllReportsLink`, and
+  no link line; `BeforePublish` has no link item; the builder's one banner after publishing is
+  "Published — Share makes its link for your client." with Share (the "Published. Your client can see it
+  now." banner and `hasUsableLink` are gone), and an archived report's is "Archived — it's out of your
+  list." / "Nothing changes for your client." with Unarchive. New report's duplicate prompt reads
+  `archivedAt` ("— it's archived.", **Unarchive**, which updates the prompt in place) and its note says
+  each report gets its own link; How it works step 3 and the phone line come from
+  `howItWorksCopy.js` (Part 1 quotes them). History's link rows: §M. The homepage's three meta strings
+  (`client/index.html`) say "…frozen reports you share by password-protected link." (the JSON-LD's
+  "…frozen reports shared by password-protected link."). The super-admin's Rebuild demo day confirm says
+  the share link "opens the demo's report".
+- **Smaller round-2 changes (the upgrade's code review):** Share prints a link's `failureLine` whenever a
   count is above zero, the warning badge only for the last 24 hours on an unlocked, unexpired link
   (WALK-2); History subjects name the tab and team (`reportRowName`, WALK-3); matched canvasser names
   show as written (the server returns them so, and `asName`/`quotedNames` in TeamDialog.jsx capitalise
@@ -2634,10 +3112,73 @@ week the way the app does (through the schema's cast, so a week stored as the st
 there too) and a tab's latest report as New report does: newest `weekEnd`, then `createdAt`, then
 `_id`.
 
+**The 2026-10-28 change** (one link per report, passwords kept sealed, Archive and the switch;
+PROPOSAL_CLIENT_REPORT_LINKS.md, its §I and *What the owner does to ship it*) has **no migration and no
+console step it depends on**: a missing `archivedAt` reads as not archived, a missing `passwordSealed` as
+"can't be shown", a missing `oneLinkGuard` as unguarded, and the one-link guard builds at boot (§B).
+`npm run audit:mobile-api` finds no phone call on the changed routes, so there is no OTA and no
+client-version gate. In order:
+
+1. **Before the deploy**, the owner decides the DPA §4 question (passwords become viewable at the deploy)
+   and checks `CREDENTIAL_SEAL_KEY` in **Settings → Reveal Config Vars**. Without it, links still work
+   but no password is kept: one made up or typed shows once, right after, then "can't be shown", Same as
+   … isn't offered, and staff under a grant can't make a link. If it's missing, add one (Run console:
+   `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`, 44 characters ending
+   in "="); adding it also turns on FbTime Connect for every organization's admins, since the key is its
+   only gate. **Never replace or remove one that's there**: every kept link password and every FbTime key
+   would stop opening.
+2. **Deploy server and web from `main`, with `RETIRE_ALL_REPORTS_LINKS` unset.** Old all-reports links
+   keep working; none can be made.
+3. **Rebuild demo day** (super-admin home): the demo's link is replaced once by the demo report's own
+   link, same address and password (§K).
+4. In the demo, check passwords work: a Latest progress report → Publish → Share → Make one up for me →
+   Create link, then **Show** gives the password just shown; then another report → Share: **Same as your
+   last link** is picked → Create link → Show gives the same password.
+5. **Run console: `npm run report:all-reports-links`** (below), then the owner's decisions (the date, the
+   customer email, the legal sentences) and the owner's own clients' new links.
+6. **On the date:** the legal edits, with `staticPages.int.test.js` checking the new sentences and not the
+   old (PROPOSAL_CLIENT_REPORT_LINKS.md §E), committed and deployed, then `RETIRE_ALL_REPORTS_LINKS = on`.
+   **Rollback:** delete the var; old links open again at once, and nothing was written to them.
+
+The steps as the owner runs them: [OPERATIONS.md](OPERATIONS.md) → *Release: one link per report — and
+the switch that turns old links off*.
+
+**`npm run report:all-reports-links`** ([reportAllReportsLinks.js](../server/src/migrations/reportAllReportsLinks.js);
+proxied in the root `package.json` with the trailing `--`, so it runs from Heroku dashboard → **More →
+Run console**) lists, per organization with a link whose `reportId` is null or missing, its name (marked
+"(Doorline internal)" or "(being deleted)"), how many such links still work, are off because of billing,
+are turned off or have expired (each counted once, in the order a client meets them: turned off, then
+expired, then billing, read once per organization through `shareLinksBlocked`), on how many campaigns,
+and when one was last opened (the newest across the organization, as a UTC date); then how many of its
+reports have more than one link; then totals, and a line for links whose organization no longer exists.
+Organizations with working links come first. **Organization names and counts only**: no campaign, label,
+token or person. It connects with `autoIndex` and `autoCreate` off, writes nothing, refuses any argument
+(`Unknown argument: --apply`, exit 2) and ends "Nothing was changed." Run from the repo root against a
+throwaway database (2026-10-28):
+
+```
+Old links to all your reports, by organization (read-only; organization names and counts only)
+
+Acme Field Co
+  4 links to all your reports: 3 still working · 0 off because of billing · 1 turned off · 0 expired
+  on 2 campaigns · last opened 2026-10-26
+  1 report with more than one link
+
+Beacon Strategies
+  1 link to all your reports: 0 still working · 0 off because of billing · 0 turned off · 1 expired
+  on 1 campaign · never opened
+
+All organizations: 2 organizations with links to all your reports · 5 links: 3 still working · 0 off because of billing · 1 turned off · 1 expired · on 3 campaigns
+1 report with more than one link, in 1 organization
+Nothing was changed.
+```
+
 **Config** (all optional; none is needed to deploy): `CLIENT_REPORT_JOB_CONCURRENCY` (2),
 `CLIENT_REPORT_BATCH` (2,000), `CLIENT_REPORT_SWEEP_CRON` (`31 5 * * *`),
 `CLIENT_REPORT_QUEUE_TIMEOUT_MS`, `CLIENT_REPORT_MAP_CACHE_MB` (64; the web process's map payload
-cache budget in megabytes, `0` turns the cache off, §J), `SHARE_LINK_DEFAULT_DAYS` (90; keep it there). Test overrides only,
+cache budget in megabytes, `0` turns the cache off, §J), `SHARE_LINK_DEFAULT_DAYS` (90; keep it there),
+`RETIRE_ALL_REPORTS_LINKS` (unset; `on` turns every all-reports link off, §K) and `CREDENTIAL_SEAL_KEY`
+(without it no link password is kept; never replace or remove it, above). Test overrides only,
 left unset in production: `CLIENT_REPORT_WAIT_RETRY_MS` (30 s), `CLIENT_REPORT_BLOCKED_AFTER_MS` (30
 minutes; the `BLOCKED` message's wording assumes it), `CLIENT_REPORT_BEAT_MS` (30 s), and the map
 cache's `CLIENT_REPORT_MAP_CACHE_TTL_MS` (15 minutes) and `CLIENT_REPORT_MAP_CACHE_SWEEP_MS` (60 s).
@@ -2708,3 +3249,40 @@ Older / Newer by last day, the one-report `before`); client `reportDerivePeriod.
 `clientReportsLogic.test.js`, `clientReportsSimplify.smoke.test.js` (the choice, an empty first day, the
 request, the list's Next per kind and gap lines), `clientReportsRender.smoke.test.js` (the publish
 warning), `publicReportRender.smoke.test.js` (the page and the hub) and `reportPdf.test.js`.
+
+One link per report, passwords, Archive and the switch (2026-10-28, PROPOSAL_CLIENT_REPORT_LINKS.md §E):
+server `clientReportOneLink.int.test.js` (`REPORT_REQUIRED`, the raw `oneLinkGuard: true`, `REPORT_HAS_LINK`
+with the primary before `REPORT_NOT_SHOWN`, a legacy unguarded link blocking a new one, 20 concurrent
+Shares leaving one link, the lost-race answers, the guard healing, declared on the schema, built at boot
+and nightly, never confused with a token collision, link rows named by their report),
+`clientReportLinksRetired.int.test.js` (the switch unset, on in each spelling, and unset again: every
+public route's 410, signed-in devices, a turned-off link still 404, the admin refusals in both states,
+`toValue.allReports`), `clientReportLinkPasswords.int.test.js` (made up, typed and copied passwords
+sealed and shown, Same as …'s boundary, no key, a malformed key, a replaced key, a stale copy, foreign
+associated data and a mismatch all answering 409 with a reason, the lone-surrogate guard, nothing secret
+in any row, History, error or public answer), `clientReportLinkStaff.int.test.js` (the two 403s,
+`passwordCopyable` as for anyone, nothing generated in an answer to staff, `PASSWORDS_NOT_KEPT`, Show in
+an internal organization), `clientReportChangeEverywhere.int.test.js` (the count and tabs, exactly the
+matching links changed by per-link CAS, a skip, a copied link found by its hash without a key),
+`clientReportArchive.int.test.js` (both CASes and their single History rows, `status` untouched,
+`archivedAt` on list rows, `GET /:id` and `REPORT_EXISTS`, `existingOf`, links still opening an archived
+report, Next onto an archived report, who may archive; plus the delete cascade's report-named link row
+and the preview's one-report earlier-totals line), `reportAllReportsLinks.int.test.js` (the check run as
+a child process: counts by state, billing included, names only, read-only to the profiler, no collection
+created) and the unit `linkPasswordSeal.test.js` (sealing with associated data, the reasons,
+`sameLinkPassword`, `primaryLinkOf`, the switch's spellings); updated for one link per report:
+`shareLinks`, `clientReportSingleLinks`, `reportSecurity` (an all-reports link unset → 200, on → 410,
+unset → 200), `sessionLifetime`, `teamLead` (its wrong-password test on a one-report link), `leadWalkthrough`,
+`clientReportOpens`, `clientReportBranding`, `clientReportMapPayload`, `clientReportBuild`,
+`clientReportEdits`, `clientReportMigration`, `clientReportAllTime`, `clientReportChecks` (the links check
+gone), `clientReportDuplicates` and `demoRebuild` (the demo link replaced once, then re-pointed with the
+same `_id`, token and password, a pitch link left alone, nothing shown, the env password sealed, the
+refusals before any write). The crash fix's own suites: `passwordText.test.js` and
+`passwordText.int.test.js` (sign-in, password changes and the link unlock with a lone surrogate, the
+process still up). Client: `clientReportShareLinks.smoke.test.js` (new: Share and the old-links card in
+every state Part 1 names), `clientReportBuilderLinks.smoke.test.js` (rewritten), `clientReportsLogic.test.js`
+(the link parts, the message endings, How it works), `clientReportsRender`, `clientReportsSimplify`,
+`clientReportBuilderEffects` and `clientReportIntegration` smoke tests (the row's buttons and lines, the
+fold, Delete's and Publish's wording while an old link works, the builder's banners) and
+`campaignHistory.test.js` (report-named link rows, Archived, the change-everywhere details, the
+vocabulary).

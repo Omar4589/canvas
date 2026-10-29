@@ -173,6 +173,21 @@ badge appears on it when you have work that hasn't synced yet — tapping Refres
 Everything below — the pins, the pull-up sheet with your progress and each house's voters, recenter,
 and the base-map picker — is covered in [MAPS.md](MAPS.md).
 
+**When your book closes.** The office can end the pass your book belongs to — by archiving its walk list,
+archiving the pass, or starting the next pass — or take the book off you. A pass ending reaches your map
+within about 30 seconds while it's open (or the next time you open the app); a book taken off you or
+handed to someone else, on your next full refresh. After the October 2026 app update, if that was your
+only book the map says *No book right now — The office closed or reassigned the book you were working.
+Anything you saved still counts.*, with **Refresh** and **Choose a different campaign** (an older app
+says *No turf assigned yet*); with books on another walk list you go to your book list. If the office
+brings the book back, it reappears on the next refresh.
+
+**Late doors still count where you knocked them.** A door you record with no signal is sent when you
+reconnect, and — after the app update — it counts in the pass you knocked it in, even if the office
+ended that pass in the meantime. One thing you may notice at a pass change: a door you knocked just
+before the office started the next pass can show as done for up to a few minutes, then as not done in
+the new pass, because your knock counted in the old one ([PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Late knocks*).
+
 ## At the door
 
 Tapping a house opens its detail. The header shows the address, when it was last visited, and a
@@ -1428,7 +1443,39 @@ nothing — the snapshot carries no `note`, so restoring is a deliberate decisio
 (`/mobile/households/:id/location`) is a coordinate write with no disposition semantics and must stay
 replayable verbatim.
 
-### The change confirmation ("Change this door's result?")
+### The book a door write names, and when a book closes (2026-10-28)
+
+Over the air, no new build ([PROPOSAL_WALK_LIST_ARCHIVE.md](PROPOSAL_WALK_LIST_ARCHIVE.md) §E):
+
+- **Every door write names its book.** A door result, a survey and a walk-up add each send the door's
+  `turfId` — its book in the cached bootstrap (the canvasser's own book for that door), read **at tap
+  time** by `doorTurfId(bootstrap, householdId)`, or `null` for a door not in the cache. The bodies come
+  from pure builders in [lib/doorPaths.js](../mobile/lib/doorPaths.js) (`doorResultBody`, `addVoterBody`,
+  `surveyBody`), shared by `recordAction.js` (door results and the walk-up add) and the survey screen, and
+  the offline queue persists them as they are. The server uses it to count a late write in the pass it
+  was made in ([PASSES_AND_TURF.md](PASSES_AND_TURF.md) §F); a server without that change strips the
+  field (its schemas are non-strict), so this ships safely in either order, and a phone without it gets
+  the old rule.
+- **Last visit only moves forward.** The knock and survey routes now keep the later of the door's stored
+  and new `lastActionAt`/`lastActionBy` (`stampLastAction` in
+  [routes/mobile/canvass.js](../server/src/routes/mobile/canvass.js)), as `healDuplicateDelivery` already
+  did, so a late replay never drags a door's last visit behind a newer one. The save always marks
+  `lastActionAt` modified, so `updatedAt` moves and `/mobile/changes` still ships the door to teammates —
+  without that, an older replayed survey that completed the door this round reached no teammate's phone.
+- **The pending overlay follows the book.** Each overlay entry also keeps the door's `turfId` from the
+  tap. When a refetch puts that door in a different book (a new pass took it), `pendingDoorVerdict`
+  answers `'moved'` and the entry is dropped, instead of painting the old round's status on the new pass's
+  pin for up to its 5-minute TTL — the recorded status belongs to the round it counted in.
+- **"No book right now."** `bookClosed({ selectedBookIds, data })` ([lib/doorPaths.js](../mobile/lib/doorPaths.js))
+  is true when the map is scoped to a book selection, the data is **fresh** (never the disk snapshot,
+  whose books list can predate an assignment), none of the selected books is in `data.books`, and no doors
+  are left. [map.jsx](../mobile/app/(app)/map.jsx) then shows *No book right now* / *The office closed or
+  reassigned the book you were working. Anything you saved still counts.* with **Refresh** and **Choose a
+  different campaign** — one wording for an archived walk list or pass, an unassigned or reassigned book
+  and a new pass. *No turf assigned yet* stays for a canvasser who never had a book, and for a selected
+  book still listed with no doors left (everyone there voted). The selection is never cleared, so a book brought
+  back reappears on the next refresh. The map notices a pass ending through its 30-second `/changes`
+  poll: a different `activePassIds` set invalidates the bootstrap.
 
 Replace-then-create means a new tap **replaces** the canvasser's earlier result for the round and —
 through the `SurveyResponse` cleanup above — **deletes** any answers they took at the door. Both used

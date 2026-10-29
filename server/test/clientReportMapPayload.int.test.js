@@ -52,7 +52,9 @@ const raw = (path, headers = {}) =>
     req.on('error', reject);
   });
 const decoded = (r) => (r.headers['content-encoding'] === 'gzip' ? zlib.gunzipSync(r.body) : r.body);
-const share = (path, headers = {}) => raw(`/share/${ctx.token}${path}`, { 'X-Share-Token': ctx.access, ...headers });
+// Each report through its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2): the pins report's, unless
+// another is named.
+const share = (path, headers = {}, link = ctx.links.pins) => raw(`/share/${link.token}${path}`, { 'X-Share-Token': link.access, ...headers });
 const admin = async (method, path, body) => {
   const res = await fetch(`${base}/api${path}`, {
     method,
@@ -176,17 +178,23 @@ before(async () => {
   // A report published before snapshots: rows with no positions yet, no stored extent.
   const legacy = await ClientReport.create(reportDoc({ title: 'Legacy', weekStart: '2026-06-29', weekEnd: '2026-07-05', rangeStartUtc: new Date('2026-06-29T05:00:00Z'), rangeEndUtc: new Date('2026-07-06T05:00:00Z'), snapshotId: null, mapPointCount: 9 }));
   await ClientReportMapPoint.collection.insertMany(pointsOf(legacy._id, null, { withSeq: false }));
-  await ReportShareLink.create({
-    organizationId: org._id, campaignId: camp._id, token: 'crmap-token', label: 'Client',
-    passwordHash: await bcrypt.hash('crmap-password-1', 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
-  });
+  for (const [token, r] of [['crmap-token', pins], ['crmap-legacy-token', legacy]]) {
+    await ReportShareLink.create({
+      organizationId: org._id, campaignId: camp._id, token, label: 'Client', reportId: r._id,
+      passwordHash: await bcrypt.hash('crmap-password-1', 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
+    });
+  }
   Object.assign(ctx, { pins, legacy, token: 'crmap-token' });
 
   server = http.createServer(createApp());
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
-  const res = await fetch(`${base}/api/share/crmap-token/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'crmap-password-1' }) });
-  ctx.access = (await res.json()).accessToken;
+  const unlock = async (token) => {
+    const res = await fetch(`${base}/api/share/${token}/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'crmap-password-1' }) });
+    return { token, access: (await res.json()).accessToken };
+  };
+  ctx.links = { pins: await unlock('crmap-token'), legacy: await unlock('crmap-legacy-token') };
+  ctx.access = ctx.links.pins.access;
 });
 
 after(async () => {
@@ -197,13 +205,14 @@ after(async () => {
 test('the streamed payload is byte-for-byte the old build — pins and a report from before snapshots', { skip }, async () => {
   clearMapCache();
   for (const r of [ctx.pins, ctx.legacy]) {
-    const plain = await share(`/reports/${r._id}/map`, { 'Accept-Encoding': 'identity' });
+    const link = r === ctx.pins ? ctx.links.pins : ctx.links.legacy;
+    const plain = await share(`/reports/${r._id}/map`, { 'Accept-Encoding': 'identity' }, link);
     assert.strictEqual(plain.status, 200, plain.body.toString());
     assert.strictEqual(plain.headers['content-encoding'], undefined, 'no gzip to a request that does not ask for it');
     const fresh = await ClientReport.findById(r._id).lean();
     const expected = await referencePins(fresh, ['support', 'issues']);
     assert.strictEqual(plain.body.toString('utf8'), expected, `${r.title}: identical bytes`);
-    const gz = await share(`/reports/${r._id}/map`, { 'Accept-Encoding': 'gzip, deflate, br' });
+    const gz = await share(`/reports/${r._id}/map`, { 'Accept-Encoding': 'gzip, deflate, br' }, link);
     assert.strictEqual(gz.headers['content-encoding'], 'gzip');
     assert.strictEqual(Number(gz.headers['content-length']), gz.body.length);
     assert.strictEqual(decoded(gz).toString('utf8'), expected, `${r.title}: identical once decoded`);

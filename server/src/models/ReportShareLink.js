@@ -1,9 +1,10 @@
 import mongoose from 'mongoose';
 
-// A public, revocable, optionally-password-protected link to a campaign's published client reports.
-// Replaces per-client login accounts: the operator shares `/r/<token>` and anyone with it sees the
-// campaign's report hub (latest + history). The token is an unguessable capability string; a
-// password (bcrypt) adds a second factor; rotate = new token, revoke = isActive:false. See
+// A public, revocable, password-protected link to ONE published client report — each report has its own,
+// and only one (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2). Replaces per-client login accounts: the
+// operator shares `/r/<token>` and anyone with it, and its password, sees that report. Older links may
+// open every report of the campaign instead (reportId below). The token is an unguessable capability
+// string; a password (bcrypt) adds a second factor; rotate = new token, revoke = delete. See
 // docs/CLIENT_PORTAL.md and routes/public/share.js.
 //
 // Hardened in docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6 / §O7: a credential version every change
@@ -98,12 +99,35 @@ const reportShareLinkSchema = new mongoose.Schema(
 
     // A link to ONE report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D): it opens that report and
     // nothing else. null — and missing, on every link made before this field — opens every published
-    // report of the campaign. Set at creation, never changed; deleting the report deletes its links
-    // (DELETE /admin/client-reports/:id). DECLARED on purpose: strictQuery drops an undeclared filter
-    // key, so `{ reportId: … }` would silently match every link (round 2 reproduced it). Filters read
-    // `reportId: null` / `$in: [null, …]`, which match the missing field too. No index of its own: a
-    // campaign has a handful of links, and {campaignId, isActive} finds them.
+    // report of the campaign: an "all your reports" link, which no route makes any more and which
+    // RETIRE_ALL_REPORTS_LINKS turns off (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1). Set at creation,
+    // never changed — except the demo seed's one re-point of its own link (§C5); deleting the report
+    // deletes its links (DELETE /admin/client-reports/:id). DECLARED on purpose: strictQuery drops an
+    // undeclared filter key, so `{ reportId: … }` would silently match every link (round 2 reproduced
+    // it). Filters read `reportId: null` / `$in: [null, …]`, which match the missing field too. Indexed
+    // only by the one-link guard below, which covers guarded links alone.
     reportId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientReport', default: null },
+
+    // The password, SEALED (utils/sealedSecret.js), so the campaign's admins and leads can see it again
+    // — never Doorline staff under a support grant (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §B, §C3).
+    // Written in the SAME atomic write as passwordHash, sealed with `report-link:<that hash>` as its
+    // associated data (services/reports/shareLinks.js sealLinkPassword), so a copy left behind when the
+    // hash changed — by code that didn't know this field — never opens as the link's password. null
+    // when sealing wasn't possible (no key, or a malformed one: a link never fails over the key), on a
+    // link to all your reports (its password is never shown or copied), and — missing — on every link
+    // made before this field: "can't be shown".
+    //
+    // select: false, so no read carries it unless it asks: `+passwordSealed` (an inclusive projection
+    // drops it — 'passwordHash +passwordSealed'). `aggregate` and `collection.*` ignore select:false,
+    // and create()'s document includes it, so a created document is never spread into a response.
+    // Never in a share row, a public response, History or a log.
+    passwordSealed: { type: String, default: null, select: false },
+    // In the one-link guard (REPORT_ONE_LINK_GUARD below): true on every link made since one link per
+    // report (§C2). NO DEFAULT on purpose — a default would put every legacy link in the guard; and it
+    // must be DECLARED, or Mongoose drops it on create and the guard holds nothing (round 1 checked it on
+    // a throwaway mongod). Healing (services/reports/clientReportIndexes.js) unsets it on the later of
+    // two guarded links, which stays an ordinary second link.
+    oneLinkGuard: { type: Boolean },
   },
   { timestamps: true }
 );
@@ -115,5 +139,19 @@ reportShareLinkSchema.methods.isLegacyOpen = function () {
 };
 
 reportShareLinkSchema.index({ campaignId: 1, isActive: 1 });
+
+// One link per report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), enforced by the database: POST
+// /admin/client-reports/shares looks first, and this catches two Shares landing at the same instant.
+// Partial, so it holds only guarded links (oneLinkGuard: true) — every link from before it, a report's
+// second link from then included, sits outside it, which is also why it builds over them. Production has
+// autoIndex off, so it is BUILT AT BOOT (services/reports/clientReportIndexes.js ensureOneLinkGuard, as
+// ClientReport's guards are); declared here too, so migrate:build-indexes sees it as built and its
+// --sync never drops it. Changing this definition fails that boot build until the old index is dropped by
+// hand. Frozen, and copied wherever it is handed over (Mongoose and the driver keep what they are given).
+export const REPORT_ONE_LINK_GUARD = Object.freeze({
+  keys: Object.freeze({ reportId: 1 }),
+  options: Object.freeze({ name: 'report_one_link_guard', unique: true, partialFilterExpression: Object.freeze({ oneLinkGuard: true }) }),
+});
+reportShareLinkSchema.index(structuredClone(REPORT_ONE_LINK_GUARD.keys), structuredClone(REPORT_ONE_LINK_GUARD.options));
 
 export const ReportShareLink = mongoose.model('ReportShareLink', reportShareLinkSchema);

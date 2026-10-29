@@ -6,7 +6,7 @@ kind: guide
 order: 21
 sourceDoc: VOTERS.md
 summary: Mark a voter Do not contact — they drop out of walk lists, exports, and surveys everywhere, and a fully-flagged door leaves the map.
-tags: do not contact, dnc, opt out, privacy, remove, skip, complaint
+tags: do not contact, dnc, opt out, privacy, remove, skip, complaint, suppression list, upload, csv, excel, xlsx
 ---
 
 ## When someone asks to be left alone
@@ -30,8 +30,9 @@ it, when, and why. Removing the flag works the same way and is also recorded.
 ## Uploading a whole list
 
 Have a suppression list from a client or a prior cycle? On the **Voters** page, open
-**Do-not-contact list**, pick the **state the list is for**, and upload a CSV of Voter IDs. It works
-like the Early Voting upload:
+**Do-not-contact list**, pick the **state the list is for**, and upload a CSV or Excel file (`.xlsx`) of
+Voter IDs in the box labelled **Do-not-contact file (CSV or Excel)**. It works like the Early Voting
+upload:
 
 1. A preview runs first — how many voters match, how many are already flagged, and how many doors
    would drop off the map, campaign by campaign. It names the column it matched on (and lets you
@@ -42,8 +43,25 @@ like the Early Voting upload:
    import under the same ID, they're flagged automatically. (If the later import spells the ID
    differently — zeros added or dropped — upload the list again afterwards; it will match then.)
 
-A list can be up to 50 MB. Only the Voter ID column is used, so if yours is bigger, save a copy with
-just that column and upload that.
+A list can be up to 50 MB, CSV or Excel. Only the Voter ID column is used, so if yours is bigger, save a
+copy with just that column and upload that. Every row of the file counts.
+
+**Excel files.** Only the first tab you can see is read; when the workbook has other tabs, the preview
+names the one it read, so check it's your list. A workbook with **rows hidden in Excel** (by a filter,
+say) is refused with how many. Hidden rows are still in the file, so the app won't guess what you
+meant: counting them could flag people you filtered out, and skipping them could leave someone off
+this list. Clear the filter or delete those rows, save, and upload again. Old-format and
+password-protected workbooks are refused with the fix (open in Excel, remove any password, **Save As →
+Excel Workbook (.xlsx)**), and so is a damaged one. An Excel file's first tab must also unpack to
+320 MB or less, about 184,000 rows of a 35-column file.
+
+**If the Voter ID column isn't found,** pick it from the list and press **Match column**. Column names
+need to be in row 1 of the first tab, and the box says so, with the row they seem to be in when a
+title sits above them. If your last upload for that state (the most recent one you didn't undo) used a column this file also has, it's already chosen;
+check it and press **Match column**.
+
+**Fixed the file? Pick it again** and the preview re-runs. If you edit a file after picking it, pick
+it again before applying.
 
 **Why the state matters.** Two states can issue the same digits, so the app only looks inside the
 campaigns of the state you picked. If the file names voters in other states' campaigns, the preview

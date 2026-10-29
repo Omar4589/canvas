@@ -29,6 +29,11 @@ export default function BookAssignmentPanel({
   // presentational here, same contract as onMerge/onRestrict. Optional: absent, no button.
   onMoveDoors = null,
   movePending = false,
+  // A view-only pass (archived, on an archived walk list or campaign — docs/PROPOSAL_WALK_LIST_ARCHIVE.md
+  // §D.3): who held each book stays listed; assign, unassign, merge, move, restrict and the print link
+  // all go, and `readOnlyReason` says why in their place.
+  readOnly = false,
+  readOnlyReason = null,
 }) {
   const qc = useQueryClient();
   const single = books.length === 1;
@@ -218,6 +223,14 @@ export default function BookAssignmentPanel({
   });
 
   const busy = assignOne.isPending || unassignFrom.isPending || unassignBulk.isPending || bulk.isPending;
+  // Assign / Unassign and "Apply to N books" used to fail without a word (the optimistic row just
+  // rolled back). Their refusal prints now — the server's own sentence — and, like the staged
+  // confirm above, it belongs to the selection it was made on.
+  const assignErr = unassignErr || assignOne.error?.message || unassignFrom.error?.message || null;
+  useEffect(() => {
+    for (const m of [assignOne, unassignFrom, bulk]) if (!m.isIdle) m.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turfKey]);
 
   function toggleSingle(userId) {
     if (assignedSet.has(userId)) unassignFrom.mutate({ turfId: turfIds[0], userId });
@@ -271,7 +284,7 @@ export default function BookAssignmentPanel({
             )}
           </div>
           {union.length === 0 ? (
-            <p className="text-xs text-fg-subtle">No one assigned yet.</p>
+            <p className="text-xs text-fg-subtle">{readOnly ? 'No one assigned.' : 'No one assigned yet.'}</p>
           ) : (
             <ul className="space-y-1">
               {union.map((e) => (
@@ -286,20 +299,22 @@ export default function BookAssignmentPanel({
                     )}
                     {!single && <span className="shrink-0 text-[10px] text-fg-subtle">in {e.inBooks.size}/{books.length}</span>}
                   </span>
-                  <button
-                    onClick={() => (single ? toggleSingle(e.user.id) : unassignEverywhere(e))}
-                    disabled={busy}
-                    className="shrink-0 rounded-md border border-danger/30 bg-danger-tint px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
-                  >
-                    Unassign
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => (single ? toggleSingle(e.user.id) : unassignEverywhere(e))}
+                      disabled={busy}
+                      className="shrink-0 rounded-md border border-danger/30 bg-danger-tint px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+                    >
+                      Unassign
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
           {/* Clear the whole selection at once. Only past one person — with a single
               assignee the per-row Unassign above already is this button. */}
-          {union.length > 1 &&
+          {union.length > 1 && !readOnly &&
             (confirmClear ? (
               <div className="mt-2 rounded-lg border border-danger/30 bg-danger-tint px-2.5 py-2">
                 <p className="text-xs font-medium text-danger-fg">
@@ -340,9 +355,12 @@ export default function BookAssignmentPanel({
                 Unassign all ({union.length})
               </button>
             ))}
-          {unassignErr && <p className="mt-1.5 text-[11px] text-danger-fg">{unassignErr}</p>}
+          {assignErr && <p className="mt-1.5 text-[11px] text-danger-fg">{assignErr}</p>}
         </div>
 
+        {readOnly ? (
+          readOnlyReason && <p className="border-t border-border pt-3 text-xs text-fg-subtle">{readOnlyReason}</p>
+        ) : (
         <div className="border-t border-border pt-3">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
             {single ? 'People' : 'Add people'}
@@ -494,14 +512,16 @@ export default function BookAssignmentPanel({
                   ? `Even DOOR count: spread the doors across ${picked.size} ${picked.size === 1 ? 'person' : 'people'} (biggest books first).`
                   : `Everyone (${picked.size}) on every book.`}
               </p>
+              {bulk.error && <p className="mt-1 text-[11px] text-danger-fg">{bulk.error.message}</p>}
             </>
           )}
             </>
           )}
         </div>
+        )}
       </div>
 
-      {(books.length >= 2 || onMoveDoors) && (
+      {!readOnly && (books.length >= 2 || onMoveDoors) && (
         <div className="space-y-1.5 border-t border-border px-4 py-2">
           {books.length >= 2 && (
             <button
@@ -530,7 +550,7 @@ export default function BookAssignmentPanel({
           published-only check, so hiding the undo with the whole block left a draft book's marks
           reachable only from the door pop-up — and, once a canvasser superseded one, from
           nowhere on this panel at all. The two halves are gated separately for that reason. */}
-      {onRestrict && (deskMarks > 0 || !draftSelected) && (
+      {!readOnly && onRestrict && (deskMarks > 0 || !draftSelected) && (
         <div className="space-y-1.5 border-t border-border px-4 py-2">
           {!draftSelected && (
             <button

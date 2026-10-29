@@ -5,11 +5,12 @@ import { api } from '../api/client.js';
 import { downloadFile, saveTextFile } from '../lib/downloadFile.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import AnswerFilters from '../components/AnswerFilters.jsx';
-import IdColumnPicker from '../components/IdColumnPicker.jsx';
+import IdColumnPicker, { SheetNote } from '../components/IdColumnPicker.jsx';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { formatInTz } from '../lib/datetime.js';
-import { describeIdsInFile, zeroMatchLine, idListTooBig, idListTooBigText } from '../lib/idListPreview.js';
+import { describeIdsInFile, zeroMatchLine, idListTooBig, idListTooBigText, fileLine, sheetNote, refusalView, lastUploadedSearchColumn, suggestedColumn, requestErrorText } from '../lib/idListPreview.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
+import { useRoundOptions } from '../lib/useRoundOptions.js';
 
 const STATUSES = ['unknocked', 'not_home', 'surveyed', 'refused', 'restricted', 'no_soliciting', 'wrong_address', 'lit_dropped'];
 const STATUS_LABEL = {
@@ -161,13 +162,11 @@ export default function WalkListsPage() {
     queryFn: () => api(`/admin/campaigns/${campaignId}/walklists`),
     enabled: !!campaignId,
   });
-  const passesQ = useQuery({
-    queryKey: ['admin', 'passes', campaignId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
-    enabled: !!campaignId,
-  });
+  // The From pass options, named by their walk list ("North · Pass 2") the way every round picker
+  // names them. The legacy bucket is no pass to take statuses from.
+  const { roundOptions } = useRoundOptions(campaignId);
   const lists = listsQ.data?.walkLists || [];
-  const passes = passesQ.data?.passes || [];
+  const passChoices = roundOptions.filter((r) => r.id !== 'legacy');
 
   const distinctQ = useQuery({
     queryKey: ['admin', 'walklist-distinct', campaignId],
@@ -205,7 +204,7 @@ export default function WalkListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'walklists', campaignId] }),
   });
 
-  // Build a frozen list by uploading a CSV of Voter IDs (matched by stateVoterId).
+  // Build a frozen list by uploading a CSV or Excel file of Voter IDs (matched by stateVoterId).
   const csvPreview = useMutation({
     mutationFn: ({ file, idColumn: col }) => {
       const fd = new FormData();
@@ -231,8 +230,14 @@ export default function WalkListsPage() {
     },
   });
 
-  // When the server can't auto-detect the Voter-ID column it 400s with the column list.
-  const colError = csvPreview.error?.data?.columns ? csvPreview.error.data : null;
+  // A refused preview: the column picker only when the server couldn't find a column (code-less 400
+  // with the column list); every other refusal is its sentence (lib/idListPreview.js refusalView).
+  // This page used to test `columns` for truthiness, so a refusal's columns: [] showed an empty picker
+  // and hid the reason.
+  const refused = refusalView(csvPreview.error, { page: 'saved-searches' });
+  // Offered, never matched: the column the newest uploaded saved search used, when this file has it.
+  const suggested = suggestedColumn(refused, lastUploadedSearchColumn(lists));
+  const pickedColumn = idColumn || suggested || '';
 
   function onPickCsv(file) {
     setCsvFile(file);
@@ -290,10 +295,10 @@ export default function WalkListsPage() {
         {/* Builder */}
         <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="mb-1 text-base font-medium">Build a saved search</h2>
-          <p className="mb-3 text-xs text-fg-muted">Build from demographic/geographic filters, or upload a CSV of Voter IDs. Saved searches are frozen snapshots.</p>
+          <p className="mb-3 text-xs text-fg-muted">Build from demographic/geographic filters, or upload a CSV or Excel file of Voter IDs. Saved searches are frozen snapshots.</p>
 
           <div className="mb-4 inline-flex rounded-md border border-border-strong p-0.5 text-sm">
-            {[['filter', 'Filter builder'], ['csv', 'Upload CSV']].map(([m, label]) => (
+            {[['filter', 'Filter builder'], ['csv', 'Upload file']].map(([m, label]) => (
               <button
                 key={m}
                 type="button"
@@ -345,8 +350,8 @@ export default function WalkListsPage() {
                   className="rounded border border-border-strong bg-card px-2 py-1.5 text-sm text-fg focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <option value="">—</option>
-                  {passes.map((p) => (
-                    <option key={p._id} value={p._id}>Pass {p.roundNumber} · {p.name}</option>
+                  {passChoices.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
                   ))}
                 </select>
               </label>
@@ -476,44 +481,61 @@ export default function WalkListsPage() {
           {mode === 'csv' && (
             <div>
               <p className="mb-3 text-xs text-fg-muted">
-                Upload a CSV of Voter IDs (any column that looks like a Voter ID is auto-detected). We match them to
+                Upload a CSV or Excel file of Voter IDs (any column that looks like a Voter ID is auto-detected). We match them to
                 this campaign's voters and freeze the doors they live at into a saved search. A door joins the saved search if <em>any</em> of
                 its voters is in your file — claiming the door later moves <em>all</em> voters there. IDs not yet imported
                 into this campaign won't match.
               </p>
               <label className="block text-sm">
-                <span className="mb-1 block text-xs font-medium text-fg-muted">Voter-ID CSV</span>
+                <span className="mb-1 block text-xs font-medium text-fg-muted">Voter-ID file (CSV or Excel)</span>
                 <input
                   type="file"
-                  accept=".csv,.tsv,.txt,.xls"
-                  disabled={!campaignId}
-                  onChange={(e) => onPickCsv(e.target.files?.[0] || null)}
+                  accept=".csv,.tsv,.txt,.xls,.xlsx"
+                  // Off while saving: the save's success clears the form, which would wipe a file picked meanwhile.
+                  disabled={!campaignId || csvSave.isPending}
+                  aria-describedby={csvFile ? 'saved-search-file' : undefined}
+                  onChange={(e) => {
+                    onPickCsv(e.target.files?.[0] || null);
+                    // Cleared so picking the same file again (fixed in Excel) runs again; the File stays in state.
+                    e.target.value = '';
+                  }}
                   className="block w-full text-sm disabled:opacity-50"
                 />
               </label>
+              {csvFile && <p id="saved-search-file" className="mt-1 text-xs text-fg-muted">{fileLine(csvFile)}</p>}
               {csvPreview.isPending && <p className="mt-2 text-xs text-fg-muted">Matching…</p>}
 
-              {colError && (
+              {refused?.kind === 'picker' && (
                 <IdColumnPicker
                   undetected
-                  columns={colError.columns}
-                  value={idColumn}
+                  columns={refused.columns}
+                  value={pickedColumn}
                   onChange={setIdColumn}
-                  onMatch={() => idColumn && csvFile && csvPreview.mutate({ file: csvFile, idColumn })}
+                  onMatch={() => pickedColumn && csvFile && csvPreview.mutate({ file: csvFile, idColumn: pickedColumn })}
                   busy={csvPreview.isPending}
+                  note={refused.sheet}
+                  headerRowHint={refused.headerRowHint}
+                  excel={refused.excel}
+                  suggested={suggested}
                 />
               )}
-              {csvPreview.error && !colError && <p className="mt-2 text-xs text-danger">{csvPreview.error.message}</p>}
+              {refused?.kind === 'message' && (
+                <>
+                  <SheetNote note={refused.sheet} className="mt-2" />
+                  <p className="mt-2 text-xs text-danger">{refused.text}</p>
+                </>
+              )}
               {idListTooBig(csvFile) && <p className="mt-2 text-xs text-danger">{idListTooBigText()}</p>}
 
               {csvPreview.data && (
                 <div className="mt-3 rounded border border-border bg-sunken p-4 text-sm">
+                  <SheetNote note={sheetNote(csvPreview.data)} className="mb-3" />
                   <div className="mb-1 text-xs text-fg-muted">
                     <IdColumnPicker
                       columns={csvPreview.data.columns || []}
                       value={csvPreview.data.idColumn}
                       onChange={(col) => { setIdColumn(col); if (col && csvFile) csvPreview.mutate({ file: csvFile, idColumn: col }); }}
-                      busy={csvPreview.isPending}
+                      busy={csvPreview.isPending || csvSave.isPending}
                     />
                     {' · '}
                     {describeIdsInFile(csvPreview.data)}
@@ -556,7 +578,7 @@ export default function WalkListsPage() {
                   {csvSave.isPending ? 'Saving…' : 'Save search'}
                 </button>
               </div>
-              {csvSave.error && <div className="mt-2 text-xs text-danger">{csvSave.error.message}</div>}
+              {csvSave.error && <div className="mt-2 text-xs text-danger">{requestErrorText(csvSave.error)}</div>}
             </div>
           )}
         </section>
@@ -579,7 +601,7 @@ export default function WalkListsPage() {
                   <div className="flex items-start gap-1.5">
                     <span className="min-w-0 flex-1 break-words font-medium" title={w.name}>{w.name}</span>
                     {w.source === 'csv' && (
-                      <span className="mt-0.5 shrink-0 rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium text-brand-accent" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID CSV'}>from CSV</span>
+                      <span className="mt-0.5 shrink-0 rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-medium text-brand-accent" title={w.sourceMeta?.fileName || 'Built from an uploaded Voter-ID list'}>uploaded</span>
                     )}
                   </div>
                   <div className="mt-0.5 text-xs text-fg-muted">

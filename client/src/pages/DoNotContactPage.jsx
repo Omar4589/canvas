@@ -3,10 +3,22 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
-import IdColumnPicker from '../components/IdColumnPicker.jsx';
+import IdColumnPicker, { SheetNote } from '../components/IdColumnPicker.jsx';
 import { saveTextFile } from '../lib/downloadFile.js';
 import { formatInTz } from '../lib/datetime.js';
-import { describeIdsInFile, zeroMatchLine, historySubtitle, idListTooBig, idListTooBigText } from '../lib/idListPreview.js';
+import {
+  describeIdsInFile,
+  zeroMatchLine,
+  historySubtitle,
+  idListTooBig,
+  idListTooBigText,
+  fileLine,
+  sheetNote,
+  refusalView,
+  lastIdColumn,
+  suggestedColumn,
+  requestErrorText,
+} from '../lib/idListPreview.js';
 
 function fmt(n) {
   return n == null ? '—' : Number(n).toLocaleString();
@@ -82,6 +94,8 @@ export default function DoNotContactPage() {
     runPreview(f, state, '');
   }
   function onPickState(st) {
+    // Never while flagging: resetting the running flag hid its success or failure from the page.
+    if (apply.isPending) return;
     setState(st);
     setIdColumn('');
     apply.reset();
@@ -104,7 +118,13 @@ export default function DoNotContactPage() {
   }
 
   const pv = preview.data;
-  const undetected = preview.error?.data?.columns?.length ? preview.error.data : null;
+  // A refused preview: the column picker only when the server couldn't find a column (code-less 400
+  // with the column list); every other refusal is its sentence (lib/idListPreview.js refusalView).
+  const refused = refusalView(preview.error, { page: 'dnc' });
+  // Offered, never matched: the column the newest upload FOR THIS STATE that wasn't undone used, when
+  // this file has it — another state's office writes its lists another way.
+  const suggested = suggestedColumn(refused, lastIdColumn((historyQ.data?.uploads || []).filter((u) => u.state === state)));
+  const pickedColumn = idColumn || suggested || '';
   const canApply = file && state && pv && pv.willFlag > 0 && !apply.isPending;
   const outsideStates = [...new Set((pv?.outsideState?.samples || []).flatMap((s) => s.states))].sort();
 
@@ -127,7 +147,7 @@ export default function DoNotContactPage() {
             <select
               value={state}
               onChange={(e) => onPickState(e.target.value)}
-              disabled={!states.length}
+              disabled={!states.length || apply.isPending}
               className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg"
             >
               <option value="">— Choose a state —</option>
@@ -141,35 +161,52 @@ export default function DoNotContactPage() {
             </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-fg-muted">Do-not-contact CSV</label>
+            <label className="mb-1 block text-xs font-medium text-fg-muted">Do-not-contact file (CSV or Excel)</label>
             <input
               type="file"
-              accept=".csv,.tsv,.txt,.xls"
-              disabled={!state}
-              onChange={(e) => onPickFile(e.target.files?.[0] || null)}
+              accept=".csv,.tsv,.txt,.xls,.xlsx"
+              // Off while flagging: the apply's success clears the page, which would wipe a file picked meanwhile.
+              disabled={!state || apply.isPending}
+              aria-describedby={file ? 'dnc-file' : undefined}
+              onChange={(e) => {
+                onPickFile(e.target.files?.[0] || null);
+                // Cleared so picking the same file again (fixed in Excel) runs again; the File stays in state.
+                e.target.value = '';
+              }}
               className="block w-full text-sm disabled:opacity-50"
             />
+            {file && <p id="dnc-file" className="mt-1 text-xs text-fg-muted">{fileLine(file)}</p>}
             {!state && <p className="mt-1 text-xs text-fg-subtle">Pick the state first.</p>}
             {preview.isPending && <p className="mt-1 text-xs text-fg-muted">Matching…</p>}
-            {undetected && (
+            {refused?.kind === 'picker' && (
               <IdColumnPicker
                 undetected
-                columns={undetected.columns}
-                value={idColumn}
+                columns={refused.columns}
+                value={pickedColumn}
                 onChange={setIdColumn}
-                onMatch={() => file && idColumn && runPreview(file, state, idColumn)}
+                onMatch={() => file && pickedColumn && runPreview(file, state, pickedColumn)}
                 busy={preview.isPending}
+                note={refused.sheet}
+                headerRowHint={refused.headerRowHint}
+                excel={refused.excel}
+                suggested={suggested}
               />
             )}
-            {preview.error && !undetected && <p className="mt-1 text-xs text-danger">{preview.error.message}</p>}
+            {refused?.kind === 'message' && (
+              <>
+                <SheetNote note={refused.sheet} className="mt-2" />
+                <p className="mt-1 text-xs text-danger">{refused.text}</p>
+              </>
+            )}
             {idListTooBig(file) && <p className="mt-1 text-xs text-danger">{idListTooBigText()}</p>}
           </div>
         </div>
 
         {pv && (
           <div className="mb-4 rounded border border-border bg-sunken p-4 text-sm">
+            <SheetNote note={sheetNote(pv)} className="mb-3" />
             <div className="mb-1 text-xs text-fg-muted">
-              <IdColumnPicker columns={pv.columns || []} value={pv.idColumn} onChange={onChangeColumn} busy={preview.isPending} />
+              <IdColumnPicker columns={pv.columns || []} value={pv.idColumn} onChange={onChangeColumn} busy={preview.isPending || apply.isPending} />
               {' · '}
               {describeIdsInFile(pv)}
               {' · '}
@@ -237,7 +274,7 @@ export default function DoNotContactPage() {
           {apply.isPending ? 'Applying…' : 'Flag these voters do-not-contact'}
         </button>
         {apply.error && (
-          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{apply.error.message}</div>
+          <div className="mt-3 rounded border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{requestErrorText(apply.error)}</div>
         )}
         {apply.data && (
           <div className="mt-3 rounded border border-success/30 bg-success-tint px-3 py-2 text-sm text-green-800">

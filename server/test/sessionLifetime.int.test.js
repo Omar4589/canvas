@@ -221,9 +221,12 @@ test('server faults answer 503 with generic text, never a 401', { skip }, async 
 });
 
 test('an expired share unlock still answers password-required (share keeps its own 24h check)', { skip }, async () => {
+  // A link to one report, as every link is now (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), so
+  // RETIRE_ALL_REPORTS_LINKS never stands between it and the share token's own check.
   const share = await ReportShareLink.create({
     organizationId: ctx.org._id,
     campaignId: new mongoose.Types.ObjectId(),
+    reportId: new mongoose.Types.ObjectId(),
     token: 'life-share-token',
     passwordHash: await User.hashPassword('share-pass'),
     isActive: true,

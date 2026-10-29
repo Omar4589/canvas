@@ -2,6 +2,7 @@ import { ClientReport, REPORT_ALL_TIME_GUARD, REPORT_PERIOD_GUARD } from '../../
 import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
 import { ClientReportSeries } from '../../models/ClientReportSeries.js';
 import { OrgBranding } from '../../models/OrgBranding.js';
+import { ReportShareLink, REPORT_ONE_LINK_GUARD } from '../../models/ReportShareLink.js';
 
 // The client-report upgrade's NEW collections (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F12). Their
 // indexes are built at BOOT by both the web dyno (awaited before it listens — it writes them: a
@@ -31,6 +32,13 @@ export const NEW_REPORT_COLLECTIONS = [ClientReportAreaCell, ClientReportSeries,
 // Since Latest progress (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §N) there are two guards, each built, healed
 // and retried on its own, the same way: dated reports' (report_period_guard, dupGuard) and all-time
 // reports' (report_all_time_guard, allTimeGuard), so the two kinds never stand for each other.
+//
+// And since one link per report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), a third on ReportShareLink —
+// report_one_link_guard, oneLinkGuard — built, healed and retried the very same way: healing makes the
+// later of two guarded links of one report an ordinary second link (Share lists it under the first, with
+// Delete). Boot-built like the report guards — a deliberate exception to the build-indexes rule (prod
+// autoIndex off, migrate:build-indexes by hand): it is partial, tiny, and never drops anything. Each guard
+// names its model (ClientReport when it doesn't).
 const PERIOD_GUARD = Object.freeze({ spec: REPORT_PERIOD_GUARD, flag: 'dupGuard', sharing: 'a tab and dates' });
 const ALL_TIME_GUARD = Object.freeze({
   spec: REPORT_ALL_TIME_GUARD,
@@ -41,18 +49,29 @@ const ALL_TIME_GUARD = Object.freeze({
   // this runs (a no-op once done).
   prepare: () => ClientReport.collection.updateMany({ allTime: true, dupGuard: true }, { $unset: { dupGuard: '' } }),
 });
+const ONE_LINK_GUARD = Object.freeze({
+  model: ReportShareLink,
+  spec: REPORT_ONE_LINK_GUARD,
+  flag: 'oneLinkGuard',
+  sharing: 'a report',
+  noun: 'link',
+});
 const GUARD_RETRY_DELAYS_MS = [5_000, 30_000, 120_000, 600_000];
 
-const buildGuard = (guard) =>
-  ClientReport.collection.createIndex(structuredClone(guard.spec.keys), structuredClone(guard.spec.options));
+const modelOf = (guard) => guard.model ?? ClientReport;
+const nounOf = (guard) => guard.noun ?? 'report';
 
-// Of the guarded reports sharing a key, all but the first made (createdAt, then _id) lose the guard's flag.
-// A missing key groups with null, as the unique index counts it. Projected to the key first, so the sort
-// never carries a report. Returns the ids taken out.
+const buildGuard = (guard) =>
+  modelOf(guard).collection.createIndex(structuredClone(guard.spec.keys), structuredClone(guard.spec.options));
+
+// Of the guarded documents sharing a key, all but the first made (createdAt, then _id) lose the guard's
+// flag. A missing key groups with null, as the unique index counts it. Projected to the key first, so the
+// sort never carries a whole document. Returns the ids taken out.
 const unguardDuplicates = async (guard) => {
   const { spec, flag } = guard;
+  const collection = modelOf(guard).collection;
   const key = Object.fromEntries(Object.keys(spec.keys).map((k) => [k, { $ifNull: [`$${k}`, null] }]));
-  const groups = await ClientReport.collection
+  const groups = await collection
     .aggregate(
       [
         { $match: { [flag]: true } },
@@ -65,20 +84,22 @@ const unguardDuplicates = async (guard) => {
     )
     .toArray();
   const extra = groups.flatMap((g) => g.ids.filter((id) => !id.equals(g.first)));
-  if (extra.length) await ClientReport.collection.updateMany({ _id: { $in: extra }, [flag]: true }, { $unset: { [flag]: '' } });
+  if (extra.length) await collection.updateMany({ _id: { $in: extra }, [flag]: true }, { $unset: { [flag]: '' } });
   return extra;
 };
 
-// E11000 on this guard: named in the message, or its exact key pattern (the two guards' keys differ).
+// E11000 on this guard: named in the message, or its exact key pattern (the guards' keys all differ, and
+// none is a link's `token` — so a token collision is never read as a second link of a report).
 const sameKeys = (pattern, keys) =>
   !!pattern && Object.keys(pattern).length === Object.keys(keys).length && Object.keys(keys).every((k) => pattern[k] === 1);
 const isGuardError = (guard, err) =>
   err?.code === 11000 && (String(err?.message || '').includes(guard.spec.options.name) || sameKeys(err?.keyPattern, guard.spec.keys));
 
 // One try: build it; when a duplicate key fails the build, take the duplicates out of the guard and
-// build once more. Returns how many reports it took out.
+// build once more. Returns how many documents it took out.
 const buildOrHeal = async (guard, tag) => {
   const name = guard.spec.options.name;
+  const noun = nounOf(guard);
   try {
     await buildGuard(guard);
     return 0;
@@ -87,23 +108,24 @@ const buildOrHeal = async (guard, tag) => {
   }
   const extra = await unguardDuplicates(guard);
   const ids = `${extra.slice(0, 20).join(', ')}${extra.length > 20 ? ', …' : ''}`;
-  console.warn(`[${tag}] ClientReport ${name}: a duplicate key failed the build; ${extra.length} report(s) sharing ${guard.sharing} with an earlier one now sit outside the guard, as second reports (${ids}) — building it again`);
+  console.warn(`[${tag}] ${modelOf(guard).modelName} ${name}: a duplicate key failed the build; ${extra.length} ${noun}(s) sharing ${guard.sharing} with an earlier one now sit outside the guard, as second ${noun}s (${ids}) — building it again`);
   await buildGuard(guard);
   return extra.length;
 };
 
 const ensureGuard = (guard) => async (tag = 'boot', { retryDelaysMs = GUARD_RETRY_DELAYS_MS } = {}) => {
   const name = guard.spec.options.name;
+  const model = modelOf(guard).modelName;
   const attempt = async (n) => {
     try {
       await guard.prepare?.();
       const healed = await buildOrHeal(guard, tag);
-      if (n || healed) console.log(`[${tag}] ClientReport ${name} index built${n ? ` on retry ${n}` : ''}`);
+      if (n || healed) console.log(`[${tag}] ${model} ${name} index built${n ? ` on retry ${n}` : ''}`);
       return true;
     } catch (e) {
       const wait = retryDelaysMs[n];
       const next = wait === undefined ? 'no retries left; the next boot tries again' : `retry ${n + 1} of ${retryDelaysMs.length} in ${wait / 1000} s`;
-      console.error(`[${tag}] ClientReport ${name} index failed — ${next}:`, e?.message || e);
+      console.error(`[${tag}] ${model} ${name} index failed — ${next}:`, e?.message || e);
       if (wait !== undefined) setTimeout(() => attempt(n + 1), wait).unref();
       return false;
     }
@@ -115,6 +137,8 @@ const ensureGuard = (guard) => async (tag = 'boot', { retryDelaysMs = GUARD_RETR
 export const ensureReportPeriodGuard = ensureGuard(PERIOD_GUARD);
 /** Build report_all_time_guard (all-time reports, §N) the same way. True when it is built now. */
 export const ensureAllTimeGuard = ensureGuard(ALL_TIME_GUARD);
+/** Build report_one_link_guard (one link per report) the same way. True when it is built now. */
+export const ensureOneLinkGuard = ensureGuard(ONE_LINK_GUARD);
 
 /**
  * Did this insert lose to a guarded report of the same kind, tab and period (E11000 on either guard)?
@@ -124,10 +148,18 @@ export const ensureAllTimeGuard = ensureGuard(ALL_TIME_GUARD);
  */
 export const isReportPeriodGuardError = (err) => isGuardError(PERIOD_GUARD, err) || isGuardError(ALL_TIME_GUARD, err);
 
+/**
+ * Did this link's insert lose to a guarded link of the same report (E11000 on report_one_link_guard)?
+ * POST /admin/client-reports/shares then answers 409 REPORT_HAS_LINK with the link that won. Never true
+ * for a token collision (its key pattern is { token: 1 }).
+ */
+export const isOneLinkGuardError = (err) => isGuardError(ONE_LINK_GUARD, err);
+
 export const syncClientReportIndexes = async (tag = 'boot') => {
   for (const M of NEW_REPORT_COLLECTIONS) {
     await M.syncIndexes().catch((e) => console.error(`[${tag}] ${M.modelName}.syncIndexes failed`, e?.message || e));
   }
   await ensureReportPeriodGuard(tag);
   await ensureAllTimeGuard(tag);
+  await ensureOneLinkGuard(tag);
 };

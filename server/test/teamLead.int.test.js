@@ -108,12 +108,15 @@ before(async () => {
     { organizationId: org._id, voterId: voterB._id, authorId: admin._id, body: 'Note on the B row' },
   ]);
 
-  // A password-protected share link for the unlock rate-limit test.
+  // A password-protected share link for the unlock rate-limit test — to one report, as every link is now
+  // (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2): a link to all the reports would answer 410 SHARE_RETIRED,
+  // not a wrong password, once RETIRE_ALL_REPORTS_LINKS is on.
   const shareToken = 'ratelimit-test-token';
   await ReportShareLink.collection.insertOne({
     token: shareToken,
     organizationId: org._id,
     campaignId: A._id,
+    reportId: new mongoose.Types.ObjectId(),
     passwordHash: await bcrypt.hash('the-real-password', 10),
     isActive: true,
   });
@@ -770,10 +773,18 @@ test('lead household-activity is scoped to a managed campaign', { skip }, async 
 
 test('share-link unlock is rate-limited after repeated wrong passwords', { skip }, async () => {
   const { shareToken } = ctx;
+  const saved = process.env.RETIRE_ALL_REPORTS_LINKS;
+  // The switch on or off, a link to one report answers a wrong password the same way.
+  process.env.RETIRE_ALL_REPORTS_LINKS = 'on';
   const statuses = [];
-  for (let i = 0; i < 11; i++) {
-    const r = await call('POST', `/api/share/${shareToken}/unlock`, { body: { password: 'wrong-guess' } });
-    statuses.push(r.status);
+  try {
+    for (let i = 0; i < 11; i++) {
+      const r = await call('POST', `/api/share/${shareToken}/unlock`, { body: { password: 'wrong-guess' } });
+      statuses.push(r.status);
+    }
+  } finally {
+    if (saved === undefined) delete process.env.RETIRE_ALL_REPORTS_LINKS;
+    else process.env.RETIRE_ALL_REPORTS_LINKS = saved;
   }
   assert.strictEqual(statuses[0], 401, 'first wrong attempt is 401');
   assert.strictEqual(statuses[10], 429, '11th attempt in the window is rate-limited (429)');

@@ -6,19 +6,20 @@ kind: faq
 order: 46
 sourceDoc: METRICS.md
 summary: Download the per-pass knock breakdown from the campaign Home's By pass section — the TOTAL row always matches the campaign's knock count.
-tags: export, csv, invoice, billing, passes, knocks, download, contact rate, not a target voter
+tags: export, csv, invoice, billing, passes, knocks, download, contact rate, not a target voter, late knocks, offline, legacy
 ---
 
 Open the campaign's **Home** and find the **By pass** section — one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range. Click **Export CSV** to download the same table as a spreadsheet. On screen a long table folds — passes with nothing in the range, and the overflow of a long list, collapse into one line — but the CSV always has every pass.
 
 Each row carries that pass's knocks, survey doors (or lit drops), connection rate, and **New homes reached** — homes whose first-ever knock landed in that pass, so a revisit adds a knock but not a new home.
 
-The last line is the **TOTAL row**: the sum of every pass above it, and always exactly the campaign's Knocks number for the same date range — so you can check the export against the dashboard, or against an invoice, at a glance. Knocks recorded before the campaign had passes appear as one "Legacy / no pass" row.
+The last line is the **TOTAL row**: the sum of every pass above it, and always exactly the campaign's Knocks number for the same date range — so you can check the export against the dashboard, or against an invoice, at a glance. Knocks no pass claims — recorded before the campaign had passes, or at a door that wasn't in any live book — appear as one "Legacy / no pass" row.
 
-Five things to know:
+Six things to know:
 
 - **Pick the date range first.** The export uses the range selected on the page — set it to the invoice period (say, last month) before downloading. The same goes for the **coordinator filter**: if a crew is selected, the export is that crew's rows and TOTAL, not the campaign's — leave it on "All coordinators" for an invoice.
 - **Pricing doesn't change.** Doorline bills per campaign per month; this export is the supporting detail behind the work, not a price calculator.
+- **Invoice a finished pass once phones have synced — or by date range.** A canvasser who knocked with no signal sends those doors when they reconnect, and after the app update they count in the pass they were knocked in, even if that pass has ended since. So a finished pass's row can keep growing for a little while, and a per-pass file can differ by a few doors from one you downloaded before the update.
 - **No-soliciting doors are already in there.** They're knocks like any other, counted in the **Knocks** column, plus their own **No soliciting** column so you can see how many there were.
 - **So are Not a target voter doors**, on campaigns that use that optional door button. They're billable knocks, like Refused, counted in **Knocks** — and a survey campaign that has had the button turned on gets its own **Not a target** column right after **No soliciting**. Every other campaign's export keeps exactly the columns it had.
 - **Restricted homes can be included.** If this campaign counts restricted homes as billable doors, the export gains **Restricted doors** and **Billable doors** columns, and the TOTAL row carries the billable-door figure. If it doesn't, the export looks exactly as it always has. See [Can I bill for restricted doors?](bill-restricted-doors).

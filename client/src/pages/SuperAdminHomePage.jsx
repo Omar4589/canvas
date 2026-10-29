@@ -54,11 +54,14 @@ export default function SuperAdminHomePage() {
     }),
     onSuccess: (r) => {
       const staged = r.staged;
+      // The seed's word on the demo's client link when it couldn't move it (no shown report, or the report
+      // already has a link made in the app) — otherwise only the console log would say so.
+      const linkNote = r.share?.note ? ` Client link: ${r.share.note}.` : '';
       setRefreshMsg(
-        staged
+        (staged
           ? `Demo rebuilt: ${staged.todayKnocks} knocks today · ${staged.activities} total · ${staged.surveys} surveys`
             + ` across ${r.books?.total ?? 0} books.`
-          : 'Demo rebuilt.'
+          : 'Demo rebuilt.') + linkNote
       );
       setConfirmRebuild(false);
       qc.invalidateQueries({ queryKey: ['super-admin', 'platform-overview'] });
@@ -395,8 +398,7 @@ export default function SuperAdminHomePage() {
                   <ul className="mt-1 list-disc pl-5 text-xs text-fg-muted">
                     <li>Doors, voters, and the books themselves</li>
                     <li>
-                      The share link &mdash; same URL and password; it always points to the
-                      campaign&rsquo;s latest report
+                      The share link &mdash; same URL and password; it opens the demo&rsquo;s report
                     </li>
                     <li>
                       Review-account passwords — Apple and Google keep the credentials they

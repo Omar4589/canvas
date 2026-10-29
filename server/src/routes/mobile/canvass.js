@@ -13,7 +13,6 @@ import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { SurveyResponseArchive } from '../../models/SurveyResponseArchive.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
-import { Turf } from '../../models/Turf.js';
 import { haversineMeters } from '../../utils/normalizeAddress.js';
 import { isValidLatLng } from '../../utils/stateBounds.js';
 import { effectiveMeters } from '../../services/audit/flagDetection.js';
@@ -21,7 +20,7 @@ import { recomputeHouseholdStatus, recomputeSurveyStatus } from '../../services/
 import { knockStateOf, knockStateDelta, bumpCampaignStats } from '../../services/reports/campaignCounters.js';
 import { canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { assertCampaignWritable } from '../../middleware/campaignWritable.js';
-import { activePassIds } from '../../services/passes/activePasses.js';
+import { resolveAttribution } from '../../services/canvass/attribution.js';
 import { getPassStatusMap } from '../../services/passes/passStatus.js';
 import { normalizeAndFilterAnswers } from '../../services/surveys/normalizeAnswers.js';
 import { effectiveSurveyTemplateId } from '../../services/surveys/effectiveTemplate.js';
@@ -30,7 +29,8 @@ import { updateHouseholdLocation } from '../../services/households/updateHouseho
 import { effectivePinSuspect, knockPinOf } from '../../services/households/pinState.js';
 import { KNOCK_ACTIONS } from '../../services/reports/aggregations.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
-import { struckByUnknock } from '../../services/canvass/unknock.js';
+import { struckByUnknock, tapStruckInAnyPass } from '../../services/canvass/unknock.js';
+import { isSameTap } from '../../services/canvass/sameTap.js';
 import { historyFor, JUDGED_RESULTS } from '../../services/audit/paceRule.js';
 import { PACE_PAUSED, paceBlocks, paceStateOf, runPaceCheck } from '../../services/audit/pacePause.js';
 import { toWireVoter, stampPerRoundSurvey, MOBILE_VOTER_PROJECTION } from './bootstrap.js';
@@ -315,25 +315,45 @@ const paceAnswer = (req) => paceStateOf(req.activeOrg, req.activeMembership).cat
 // heals the door's derived state in case the first attempt was cut off mid-write.
 //
 // "The same action" includes the row an admin has since converted AWAY from it on Door Outcomes (its
-// `reclassified.from`): a duplicate arriving after that conversion re-applied the original outcome
-// over the admin's correction. And a survey is the same delivery only for the same voter — two voters
-// at one door are two submissions even at one millisecond (code review 2026-10-19).
+// `reclassified.from`), and a survey is the same delivery only for the same voter — the one definition
+// of the same tap, in services/canvass/sameTap.js.
 function supersededByNewer(data, mineRows, ts, actionType, voterId = null) {
   if (!data.wasOfflineSubmission) return null;
   const at = ts.getTime();
   const newer = mineRows.find((r) => r.timestamp && new Date(r.timestamp).getTime() > at);
   if (newer) return { row: newer, sameDelivery: false };
-  const same = mineRows.find(
-    (r) =>
-      r.timestamp &&
-      new Date(r.timestamp).getTime() === at &&
-      (r.actionType === actionType || r.reclassified?.from === actionType) &&
-      // A row converted away from Surveyed carries no voter; the one it had is voterIdWas (round 2:
-      // its null voter matched every housemate surveyed in the same millisecond).
-      (voterId == null || (r.voterId ?? r.reclassified?.voterIdWas) == null || String(r.voterId ?? r.reclassified?.voterIdWas) === String(voterId))
-  );
+  const same = mineRows.find((r) => isSameTap(r, { ts, actionType, voterId }));
   return same ? { row: same, sameDelivery: true } : null;
 }
+
+// supersededByNewer reads the pass this delivery was attributed to — but attribution is decided on
+// arrival (services/canvass/attribution.js), so a retry can resolve to a different pass than its first
+// delivery did when a pass ended, started or came back in between. The same tap already counted in
+// another pass is that same delivery: answered as such, for the pass it counted in (`{ passId }`), one
+// tap never counts in two. Only the same tap — an older replay is never "superseded" by newer work in
+// ANOTHER pass, as each pass keeps its own door state. Replays only, like supersededByNewer.
+//
+// Found as its own row; or, when the canvasser has saved that door again since, in the later save's
+// memory of the rows it replaced (`replaced.history` — a knock only: an entry there names no voter, so it
+// can't tell two voters' surveys apart); or, for a survey, by its answer, which keeps the canvasser and
+// the tap time (`submittedAt`) whatever happened to the row. Indexed by door, and by voter.
+const deliveredInAnotherPass = async ({ data, householdId, userId, passId, ts, actionType, voterId = null }) => {
+  if (!data.wasOfflineSubmission) return null;
+  const rows = await CanvassActivity.find(
+    { householdId, userId, passId: { $ne: passId }, $or: [{ timestamp: ts }, { 'replaced.history.at': ts }] },
+    'passId actionType voterId timestamp reclassified replaced.history'
+  ).lean();
+  const own = rows.find((r) => isSameTap(r, { ts, actionType, voterId }));
+  if (own) return { passId: own.passId ?? null };
+  if (voterId == null) {
+    const remembered = rows.find((r) =>
+      (r.replaced?.history || []).some((h) => h?.at && new Date(h.at).getTime() === ts.getTime() && h.actionType === actionType)
+    );
+    return remembered ? { passId: remembered.passId ?? null } : null;
+  }
+  const answer = await SurveyResponse.findOne({ voterId, userId, submittedAt: ts, passId: { $ne: passId } }, { passId: 1 }).lean();
+  return answer ? { passId: answer.passId ?? null } : null;
+};
 
 // The first delivery of a duplicated submission normally finished, so this is a no-op. If it was cut
 // off after its activity row landed but before the door was re-derived, this finishes that part.
@@ -348,21 +368,20 @@ const healDuplicateDelivery = async (household, campaignType, ts, userId) => {
   await household.save();
 };
 
-// Deterministic attribution: a door belongs to its book on one of the campaign's
-// ACTIVE rounds. Efforts are door-disjoint, so a household is in at most one
-// active round's books — no time-window guessing needed (works with several
-// concurrent active rounds). effortId comes from the door's owner; passId/turfId
-// from its published book on an active round (null = legacy / not yet booked).
-async function resolveAttribution(campaign, household) {
-  const effortId = household.effortId || null;
-  const passIds = await activePassIds(campaign._id);
-  if (!passIds.length) return { passId: null, turfId: null, effortId };
-  const turf = await Turf.findOne(
-    { campaignId: campaign._id, passId: { $in: passIds }, status: 'published', householdIds: household._id },
-    { _id: 1, passId: 1 }
-  ).lean();
-  return { passId: turf?.passId || null, turfId: turf?._id || null, effortId };
-}
+// Attribution — which round and book a door action counts in — lives in
+// services/canvass/attribution.js: the book the phone says it tapped in (an updated phone sends the
+// door's turfId), else the door's book on a live round, else none.
+
+// The door's last visit only moves FORWARD: a late knock (an offline replay, a dead-zone phone) must
+// not drag it behind a newer visit. The save must still bump updatedAt — /mobile/changes finds
+// changed doors by it, and the round's status may have changed — so it's marked modified either way.
+const stampLastAction = (household, ts, userId) => {
+  if (!household.lastActionAt || new Date(household.lastActionAt).getTime() <= ts.getTime()) {
+    household.lastActionAt = ts;
+    household.lastActionBy = userId;
+  }
+  household.markModified('lastActionAt');
+};
 
 // The household as it goes on the ACTION-RESPONSE wire: per-round status + last
 // visit — the same values the bootstrap and /changes would show this door — and
@@ -443,7 +462,10 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // The pin this distance is measured against, frozen on the row (the GPS audit forgives a Far at an
   // unconfirmed estimate or a condo complex). An offline replay stamps at flush time, like the distance.
   const knockPin = knockPinOf(household);
-  const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
+  const { passId, turfId, effortId } = await resolveAttribution(campaign, household, {
+    clientTurfId: body?.turfId,
+    tappedAt: ts,
+  });
 
   // Campaign.stats deltas: one indexed read of the pair's replaceable rows gives the pair's
   // billable-knock state BEFORE, and — because the delete below removes exactly THIS canvasser's
@@ -468,6 +490,11 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
     if (superseding.sameDelivery) await healDuplicateDelivery(household, campaign.type, ts, userId);
     return { household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) };
   }
+  const elsewhere = await deliveredInAnotherPass({ data, householdId: household._id, userId, passId, ts, actionType });
+  if (elsewhere) {
+    await healDuplicateDelivery(household, campaign.type, ts, userId);
+    return { household: await toWireHousehold(household, elsewhere.passId ?? null, campaign.type), superseded: true, pace: await paceAnswer(req) };
+  }
 
   // The unknock tombstone — supersededByNewer's blind spot. That guard compares a replay against
   // rows that EXIST; an admin's unknock leaves none, so without this a queued copy of the struck
@@ -477,13 +504,16 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   // work), standing runs only (a reverted unknock restores the world, replays included). The 200
   // `superseded` shape drains the phone's queue with no client change.
   if (data.wasOfflineSubmission) {
-    const struck = await struckByUnknock({
-      campaignId: campaign._id,
-      householdId: household._id,
-      passId,
-      userId: req.user._id,
-      ts,
-    });
+    const struck =
+      (await struckByUnknock({
+        campaignId: campaign._id,
+        householdId: household._id,
+        passId,
+        userId: req.user._id,
+        ts,
+      })) ||
+      // The same tap struck where its first delivery counted, when this retry resolved to another pass.
+      (await tapStruckInAnyPass({ campaignId: campaign._id, householdId: household._id, userId: req.user._id, ts, actionType }));
     if (struck) {
       return { household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) };
     }
@@ -529,8 +559,7 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   });
 
   await recomputeHouseholdStatus(household, campaign.type);
-  household.lastActionAt = ts;
-  household.lastActionBy = userId;
+  stampLastAction(household, ts, userId);
   await household.save();
 
   // Campaign.stats: net row delta (1 created − mine deleted), the pair's knock-state delta,
@@ -886,7 +915,10 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     // The pin this distance is measured against, frozen on the row (the GPS audit forgives a Far at an
     // unconfirmed estimate or a condo complex). An offline replay stamps at flush time, like the distance.
     const knockPin = knockPinOf(household);
-    const { passId, turfId, effortId } = await resolveAttribution(campaign, household);
+    const { passId, turfId, effortId } = await resolveAttribution(campaign, household, {
+      clientTurfId: req.body?.turfId,
+      tappedAt: ts,
+    });
 
     // Campaign.stats deltas — same pre-read pattern as recordHouseholdAction (see the comment
     // there): the pair's replaceable rows give before/after knock state + deleted counts.
@@ -910,17 +942,42 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
         .status(200)
         .json({ household: await toWireHousehold(household, passId, campaign.type), superseded: true, pace: await paceAnswer(req) });
     }
+    const elsewhere = await deliveredInAnotherPass({
+      data,
+      householdId: household._id,
+      userId: req.user._id,
+      passId,
+      ts,
+      actionType: 'survey_submitted',
+      voterId: voter._id,
+    });
+    if (elsewhere) {
+      await healDuplicateDelivery(household, campaign.type, ts, req.user._id);
+      await recomputeSurveyStatus([voter._id]);
+      return res
+        .status(200)
+        .json({ household: await toWireHousehold(household, elsewhere.passId ?? null, campaign.type), superseded: true, pace: await paceAnswer(req) });
+    }
 
     // The unknock tombstone, before the upsert for the same reason as the guard above it — a
     // struck survey replay must never re-create its SurveyResponse. See the disposition path.
     if (data.wasOfflineSubmission) {
-      const struck = await struckByUnknock({
-        campaignId: campaign._id,
-        householdId: household._id,
-        passId,
-        userId: req.user._id,
-        ts,
-      });
+      const struck =
+        (await struckByUnknock({
+          campaignId: campaign._id,
+          householdId: household._id,
+          passId,
+          userId: req.user._id,
+          ts,
+        })) ||
+        (await tapStruckInAnyPass({
+          campaignId: campaign._id,
+          householdId: household._id,
+          userId: req.user._id,
+          ts,
+          actionType: 'survey_submitted',
+          voterId: voter._id,
+        }));
       if (struck) {
         return res
           .status(200)
@@ -1090,8 +1147,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     }
 
     await recomputeHouseholdStatus(household, campaign.type);
-    household.lastActionAt = ts;
-    household.lastActionBy = req.user._id;
+    stampLastAction(household, ts, req.user._id);
     await household.save();
 
     // Campaign.stats: the created row is a survey_submitted knock; a re-submit that only
@@ -1199,7 +1255,10 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
     // explicitly so a staff-under-grant add is auditable like any single-record access.
     addAuditSubjects(res, 'voter', voterId);
 
-    const { passId } = await resolveAttribution(campaign, household);
+    const { passId } = await resolveAttribution(campaign, household, {
+      clientTurfId: req.body?.turfId,
+      tappedAt: data.timestamp ? new Date(data.timestamp) : null,
+    });
     // Single-door doorPass map, same shape canvasserScopeWithPasses builds, so the per-round
     // stamp below speaks the exact bootstrap/delta dialect.
     const doorPass = passId ? new Map([[String(household._id), String(passId)]]) : new Map();

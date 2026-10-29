@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
+import { SaxesParser } from 'saxes';
 
 // Turn an uploaded CSV or XLSX buffer into a uniform row set the importer can
 // validate. Returns { headers, rows, format, cellMeta }:
@@ -41,11 +42,16 @@ export const looksLegacyXls = (buffer) =>
 
 // Typed like ImportTooLargeError so every route can 400 with the remedy and the
 // worker can mark it unrecoverable instead of retrying a file no retry can read.
+//
+// A password-protected (or access-restricted) .xlsx is NOT a zip: Excel wraps it in the same OLE2
+// container, so it lands here too. One message names both, with a remedy that works for both, rather
+// than a second detector at every call site (docs/PROPOSAL_ID_LIST_EXCEL.md §B.5).
 export class LegacyXlsError extends Error {
   constructor() {
     super(
-      'This is an old-format Excel file (.xls, Excel 97–2003), which we cannot read. Open it in Excel and use ' +
-        'File → Save As → Excel Workbook (.xlsx), then upload the .xlsx.'
+      'This is an old-format Excel file (.xls, Excel 97–2003) or a password-protected one, which we cannot read. ' +
+        'Open it in Excel, remove any password or access restriction, then use File → Save As → Excel Workbook ' +
+        '(.xlsx), and upload the .xlsx.'
     );
     this.name = 'LegacyXlsError';
     this.code = 'legacy-xls';
@@ -101,25 +107,220 @@ function readCell(cell) {
  * claim our docs can honestly make. All sheets hidden → fall back to the first.
  */
 export function resolveFirstSheetTarget(workbookXml, relsXml) {
-  const sheets = listWorkbookSheets(workbookXml, relsXml);
+  return sheetChoiceFrom(listWorkbookSheets(workbookXml, relsXml)).target;
+}
+
+/**
+ * The tab we read and how to NAME it, from a sheet list: `{ target, name, others }`. The name comes
+ * from matching `target`, never position: when the first tab can't be resolved the target is the
+ * sheet1.xml guess, and naming it by position would print that guess as fact — so the name is null
+ * and `others` empty. `others` lists only tabs the user can SEE. Pure, so a caller holding the list
+ * (readIdColumn.js) needn't parse the parts again.
+ */
+export const sheetChoiceFrom = (sheets) => {
   const first = sheets.find((s) => !s.hidden) || sheets[0];
-  return first?.target || 'xl/worksheets/sheet1.xml'; // Excel's overwhelmingly common layout
-}
-
-const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-
-function decodeXmlEntities(s) {
-  return String(s).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (full, body) => {
-    if (body[0] !== '#') return XML_ENTITIES[body] ?? full;
-    const code = /^#x/i.test(body) ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-    return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : full;
-  });
-}
+  const target = first?.target || 'xl/worksheets/sheet1.xml'; // Excel's overwhelmingly common layout
+  const readIdx = sheets.findIndex((s) => s.target === target);
+  if (readIdx === -1) return { target, name: null, others: [] };
+  return {
+    target,
+    name: sheets[readIdx].name,
+    others: sheets
+      .filter((s, i) => i !== readIdx && !s.hidden)
+      .map((s) => s.name)
+      .filter(Boolean),
+  };
+};
+// The same from the parts' text (peekUpload's preview), each part parsed once.
+export const sheetChoice = (workbookXml, relsXml) => sheetChoiceFrom(listWorkbookSheets(workbookXml, relsXml));
 
 function normalizeRelTarget(target) {
   const t = String(target).replace(/^\//, '');
   return t.startsWith('xl/') ? t : `xl/${t}`;
 }
+
+// The relationships namespace, in its transitional and Strict Open XML spellings: a <sheet>'s link to
+// its part is the `id` attribute in THIS namespace, whatever prefix the file gave it. And the
+// spreadsheet namespace itself, for telling the workbook's own <workbookPr> from an extension's.
+const REL_NS = new Set([
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships',
+]);
+const MAIN_NS = new Set(['http://schemas.openxmlformats.org/spreadsheetml/2006/main', 'http://purl.oclc.org/ooxml/spreadsheetml/main']);
+
+// What a crafted small part can cost (code review, docs/PROPOSAL_ID_LIST_EXCEL.md §J): real workbook,
+// rels and styles parts nest under 10 deep, carry few XML errors and a handful of attributes per tag;
+// saxes slows quadratically on a pile of tags that never close, every error it reports costs an Error
+// object, and every attribute an object — a part packed with distinct attributes cost seconds per walk.
+const XML_PART = Object.freeze({ depth: 64, errors: 100, attrsPerTag: 256, attrs: 200000, entries: 10000 });
+const STOP = Symbol('stop');
+
+/**
+ * Walk a small XML part (workbook.xml, its rels, styles.xml) ONCE, synchronously, with saxes — not
+ * regexes, which took time growing with the square of a crafted part's size (a 1.5 KB upload froze
+ * the web dyno for 12.7 s) and missed single-quoted attributes. saxes runs in its plain mode (attribute
+ * values as strings, decoded once, either quote); prefixes are resolved here from the xmlns
+ * declarations seen. onOpen gets `{ name, local, ns, attributes, nsOf }`, where `nsOf(prefix)` resolves
+ * a prefix. Lenient: a malformed part yields what was read, and the walk stops early (with what it
+ * has) past any XML_PART bound.
+ */
+const walkXml = (xml, { onOpen, onClose } = {}) => {
+  const parser = new SaxesParser();
+  const bound = new Map(); // prefix ('' = default) → namespace URI, last declaration wins
+  const nsOf = (prefix) => bound.get(prefix) ?? null;
+  let depth = 0;
+  let errors = 0;
+  let tagAttrs = 0;
+  let attrs = 0;
+  parser.on('error', () => {
+    errors += 1;
+    if (errors > XML_PART.errors) throw STOP;
+  });
+  parser.on('opentagstart', () => {
+    tagAttrs = 0;
+  });
+  parser.on('attribute', () => {
+    tagAttrs += 1;
+    attrs += 1;
+    if (tagAttrs > XML_PART.attrsPerTag || attrs > XML_PART.attrs) throw STOP;
+  });
+  parser.on('opentag', (tag) => {
+    depth += 1;
+    if (depth > XML_PART.depth) throw STOP;
+    for (const [name, value] of Object.entries(tag.attributes)) {
+      if (name === 'xmlns') bound.set('', value);
+      else if (name.startsWith('xmlns:')) bound.set(name.slice(6), value);
+    }
+    const i = tag.name.indexOf(':');
+    const local = i === -1 ? tag.name : tag.name.slice(i + 1);
+    onOpen?.({ name: tag.name, local, ns: nsOf(i === -1 ? '' : tag.name.slice(0, i)), attributes: tag.attributes, nsOf });
+  });
+  parser.on('closetag', (tag) => {
+    depth -= 1;
+    if (onClose) {
+      const i = tag.name.indexOf(':');
+      onClose({ local: i === -1 ? tag.name : tag.name.slice(i + 1) });
+    }
+  });
+  try {
+    parser.write(String(xml || '')).close();
+  } catch {
+    // past a bound, or an error saxes couldn't carry past: keep what was read
+  }
+};
+
+/** A rels part as [{ id, type, target }] (targets normalized to xl/… paths), parsed once. */
+export const relationships = (relsXml) => {
+  const out = [];
+  walkXml(relsXml, {
+    onOpen: ({ local, attributes }) => {
+      if (local !== 'Relationship' || out.length >= XML_PART.entries) return;
+      const { Id: id, Target: target, Type: type } = attributes;
+      if (id && target) out.push({ id, type: type || '', target: normalizeRelTarget(target) });
+    },
+  });
+  return out;
+};
+
+/**
+ * workbook.xml, parsed once: its tabs in TAB order as `{ name, rid, hidden }` — the relationship id
+ * found by its NAMESPACE whatever the prefix (else a literal `r:id`, for files that never declared
+ * it), so an extra prefixed `id` on a tag can't stand in for it — and whether its dates count from
+ * 1904, read from the workbook's OWN <workbookPr> (the first in the spreadsheet namespace; an
+ * extension's x15:workbookPr further down says nothing about dates).
+ */
+export const parseWorkbookXml = (workbookXml) => {
+  const sheets = [];
+  let date1904 = null;
+  let inSheets = 0;
+  walkXml(workbookXml, {
+    onOpen: ({ local, ns, attributes, nsOf }) => {
+      if (local === 'sheets') inSheets += 1;
+      else if (local === 'sheet' && inSheets && sheets.length < XML_PART.entries) {
+        let rid = null;
+        for (const [name, value] of Object.entries(attributes)) {
+          const i = name.indexOf(':');
+          if (i !== -1 && name.slice(i + 1) === 'id' && REL_NS.has(nsOf(name.slice(0, i)))) {
+            rid = value;
+            break;
+          }
+        }
+        if (rid == null && attributes['r:id'] != null) rid = attributes['r:id'];
+        sheets.push({
+          name: attributes.name ?? null,
+          rid,
+          hidden: attributes.state != null && /^(hidden|veryHidden)$/i.test(attributes.state),
+        });
+      } else if (local === 'workbookPr' && date1904 == null && (ns == null || MAIN_NS.has(ns))) {
+        date1904 = /^(1|true)$/i.test(String(attributes.date1904 ?? '').trim());
+      }
+    },
+    onClose: ({ local }) => {
+      if (local === 'sheets') inSheets -= 1;
+    },
+  });
+  return { sheets, date1904: !!date1904 };
+};
+
+/** Join a parsed workbook's tabs to a parsed rels list: `{ name, target, hidden }` in tab order. */
+export const sheetsWithTargets = (workbook, rels) => {
+  const byId = new Map(rels.map((r) => [r.id, r.target]));
+  return workbook.sheets.map(({ name, rid, hidden }) => ({ name, target: (rid && byId.get(rid)) || null, hidden }));
+};
+
+// Built-in date numFmtIds + the y/m/d/h token heuristic for custom formats (Excel caps a number format
+// at 255 characters; longer is no format Excel wrote). Bracketed and quoted sections are cut in ONE
+// pass each: the regexes this replaced rescanned from every "[" (255 of them made a format take 32,000
+// steps, and an 8 MB styles.xml of such formats 2.9 s).
+const BUILTIN_DATE_IDS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
+const cutPairs = (s, open, close) => {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const a = s.indexOf(open, at);
+    if (a === -1) return out + s.slice(at);
+    const b = s.indexOf(close, a + 1);
+    if (b === -1) return out + s.slice(at);
+    out += s.slice(at, a);
+    at = b + 1;
+  }
+};
+const isDateFormat = (code) => code.length <= 255 && /[ymdhs]/i.test(cutPairs(cutPairs(String(code), '[', ']'), '"', '"'));
+
+/**
+ * styles.xml TEXT → Set of cellXfs style indexes that render as dates. Pure, shared by the Voter
+ * Import's preview (peekUpload.js) and the Voter-ID list reader (readIdColumn.js, which feeds it text
+ * from its own capped stream). The first <cellXfs> block's <xf> elements, in order, by their numFmtId.
+ */
+export const dateStylesFromXml = (xml) => {
+  const customDateIds = new Set();
+  const xfFormats = [];
+  let inCellXfs = 0;
+  let firstBlockDone = false;
+  walkXml(xml, {
+    onOpen: ({ local, attributes }) => {
+      if (local === 'numFmt') {
+        const { numFmtId: id, formatCode: code } = attributes;
+        if (id != null && code != null && isDateFormat(code)) customDateIds.add(Number(id));
+      } else if (local === 'cellXfs') {
+        inCellXfs += 1;
+      } else if (local === 'xf' && inCellXfs && !firstBlockDone) {
+        xfFormats.push(Number(attributes.numFmtId ?? 0));
+      }
+    },
+    onClose: ({ local }) => {
+      if (local === 'cellXfs') {
+        inCellXfs -= 1;
+        if (!inCellXfs) firstBlockDone = true;
+      }
+    },
+  });
+  const dates = new Set();
+  xfFormats.forEach((id, idx) => {
+    if (BUILTIN_DATE_IDS.has(id) || customDateIds.has(id)) dates.add(idx);
+  });
+  return dates;
+};
 
 /**
  * Every worksheet as `{ name, target, hidden }` in TAB order (first tab first) —
@@ -127,29 +328,11 @@ function normalizeRelTarget(target) {
  *
  * Pairing them here is the point: the mapping step must name the tab we actually
  * READ, so the caller matches on `target` rather than trusting position. Both the
- * preview and the real import resolve their sheet from this one list.
+ * preview and the real import resolve their sheet from this one list. Any prefix
+ * (<x:workbook><x:sheets>), either quote; each part parsed once.
  */
 export function listWorkbookSheets(workbookXml, relsXml) {
-  const block = String(workbookXml || '').match(/<sheets\b[^>]*>([\s\S]*?)<\/sheets>/);
-  if (!block) return [];
-  const rels = new Map();
-  for (const rel of String(relsXml || '').matchAll(/<Relationship\b[^>]*>/g)) {
-    const id = rel[0].match(/\sId="([^"]+)"/);
-    const target = rel[0].match(/\sTarget="([^"]+)"/);
-    if (id && target) rels.set(id[1], normalizeRelTarget(target[1]));
-  }
-  const sheets = [];
-  for (const tag of block[1].matchAll(/<sheet\b[^>]*>/g)) {
-    const name = tag[0].match(/\sname="([^"]*)"/);
-    const rid = tag[0].match(/\sr:id="([^"]+)"/);
-    const state = tag[0].match(/\sstate="([^"]*)"/);
-    sheets.push({
-      name: name ? decodeXmlEntities(name[1]) : null,
-      target: (rid && rels.get(rid[1])) || null,
-      hidden: !!state && /^(hidden|veryHidden)$/i.test(state[1]),
-    });
-  }
-  return sheets;
+  return sheetsWithTargets(parseWorkbookXml(workbookXml), relationships(relsXml));
 }
 
 // exceljs's streaming reader is zip-entry-order sensitive: a worksheet that

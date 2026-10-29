@@ -154,7 +154,11 @@ before(async () => {
   });
   const e1 = await Effort.create({ organizationId: org._id, campaignId: campaign._id, name: 'Main' });
   const e2 = await Effort.create({ organizationId: org._id, campaignId: campaign._id, name: 'Second' });
-  const p1 = await Pass.create({ organizationId: org._id, campaignId: campaign._id, effortId: e1._id, roundNumber: 1, name: 'Round 1', status: 'active' });
+  // One live pass per walk list: Round 1 ended when Round 2 went live on Main, between T1 and T2.
+  const p1 = await Pass.create({
+    organizationId: org._id, campaignId: campaign._id, effortId: e1._id, roundNumber: 1, name: 'Round 1', status: 'archived',
+    archivedAt: new Date('2026-07-12T14:00:00Z'), archivedFrom: 'active', archivedVia: 'next-pass',
+  });
   const p2 = await Pass.create({ organizationId: org._id, campaignId: campaign._id, effortId: e1._id, roundNumber: 2, name: 'Round 2', status: 'active' });
   const p3 = await Pass.create({ organizationId: org._id, campaignId: campaign._id, effortId: e2._id, roundNumber: 1, name: 'Second R1', status: 'active' });
 

@@ -34,6 +34,7 @@ import { isOffWorld } from '../lib/pinFixes.js';
 import { visibleMapDoors, countExcludedDoors } from '../lib/excludedDoors.js';
 import MapDoorCount from '../components/MapDoorCount.jsx';
 import { pluralize } from '../lib/mapCounts.js';
+import { passOptionLabel, walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import {
   householdsToGeoJSON,
   buildingsToGeoJSON,
@@ -58,6 +59,12 @@ const DEFAULT_ZOOM = 3.5;
 // SAME reference every time and the memos below bail out instead of re-ringing the map.
 const EMPTY_SELECTION = new Set();
 const EMPTY_DOORS = [];
+
+// The pass in scope, named by its walk list ("North · Pass 3 · GOTV") — a bare "Pass 1" names a
+// different round in every walk list (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.4). The scope chip and
+// the selection bar's confirm both name it this one way.
+const scopePassName = (pass, efforts) =>
+  passOptionLabel(pass, walkListLabel(efforts.find((x) => String(x._id) === String(pass.effortId))));
 
 // Prefetch buffer for the households map: fetch a box padded beyond the viewport, and skip the
 // refetch entirely while the viewport stays inside the last padded box — so small pans are instant
@@ -352,10 +359,10 @@ export default function MapPage() {
   // into a campaign with fewer than 2 efforts, where there's no select to show it.
   if (scopeEffortId && !showEffortSelect) {
     const e = efforts.find((x) => String(x._id) === scopeEffortId);
-    scopeLabel = e ? e.name : 'Walk list';
+    scopeLabel = e ? walkListLabel(e) : 'Walk list';
   } else if (scopePassId) {
     const p = (scopePassesQ.data?.passes || []).find((x) => String(x._id) === scopePassId);
-    scopeLabel = p ? `Pass ${p.roundNumber} · ${p.name}` : 'Pass';
+    scopeLabel = p ? scopePassName(p, efforts) : 'Pass';
   } else if (scopeImportId) {
     scopeLabel = "this import's homes";
   } else if (scopeSavedSearchId) {
@@ -984,10 +991,17 @@ export default function MapPage() {
     : null;
   const passLabel = scopePassId
     ? scopePass
-      ? `Pass ${scopePass.roundNumber} · ${scopePass.name}`
+      ? scopePassName(scopePass, efforts)
       : 'the selected round'
     : null;
   const passEffortId = scopePass?.effortId ? String(scopePass.effortId) : '';
+  // Walk lists whose doors can't take a mark: archived ones, and the walk list of an archived pass the
+  // page is scoped to (the Passes panel's Audit link). The server refuses the whole batch otherwise.
+  const frozenEffortIds = useMemo(() => {
+    const set = new Set(efforts.filter((e) => e.status === 'archived').map((e) => String(e._id)));
+    if (scopePass?.status === 'archived' && passEffortId) set.add(passEffortId);
+    return set;
+  }, [efforts, scopePass, passEffortId]);
   const passEffortName = passEffortId
     ? efforts.find((x) => String(x._id) === passEffortId)?.name || 'this walk list'
     : null;
@@ -1020,13 +1034,13 @@ export default function MapPage() {
       if (passEffortId && d.effortId && String(d.effortId) !== passEffortId) off += 1;
       else inRows.push(d);
     }
-    const base = planDoorSelection(inRows, { forRound, sendsPassId });
+    const base = planDoorSelection(inRows, { forRound, sendsPassId, frozenEffortIds });
     if (!off) return { plan: base, offListCount: 0 };
     // Counted in BOTH total and cannotMark so the bar's line still adds up; the disclosure below
     // names them (planDoorSelection only knows the campaign-wide gates — Intake, excluded from
     // books, do-not-knock — not which round is on screen).
     return { plan: { ...base, total: base.total + off, cannotMark: base.cannotMark + off }, offListCount: off };
-  }, [selectedDoors, passEffortId, forRound, sendsPassId]);
+  }, [selectedDoors, passEffortId, forRound, sendsPassId, frozenEffortIds]);
 
   // Blue "will be marked" vs slate "will be skipped", both fed from the DRAWN rows.
   const markIdSet = useMemo(() => new Set(plan.markIds), [plan]);
@@ -1241,6 +1255,16 @@ export default function MapPage() {
     qc.invalidateQueries({ queryKey: ['turfs'] });
   };
 
+  // Refused because the walk list, its pass or the campaign was archived after this page loaded (or
+  // is being archived right now): refetch what names them, so the select, the chip and the bar's
+  // read-only state catch up. The server's sentence shows in the selection bar.
+  const onArchivedRefusal = (err) => {
+    if (!['walk-list-archived', 'pass-archived', 'campaign-archived', 'lifecycle-busy'].includes(err?.code)) return;
+    qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+  };
+
   // ONE request per action, capped at 1,000 ids, never chunked: chunking would pay
   // recomputeCampaignStats' whole-ledger recompute once per chunk. With a round in scope the
   // passId rides along; in global mode it is omitted and the server resolves each door's own
@@ -1255,6 +1279,7 @@ export default function MapPage() {
       showRestrictToast(markResultText(res, ids.length));
       invalidateRestrict();
     },
+    onError: onArchivedRefusal,
   });
 
   const unmarkSelection = useMutation({
@@ -1267,6 +1292,7 @@ export default function MapPage() {
       showRestrictToast(unmarkResultText(res, ids.length));
       invalidateRestrict();
     },
+    onError: onArchivedRefusal,
   });
 
   const householdsById = useMemo(() => {
@@ -1585,8 +1611,8 @@ export default function MapPage() {
               className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">All walk lists</option>
-              {efforts.map((ef) => (
-                <option key={ef._id} value={ef._id}>{ef.name}</option>
+              {walkListOptions(efforts).map((ef) => (
+                <option key={ef._id} value={ef._id}>{walkListLabel(ef)}</option>
               ))}
             </select>
           )}

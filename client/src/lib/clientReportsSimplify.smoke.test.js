@@ -4,14 +4,18 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
-import { todayIn } from '../components/clientReports/reportDates.js';
+import { formatDayOf, todayIn } from '../components/clientReports/reportDates.js';
 
 // The Client Reports "simpler start", clicked through (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §B–§E):
 // the guide (Got it, How it works, storage that fails, the phone lines), New report's dated choices with
 // the organization's week (Change, the nudge, Move this tab, admins and leads), the duplicate prompt and
-// the race note, Share (the link chooser, Make a link, a password shown once, the message's endings), the
-// links panel (one-report links folded away, New link's Opens), and the list page's own wiring: Share on a
-// row, Next refused NEXT_GAP_TOO_LONG, the ?new=1 link (contract K10), and the Take down / Delete confirms.
+// the race note, and the list page's own wiring: Next refused NEXT_GAP_TOO_LONG and the ?new=1 link
+// (contract K10). Since docs/PROPOSAL_CLIENT_REPORT_LINKS.md (one link per report, Archive): the
+// duplicate prompt's archived report with Unarchive, and the list page's Archived (N) fold — the newest of
+// each kind never folded, gap lines over every report, Archive's line with Undo — its row link line, what
+// it hands Share and the old-links card, and the Take down / Delete confirms. Share and the old-links card
+// are their own components' to test (C1's suites): here they are stand-ins that record what the page
+// hands them.
 //
 // renderToString renders once and runs no effect, so — the clientReportBuilderEffects pattern, taken one
 // step further — the modules under test get their own hooks: state and refs that outlive one render (the
@@ -29,7 +33,7 @@ const DAY = 86400000;
 const iso = (ms) => new Date(ms).toISOString();
 // The modules whose hooks the harness holds, by file name → their store. Their handlers are recorded
 // too, and so are those of the row and the shared confirm (their own hooks stay React's).
-const SHIMMED = { 'ClientReportsPage.jsx': 'page', 'NewReportDialog.jsx': 'newReport', 'ShareDialog.jsx': 'share', 'ClientLinksPanel.jsx': 'links', 'HowItWorks.jsx': 'guide' };
+const SHIMMED = { 'ClientReportsPage.jsx': 'page', 'NewReportDialog.jsx': 'newReport', 'HowItWorks.jsx': 'guide' };
 const HANDLERS_ONLY = new Set(['ReportRow.jsx', 'parts.jsx']);
 
 const storeOf = (name) => `const st = () => {
@@ -122,6 +126,9 @@ const load = async () => {
   writeFileSync(join(dir, 'router.js'), routerShim);
   writeFileSync(join(dir, 'auth.jsx'), `export const useAuth = () => globalThis.__h.auth;`);
   writeFileSync(join(dir, 'portal.js'), `export * from 'react-dom';\nexport const createPortal = (children) => children;`);
+  // Share and the old-links card, as the page hands them their props (their own suites test them).
+  writeFileSync(join(dir, 'shareStub.jsx'), `const ShareDialog = (props) => { globalThis.__h.shareProps.push(props); return <div data-share-stub="">Share dialog</div>; };\nexport default ShareDialog;`);
+  writeFileSync(join(dir, 'retiredStub.jsx'), `const RetiredLinksCard = (props) => { globalThis.__h.retiredProps.push(props); return <div data-retired-stub="">Old links card</div>; };\nexport default RetiredLinksCard;`);
   writeFileSync(
     join(dir, 'entry.jsx'),
     `import React from 'react';
@@ -130,8 +137,6 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ClientReportsPage from '${join(here, '../pages/ClientReportsPage.jsx')}';
 import NewReportDialog from '${C('NewReportDialog.jsx')}';
-import ShareDialog from '${C('ShareDialog.jsx')}';
-import ClientLinksPanel from '${C('ClientLinksPanel.jsx')}';
 import HowItWorks from '${C('HowItWorks.jsx')}';
 
 // The browser, as far as these screens reach it. Storage can be made to fail (a private window).
@@ -153,7 +158,7 @@ globalThis.fetch = (url, init = {}) => {
 
 // A new screen: nothing held, nothing recorded.
 export const fresh = ({ search = '', auth = { isOrgAdmin: true, user: { id: 'u1' } }, storageBroken = false } = {}) => {
-  globalThis.__h = { stores: {}, effects: [], handlers: [], last: null, fetches: [], copied: [], navigations: [], setParams: [], search, auth, storageBroken };
+  globalThis.__h = { stores: {}, effects: [], handlers: [], last: null, fetches: [], copied: [], navigations: [], setParams: [], shareProps: [], retiredProps: [], search, auth, storageBroken };
   return globalThis.__h;
 };
 export const h = () => globalThis.__h;
@@ -188,8 +193,6 @@ export const newReport = ({ hold = false, ...props }, qc = newQc()) => {
   qc.setQueryData(['admin', 'client-report-series', '${CID}'], props.seriesData);
   return rerender();
 };
-export const share = (props, qc = newQc()) => show(() => wrap(qc, <ShareDialog campaignId="${CID}" tz="America/New_York" onClose={() => {}} {...props} />));
-export const links = (shares, reports = [], qc = newQc([[['admin', 'client-report-shares', '${CID}'], { shares }]]), extra = {}) => show(() => wrap(qc, <ClientLinksPanel campaignId="${CID}" tz="America/New_York" reports={reports} {...extra} />));
 export const guide = (props) => show(() => wrap(newQc(), <HowItWorks onDismiss={() => {}} {...props} />));
 `
   );
@@ -215,6 +218,8 @@ export const guide = (props) => show(() => wrap(newQc(), <HowItWorks onDismiss={
           b.onResolve({ filter: /^@tanstack\/react-query$/ }, (a) => (nameOf(a.importer) ? { path: join(dir, `query-${nameOf(a.importer)}.js`) } : undefined));
           b.onResolve({ filter: /^react-router-dom$/ }, (a) => (nameOf(a.importer) === 'page' ? { path: join(dir, 'router.js') } : undefined));
           b.onResolve({ filter: /auth\/AuthContext\.jsx$/ }, () => ({ path: join(dir, 'auth.jsx') }));
+          b.onResolve({ filter: /clientReports\/ShareDialog\.jsx$/ }, () => ({ path: join(dir, 'shareStub.jsx') }));
+          b.onResolve({ filter: /clientReports\/RetiredLinksCard\.jsx$/ }, () => ({ path: join(dir, 'retiredStub.jsx') }));
           // Overlay and Popover portal into document.body; render them in place for the server renderer.
           b.onResolve({ filter: /^react-dom$/ }, (a) => (/Overlay\.jsx$|Popover\.jsx$/.test(a.importer) ? { path: join(dir, 'portal.js') } : undefined));
         },
@@ -303,10 +308,10 @@ const link = (over = {}) => ({
   report: null,
   ...over,
 });
-const R1 = { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign' };
-const board = (over = {}) => link({ id: 'b1', token: 'tokBoard00001', label: 'Board', reportId: 'r1', report: R1, ...over });
-const donorElsewhere = link({ id: 'd2', token: 'tokDonor00002', label: 'Donor', reportId: 'r0', report: { id: 'r0', weekStart: '2026-10-12', weekEnd: '2026-10-18', scopeLabel: 'Whole campaign' } });
-const messageReport = { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', campaignType: 'survey', scope: { kind: 'campaign', label: 'Whole campaign', seriesLabel: 'Whole campaign' }, cumulative: { doorsKnocked: 3412, surveysTaken: 1980 }, period: { doorsKnocked: 412, surveysTaken: 260 } };
+const R1 = { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign', takenDown: false, seriesId: 'sc' };
+// `link()` is an old link to all your reports (reportId null); a report's own link has no label (§C2).
+const ownLink = (over = {}) => link({ id: 'o1', token: 'tokOwn0000001', label: '', reportId: 'r1', report: R1, createdAt: iso(NOW - DAY), ...over });
+const elsewhere = link({ id: 'd2', token: 'tokDonor00002', label: '', reportId: 'r0', report: { id: 'r0', weekStart: '2026-10-12', weekEnd: '2026-10-18', scopeLabel: 'Whole campaign', takenDown: false, seriesId: 'sc' } });
 const picker = (over = {}) => ({
   teamsReady: true,
   weekStartsOn: 1,
@@ -337,13 +342,14 @@ const row = (over = {}) => ({
   headline: { cumulative: { doorsKnocked: 3412, surveysTaken: 1980 }, period: { doorsKnocked: 412, surveysTaken: 260 } },
   ...over,
 });
-// `series: null`: the series picker hasn't answered yet; `shares: null`: nor the links list.
-const pageQc = (m, { reports = [row()], shares = [], series = picker() } = {}) =>
+// `series: null`: the series picker hasn't answered yet; `shares: null`: nor the links list (contract K1:
+// the rows, the switch for old links to all your reports, and whether this is staff under a grant).
+const pageQc = (m, { reports = [row()], shares = [], series = picker(), allReportsRetired = false, staffUnderGrant = false } = {}) =>
   m.newQc([
     [['admin', 'campaigns'], { campaigns: [{ _id: CID, name: 'Ward 3', type: 'survey', isActive: true, timeZone: 'America/New_York' }] }],
     [['admin', 'client-reports', CID], { reports }],
     ...(series ? [[['admin', 'client-report-series', CID], series]] : []),
-    ...(shares ? [[['admin', 'client-report-shares', CID], { shares }]] : []),
+    ...(shares ? [[['admin', 'client-report-shares', CID], { shares, allReportsRetired, staffUnderGrant }]] : []),
     [['admin', 'efforts', CID], { efforts: [] }],
     [['admin', 'branding'], { hasLogo: false }],
   ]);
@@ -369,12 +375,18 @@ test('the guide: the header line ends in How it works; the guide sits above the 
     'the one-line description, ending in How it works'
   );
   assert.ok(html.indexOf('How client reports work') < html.indexOf('role="tablist"'), 'the guide sits above the tabs');
-  for (const s of ['Make a report — press New report and pick the dates, usually Last week.', 'Check it, then publish — the preview is exactly what your client will see.', 'Share it — Share gives you a message with the link']) {
+  // Step 3 since one link per report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D6): Share makes the link, and the
+  // password carries over week to week.
+  for (const s of [
+    'Make a report — press New report and pick the dates, usually Last week.',
+    'Check it, then publish — the preview is exactly what your client will see.',
+    'Share it — Share makes the report’s link and a message to paste into your email or text. Next week’s link keeps this week’s password, so you send a password only the first time, or after you change it. Or open the report and press Download PDF.',
+  ]) {
     assert.ok(t.includes(s), s);
   }
   assert.ok(html.includes('href="/help/client-reports"') && t.includes('More in the Help Center →'), 'the Help Center’s guide');
   // Below 640 px: the short lines, and no Help line (the Help link and the long steps hide there).
-  assert.match(html, /<ol class="[^"]*sm:hidden[^"]*"><li>Make a report — usually Last week; then Next report each week\.<\/li><li>Check the preview, then publish\.<\/li><li>Share the link; send its password separately\.<\/li><\/ol>/);
+  assert.match(html, /<ol class="[^"]*sm:hidden[^"]*"><li>Make a report — usually Last week; then Next report each week\.<\/li><li>Check the preview, then publish\.<\/li><li>Share its link; send the password the first time\.<\/li><\/ol>/);
   assert.match(html, /<ol class="[^"]*hidden[^"]*sm:block[^"]*"><li>/);
   assert.match(html, /<a class="hidden [^"]*sm:inline[^"]*" href="\/help\/client-reports">/);
   // Got it: gone, and kept in this browser, per person — the next visit doesn't show it either.
@@ -694,7 +706,7 @@ test('New report: the tab already has these dates — Open the draft, or Make a 
   click(m, 'Create draft');
   let html = await settle(m, refusal('REPORT_EXISTS', { reportId: 'rX', status: 'draft', takenDown: false, weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign' }));
   let t = text(html);
-  assert.ok(t.includes('You already have a draft Whole campaign report for Oct 19 – Oct 25. Open the draft Make a second one Your client sees both once both are published.'));
+  assert.ok(t.includes('You already have a draft Whole campaign report for Oct 19 – Oct 25. Open the draft Make a second one Each one gets its own link once it’s published.'));
   assert.ok(!t.includes('Couldn’t create the draft.'), 'a prompt, not an error');
   assert.equal(disabledButton(html, 'Create draft'), true, 'not the same request again');
   // The list gains that draft while the prompt is up: the dates it names stay picked (WEEK-2).
@@ -957,187 +969,6 @@ test('New report follows the tab’s newest report — of two ending the same da
   }
 });
 
-// ── Share (§D, contract K9) ───────────────────────────────────────────────────────────────────────
-
-test('Share with no link that opens the report: Make a link is the main action, All your reports picked', async () => {
-  const m = await load();
-  m.fresh();
-  const html = m.share({ report: messageReport, shares: [donorElsewhere] });
-  const t = text(html);
-  assert.ok(t.includes('Share “Oct 19 – Oct 25 · Whole campaign”'));
-  assert.ok(t.includes('All your reports (the usual choice) — one link and one password; next week’s report shows up on it too.'));
-  assert.ok(t.includes('Just this report — for someone who should see only this one (a donor, a board member). It has its own password, and next week’s report won’t be on it.'));
-  assert.deepEqual(ticks(html, 'share-kind'), [true, false]);
-  assert.ok(t.includes('A password is shown once, right after the link is made — copy it then.'));
-  assert.equal(disabledButton(html, 'Copy message'), true, 'no link, no message');
-  assert.ok(!t.includes('Message (no password in it)') && !t.includes('Donor'), 'another report’s link is never offered');
-  assert.ok(!t.includes('Make a link Make a link'), 'one Make a link');
-});
-
-test('Share: the links that open this report, all-reports first; the message ends by the link; no password for an existing link', async () => {
-  const m = await load();
-  m.fresh();
-  const expired = link({ id: 'x', label: 'Old', expiresAt: iso(NOW - DAY) });
-  let html = m.share({ report: messageReport, shares: [board(), donorElsewhere, expired, link()] });
-  let t = text(html);
-  assert.ok(t.includes('Candidate — opens all your reports Board — opens only this report'), 'the chooser, all-reports first');
-  assert.ok(!t.includes('Donor') && !t.includes('Old —'), 'never another report’s link, never one that can’t open');
-  assert.deepEqual(ticks(html, 'share-link'), [true, false]);
-  assert.ok(t.includes('doorline.app/r/tokCa…') && t.includes('Copy link'));
-  assert.match(t, /Open it here: https:\/\/doorline\.app\/r\/tokCandidate1\/reports\/r1 — use the password I sent you\./);
-  assert.ok(!t.includes('Copy password'), 'an existing link’s password is stored hashed — never shown');
-  assert.ok(t.includes('Make a link'), 'always there');
-  html = choose(m, 'Board — opens only this report');
-  t = text(html);
-  assert.match(t, /Open it here: https:\/\/doorline\.app\/r\/tokBoard00001\/reports\/r1 — use the password I sent you for this report\./);
-  click(m, 'Copy message');
-  await new Promise((r) => setTimeout(r, 0));
-  assert.match(m.h().copied.at(-1), /— use the password I sent you for this report\.$/);
-});
-
-test('Share → Make a link → Just this report: its password once, Copy password, and the message for a link made just now', async () => {
-  const m = await load();
-  m.fresh();
-  let changed = 0;
-  m.share({ report: messageReport, shares: [link()], onLinksChanged: () => (changed += 1) });
-  click(m, 'Make a link');
-  choose(m, 'Just this report');
-  let html = fill(m, 'e.g. Board', 'Donor');
-  click(m, 'Create link');
-  const req = m.h().last;
-  assert.deepEqual(req.calls[0].variables, { campaignId: CID, label: 'Donor', expiresInDays: 90, reportId: 'r1' });
-  req.opts.mutationFn(req.calls[0].variables);
-  assert.equal(m.h().fetches.pop().url, '/api/admin/client-reports/shares');
-  const made = link({ id: 'n1', token: 'tokDonorNew01', label: 'Donor', reportId: 'r1', report: R1 });
-  html = await settle(m, { share: made, generatedPassword: 'Plum-Ladder-Quiet-42' });
-  const t = text(html);
-  assert.equal(changed, 1, 'the links list and History are read again');
-  assert.ok(t.includes('Password for Donor: Plum-Ladder-Quiet-42 Copy password — shown once. Send it separately from the message.'));
-  assert.ok(t.includes('Donor — opens only this report'));
-  assert.deepEqual(ticks(html, 'share-link'), [false, true], 'the new link is the one the message uses');
-  assert.match(t, /Open it here: https:\/\/doorline\.app\/r\/tokDonorNew01\/reports\/r1 — I’ll send you its password separately\./);
-  click(m, 'Copy password');
-  await new Promise((r) => setTimeout(r, 0));
-  assert.equal(m.h().copied.at(-1), 'Plum-Ladder-Quiet-42');
-  // Back on the link that was there before: its own ending.
-  assert.match(text(choose(m, 'Candidate — opens all your reports')), /— use the password I sent you\./);
-});
-
-test('Share before the links list is in: it waits — no Make a link, no message — and a list that failed says so (LINK-3)', async () => {
-  const m = await load();
-  m.fresh();
-  const html = m.share({ report: messageReport, shares: null });
-  let t = text(html);
-  assert.ok(t.includes('Link Loading links…'), t);
-  assert.ok(!t.includes('Make a link') && !t.includes('All your reports (the usual choice)'), 'nothing offered on a list it hasn’t read');
-  assert.ok(!t.includes('Message (no password in it)'));
-  assert.equal(disabledButton(html, 'Copy message'), true);
-  m.fresh();
-  t = text(m.share({ report: messageReport, shares: null, linksError: Object.assign(new Error('Couldn’t reach Doorline.'), { status: 0 }) }));
-  assert.ok(t.includes('Couldn’t load the links. Couldn’t reach Doorline.') && !t.includes('Loading links…') && !t.includes('Make a link'));
-});
-
-test('Share: when the links meant for it can’t open (expired), it says so and offers a new one; a refusal reads in words', async () => {
-  const m = await load();
-  m.fresh();
-  const html = m.share({ report: messageReport, shares: [link({ expiresAt: iso(NOW - DAY) })] });
-  assert.ok(text(html).includes('Your only link expired — renew it.'));
-  assert.deepEqual(ticks(html, 'share-kind'), [true, false]);
-  click(m, 'Create link');
-  assert.deepEqual(m.h().last.calls[0].variables, { campaignId: CID, label: undefined, expiresInDays: 90 }, 'All your reports: no reportId');
-  const t = text(await settle(m, refusal('REPORT_NOT_SHOWN', { error: 'That report isn’t up — a link to it would only say “taken down”.' })));
-  assert.ok(t.includes('Couldn’t create the link. That report isn’t up — a link to it would only say “taken down”.'));
-});
-
-// ── The links panel (§D) ──────────────────────────────────────────────────────────────────────────
-
-test('links panel: all-reports links first, one-report links folded under their own heading, each saying what it opens', async () => {
-  const m = await load();
-  m.fresh();
-  const donor = board({ id: 'b2', token: 'tokDonor00009', label: 'Donor' });
-  let html = m.links([board(), link(), donor]);
-  let t = text(html);
-  assert.ok(t.includes('A link opens all your reports, or just one. Each has its own password — send it separately.'));
-  assert.ok(t.includes('Opens all your reports'));
-  assert.ok(t.includes('Links to one report (2)'));
-  assert.ok(!t.includes('Opens only the'), 'folded away until opened');
-  assert.match(html, /aria-expanded="false"[^>]*>.*Links to one report/);
-  t = text(click(m, 'Links to one report (2)'));
-  assert.equal((t.match(/Opens only the Oct 19 – Oct 25 report \(Whole campaign\)/g) || []).length, 2);
-  assert.ok(t.indexOf('Opens all your reports') < t.indexOf('Links to one report'), 'all-reports links on top');
-  // No one-report link: no heading.
-  m.fresh();
-  assert.ok(!text(m.links([link()])).includes('Links to one report'));
-});
-
-test('links panel → New link: Opens all your reports, or one report the client can see now — next week’s won’t be on it', async () => {
-  const m = await load();
-  m.fresh();
-  const reports = [
-    row(),
-    row({ id: 'r2', weekStart: '2026-10-12', weekEnd: '2026-10-18', seriesLabel: 'Paid team', scope: { kind: 'team', label: 'Paid team' } }),
-    row({ id: 'r3', weekStart: '2026-10-05', weekEnd: '2026-10-11', takenDownAt: '2026-10-20T14:00:00Z' }),
-    row({ id: 'r4', status: 'draft', publishedAt: null }),
-  ];
-  m.links([link()], reports);
-  let html = click(m, '+ New link');
-  let t = text(html);
-  assert.ok(t.includes('Opens All your reports One report only'));
-  html = choose(m, 'One report only');
-  t = text(html);
-  assert.ok(t.includes('— next week’s report won’t be on it.'));
-  assert.match(html, /<option value="r1" selected="">Oct 19 – Oct 25 \(Whole campaign\)<\/option><option value="r2">Oct 12 – Oct 18 \(Paid team\)<\/option><\/select>/, 'only the reports a client can see now, newest first');
-  assert.ok(html.includes('placeholder="e.g. Board"'));
-  fill(m, 'Report', 'r2');
-  click(m, 'Create link');
-  assert.deepEqual(m.h().last.calls[0].variables, { campaignId: CID, label: undefined, expiresInDays: 90, reportId: 'r2' });
-  // Made: the Link ready dialog's message says "this report".
-  t = text(await settle(m, { share: link({ id: 'n2', token: 'tokNew000002', label: '', reportId: 'r2', report: { id: 'r2', weekStart: '2026-10-12', weekEnd: '2026-10-18', scopeLabel: 'Paid team' } }), generatedPassword: 'Kite-Harbor-Mint-77' }));
-  assert.ok(t.includes('Link ready') && t.includes('Kite-Harbor-Mint-77'));
-  click(m, 'Copy message');
-  await new Promise((r) => setTimeout(r, 0));
-  assert.equal(m.h().copied.at(-1), 'Here\'s the link to this report: https://doorline.app/r/tokNew000002 — I’ll send the password separately.');
-  // No report a client can see: One report only waits for one.
-  m.fresh();
-  m.links([], [row({ status: 'draft' })]);
-  html = click(m, '+ New link');
-  assert.ok(text(html).includes('One report only — publish a report first'));
-  assert.match(html, /<input type="radio" class="accent-brand-accent" disabled=""/);
-});
-
-test('links panel → New link: “One report only” sends the report its select shows — the list arriving or changing after the dialog opened — and never an all-reports link in its place (LINK-1)', async () => {
-  const m = await load();
-  m.fresh();
-  // The reports list is still on its way when New link opens (the page hands the panel null meanwhile).
-  let reports = null;
-  const qc = m.newQc([[['admin', 'client-report-shares', CID], { shares: [link()] }]]);
-  m.links([link()], null, qc);
-  let html = click(m, '+ New link');
-  assert.ok(text(html).includes('One report only — loading your reports…'));
-  assert.match(html, /<input type="radio" class="accent-brand-accent" disabled=""/, 'nothing to pick yet');
-  reports = [row(), row({ id: 'r2', weekStart: '2026-10-12', weekEnd: '2026-10-18' })];
-  m.links([link()], reports, qc);
-  html = choose(m, 'One report only');
-  assert.match(html, /<option value="r1" selected="">Oct 19 – Oct 25/, 'the select shows the newest');
-  click(m, 'Create link');
-  assert.deepEqual(m.h().last.calls.at(-1).variables, { campaignId: CID, label: undefined, expiresInDays: 90, reportId: 'r1' }, 'and the request names that one');
-  // The report picked leaves the list (taken down meanwhile): the select and the request move together.
-  m.h().last.isPending = false;
-  fill(m, 'Report', 'r2');
-  reports.splice(1, 1);
-  html = m.rerender();
-  assert.match(html, /<option value="r1" selected="">/);
-  click(m, 'Create link');
-  assert.equal(m.h().last.calls.at(-1).variables.reportId, 'r1');
-  // None left to pick: Create waits — no all-reports link is made in its place.
-  m.h().last.isPending = false;
-  const sent = m.h().last.calls.length;
-  reports.length = 0;
-  html = m.rerender();
-  assert.equal(disabledButton(html, 'Create link'), true);
-  assert.equal(m.h().last.calls.length, sent);
-});
-
 // ── After code review round 2 (VER-1, VER-2, FRESH-1 … FRESH-8) ─────────────────────────────────────
 // renderToString attaches no refs: a test puts stand-ins in a module's refs (found in its store, in the
 // order they are declared) and runs the module's effects as a browser would, stopping what they start.
@@ -1167,9 +998,9 @@ test('New report: Create on its way freezes the form; the duplicate prompt comes
   assert.ok(at > html.indexOf('Pick dates') && at < html.indexOf('Title (optional)'), 'an alert, right under the dates — above Title');
   assert.ok(
     text(html).includes(
-      'You already published a Whole campaign report for Oct 19 – Oct 25, taken down. Open it Make a second one Your client sees only the new one; the taken-down one stays hidden unless you put it back up.'
+      'You already published a Whole campaign report for Oct 19 – Oct 25, taken down. Open it Make a second one The taken-down one stays hidden until you put it back up. The new one gets its own link once it’s published.'
     ),
-    'a taken-down one stays hidden (FRESH-5)'
+    'a taken-down one stays hidden (FRESH-5); each report gets its own link (LINKS Part 1 §6)'
   );
   const calls = [];
   reportBox(m, 'duplicate').current = box('the duplicate prompt', calls);
@@ -1179,6 +1010,56 @@ test('New report: Create on its way freezes the form; the duplicate prompt comes
   // "the tab already has these dates" test — so an edit is never dropped without a word.)
   click(m, 'Make a second one');
   assert.deepEqual(m.h().last.calls.at(-1).variables, { ...pressed, allowDuplicate: true });
+});
+
+test('New report: a report of these dates that’s archived says so — “— it’s archived.” — with Open it and Unarchive, which brings it back right there (LINKS Part 1 §4)', async () => {
+  const m = await load();
+  m.fresh();
+  const opened = [];
+  let changed = 0;
+  m.newReport({ seriesData: picker(), reports: [], onOpenReport: (id) => opened.push(id), onReportsChanged: () => (changed += 1) });
+  click(m, 'Create draft');
+  const exists = (over) => refusal('REPORT_EXISTS', { reportId: 'rA', status: 'published', takenDown: false, archivedAt: AT, weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign', ...over });
+  let html = await settle(m, exists());
+  let t = text(html);
+  assert.ok(t.includes('You already published a Whole campaign report for Oct 19 – Oct 25 — it’s archived. Open it Unarchive Make a second one Each one gets its own link once it’s published.'), t);
+  assert.ok(!t.includes('Refresh numbers'), 'not sent off to a list it isn’t in');
+  click(m, 'Open it');
+  assert.deepEqual(opened, ['rA']);
+  // Unarchive: the request, then the prompt reads as for any report of these dates; the list is read again.
+  click(m, 'Unarchive');
+  const req = m.h().last;
+  assert.equal(req.calls.at(-1).variables, 'rA');
+  req.opts.mutationFn('rA');
+  assert.deepEqual(m.h().fetches.at(-1), { url: '/api/admin/client-reports/rA/unarchive', method: 'POST', body: null });
+  html = await settle(m, { report: { _id: 'rA', archivedAt: null } });
+  t = text(html);
+  assert.ok(t.includes('You already published a Whole campaign report for Oct 19 – Oct 25. To bring its numbers up to date, open it and press Refresh numbers. Open it Make a second one'), t);
+  assert.ok(!t.includes('Unarchive') && !t.includes('archived'));
+  assert.equal(changed, 1, 'the page’s list follows');
+  // Unarchive is gone, so the keyboard goes back to the prompt's first button.
+  const calls = [];
+  reportBox(m, 'duplicate').current = box('the duplicate prompt', calls);
+  runEffects(m, 'newReport');
+  assert.deepEqual(calls, ['the duplicate prompt: into view', 'the duplicate prompt: its first control']);
+  // A draft, and a taken-down report, that are archived.
+  m.fresh();
+  m.newReport({ seriesData: picker(), reports: [] });
+  click(m, 'Create draft');
+  t = text(await settle(m, exists({ status: 'draft' })));
+  assert.ok(t.includes('You already have a draft Whole campaign report for Oct 19 – Oct 25 — it’s archived. Open the draft Unarchive Make a second one Each one gets its own link once it’s published.'), t);
+  m.fresh();
+  m.newReport({ seriesData: picker(), reports: [] });
+  click(m, 'Create draft');
+  t = text(await settle(m, exists({ takenDown: true })));
+  assert.ok(
+    t.includes('You already published a Whole campaign report for Oct 19 – Oct 25, taken down — it’s archived. Open it Unarchive Make a second one The taken-down one stays hidden until you put it back up. The new one gets its own link once it’s published.'),
+    t
+  );
+  // Unarchive refused: said under the buttons, and the prompt stays as it was.
+  click(m, 'Unarchive');
+  t = text(await settle(m, Object.assign(new Error('Report not found'), { status: 404, code: 'REPORT_NOT_FOUND' })));
+  assert.ok(t.includes('Couldn’t unarchive it. Report not found') && t.includes('— it’s archived.'), t);
 });
 
 test('New report: the race note names the report’s own tab and comes into view, Open it takes the focus; a refusal in words, the walk list’s name and an ended team come into view too (VER-1, FRESH-1)', async () => {
@@ -1220,7 +1101,7 @@ test('New report: the race note names the report’s own tab and comes into view
   }
 });
 
-test('the guide’s Got it hands the keyboard to How it works; Share’s Make a link to its first choice, Create link to the new Copy password (FRESH-4)', async () => {
+test('the guide’s Got it hands the keyboard to How it works (FRESH-4)', async () => {
   const m = await load();
   m.storage.clear();
   m.fresh();
@@ -1230,153 +1111,340 @@ test('the guide’s Got it hands the keyboard to How it works; Share’s Make a 
   how.current = { focus: () => focused.push('How it works') };
   click(m, 'Got it');
   assert.deepEqual(focused, ['How it works']);
-  // Share: Make a link, then Create link.
-  m.fresh();
-  m.share({ report: messageReport, shares: [link()] });
-  const [make, passwords] = refSlots(m, 'share');
-  make.current = { querySelector: (sel) => (sel === 'input[type="radio"]' ? { focus: () => focused.push('All your reports') } : null) };
-  click(m, 'Make a link');
-  runEffects(m, 'share');
-  assert.equal(focused.at(-1), 'All your reports');
-  click(m, 'Create link');
-  await settle(m, { share: link({ id: 'n1', token: 'tokNew000001', label: 'Field' }), generatedPassword: 'Owl-Cedar-Tide-31' });
-  passwords.current = { querySelectorAll: () => [{ focus: () => focused.push('an older Copy password') }, { focus: () => focused.push('the new Copy password') }] };
-  runEffects(m, 'share');
-  assert.equal(focused.at(-1), 'the new Copy password');
 });
 
-test('Share keeps every link made in it with its password until Done, each with how to recover it (FRESH-7)', async () => {
-  const m = await load();
-  m.fresh();
-  m.share({ report: messageReport, shares: [link()] });
-  click(m, 'Make a link');
-  fill(m, 'e.g. Candidate', 'Field director');
-  click(m, 'Create link');
-  await settle(m, { share: link({ id: 'n1', token: 'tokField00001', label: 'Field director' }), generatedPassword: 'Owl-Cedar-Tide-31' });
-  click(m, 'Make a link');
-  choose(m, 'Just this report');
-  fill(m, 'e.g. Board', 'Treasurer');
-  click(m, 'Create link');
-  const html = await settle(m, { share: link({ id: 'n2', token: 'tokTreas00002', label: 'Treasurer', reportId: 'r1', report: R1 }), generatedPassword: 'Fern-Quarry-Lamp-58' });
-  const t = text(html);
-  const line = (label, pw) => `Password for ${label}: ${pw} Copy password — shown once. Send it separately from the message. Lost it? Change password on the link.`;
-  assert.ok(t.includes(line('Field director', 'Owl-Cedar-Tide-31')) && t.includes(line('Treasurer', 'Fern-Quarry-Lamp-58')), t);
-  assert.match(t, /Open it here: https:\/\/doorline\.app\/r\/tokTreas00002\/reports\/r1 — I’ll send you its password separately\./, 'the newest link is the one the message uses');
-  // Each Copy password copies its own link's.
-  const copyButtons = m.h().handlers.filter((x) => x.text === 'Copy password');
-  copyButtons[0].props.onClick();
-  copyButtons[1].props.onClick();
-  await new Promise((r) => setTimeout(r, 0));
-  assert.deepEqual(m.h().copied.slice(-2), ['Owl-Cedar-Tide-31', 'Fern-Quarry-Lamp-58']);
-  // Back on the first one made: its message still says the password comes separately.
-  assert.match(text(choose(m, 'Field director — opens all your reports')), /— I’ll send you its password separately\./);
-});
+// ── The list page's wiring (§C, §D, K10; docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D2, §D3, K1, K12) ────────────
 
-test('a links list or reports list that failed is never a dead end: Share and the panel say so with Try again, and reading again starts at once; New link says it couldn’t load your reports (VER-2)', async () => {
-  const m = await load();
-  const SHARES_URL = `/api/admin/client-reports/shares?campaignId=${CID}`;
-  const REPORTS_URL = `/api/admin/client-reports?campaignId=${CID}`;
-  const reads = (url) => m.h().fetches.filter((f) => f.url === url).length;
-  // The page's own query for a list, failed after its retry (its read is the one Try again repeats).
-  const failed = (qc, key, url) => {
-    // As in a browser, where the list's own observer was already there when it failed: no read on mount.
-    qc.setDefaultOptions({ queries: { ...qc.getDefaultOptions().queries, retryOnMount: false } });
-    const q = qc.getQueryCache().build(qc, { queryKey: key, queryFn: () => fetch(url).then((r) => r.json()) });
-    q.setState({ status: 'error', error: Object.assign(new Error('Couldn’t reach Doorline.'), { status: 0 }), errorUpdatedAt: Date.now(), errorUpdateCount: 1, fetchStatus: 'idle' });
-    return qc;
-  };
-  // Share, opened after the links list failed: it reads it again at once, and Try again does too.
-  m.fresh();
-  const qc = failed(m.newQc(), ['admin', 'client-report-shares', CID], SHARES_URL);
-  let t = text(m.share({ report: messageReport, shares: null, linksError: Object.assign(new Error('Couldn’t reach Doorline.'), { status: 0 }) }, qc));
-  assert.ok(t.includes('Couldn’t load the links. Couldn’t reach Doorline. Try again') && !t.includes('Make a link'), t);
-  runEffects(m, 'share');
-  assert.equal(reads(SHARES_URL), 1, 'opening Share after a failure reads the list again');
-  t = text(m.rerender());
-  assert.ok(t.includes('Loading links…') && !t.includes('Try again'), 'while it reads again');
-  qc.getQueryCache().find({ queryKey: ['admin', 'client-report-shares', CID] }).setState({ fetchStatus: 'idle' });
-  m.rerender();
-  click(m, 'Try again');
-  assert.equal(reads(SHARES_URL), 2, 'Try again reads it again');
-  // The links panel's own list failed: Try again there too.
-  m.fresh();
-  const pqc = failed(m.newQc(), ['admin', 'client-report-shares', CID], SHARES_URL);
-  t = text(m.links([], [], pqc));
-  assert.ok(t.includes('Couldn’t load the links. Couldn’t reach Doorline. Try again'), t);
-  const before = reads(SHARES_URL);
-  click(m, 'Try again');
-  assert.equal(reads(SHARES_URL), before + 1);
-  // New link, the reports list failed: it says so with Try again — never "loading your reports…" for good.
-  m.fresh();
-  const rqc = failed(m.newQc([[['admin', 'client-report-shares', CID], { shares: [] }]]), ['admin', 'client-reports', CID], REPORTS_URL);
-  m.links([], null, rqc, { reportsError: Object.assign(new Error('Couldn’t reach Doorline.'), { status: 0 }) });
-  t = text(click(m, '+ New link'));
-  assert.ok(t.includes('One report only Couldn’t load your reports. Try again') && !t.includes('loading your reports'), t);
-  const r0 = reads(REPORTS_URL);
-  runEffects(m, 'links');
-  assert.equal(reads(REPORTS_URL), r0 + 1, 'opening New link after a failure reads the reports again');
-  rqc.getQueryCache().find({ queryKey: ['admin', 'client-reports', CID] }).setState({ fetchStatus: 'idle' });
-  m.rerender();
-  click(m, 'Try again');
-  assert.equal(reads(REPORTS_URL), r0 + 2, 'and so does Try again');
-});
-
-test('links panel: a one-report link whose report is taken down says so under what it opens (FRESH-6)', async () => {
-  const m = await load();
-  m.fresh();
-  m.links([board({ report: { ...R1, takenDown: true } }), board({ id: 'b2', token: 'tokBoard00002', label: 'Donor' })]);
-  const html = click(m, 'Links to one report (2)');
-  assert.equal((text(html).match(/Its report is taken down — the link shows “taken down” until you put it back up\./g) || []).length, 1, 'only under the link whose report is down');
-  const at = html.indexOf('Its report is taken down');
-  assert.ok(html.indexOf('value="Board"') < at && at < html.indexOf('value="Donor"'), 'in Board’s row');
-});
-
-// ── The list page's wiring (§C, §D, K10) ──────────────────────────────────────────────────────────
-
-test('the list page: Share on a shown report’s row opens Share for it', async () => {
+test('the list page: Share on every published row — shown or taken down — hands Share the report as it stands, its links, the switch and who is asking (K12)', async () => {
   const m = await load();
   m.storage.set(GUIDE_KEY, '1');
   m.fresh();
-  const qc = pageQc(m, { reports: [row(), row({ id: 'r0', weekStart: '2026-10-12', weekEnd: '2026-10-18', takenDownAt: '2026-10-22T14:00:00Z' })], shares: [link()] });
+  const down = row({ id: 'r0', weekStart: '2026-10-12', weekEnd: '2026-10-18', takenDownAt: '2026-10-22T14:00:00Z' });
+  const draft = row({ id: 'rd', status: 'draft', weekStart: '2026-10-05', weekEnd: '2026-10-11', publishedAt: null, hasSnapshot: false });
+  const qc = pageQc(m, { reports: [row(), down, draft], shares: [ownLink()], allReportsRetired: true, staffUnderGrant: true });
   const html = m.page(qc);
-  let t = text(html);
-  assert.equal((html.match(/>Share<\/button>/g) || []).length, 1, 'one Share — the taken-down report has none');
-  assert.ok(!t.includes('Copy message'));
-  t = text(click(m, 'Share'));
-  assert.ok(t.includes('Share “Oct 19 – Oct 25 · Whole campaign”') && t.includes('Candidate — opens all your reports'));
-  assert.match(t, /— use the password I sent you\./);
-});
-
-test('the list page: Share pressed before the links list is in waits for it, then shows the link — never an extra one (LINK-3)', async () => {
-  const m = await load();
-  m.storage.set(GUIDE_KEY, '1');
-  m.fresh();
-  const qc = pageQc(m, { reports: [row()], shares: null });
-  m.page(qc);
-  const dialog = (html) => {
-    const t = text(html);
-    return t.slice(t.indexOf('Share “'));
+  assert.equal((html.match(/>Share<\/button>/g) || []).length, 2, 'both published reports — a draft has nothing to share');
+  assert.ok(!text(html).includes('Copy message'));
+  assert.equal(m.h().shareProps.length, 0, 'closed until asked');
+  assert.ok(text(handed(m, 'ReportRow', 'onShare', down)).includes('Share dialog'));
+  const props = m.h().shareProps.at(-1);
+  assert.equal(props.report.id, 'r0');
+  assert.equal(props.report.status, 'published');
+  assert.equal(props.report.takenDownAt, '2026-10-22T14:00:00Z', 'Share holds the message on a taken-down report');
+  assert.equal(props.report.seriesId, 'sc', 'its tab, for Same as your last link');
+  assert.equal(props.report.campaignType, 'survey');
+  assert.deepEqual(props.report.cumulative, { doorsKnocked: 3412, surveysTaken: 1980 });
+  assert.deepEqual(props.shares.map((s) => s.id), ['o1']);
+  assert.equal(props.allReportsRetired, true);
+  assert.equal(props.staffUnderGrant, true);
+  assert.equal(props.linksError, null);
+  assert.equal(props.campaignId, CID);
+  assert.equal(props.tz, 'America/New_York');
+  // A link made or changed there: the links list and History are read again.
+  const invalidated = [];
+  const real = qc.invalidateQueries.bind(qc);
+  qc.invalidateQueries = (f) => {
+    invalidated.push(JSON.stringify(f?.queryKey));
+    return real(f);
   };
-  let d = dialog(click(m, 'Share'));
-  assert.ok(d.startsWith('Share “Oct 19 – Oct 25 · Whole campaign”') && d.includes('Loading links…'), d);
-  assert.ok(!d.includes('Make a link'));
-  qc.setQueryData(['admin', 'client-report-shares', CID], { shares: [link()] });
-  d = dialog(m.rerender());
-  assert.ok(d.includes('Candidate — opens all your reports') && !d.includes('Loading links…'));
-  assert.match(d, /— use the password I sent you\./);
+  props.onLinksChanged();
+  assert.ok(invalidated.includes(JSON.stringify(['admin', 'client-report-shares', CID])) && invalidated.includes(JSON.stringify(['admin', 'client-report-history', CID])), invalidated.join(' '));
+  // Create found the report taken down or deleted somewhere else (code review V2-2): the reports list and
+  // the report are read again, so Share shows it taken down — its row offering Put back up — or it goes.
+  invalidated.length = 0;
+  props.onReportChanged();
+  assert.ok(invalidated.includes(JSON.stringify(['admin', 'client-reports', CID])) && invalidated.includes(JSON.stringify(['admin', 'client-report', 'r0'])), invalidated.join(' '));
+  props.onClose();
+  assert.ok(!text(m.rerender()).includes('Share dialog'), 'and it closes');
+  // Share reads the report as the list has it now — taken down while Share was open, it says so.
+  handed(m, 'ReportRow', 'onShare', row());
+  qc.setQueryData(['admin', 'client-reports', CID], { reports: [row({ takenDownAt: '2026-10-27T14:00:00Z' }), down, draft] });
+  m.rerender();
+  assert.equal(m.h().shareProps.at(-1).report.takenDownAt, '2026-10-27T14:00:00Z');
 });
 
-test('the list page: a report whose own link expired says to renew it, even beside a working link to another report (LINK-2)', async () => {
+test('the list page: before the links list is in, a row says nothing about its link and Share is handed none — then both follow the list (LINK-3)', async () => {
   const m = await load();
   m.storage.set(GUIDE_KEY, '1');
   m.fresh();
-  let t = text(m.page(pageQc(m, { reports: [row()], shares: [link({ expiresAt: iso(NOW - DAY) }), donorElsewhere] })));
-  assert.ok(t.includes('Your only link expired — renew it.'), t);
-  assert.ok(!t.includes('your links open other reports'));
-  // No link of any state opens it: then it says the links open other reports.
+  const qc = pageQc(m, { reports: [row({ views: { byLink: { o1: { opens: 3 } } } })], shares: null });
+  let t = text(m.page(qc));
+  assert.ok(!/No link of its own|Link:/.test(t), t);
+  assert.ok(t.includes('About 3 visits'), 'its visits are its own counts: no list needed');
+  handed(m, 'ReportRow', 'onShare', row());
+  assert.equal(m.h().shareProps.at(-1).shares, null, 'Share waits for the list');
+  assert.deepEqual(m.h().retiredProps.at(-1).shares, [], 'the old-links card: nothing to show yet');
+  qc.setQueryData(['admin', 'client-report-shares', CID], { shares: [ownLink()], allReportsRetired: false, staffUnderGrant: false });
+  t = text(m.rerender());
+  assert.deepEqual(m.h().shareProps.at(-1).shares.map((s) => s.id), ['o1']);
+  assert.ok(t.includes(`Link: active · expires ${formatDayOf(ownLink().expiresAt, 'America/New_York')}`), t);
+});
+
+test('the list page: a row says how its own link is doing — expired says Share renews it, even beside a working link to another report; an old link to all your reports isn’t its link (LINK-2)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
   m.fresh();
-  t = text(m.page(pageQc(m, { reports: [row()], shares: [{ ...donorElsewhere, isActive: false }] })));
-  assert.ok(t.includes('No link opens this report — your links open other reports. Share makes one.'));
+  const gone = iso(NOW - DAY);
+  let t = text(m.page(pageQc(m, { reports: [row()], shares: [ownLink({ expiresAt: gone }), elsewhere] })));
+  assert.ok(t.includes(`Link expired ${formatDayOf(gone, 'America/New_York')} — Share to renew it.`), t);
+  m.fresh();
+  t = text(m.page(pageQc(m, { reports: [row()], shares: [link(), elsewhere] })));
+  assert.ok(t.includes('No link of its own yet — Share makes one.'));
+});
+
+test('the list page: the old-links card sits above the reports, in the reports’ own column, with the links, the switch and who is asking — and the Client links panel is gone (K12)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  const qc = pageQc(m, { reports: [row()], shares: [link(), ownLink()], allReportsRetired: true });
+  const html = m.page(qc);
+  const props = m.h().retiredProps.at(-1);
+  assert.equal(props.campaignId, CID);
+  assert.equal(props.tz, 'America/New_York');
+  assert.deepEqual(props.shares.map((s) => s.id), ['l1', 'o1'], 'the whole list: the card picks the old links');
+  assert.equal(props.allReportsRetired, true);
+  assert.equal(props.staffUnderGrant, false);
+  const card = html.indexOf('data-retired-stub');
+  const reports = html.indexOf('>Reports</h2>');
+  assert.ok(card > -1 && card < reports, 'above the reports card');
+  // In the reports' column — before the reports card closes — not the side column beside it, so it sits
+  // above the reports at every width.
+  const column = html.lastIndexOf('<div class="min-w-0 space-y-5">', card);
+  assert.ok(column > -1 && html.lastIndexOf('<div class="min-w-0 space-y-5">', reports) === column);
+  assert.ok(!/Client links|\+ New link/.test(text(html)));
+  const invalidated = [];
+  const real = qc.invalidateQueries.bind(qc);
+  qc.invalidateQueries = (f) => {
+    invalidated.push(JSON.stringify(f?.queryKey));
+    return real(f);
+  };
+  props.onChanged();
+  assert.ok(invalidated.includes(JSON.stringify(['admin', 'client-report-shares', CID])) && invalidated.includes(JSON.stringify(['admin', 'client-report-history', CID])));
+});
+
+// ── Archive (docs/PROPOSAL_CLIENT_REPORT_LINKS.md Part 1 §4, §D3, contract K7) ──────────────────────────
+const AT = '2026-10-27T14:00:00Z';
+// The server render puts <!-- --> between neighbouring text and numbers: gone, the markup reads whole.
+const flat = (html) => html.replace(/<!-- -->/g, '');
+// The tab's count badge, as it reads.
+const tabCount = (html) => {
+  const at = html.indexOf('>', html.indexOf('role="tablist"')) + 1;
+  return text(html.slice(at, html.indexOf('</div>', at))).trim();
+};
+
+test('Archive: archived reports fold under Archived (N) at the bottom of their tab, closed; the tab counts the rest; gap lines still count them (LINKS §D3)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  // Newest first, as the server sends them. Dates far from any clock.
+  const reports = [
+    row({ id: 'ra', weekStart: '2020-03-02', weekEnd: '2020-03-08' }),
+    // An archived report between two others still covers its days: no "not covered" line for them.
+    row({ id: 'rb', weekStart: '2020-02-24', weekEnd: '2020-03-01', archivedAt: AT }),
+    row({ id: 'rc', weekStart: '2020-02-17', weekEnd: '2020-02-23' }),
+    // The days before this one's successor are a real gap: its line goes with it, into the fold.
+    row({ id: 'rd', weekStart: '2020-02-03', weekEnd: '2020-02-09', archivedAt: AT }),
+  ];
+  let html = m.page(pageQc(m, { reports }));
+  let t = text(html);
+  assert.equal(tabCount(html), 'Whole campaign 2', 'archived reports aren’t counted');
+  assert.ok(t.includes('Mar 2 – Mar 8') && t.includes('Feb 17 – Feb 23'));
+  assert.ok(!t.includes('Feb 24 – Mar 1') && !t.includes('Feb 3 – Feb 9'), 'folded away');
+  assert.ok(!t.includes('not covered by any report'), 'no false gap where an archived report sits');
+  assert.match(flat(html), /aria-expanded="false"[^>]*>.*Archived \(2\)<\/button>/, 'folded, at the bottom');
+  assert.ok(flat(html).indexOf('Archived (2)') > flat(html).indexOf('Feb 17 – Feb 23'));
+  assert.ok(!t.includes('Every report here is archived'));
+  html = click(m, 'Archived (2)');
+  t = text(html);
+  assert.match(flat(html), /aria-expanded="true"[^>]*>.*Archived \(2\)<\/button>/);
+  assert.ok(t.indexOf('Archived (2)') < t.indexOf('Feb 24 – Mar 1') && t.indexOf('Feb 24 – Mar 1') < t.indexOf('Feb 3 – Feb 9'));
+  assert.match(t, /Feb 10 – Feb 16(, 2020)? not covered by any report/, 'the gap line, with the row it sits above');
+  assert.ok(t.indexOf('not covered by any report') > t.indexOf('Feb 24 – Mar 1') && t.indexOf('not covered by any report') < t.indexOf('Feb 3 – Feb 9'));
+  assert.equal((html.match(/>Unarchive<\/button>/g) || []).length, 2, 'Unarchive on each');
+  assert.equal((t.match(/Published Archived/g) || []).length, 2, 'each marked Archived');
+});
+
+test('Archive: the newest report of each kind is never folded — archived, it stays in the list marked Archived, with Next report and Unarchive (LINKS Part 1 §4)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  const reports = [
+    row({ id: 'rall', weekStart: '2020-01-06', weekEnd: '2020-03-11', allTime: true, archivedAt: AT }),
+    row({ id: 'ra', weekStart: '2020-03-02', weekEnd: '2020-03-08', archivedAt: AT }),
+    row({ id: 'rb', weekStart: '2020-02-24', weekEnd: '2020-03-01', archivedAt: AT }),
+    row({ id: 'rc', weekStart: '2020-02-17', weekEnd: '2020-02-23' }),
+  ];
+  const html = m.page(pageQc(m, { reports }));
+  const t = text(html);
+  assert.ok(t.includes('All time · Jan 6 – Mar 11') && t.includes('Mar 2 – Mar 8'), 'the newest of each kind stays in the list');
+  assert.ok(t.includes('Archived (1)') && !t.includes('Feb 24 – Mar 1'), 'only the rest fold away');
+  assert.equal((html.match(/>Next report<\/button>/g) || []).length, 2, 'Next report stays where it lives');
+  assert.equal((html.match(/>Unarchive<\/button>/g) || []).length, 2);
+  assert.equal((html.match(/>Archive<\/button>/g) || []).length, 1, 'only on the older report that isn’t archived');
+  assert.equal(tabCount(html), 'Whole campaign 1');
+});
+
+test('Archive: a tab whose reports are all archived says where they went — unless nothing is folded away', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  const ra = row({ id: 'ra', weekStart: '2020-03-02', weekEnd: '2020-03-08', archivedAt: AT });
+  const rb = row({ id: 'rb', weekStart: '2020-02-24', weekEnd: '2020-03-01', archivedAt: AT });
+  let html = m.page(pageQc(m, { reports: [ra, rb] }));
+  assert.ok(text(html).includes('Every report here is archived — open Archived below, or press New report.'));
+  assert.ok(text(html).includes('Mar 2 – Mar 8') && text(html).includes('Archived (1)'));
+  assert.equal(tabCount(html), 'Whole campaign 0');
+  // Only the newest, archived: it is the list — nothing below to open.
+  m.fresh();
+  html = m.page(pageQc(m, { reports: [ra] }));
+  assert.ok(!text(html).includes('Every report here is archived') && !text(html).includes('Archived ('));
+  assert.ok(text(html).includes('Published Archived'));
+});
+
+test('Archive: a report goes under Archived (N) at once, with a line saying so and Undo; Unarchive brings one back; a refusal reads in the page’s banner (K7)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  const reports = [
+    row({ id: 'ra', weekStart: '2020-03-02', weekEnd: '2020-03-08' }),
+    row({ id: 'rb', weekStart: '2020-02-24', weekEnd: '2020-03-01' }),
+    row({ id: 'rc', weekStart: '2020-02-17', weekEnd: '2020-02-23', archivedAt: AT }),
+  ];
+  const qc = pageQc(m, { reports });
+  let html = m.page(qc);
+  assert.equal((html.match(/>Archive<\/button>/g) || []).length, 1, 'on the older report only — the newest is where Next report lives');
+  click(m, 'Archive');
+  const req = m.h().last;
+  assert.equal(req.calls.at(-1).variables.row.id, 'rb');
+  req.opts.mutationFn(req.calls.at(-1).variables);
+  assert.deepEqual(m.h().fetches.at(-1), { url: '/api/admin/client-reports/rb/archive', method: 'POST', body: null });
+  html = await settle(m, { report: { _id: 'rb', archivedAt: '2026-10-28T14:00:00Z' } });
+  let t = text(html);
+  assert.ok(t.includes('Archived — it’s under Archived (2) at the bottom. Undo'), t);
+  assert.match(flat(html), /role="status"[^>]*><span class="flex-1">Archived — it’s under Archived \(2\) at the bottom/);
+  assert.ok(!t.includes('Feb 24 – Mar 1'), 'folded away at once — the list read again follows');
+  assert.equal(tabCount(html), 'Whole campaign 1');
+  // Undo: unarchived, back in the list, and the line goes.
+  click(m, 'Undo');
+  const undo = m.h().last;
+  assert.equal(undo.calls.at(-1).variables.row.id, 'rb');
+  undo.opts.mutationFn(undo.calls.at(-1).variables);
+  assert.deepEqual(m.h().fetches.at(-1), { url: '/api/admin/client-reports/rb/unarchive', method: 'POST', body: null });
+  t = text(await settle(m, { report: { _id: 'rb', archivedAt: null } }));
+  assert.ok(!t.includes('Archived — it’s under') && t.includes('Feb 24 – Mar 1') && t.includes('Archived (1)'));
+  // Unarchive on a folded report: back in the list.
+  click(m, 'Archived (1)');
+  click(m, 'Unarchive');
+  assert.equal(m.h().last.calls.at(-1).variables.row.id, 'rc');
+  t = text(await settle(m, { report: { _id: 'rc', archivedAt: null } }));
+  assert.ok(!t.includes('Archived (') && t.includes('Feb 17 – Feb 23'));
+  // A refusal: the page's banner says which action failed, and nothing moves.
+  click(m, 'Archive');
+  t = text(await settle(m, Object.assign(new Error('Report not found'), { status: 404, code: 'REPORT_NOT_FOUND' })));
+  assert.ok(t.includes('Couldn’t archive the report. Report not found'), t);
+  assert.ok(!t.includes('Archived — it’s under'));
+});
+
+test('Archive hands the keyboard to its line’s Undo; Unarchive — and Undo — to the report’s row, back in the list: its Archive, or Open on the newest of its kind (code review CC-6)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  const reports = [
+    // The newest of its kind, archived: in the list, with Unarchive and no Archive.
+    row({ id: 'ra', weekStart: '2020-03-02', weekEnd: '2020-03-08', archivedAt: AT }),
+    row({ id: 'rb', weekStart: '2020-02-24', weekEnd: '2020-03-01' }),
+  ];
+  let html = m.page(pageQc(m, { reports }));
+  assert.match(html, /<li [^>]*data-report-row="rb"/, 'each row carries its report’s mark');
+  // renderToString attaches no refs: stand-ins in the page's refs after How it works — Undo, then the tab
+  // panel, which finds a row and its controls by their marks in the page as last drawn.
+  const focused = [];
+  const [, undo, panel] = refSlots(m, 'page');
+  undo.current = { focus: () => focused.push('Undo') };
+  const rowOf = (id) => {
+    const at = html.indexOf(`data-report-row="${id}"`);
+    return at < 0 ? null : html.slice(at, html.indexOf('</li>', at));
+  };
+  panel.current = {
+    querySelector: (sel) => {
+      const id = (sel.match(/^\[data-report-row="([^"]+)"\]$/) || [])[1];
+      const block = id ? rowOf(id) : null;
+      if (!block) return null;
+      return {
+        querySelector: (inner) => {
+          const action = (inner.match(/^\[data-row-action="(\w+)"\]$/) || [])[1];
+          return action && block.includes(`data-row-action="${action}"`) ? { focus: () => focused.push(`${id} ${action}`) } : null;
+        },
+      };
+    },
+  };
+  runEffects(m, 'page');
+  assert.deepEqual(focused, [], 'nothing moves on its own');
+  click(m, 'Archive');
+  html = await settle(m, { report: { _id: 'rb', archivedAt: '2026-10-28T14:00:00Z' } });
+  runEffects(m, 'page');
+  assert.deepEqual(focused, ['Undo'], 'the row folded away: Undo takes it');
+  click(m, 'Undo');
+  html = await settle(m, { report: { _id: 'rb', archivedAt: null } });
+  runEffects(m, 'page');
+  assert.deepEqual(focused, ['Undo', 'rb archive'], 'back in the list: its Archive');
+  click(m, 'Unarchive');
+  html = await settle(m, { report: { _id: 'ra', archivedAt: null } });
+  runEffects(m, 'page');
+  assert.deepEqual(focused, ['Undo', 'rb archive', 'ra open'], 'the newest of its kind has no Archive: Open');
+});
+
+test('the list page: Take down and Delete say what happens to the report’s own link — and Delete, while an old link to all your reports still works, says that link shows it (LINKS §D2)', async () => {
+  const m = await load();
+  m.storage.set(GUIDE_KEY, '1');
+  m.fresh();
+  const shown = row();
+  const qc = pageQc(m, { reports: [shown], shares: [link(), ownLink(), elsewhere] });
+  m.page(qc);
+  let t = text(handed(m, 'ReportRow', 'onTakeDown', shown));
+  assert.ok(
+    t.includes('Take down this report? Your client stops seeing it. It stays exactly as it was — numbers, map and publish date — and Put back up shows it again. Its link shows “taken down” until you put it back up. Any build or new numbers waiting for review are cancelled.'),
+    t
+  );
+  click(m, 'Cancel');
+  let html = handed(m, 'ReportRow', 'onDelete', shown);
+  t = text(html);
+  assert.ok(
+    t.includes('Delete this report? Your client can open the Oct 19 – Oct 25 report right now. Deleting it also deletes its link — anyone who opens it then reads “This link isn’t available.” To hide it but keep it, use Take down instead. This can’t be undone.'),
+    t
+  );
+  assert.match(html, /<p class="text-danger-fg">Your client can open the Oct 19 – Oct 25 report right now\.<\/p>/);
+  // Deleted: its link went with it, so the links list (and History) is read again.
+  const invalidated = [];
+  const real = qc.invalidateQueries.bind(qc);
+  qc.invalidateQueries = (f) => {
+    invalidated.push(JSON.stringify(f?.queryKey));
+    return real(f);
+  };
+  click(m, 'Delete');
+  assert.deepEqual(m.h().last.calls[0].variables, { row: shown, erase: false });
+  await settle(m, { ok: true });
+  assert.ok(invalidated.includes(JSON.stringify(['admin', 'client-report-shares', CID])), invalidated.join(' '));
+  // No link of its own, beside a working old link to all your reports: Delete says that link shows it;
+  // Take down has no line about a link.
+  m.fresh();
+  m.page(pageQc(m, { reports: [shown], shares: [link()] }));
+  t = text(handed(m, 'ReportRow', 'onDelete', shown));
+  assert.ok(t.includes('The Oct 19 – Oct 25 report has no link of its own, but your old link to all your reports shows it — deleting it takes it off that too. This can’t be undone.'), t);
+  click(m, 'Cancel');
+  t = text(handed(m, 'ReportRow', 'onTakeDown', shown));
+  assert.ok(!t.includes('Its link shows'));
+  // Once the switch has turned the old links off, it's only the report.
+  m.fresh();
+  m.page(pageQc(m, { reports: [shown], shares: [link()], allReportsRetired: true }));
+  t = text(handed(m, 'ReportRow', 'onDelete', shown));
+  assert.ok(t.includes('The Oct 19 – Oct 25 report has no link of its own, so this deletes only the report. This can’t be undone.'), t);
+  // Taken down, with its link: it goes too.
+  m.fresh();
+  const down = row({ takenDownAt: '2026-10-27T14:00:00Z' });
+  m.page(pageQc(m, { reports: [down], shares: [ownLink()] }));
+  t = text(handed(m, 'ReportRow', 'onDelete', down));
+  assert.ok(t.includes('Your client already can’t see the Oct 19 – Oct 25 report — it was taken down. Deleting it also deletes its link, for good. This can’t be undone.'), t);
 });
 
 test('the list page: a new report whose dates start after today opens the builder saying so (?ahead=1), as Next does (WEEK-3)', async () => {
@@ -1445,44 +1513,4 @@ test('the list page: ?new=1&seriesId=&weekStart=&weekEnd= opens New report with 
   m.page(pageQc(m, { series: null }));
   m.h().effects.filter((e) => e.module === 'page').forEach((e) => e.fn());
   assert.deepEqual(m.h().setParams, [], 'waits for the series list');
-});
-
-test('the list page: Take down and Delete name the report’s one-report links; Delete counts only the links that open it', async () => {
-  const m = await load();
-  m.storage.set(GUIDE_KEY, '1');
-  m.fresh();
-  const shown = row();
-  const qc = pageQc(m, { reports: [shown], shares: [link(), board(), donorElsewhere] });
-  m.page(qc);
-  let t = text(handed(m, 'ReportRow', 'onTakeDown', shown));
-  assert.ok(t.includes('Take down this report?'));
-  assert.ok(
-    t.includes('Your client stops seeing it. It stays exactly as it was — numbers, map and publish date — and Put back up shows it again. Board, a link to just this report, shows “taken down” until you put it back up. Any build or new numbers waiting for review are cancelled.')
-  );
-  assert.ok(!t.includes('Donor'), 'another report’s link isn’t this report’s');
-  click(m, 'Cancel');
-  t = text(handed(m, 'ReportRow', 'onDelete', shown));
-  assert.ok(t.includes('Your client can see the Oct 19 – Oct 25 report right now — it shows on 2 links: Candidate, Board.'), 'never another report’s link');
-  assert.ok(t.includes('Its link Board (just this report) stops working for good.'));
-  // Deleted: its one-report links went with it, so the links list (and History) is read again.
-  const invalidated = [];
-  const real = qc.invalidateQueries.bind(qc);
-  qc.invalidateQueries = (f) => {
-    invalidated.push(JSON.stringify(f?.queryKey));
-    return real(f);
-  };
-  click(m, 'Delete');
-  assert.deepEqual(m.h().last.calls[0].variables, { row: shown, erase: false });
-  await settle(m, { ok: true });
-  assert.ok(invalidated.includes(JSON.stringify(['admin', 'client-report-shares', CID])), invalidated.join(' '));
-  // A taken-down report says its own links go too; a report with none says nothing about links.
-  m.fresh();
-  const down = row({ takenDownAt: '2026-10-27T14:00:00Z' });
-  m.page(pageQc(m, { reports: [down], shares: [board()] }));
-  t = text(handed(m, 'ReportRow', 'onDelete', down));
-  assert.ok(t.includes('Your client already can’t see the Oct 19 – Oct 25 report — it was taken down. Deleting it removes it for good. This can’t be undone. Its link Board (just this report) stops working for good.'));
-  m.fresh();
-  m.page(pageQc(m, { reports: [shown], shares: [link()] }));
-  t = text(handed(m, 'ReportRow', 'onTakeDown', shown));
-  assert.ok(!t.includes('a link to just this report'));
 });

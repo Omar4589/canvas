@@ -107,7 +107,11 @@ before(async () => {
 
   ctx.e1 = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, name: 'North Side' });
   ctx.e2 = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, name: 'South Side' });
-  ctx.p1 = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: ctx.e1._id, roundNumber: 1, name: 'First knock', status: 'active', activatedAt: new Date('2026-06-20T00:00:00Z') });
+  // One live pass per walk list: P1 ended when P2 went live on North Side (every P1 knock is earlier).
+  ctx.p1 = await Pass.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: ctx.e1._id, roundNumber: 1, name: 'First knock', status: 'archived',
+    activatedAt: new Date('2026-06-20T00:00:00Z'), archivedAt: new Date('2026-07-05T00:00:00Z'), archivedFrom: 'active', archivedVia: 'next-pass',
+  });
   ctx.p2 = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: ctx.e1._id, roundNumber: 2, name: 'Re-knock', status: 'active', activatedAt: new Date('2026-07-05T00:00:00Z') });
   ctx.p3 = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: ctx.e2._id, roundNumber: 1, name: 'South first', status: 'active', activatedAt: new Date('2026-06-25T00:00:00Z') });
 

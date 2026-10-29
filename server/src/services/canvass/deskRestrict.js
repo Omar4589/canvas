@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
+import { Effort } from '../../models/Effort.js';
 import { Household } from '../../models/Household.js';
 import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
@@ -200,30 +201,56 @@ export const bookOfDoorsInPass = async ({ campaignId, passId, householdIds }) =>
   return out;
 };
 
-// The round a desk mark lands on when the caller names none, for ONE door: the door's own
-// effort's ACTIVE round (one per effort by construction) → else the effort's SINGLE non-archived
-// (draft) round (several drafts per effort are legal, hence "exactly one") → else null. An
-// Intake door (effortId null) can NEVER be marked: Pass.effortId is required, so no round can own
-// it — short-circuited before any query. Shared by resolveDeskPassForDoors and the
-// /activity `currentPassId` read so the client and the writer agree by construction.
-export const currentDeskPassForDoor = async ({ campaignId, effortId }) => {
-  if (!effortId) return null;
+// The round a desk mark lands on when the caller names none, for ONE door, and why there is none
+// when there isn't → { passId, reason, walkList }:
+//   the door's own effort's ACTIVE round (one per effort by construction) → else the effort's
+//   SINGLE non-archived (draft) round (several drafts per effort are legal, hence "exactly one")
+//   → else { passId: null, reason: 'no-round' }.
+//   An Intake door (effortId null) can NEVER be marked: Pass.effortId is required, so no round can
+//   own it — reason 'intake', short-circuited before any query.
+//   A door of an ARCHIVED walk list can't either (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.8): the walk
+//   list is read-only, so its single draft — frozen with it — must not take a mark, and nor may a
+//   live pass left from before archiving ended it (the pre-repair state). Reason
+//   'walk-list-archived', with the walk list's name for the refusal. Its OWN reason, never
+//   'no-round': an already-released phone turns a non-Intake PASS_REQUIRED into "this walk list has
+//   no current round" (mobile/lib/restrictBooks.js), which is the wrong advice here.
+// `forMark: false` (an unmark) skips the archive check and resolves exactly as before: unmarking a
+// desk mark stays allowed on an archived walk list.
+export const deskRoundForDoor = async ({ campaignId, effortId, forMark = true }) => {
+  if (!effortId) return { passId: null, reason: 'intake', walkList: null };
+  if (forMark) {
+    const effort = await Effort.findOne({ _id: effortId, campaignId }, { name: 1, status: 1 }).lean();
+    if (effort?.status === 'archived') return { passId: null, reason: 'walk-list-archived', walkList: effort.name };
+  }
   const active = await activePassIdForEffort(effortId);
-  if (active) return active;
+  if (active) return { passId: active, reason: null, walkList: null };
   const open = await Pass.find({ campaignId, effortId, status: { $ne: 'archived' } }, { _id: 1 }).limit(2).lean();
-  return open.length === 1 ? open[0]._id : null;
+  return open.length === 1 ? { passId: open[0]._id, reason: null, walkList: null } : { passId: null, reason: 'no-round', walkList: null };
 };
+
+// The round a desk mark with no passId is on for one door, or null — the /activity `currentPassId`
+// read (routes/admin/households.js), resolved as an UNMARK resolves it (forMark: false) so the client
+// and the writer agree by construction. A door of an archived walk list therefore still shows the mark
+// on its frozen draft, with Unmark, on the web and on already-installed phones (code review round 2:
+// resolved as a MARK, it read "Not restricted"). Whether a NEW mark can land is the clients' own
+// walk-list check — an archived walk list takes none (restrict-doors answers 409 walk-list-archived).
+// Null for an Intake door and for a door with no current round.
+export const currentDeskPassForDoor = async ({ campaignId, effortId }) =>
+  (await deskRoundForDoor({ campaignId, effortId, forMark: false })).passId;
 
 // Group doors by the round their desk mark belongs to.
 //   explicit passId → every door lands on it. For a MARK (forMark) the pass must belong to the
-//     campaign (`passProblem:'not-found'`) and not be archived (`'archived'` — phones only receive
+//     campaign (`passProblem:'not-found'`), not be archived (`'archived'` — phones only receive
 //     active-pass books, so an archived-round mark would be invisible to canvassers yet flip
-//     global status); a door whose effortId ≠ the pass's effortId is `ineligible` (Intake doors
-//     included). An UNMARK applies NONE of those checks — it deletes whatever the client names
-//     (the mark's own round from /activity), so a mark whose draft pass was later deleted or
-//     whose door was re-housed can always be removed.
-//   no passId → currentDeskPassForDoor per effort; doors with no answer come back in
-//     `unresolved` as { id, reason:'intake'|'no-round' } (the route refuses all-or-nothing).
+//     global status), and not belong to an archived walk list (`'walk-list-archived'` — its
+//     drafts are frozen with it, §C.8); `pass` / `walkList` name what was refused. A door whose
+//     effortId ≠ the pass's effortId is `ineligible` (Intake doors included). An UNMARK applies
+//     NONE of those checks — it deletes whatever the client names (the mark's own round from
+//     /activity), so a mark whose draft pass was later deleted, whose door was re-housed, or whose
+//     walk list or round was since archived can always be removed.
+//   no passId → deskRoundForDoor per effort; doors with no answer come back in `unresolved` as
+//     { id, reason:'intake'|'no-round'|'walk-list-archived' } (+ `walkList`, the name, for the
+//     last) — the route refuses all-or-nothing.
 export const resolveDeskPassForDoors = async ({ campaign, households, passId = null, forMark }) => {
   const byPass = new Map();
   const unresolved = [];
@@ -236,9 +263,16 @@ export const resolveDeskPassForDoors = async ({ campaign, households, passId = n
   if (passId) {
     let passEffortId = null;
     if (forMark) {
-      const pass = await Pass.findOne({ _id: passId, campaignId: campaign._id }, { status: 1, effortId: 1 }).lean();
+      const pass = await Pass.findOne(
+        { _id: passId, campaignId: campaign._id },
+        { status: 1, effortId: 1, roundNumber: 1, name: 1 }
+      ).lean();
       if (!pass) return { byPass, unresolved, ineligible, passProblem: 'not-found' };
-      if (pass.status === 'archived') return { byPass, unresolved, ineligible, passProblem: 'archived' };
+      if (pass.status === 'archived') return { byPass, unresolved, ineligible, passProblem: 'archived', pass };
+      const effort = await Effort.findOne({ _id: pass.effortId, campaignId: campaign._id }, { name: 1, status: 1 }).lean();
+      if (effort?.status === 'archived') {
+        return { byPass, unresolved, ineligible, passProblem: 'walk-list-archived', pass, walkList: effort.name };
+      }
       passEffortId = String(pass.effortId);
     }
     for (const hh of households) {
@@ -258,8 +292,8 @@ export const resolveDeskPassForDoors = async ({ campaign, households, passId = n
     byEffort.get(k).push(hh);
   }
   for (const [effortId, hhs] of byEffort) {
-    const pid = await currentDeskPassForDoor({ campaignId: campaign._id, effortId: oid(effortId) });
-    if (!pid) for (const hh of hhs) unresolved.push({ id: String(hh._id), reason: 'no-round' });
+    const { passId: pid, reason, walkList } = await deskRoundForDoor({ campaignId: campaign._id, effortId: oid(effortId), forMark });
+    if (!pid) for (const hh of hhs) unresolved.push({ id: String(hh._id), reason, ...(walkList != null ? { walkList } : {}) });
     else for (const hh of hhs) add(pid, hh);
   }
   return { byPass, unresolved, ineligible, passProblem: null };

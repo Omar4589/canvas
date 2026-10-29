@@ -994,6 +994,199 @@ latest report the way New report picks it (the newest last day, then the newest 
 the answer: each tab's next New report offers **Move this tab to Monday – Sunday weeks**, and an admin can
 instead set the organization's week there.
 
+### Release: one link per report — and the switch that turns old links off (October 2026)
+
+Every client report now has **one link of its own**, made and managed with **Share** on the report; its
+password is kept, so the campaign's admins and leads can **Show** it again (Doorline staff never can);
+reports can be **archived**; and the old links that open all of a campaign's reports are turned off by a
+switch, on a day you pick ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Sharing a report*; the plan, your
+answers and *As built* in [PROPOSAL_CLIENT_REPORT_LINKS.md](PROPOSAL_CLIENT_REPORT_LINKS.md)). A server
+deploy plus the web build; **no OTA, no client-version bump, no migration**: the phone calls none of these
+routes, and every new field reads as its default when it's missing. The guard that keeps one link per
+report builds itself when the web and the worker start, like the report guards.
+
+**The old links are turned off by one config var, `RETIRE_ALL_REPORTS_LINKS`** (**Settings ▸ Reveal
+Config Vars**). The server reads it every time it needs it, and saving it restarts the dynos — no deploy.
+It acts on **every organization at once**. **Never name it to customers.**
+
+| `RETIRE_ALL_REPORTS_LINKS` | What happens |
+| --- | --- |
+| **Unset** — how the deploy ships | Old links to all your reports keep working as before, and none can be made. Each can still get a new password or a new address, or be deleted; nothing else. Their card on the Client Reports page says "Doorline will turn these old links off." |
+| **`on`** (`true` or `1` work too, in any case) | Every link that opens all of a campaign's reports stops working, in every organization, including every copy already sent: it says "This link no longer works. Ask the person who sent it for the link to the latest report.", and a device signed in to one is signed out at once. A link already turned off keeps saying "This link isn't available." They can only be deleted, and the card says "— turned off". Links to one report are untouched. |
+| **Unset again**, after it was on | **The rollback.** Old links open again at once (nothing was ever written to them); anyone the switch signed out types the password again. Put the legal sentences back in the next deploy. |
+
+**`CREDENTIAL_SEAL_KEY`: check it before the deploy, and never replace or remove it.** It now keeps
+client link passwords as well as FbTime keys. In **Settings ▸ Reveal Config Vars**, a good value is 44
+characters ending in "=".
+
+- **There:** leave it exactly as it is. Replacing or removing it makes every kept link password
+  unshowable ("can't be shown", and Same as … disappears) and every connected organization's FbTime key
+  unreadable.
+- **Missing:** links still work, but no password is kept: one made up or typed shows once, right after,
+  then "can't be shown"; Same as … isn't offered; and Doorline staff can't make a link at all. To add one:
+  **More ▸ Run console** →
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`, copy the 44-character
+  line it prints, and add it as `CREDENTIAL_SEAL_KEY` (the dynos restart). **Adding it also turns on
+  FbTime Connect** for every organization's admins, since the key is its only gate. FbTime is already in
+  the Privacy Policy and the DPA, so that's an unannounced feature, not a legal problem; your call.
+
+**Before the deploy:** decide the DPA §4 question (from the deploy, Doorline keeps link passwords and
+shows them to the campaign's admins and leads: the plan's Part 1, *What this changes in our promises*,
+item 6, and [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 44(e)), and check the key (above).
+
+**To release it, in this order:**
+
+1. **Deploy server and web from `main`** (**Deploy ▸ Manual deploy**) with `RETIRE_ALL_REPORTS_LINKS`
+   unset. Before committing, on your computer, `npm run audit:mobile-api` from the repo root: the phone
+   calls no client-report, share or branding route. No index build to run.
+2. **Super-admin home → Rebuild demo day.** The demo's client link becomes the demo report's own link —
+   same address and password; demo viewers sign in once more.
+3. **Check passwords work**, in the demo's Whole campaign tab: **New report** → Latest progress → Create
+   draft → Publish → **Share** → Make one up for me → Create link; **Show** gives the password just
+   shown. Then New report → the first choice → Create draft → Publish → Share: **Same as your last
+   link** is picked → Create link → Show gives the same password. (Rebuild demo day afterwards tidies
+   them away.)
+4. **Run console — who still has old links (read-only):**
+
+   ```
+   npm run report:all-reports-links
+   ```
+
+   Per organization, its name and counts only: how many old links to all your reports still work, are
+   off because of billing, are turned off or have expired; on how many campaigns; when one was last
+   opened; and how many of its reports have more than one link. Then totals. It writes nothing, refuses
+   any argument, and ends "Nothing was changed." For example (run from the repo root against a throwaway
+   database):
+
+   ```
+   Acme Field Co
+     4 links to all your reports: 3 still working · 0 off because of billing · 1 turned off · 0 expired
+     on 2 campaigns · last opened 2026-10-26
+     1 report with more than one link
+   ```
+
+   The organizations whose links **still work** are the ones whose clients lose a link on the day, and the
+   customers to tell first.
+5. **Decide the rest:** the date (before **Nov 3** means your customers re-send links in the last days
+   before the election; Nov 4 or later avoids that), the email to the listed organizations' admins (a
+   draft is in the plan's Part 1) and whether this is a material change, and the Privacy Policy and Terms
+   sentences. [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 44(f) is completed with the date,
+   the email as sent and how many organizations got it (or that none was sent), your answer on the
+   material change, and the sentences chosen.
+6. **Move your own clients over:** on each tab they follow, press **Share** on the newest published
+   report and send its link. To keep the password a client already has: **Type my own** and type it (it
+   needs 12 or more characters; a shorter one can't be kept, so make up a new one and send it); on that
+   client's other tabs, **Same as** that link.
+7. **On the date:** the legal edits (`client/public/privacy.html` and `terms.html`, both "Last updated"
+   dates too), with `staticPages.int.test.js` checking the new sentences and not the old (the plan's §E),
+   committed and deployed; then **Settings ▸ Reveal Config Vars** → `RETIRE_ALL_REPORTS_LINKS`
+   = `on` (the dynos restart). **Check:** an old link from an email says "This link no longer works"; the
+   demo's link opens the demo report; doorline.app/privacy and doorline.app/terms show the new sentences
+   and date.
+
+**If something's wrong:** delete `RETIRE_ALL_REPORTS_LINKS` in Config Vars — old links open again at
+once — and put the legal sentences back in the next deploy.
+
+### Release: archiving a walk list ends its pass — and the late-knock switch (October 2026)
+
+Archiving a walk list now ends its live pass, with **Undo**, **Unarchive** and **Bring back** for a pass;
+archived walk lists are read-only and archived passes view-only; and a late knock from an updated phone
+counts in the pass it was made in ([EFFORTS.md](EFFORTS.md), [PASSES.md](PASSES.md),
+[PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Late knocks*; plan in
+[PROPOSAL_WALK_LIST_ARCHIVE.md](PROPOSAL_WALK_LIST_ARCHIVE.md)). Server, web and an over-the-air phone
+update. No native build and no client-version bump: every new field, body field and refusal code is an
+addition, and old phones keep working. One console repair, then one index build.
+
+**The late-knock switch is one config var, `LATE_KNOCK_ATTRIBUTION`** (**Settings ▸ Reveal Config Vars**).
+The server reads it on every knock, survey and walk-up add.
+
+| `LATE_KNOCK_ATTRIBUTION` | What happens |
+| --- | --- |
+| **Unset** — how the deploy ships — or anything but `off` | On. A knock from a phone with the update counts in the book it was made in, late knocks included; a phone without the update gets the old rule. |
+| **`off`**, in any spelling (`OFF`, `Off`, with spaces around it) | Off. Every knock goes back to the old rule — the live book that holds the door, else "Legacy / no pass". Knocks already saved keep their pass. |
+
+Saving a config var **restarts the app for a few seconds**. Flip it **outside field hours** — a knock sent
+again after the flip can land in a different pass than it would have before it (Doorline still recognizes
+a retry of a knock it already saved, so nothing counts twice) — **unless knocks are failing**: then flip it
+anyway, because phones hold their knocks through the restart and send them again.
+
+**Bring back's outline redraw has one optional cap, `TURF_BRING_BACK_REHULL_MAX_DOORS`** (default
+**20,000** booked doors — about 2 seconds at 16,000 on a laptop, well inside Heroku's 30-second limit).
+It sits beside `TURF_REHULL_INLINE_MAX_DOORS`, the pin-move cap. A pass bigger than this comes back with
+its book shapes as they were and the log says `[passLifecycle] outlines of pass … not redrawn (N doors);
+run npm run recompute:territories -- --apply` — run that command (*Redraw the book shapes* below) to redraw
+them. Leave it unset.
+
+**To release it, in this order:**
+
+1. **Before committing, on the combined working tree:** every suite CI runs, and `npm run audit:mobile-api`
+   with no argument. It flags `routes/admin/efforts.js`, `passes.js`, `turfs.js`, `turfAssignments.js`,
+   `packets.js`, `campaigns.js` and `routes/mobile/canvass.js`: all additions — new fields on `GET /efforts`
+   and `GET /passes`, `details` and the *One-time check* actor on the new History rows, an optional `turfId`
+   on knocks, surveys and the walk-up add, and new 409 codes for archived passes and walk lists (the phone's
+   admin Books stops offering those, and an older app shows the server's sentence).
+2. **Deploy server and web from `main`** (**Deploy → Manual deploy**) with `LATE_KNOCK_ATTRIBUTION` unset.
+   Old phones keep working; the Help Center articles go live.
+3. **Run console — the list (read-only):**
+
+   ```
+   npm run repair:archived-walk-lists
+   ```
+
+   Per organization (Doorline's own first, then each customer) and per campaign (archived ones flagged):
+   every walk list archived with a pass still live — its pass, how many books and canvassers it has (a
+   canvasser count under 3 reads *fewer than 3*, so no number points at a person), the
+   last knock, and *knocked in the last 2 days* when true; every walk list of any kind holding two or more
+   live passes; and a count of live passes with no walk list. **Counts and walk list, pass, campaign and
+   organization names — never a canvasser's name.** Nothing is changed. That last count should read
+   **Live passes with no walk list: 0** — if it doesn't, stop and ask: those passes predate walk lists, the
+   command leaves them alone, and no screen lists them (they don't block the index).
+4. **Before applying:** unarchive on the web any of your own walk lists you want to keep running (the
+   command then skips it), and **tell the customers it lists** — especially those knocked in the last 2
+   days: their canvassers lose those books on their next refresh, and the customer can unarchive to bring
+   them back.
+5. **Outside field hours, apply:**
+
+   ```
+   npm run repair:archived-walk-lists -- --apply
+   ```
+
+   If a line says **NOT CHANGED** (the command then ends with an error), stop and ask before the index
+   steps: running it again won't change that one (a deleted walk list still holding live passes).
+
+   It ends every listed pass, customers' included, exactly as a new archive would, and each walk list can
+   bring it back with **Unarchive**. On a walk list with two or more live passes it keeps the one started
+   most recently and ends the rest. It works on archived campaigns too (so a later Reactivate can't revive
+   the bug), keeps each walk list's own archive date, and writes a History row per ended pass — *One-time
+   check ended North · Pass 3 · GOTV*. If it reports a walk list it skipped because someone was working on
+   it, run it again. It also skips campaigns being deleted (their passes go with them): if it says so, let
+   those deletes finish before step 6. Running it twice changes nothing.
+6. **Same console — the index, dry run first:** `npm run migrate:build-indexes`. It must list exactly one
+   missing index, **`one_live_pass_per_walk_list`** on `Pass`. **If it lists anything else, stop and ask
+   before going on** — `--apply` builds every missing index.
+7. **Build it:** `npm run migrate:build-indexes -- --apply`. A `✗ Pass:` line mentioning `E11000` means a
+   walk list still has two live passes: re-run step 5 (it reports and fixes it), then this step.
+8. **Phone, staging.** On your machine, in `mobile/`: check `git status --short mobile/` prints nothing (an
+   update bundles whatever is on disk, another session's screens included), `npm run ota:staging`, then the
+   **airplane-mode check**:
+   - **Setup.** **Staging builds talk to production**, so use a throwaway test campaign in an internal
+     (Doorline-owned) organization — never the demo campaign the store reviewers sign into. On the web:
+     a walk list with Pass 1 live; cut and accept Pass 2 with one door in both; assign the phone's account
+     a book on each pass.
+   - **The check:** on the phone, open the Pass 1 book and turn on airplane mode; knock that door; on the
+     web, activate Pass 2; turn airplane mode off and let the phone send. The By pass table must count
+     that knock in **Pass 1** (a phone without the update puts it in Pass 2).
+   - **Then:** on the phone, open the Pass 2 book (activating Pass 2 sent the phone to its book list). Archive
+     the test walk list on the web: the phone shows *No book right now*, and **Undo** brings the Pass 2
+     book back on the next refresh.
+   - **Clean up**, in the Run console: `npm run cleanup:test-campaigns -- --ids=<id>` (a dry run), then the
+     same with `--apply`.
+9. **Phone, production:** `npm run ota:production` from `main`.
+
+**If late knocks look wrong:** set `LATE_KNOCK_ATTRIBUTION` = `off` — outside field hours unless knocks
+are failing. Knocks already saved keep their pass, and phones keep sending the book (the server simply
+ignores it).
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -1004,6 +1197,10 @@ a fine habit if you'd rather not keep track.
 quiet moment, run `npm run migrate:build-indexes` once as the dry run and then
 `npm run migrate:build-indexes -- --apply`, because until they exist the Voters page of an organization
 with more than one campaign keeps doing the slow work that release was meant to end.
+
+**2026-10-28 — the walk-list archive release adds `one_live_pass_per_walk_list` on `Pass`,** a unique
+index: build it only **after** `npm run repair:archived-walk-lists -- --apply`, in the order the release
+section above gives — a walk list still holding two live passes makes the build fail on that model.
 
 ```
 npm run migrate:build-indexes -- --apply
@@ -1019,7 +1216,9 @@ The Turf Cutting map's book shapes now **contain every one of their houses** (a 
 small pocket of its book's color instead of sitting outside the shape). New cuts, any book edit, and
 any pin move draw the new shapes automatically; **books cut before the release keep their old shapes
 until you run this once.** (It is also the fallback for a pin move whose redraw was skipped — a round
-over the inline cap, `TURF_REHULL_INLINE_MAX_DOORS`, default 60,000 booked doors — or failed.) It rewrites only the drawn outlines — doors, canvasser assignments, and knocks are
+over the inline cap, `TURF_REHULL_INLINE_MAX_DOORS`, default 60,000 booked doors — or failed, and for a
+pass brought back whose redraw was skipped — over `TURF_BRING_BACK_REHULL_MAX_DOORS`, default 20,000
+booked doors — or failed.) It rewrites only the drawn outlines — doors, canvasser assignments, and knocks are
 untouched, so it is safe to run in the middle of a live round. Dry-runs by default; idempotent, so
 re-running is harmless.
 
@@ -1247,6 +1446,7 @@ fraud audit).
 | `npm run migrate:client-report-visibility` | **Read-only.** What the client-reports migration would do, step by step ([clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*): surveys whose follow-up record (and the version it starts at) it would seed, surveys with answers older than that version, legacy reports whose operator unticked every question, reports to put in a series (and walk-list names matching a canvasser's), backfills, the two steps marked as discarding information, the links' new fields, and open drafts that need a rebuild |
 | `npm run migrate:client-report-visibility -- --apply` | **Once, after the client reports upgrade deploy** (add `--keep-legacy-all` to keep the charts of legacy reports whose operator unticked every question). Writes only what is still missing, so a second run, or one over documents the new code wrote, changes nothing |
 | `npm run report:tab-weeks` | **Read-only, optional.** Per organization, how many open client-report tabs' latest report runs whole weeks on another weekday than the organization's report week — the tabs whose New report shows the week nudge ([reportTabWeeks.js](../server/src/migrations/reportTabWeeks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Report weeks and the next period*). Counts and organization names only; refuses any extra argument; ends "Nothing was changed." |
+| `npm run report:all-reports-links` | **Read-only.** After the one-link-per-report deploy and before `RETIRE_ALL_REPORTS_LINKS` is set: per organization (names only, internal and being-deleted ones marked), how many old links to all your reports still work, are off because of billing, are turned off or have expired, on how many campaigns, when one was last opened, and how many of its reports have more than one link; then totals, and a count of links whose organization no longer exists ([reportAllReportsLinks.js](../server/src/migrations/reportAllReportsLinks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*). No campaign, label, token or person; refuses any argument (exit 2); ends "Nothing was changed." Run from the repo root against a throwaway database on 2026-10-28 |
 | `npm run sweep:raw-imports` | Once after the import-fix release (purges the pre-fix backlog of orphaned raw voter-file uploads), or whenever an import looks wedged — same code as the nightly `sweep-stale-imports` job ([sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js)) |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |
@@ -1273,6 +1473,8 @@ fraud audit).
 | `npm run replay:pace-pause` | **Read-only, counts only.** Automatic pause's season replay across every customer organization: per org, canvassers and days scanned, the days and people it would have paused, pauses in total, the pattern mix (vehicle / one spot / walking), fails on long hops, and how often a visit began Not home and ended surveyed. Counts under 3 print as *fewer than 3*; no name, id, address or coordinate. Skips internal and deleting orgs. Flags: `--since=<YYYY-MM-DD>` and the rule's numbers (`--door --survey --travel --window --fails --visit`); an unknown flag exits 2. A full ledger scan — run it late ([replayPacePause.js](../server/src/migrations/replayPacePause.js)) |
 | `npm run pace:resolve-open` | **Read-only.** How many automatic pauses are open, per organization, no names ([resolveOpenPacePauses.js](../server/src/migrations/resolveOpenPacePauses.js)) |
 | `npm run pace:resolve-open -- --apply` | **Rollback only**, after `PACE_PAUSE` was set to `off` because pauses misfired: lifts every open pause (`resolvedVia: 'switch_off'`) and moves each person's restart point, so the old fails never count again |
+| `npm run repair:archived-walk-lists` | **Read-only.** Per organization (internal first, then customers) and campaign (archived ones flagged): walk lists archived with a pass still live — pass, published books, assigned canvassers, last knock, *knocked in the last 2 days* — walk lists of any kind with two or more live passes, and the count of live passes with no walk list. Counts and walk list / pass / campaign / organization names, never a canvasser's name. `--campaign <id>` narrows it ([repairArchivedWalkLists.js](../server/src/migrations/repairArchivedWalkLists.js); [below](#the-one-time-walk-list-repair-repairarchivedwalklistsjs)) |
+| `npm run repair:archived-walk-lists -- --apply` | **Once, after the walk-list archive release deploy, outside field hours, and BEFORE its index build.** Ends every listed live pass on an archived walk list, and every live pass but the latest on a walk list holding several — customers' included, archived campaigns included — through the same writer a new archive uses (`repairWalkList`). Skips and reports a walk list whose lock is held (run it again). Idempotent |
 | `npm run migrate:fbtime-deletion-gaps` | **Read-only.** Counts, per step, what the FbTime deletion-gaps backfill would change ([`backfillFbtimeDeletionGaps.js`](../server/src/migrations/backfillFbtimeDeletionGaps.js)) |
 | `npm run migrate:fbtime-deletion-gaps -- --apply` | **Once, straight after the door-counts release deploy.** (1) nulls `fbtimeEmail` on FbTime links of deleted accounts; (2) strips `detail.userEmail` from **every** `link-created` integration event (nothing reads it, and a per-user match would miss rows whose `detail.userId` is stored upper-case); (3) runs the purge's FbTime step for records purged before it existed (expected 0 — the first default purge is around 2027-01-08). Idempotent; a record that fails is printed, the exit code is 1, and a re-run retries it |
 
@@ -1562,6 +1764,39 @@ for the same organization twice at once. Every send and clear re-checks before e
 ledger write, the reporter predicate, each person's set of accounts), which narrows what an interleaving
 could do but doesn't make it safe — so the formation stays at one worker dyno.
 
+### The old-links switch (`RETIRE_ALL_REPORTS_LINKS`)
+
+[`allReportsRetired()`](../server/src/services/reports/shareLinks.js) reads
+`process.env.RETIRE_ALL_REPORTS_LINKS` on every call — `on`, `true` or `1` after trimming, in any case;
+anything else is off. Nothing caches it. Its readers:
+
+- **`loadShare`** ([routes/public/share.js](../server/src/routes/public/share.js)), which every public
+  `/share` route runs first: a link with no `reportId` (a link to all of a campaign's reports, missing
+  `reportId` included) answers `410 SHARE_RETIRED` right after the token lookup, before the expiry and
+  billing checks, so a device signed in to one is refused at once too. The client needs no change: any
+  410 ends its session and shows the server's sentence.
+- **The admin link routes** ([routes/admin/clientReportShares.js](../server/src/routes/admin/clientReportShares.js)):
+  on, a link to all reports can only be deleted (`409 ALL_REPORTS_LINK`, "Links that open all your reports
+  can only be deleted now."); off, it can also get a new password or a new address. `GET /shares` returns
+  it as `allReportsRetired`, which words the old-links card.
+
+Nothing is written to any link when it flips either way, so unsetting it is a complete rollback. Once it
+has been on a while (after Election Day), the plan makes it permanent in code and removes what it makes
+unreachable ([PROPOSAL_CLIENT_REPORT_LINKS.md](PROPOSAL_CLIENT_REPORT_LINKS.md) §J).
+
+### The credential seal key (`CREDENTIAL_SEAL_KEY`)
+
+[`utils/sealedSecret.js`](../server/src/utils/sealedSecret.js): AES-256-GCM under one 32-byte key,
+base64 (44 characters). Two kinds of value are sealed with it: an organization's FbTime API key (no
+associated data), and, since 2026-10-28, each client link's password (associated data
+`report-link:<its bcrypt hash>`), so neither opens as the other. **Absent or malformed:** FbTime Connect
+answers 503 ("Secret sealing is not configured on this server") and its sync does nothing; links still work, but no password is kept
+(`passwordSealed: null`), Show answers `409 PASSWORD_NOT_VIEWABLE`, Same as … isn't offered, and Doorline
+staff under a grant can't make a link (`403 PASSWORDS_NOT_KEPT`). **Never replace or remove it:** every
+sealed value would stop opening (FbTime keys until each organization pastes a new one, link passwords
+until each is changed). **Adding a missing one turns on FbTime Connect** for every organization's admins:
+the key is its only gate ([routes/admin/integrations.js](../server/src/routes/admin/integrations.js)).
+
 ### The automatic-pause switch (`PACE_PAUSE`)
 
 [`paceSwitch()`](../server/src/services/audit/pacePause.js) reads `process.env.PACE_PAUSE` on every call
@@ -1582,6 +1817,47 @@ Turning it off **resolves nothing**: open pauses stay open, simply not blocking 
 off resolves that org's open pauses at once (`setting_off`), and turning it back on stamps
 `pacePause.enabledAt`, which restarts every count there. The console replay ignores the switch — it never
 pauses anyone.
+
+### The late-knock switch (`LATE_KNOCK_ATTRIBUTION`)
+
+`lateKnockAttributionOn()` in [services/canvass/attribution.js](../server/src/services/canvass/attribution.js)
+reads `process.env.LATE_KNOCK_ATTRIBUTION` on every call: `String(v || '').trim().toLowerCase() !== 'off'`
+— the house pattern for a kill switch that fails open. Off, `resolveAttribution` skips step 1 (the book
+the phone sent) and decides by the old rule alone; the phone's `turfId` is still accepted and ignored, so
+nothing a phone sends is refused either way. The switch changes only where **new** writes land: saved rows
+keep their `passId`. A replay of a write that first landed before a flip can land in a different round
+afterwards, and since the duplicate check (`supersededByNewer`, `healDuplicateDelivery`) is per round, it
+can then count in both — hence "outside field hours unless knocks are failing"; a server error is retried
+by the phone's queue, so a restart loses nothing. Rules and callers:
+[PASSES_AND_TURF.md](PASSES_AND_TURF.md) §F.
+
+### The one-time walk-list repair (`repairArchivedWalkLists.js`)
+
+[`repairArchivedWalkLists.js`](../server/src/migrations/repairArchivedWalkLists.js), server script
+`repair:archived-walk-lists`, root proxy `"repair:archived-walk-lists": "npm --prefix server run
+repair:archived-walk-lists --"`, options `[--campaign <id>] [--apply]`. Before 2026-10-28 archiving a walk
+list only set `Effort.status`, so a walk list could be archived with its pass still live — the Help
+Center's re-carve advice to archive the emptied leftover "Main" was the likely source. **`--apply`** (owner
+ruling 10: every listed pass, customers' included) calls `repairWalkList` in
+[passLifecycle.js](../server/src/services/passes/passLifecycle.js) under the walk list's lifecycle lock
+and every live pass's recut lock at once (one held lock skips the walk list with nothing changed): on an
+**archived** walk list, in any campaign state but one being deleted, it ends every live pass (`archivedVia:
+'repair'`, `archivedBy: null`, `archivedFrom: 'active'`) and sets `endedPassId` to the one last activated,
+ending that one last, 1 ms after the others, so Unarchive can offer it back (a pass from before
+`lastActivatedAt` counts as live until it ended — ended after the offered one, it would block that one
+under bring-back rule 4b); on an **open** walk list with two or more live passes it keeps the one last
+activated and ends the rest the same way. A campaign being deleted is listed but skipped (`out.deleting`;
+its passes go with it, and a History row written now could outlive the delete's last sweep); the summary
+then says to build the index once those deletes have finished. It deliberately bypasses the
+archived-campaign refusal (a later Reactivate must not revive these passes), keeps each walk list's own archive date (walk
+lists archived before the change have none, so their row reads *Archived · Pass 1 ended by the one-time
+check*), skips and reports a walk list or pass whose lock is held, and writes one `passArchived` History
+row per ended pass with `outcome: 'repair'` and no actor — the History route names that actor *One-time
+check*. Idempotent. **It runs in the staff console across customer organizations, outside any
+support-access grant, so its output is counts and operator metadata only** (walk list, pass, campaign and
+organization names) — never a canvasser's name ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md), item
+43). Its index partner, `one_live_pass_per_walk_list`, has a `$type: 'objectId'` partial filter so live
+passes with no walk list (pre-Effort data) can't collide on null; the dry run counts those separately.
 
 ### `contactKnockCount` and the required recompute (`migrate:campaign-stats`)
 

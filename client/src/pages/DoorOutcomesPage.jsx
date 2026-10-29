@@ -5,6 +5,7 @@ import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
+import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import { buildScope, scopeToSearchParams } from '../lib/outcomeScope.js';
 import { downloadFile } from '../lib/downloadFile.js';
 import DateRangeSelector, { defaultRange, labelForRange } from '../components/DateRangeSelector.jsx';
@@ -290,7 +291,8 @@ export default function DoorOutcomesPage() {
       out.push({ key: 'user', label: name, clear: () => setUserId('') });
     }
     if (effortId) {
-      out.push({ key: 'effort', label: efforts.find((ef) => String(ef._id) === String(effortId))?.name || 'One walk list', clear: () => setEffortId('') });
+      const ef = efforts.find((x) => String(x._id) === String(effortId));
+      out.push({ key: 'effort', label: ef ? walkListLabel(ef) : 'One walk list', clear: () => setEffortId('') });
     }
     if (passId) {
       out.push({ key: 'pass', label: roundOptions.find((r) => r.id === passId)?.label || 'One round', clear: () => setPassId('') });
@@ -1243,8 +1245,8 @@ export default function DoorOutcomesPage() {
               title="Filter to one walk list"
             >
               <option value="">All walk lists</option>
-              {efforts.map((ef) => (
-                <option key={ef._id} value={ef._id}>{ef.name}</option>
+              {walkListOptions(efforts).map((ef) => (
+                <option key={ef._id} value={ef._id}>{walkListLabel(ef)}</option>
               ))}
             </Select>
           )}

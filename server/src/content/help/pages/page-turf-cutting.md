@@ -6,7 +6,7 @@ kind: page
 order: 105
 sourceDoc: PASSES_AND_TURF.md
 summary: Cut a pass's doors into books, accept them, assign them, and watch a round's progress.
-tags: turf, books, cutting, assign, progress, status, move, page, target doors, exclude doors
+tags: turf, books, cutting, assign, progress, status, move, page, target doors, exclude doors, archived pass, view only, bring back
 ---
 
 **Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), move, merge, or split books, mark a house or a book restricted, and fix a pin that's sitting in the wrong spot.
@@ -39,6 +39,20 @@ Status colors appear on their own once the round has knocks. While you're still 
 **Hiding doors that aren't in a book.** After a cut — especially a second pass where you only cut the unknocked doors — every door left out of a book (the already-worked ones, restricted homes, voters added since you cut) still shows on the map as a gray dot, so the round can look bigger than the actual walk. The **Not in a book** checkbox in the **Layers** box hides them all in one flip. It starts hidden, so the map opens showing just the cut's books, and only appears when the cut left doors loose. Homes that are *inside* a book — including one a canvasser marked restricted mid-round — keep their book color and stay put, so you never lose worked doors; the one exception is yours to flip — the **Restricted & no soliciting** checkbox above.
 
 Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
+
+## The Pass dropdown, and passes you can only look at
+
+The **Pass** dropdown groups every pass by what it is — **Live**, **Drafts**, **Archived** — and names each one with its walk list, like *North · Pass 3 · GOTV*, so two walk lists' "Pass 1"s can't be confused. Every pass of an archived walk list is under **Archived**, marked *walk list archived*. The page still opens on the pass you're most likely there to work on.
+
+Pick an archived pass, or any pass of an archived walk list, and the page is **view-only**: you see its books as they were, with who held each one. A banner at the top says when it ended and what you can do:
+
+- **Bring back** the pass, when it can come back (see [Passes](passes));
+- **Unarchive** the walk list, when the walk list is archived — the box opens right there;
+- **Open Pass 3**, to jump to the walk list's live pass, when it has one.
+
+While you're looking at one, cutting, Accept, Discard, Add as new book, renaming, moving doors, merging, Mark restricted, assigning and restoring a snapshot are all off. You can still **delete an old snapshot** — sometimes the way to let a Door Outcomes undo go through without bringing the pass back — and you can still unmark a desk mark from the [Map page](page-map), opened on that pass (**Audit →** on the pass in its walk list's Passes panel). An archived campaign opens the same way, with the campaign's own message.
+
+If someone else archives the pass while you have the page open, your next change is refused and the page switches to view-only. **Undo last discard** only ever restores the pass it was made on, and a button that fails now tells you why instead of doing nothing.
 
 **Making the map bigger.** Use the chevron on the **Generate books** header to collapse that panel so the map fills the space — a small button at the top-left of the map brings it back, and it stays collapsed next time. For an even bigger view, the **fullscreen** button (also top-left of the map) expands the map to the whole screen; press **Esc** or the button again to come back.
 
@@ -111,7 +125,8 @@ Unmark isn't offered yet, so use the popup until you accept).
 Two things you'll notice: the first mark on a draft cut switches the map from book colors to **status
 colors** (uncheck **Door status** under **Layers** to go back), and the **Discard** dialog counts the mark
 among the round's recorded work. Re-cutting or discarding drafts doesn't undo it — the mark follows the
-door into whichever book it lands in next. Marks land on the round you have selected at the top right.
+door into whichever book it lands in next. Marks land on the round you have selected at the top right —
+never on an archived pass or on any pass of an archived walk list, which are view-only.
 
 You can do the same on your phone — from the admin **Map** tab's door sheet, or by tapping a house inside a
 book — and from the web [Map page](page-map). See [Can I mark just one house restricted?](mark-one-home-restricted).

@@ -3,7 +3,7 @@ import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './
 import { submitOrQueue, flushQueue, getPending } from './offlineQueue';
 import { saveBootstrap, loadActiveOrgId } from './cache';
 import { changePrompt, ownSurveysHere, buildChangePrompt, clearOwnSurveysAtDoor, ownSurveyedIds, restoreOwnSurveys } from './doorChange';
-import { ACTION_PATHS, addVoterPath, addVoterBody } from './doorPaths';
+import { ACTION_PATHS, addVoterPath, addVoterBody, doorResultBody, doorTurfId, pendingDoorVerdict } from './doorPaths';
 import { reconcileLocationResponse } from './deltaFold';
 import { lightColors } from './theme';
 import { blocksRecording, flushAnswerApplies, withPace, PACE_MESSAGE, PACE_TIPPED_MESSAGE, PACE_TITLE } from './pace';
@@ -120,11 +120,15 @@ function replaceVoterInBootstrap(prev, wireVoter) {
 // bootstrap write runs its households through reconcilePendingHouseholds(), which
 // re-applies the pending status and clears each entry once the server's own data
 // agrees (or a safety TTL elapses). map.jsx wires this into both server writers.
+//
+// Each entry also holds the book the door was tapped in (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §E.6): a
+// refetch that puts the door in a different book — a new pass — clears it at once, since the recorded
+// status belongs to the old round (lib/doorPaths.js pendingDoorVerdict has the whole decision).
 const PENDING_TTL_MS = 5 * 60 * 1000;
-const pendingHouseholds = new Map(); // id -> { status, at }
+const pendingHouseholds = new Map(); // id -> { status, at, turfId }
 
-export function markPendingHousehold(id, status) {
-  pendingHouseholds.set(String(id), { status, at: Date.now() });
+export function markPendingHousehold(id, status, turfId = null) {
+  pendingHouseholds.set(String(id), { status, at: Date.now(), turfId: turfId ? String(turfId) : null });
 }
 
 export function clearPendingHousehold(id) {
@@ -132,19 +136,18 @@ export function clearPendingHousehold(id) {
 }
 
 // Overlay unconfirmed optimistic statuses onto a server-sourced households array,
-// clearing entries the server has caught up to (or that have aged past the TTL).
+// clearing entries the server has caught up to, that have aged past the TTL, or whose
+// door has moved to another book since the tap.
 export function reconcilePendingHouseholds(households) {
   if (!pendingHouseholds.size || !Array.isArray(households)) return households;
   const now = Date.now();
   return households.map((h) => {
     const p = pendingHouseholds.get(String(h._id));
     if (!p) return h;
-    if (now - p.at > PENDING_TTL_MS) {
-      pendingHouseholds.delete(String(h._id)); // give up; let the server win
-      return h;
-    }
-    if (h.status === p.status) {
-      pendingHouseholds.delete(String(h._id)); // server caught up — stop overlaying
+    // 'expired' gives up, 'moved' is another round's pin, 'confirmed' means the server caught up:
+    // each stops overlaying and lets the server win.
+    if (pendingDoorVerdict(p, h, { now, ttlMs: PENDING_TTL_MS }) !== 'hold') {
+      pendingHouseholds.delete(String(h._id));
       return h;
     }
     return { ...h, status: p.status }; // server is stale for this door — hold the optimistic color
@@ -399,7 +402,8 @@ export function optimisticSubmit(qc, opts) {
 
     // Step 2 — gate passed: register the unconfirmed status(es) BEFORE the patch so any
     // concurrent or subsequent server-sourced write is overlaid (reconcilePendingHouseholds).
-    for (const p of pending) markPendingHousehold(p.id, p.status);
+    // Each with the book its caller read at the tap, so a new pass's refetch clears it.
+    for (const p of pending) markPendingHousehold(p.id, p.status, p.turfId);
 
     writeBootstrap(qc, optimisticPatch);
 
@@ -433,8 +437,8 @@ export function optimisticSubmit(qc, opts) {
       // then DEFENDS against correct per-round deltas for the full TTL — the
       // "not-home flips back to surveyed" field bug. With the server returning
       // per-round truth this matches it exactly, and the next fetch clears the
-      // overlay as before.
-      for (const p of pending) markPendingHousehold(p.id, p.status);
+      // overlay as before. The book too is the tap's, never the cache's.
+      for (const p of pending) markPendingHousehold(p.id, p.status, p.turfId);
     } else if (!result.queued) {
       // Server rejected it (not a network drop) and submitOrQueue won't retry —
       // drop the optimistic claim and pull server truth back so it can't linger.
@@ -535,12 +539,15 @@ export const confirmDoorChange = async (qc, householdId, action) => {
 export function recordHouseholdAction(qc, householdId, action, { note = null, onAccepted } = {}) {
   const path = ACTION_PATHS[action];
   if (!path) throw new Error(`Unknown action: ${action}`);
+  // The book the door is in at the tap (lib/doorPaths.js doorTurfId): a knock that uploads after its
+  // pass ended still counts in that pass, and the pending overlay below follows that book.
+  const turfId = doorTurfId(qc.getQueryData(['bootstrap']), householdId);
   // The survey marks this tap clears below, so a rejected result can put them back.
   let cleared = [];
   return optimisticSubmit(qc, {
     path: `/mobile/households/${householdId}/${path}`,
     confirm: () => confirmDoorChange(qc, householdId, action),
-    body: { note },
+    body: doorResultBody({ note, turfId }),
     // The voters too: the server deletes this canvasser's surveys at the door with the result, and
     // its reply carries only the household — left alone, the next change here would warn about
     // answers already gone (doorChange.js clearOwnSurveysAtDoor).
@@ -551,11 +558,13 @@ export function recordHouseholdAction(qc, householdId, action, { note = null, on
     // Rejected, the result deleted nothing — the marks must come back before the next tap, or that
     // tap would skip the erase warning and really delete the answers.
     rollbackPatch: (prev) => restoreOwnSurveys(prev, cleared),
+    // The answer is for the pass the knock counted in. A door a new pass has taken since the tap
+    // keeps the status the refetch gave it there (the overlay below drops for the same reason).
     reconcile: (prev, response) => {
       const status = response?.household?.status;
-      return status ? setHouseholdStatus(prev, householdId, status) : prev;
+      return status && doorTurfId(prev, householdId) === turfId ? setHouseholdStatus(prev, householdId, status) : prev;
     },
-    pending: [{ id: householdId, status: action }],
+    pending: [{ id: householdId, status: action, turfId }],
     // Refresh the canvasser's Today's Progress counts once the knock is recorded.
     invalidateKeys: [['mobile', 'me']],
     hardFailTitle: 'Action not saved',
@@ -570,11 +579,12 @@ export function recordHouseholdAction(qc, householdId, action, { note = null, on
 // lib/objectId.js) as the voter's real _id and is idempotent on it, so an offline replay can
 // never duplicate the person — and the follow-up survey queued behind it references an id
 // that survives the replay. GPS-gated like every other door write; `pending` stays empty
-// because adding a person never recolors the pin.
+// because adding a person never recolors the pin. It names the door's book at the tap too, for
+// the server's per-round stamp (lib/doorPaths.js doorTurfId).
 export const recordAddVoter = (qc, householdId, { voterId, firstName, lastName, phone = null, email = null, onAccepted } = {}) =>
   optimisticSubmit(qc, {
     path: addVoterPath(householdId),
-    body: addVoterBody({ voterId, firstName, lastName, phone, email }),
+    body: addVoterBody({ voterId, firstName, lastName, phone, email, turfId: doorTurfId(qc.getQueryData(['bootstrap']), householdId) }),
     optimisticPatch: (prev) => addVoterToBootstrap(prev, householdId, { voterId, firstName, lastName }),
     reconcile: (prev, response) =>
       response?.voter ? replaceVoterInBootstrap(prev, response.voter) : prev,

@@ -178,10 +178,17 @@ test('a free-text question CANNOT be pinned to a street address in a published r
 });
 
 test('a new share link ALWAYS gets a password and an expiry', { skip }, async () => {
+  // Each link opens one published report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2).
+  const report = await ClientReport.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, title: 'Shared', status: 'published', publishedAt: new Date(),
+    weekStart: '2026-06-29', weekEnd: '2026-07-05', timeZone: 'America/Chicago',
+    rangeStartUtc: new Date('2026-06-29T05:00:00Z'), rangeEndUtc: new Date('2026-07-06T05:00:00Z'),
+    visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: [], showMap: false },
+  });
   // The operator supplied neither. It used to produce an open, never-expiring public URL.
   const res = await call('POST', '/admin/client-reports/shares', {
     ...ctx.admin,
-    body: { campaignId: String(ctx.camp._id), label: 'Client' },
+    body: { campaignId: String(ctx.camp._id), reportId: String(report._id), label: 'Client' },
   });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
   assert.strictEqual(res.json.share.hasPassword, true, 'a password was generated');
@@ -207,17 +214,31 @@ test('an expired link is refused, even with the right token', { skip }, async ()
   assert.strictEqual(res.json.code, 'SHARE_EXPIRED');
 });
 
-test('a legacy link with no expiry still works — we do not break a client\'s live URL silently', { skip }, async () => {
+test('a legacy link with no expiry still works — until the switch turns links to all your reports off, never by a deploy', { skip }, async () => {
   // Links created before this change have expiresAt: null. Breaking them without notice would take a
-  // published report offline under a customer's feet. They are sunset on notice, not by surprise.
+  // published report offline under a customer's feet. They are sunset on notice, not by surprise: every
+  // such link opens all of a campaign's reports, and RETIRE_ALL_REPORTS_LINKS — set in the dashboard on a
+  // day the owner picks, after the customers are told — is what turns them off
+  // (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1).
   const legacy = await ReportShareLink.create({
     organizationId: ctx.org._id, campaignId: ctx.camp._id,
     token: 'legacy-token-xyz', passwordHash: null, expiresAt: null, isActive: true,
   });
-  const res = await call('GET', `/share/${legacy.token}`);
-  assert.notStrictEqual(res.status, 410, 'a legacy link must not be killed by the expiry check');
+  delete process.env.RETIRE_ALL_REPORTS_LINKS;
+  let res = await call('GET', `/share/${legacy.token}`);
+  assert.strictEqual(res.status, 200, 'a legacy link must not be killed by the expiry check, nor by the deploy');
   const row = await ReportShareLink.findById(legacy._id);
   assert.strictEqual(row.isLegacyOpen(), true, 'but it is flagged so the UI can nag about it');
+  process.env.RETIRE_ALL_REPORTS_LINKS = 'on';
+  try {
+    res = await call('GET', `/share/${legacy.token}`);
+    assert.strictEqual(res.status, 410, 'the switch on: it no longer works, and says so');
+    assert.strictEqual(res.json.code, 'SHARE_RETIRED');
+    assert.strictEqual(res.json.error, 'This link no longer works. Ask the person who sent it for the link to the latest report.');
+  } finally {
+    delete process.env.RETIRE_ALL_REPORTS_LINKS;
+  }
+  assert.strictEqual((await call('GET', `/share/${legacy.token}`)).status, 200, 'unset again: it opens at once');
   ctx.legacy = row;
 });
 
@@ -620,16 +641,26 @@ test('a Not a target voter door publishes its status — never the canvasser not
 // dependency record is the route's), doors and link.
 
 const RECALL = 'would_you_back_recall_of_mayor_smith';
-const B_LINK = 'b-series-token';
 const B_PASSWORD = 'b-series-password-ok';
 
+// Each report is read through its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), made the first time
+// a path names it: `/reports/<id>…`.
 async function bShare(path) {
-  if (!ctx.bAccess) {
-    const unlock = await call('POST', `/share/${B_LINK}/unlock`, { body: { password: B_PASSWORD } });
+  const id = path.match(/^\/reports\/([0-9a-f]{24})/)[1];
+  ctx.bLinks ??= new Map();
+  if (!ctx.bLinks.has(id)) {
+    const bcrypt = (await import('bcryptjs')).default;
+    const token = `b-series-${id}`;
+    await ReportShareLink.create({
+      organizationId: ctx.org._id, campaignId: ctx.bCamp._id, token, reportId: id,
+      passwordHash: await bcrypt.hash(B_PASSWORD, 4), expiresAt: new Date(Date.now() + 86400000), isActive: true,
+    });
+    const unlock = await call('POST', `/share/${token}/unlock`, { body: { password: B_PASSWORD } });
     assert.strictEqual(unlock.status, 200);
-    ctx.bAccess = unlock.json.accessToken;
+    ctx.bLinks.set(id, { token, access: unlock.json.accessToken });
   }
-  const res = await fetch(`${base}/api/share/${B_LINK}${path}`, { headers: { 'X-Share-Token': ctx.bAccess } });
+  const { token, access } = ctx.bLinks.get(id);
+  const res = await fetch(`${base}/api/share/${token}${path}`, { headers: { 'X-Share-Token': access } });
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
@@ -690,11 +721,6 @@ test('B-series fixture: a scripted survey made through the real route', { skip }
     await CanvassActivity.create({ organizationId: ctx.org._id, campaignId: camp._id, householdId: hh._id, userId: admin._id, actionType: 'survey_submitted', location: { lat: 27.8, lng: -82.3 }, timestamp: when });
     await SurveyResponse.create({ organizationId: ctx.org._id, campaignId: camp._id, householdId: hh._id, voterId: v._id, userId: admin._id, surveyTemplateId: template._id, surveyTemplateVersion: 1, location: { lat: 27.8, lng: -82.3 }, submittedAt: when, answers });
   }
-  const bcrypt = (await import('bcryptjs')).default;
-  await ReportShareLink.create({
-    organizationId: ctx.org._id, campaignId: camp._id, token: B_LINK,
-    passwordHash: await bcrypt.hash(B_PASSWORD, 4), expiresAt: new Date(Date.now() + 86400000), isActive: true,
-  });
   Object.assign(ctx, { bCamp: camp, bTemplate: template });
 });
 

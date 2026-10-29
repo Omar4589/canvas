@@ -10,6 +10,7 @@ import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
 import { paramsFor, ROUND_STATUSES } from '../lib/exportTypes';
+import { walkListOptions, walkListLabel, passOptionLabel } from '../lib/walkListOptions';
 import { useOutcomeInUse } from '../lib/useOutcomeInUse';
 import DateRangeBar from './DateRangeBar';
 import TabSwitcher from './TabSwitcher';
@@ -99,10 +100,11 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
     setPassId('');
   }
 
+  // The round tabs need the walk lists too, to name each round's.
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
-    enabled: !!campaignId && wants('effort'),
+    enabled: !!campaignId && (wants('effort') || wants('pass')),
     staleTime: 60 * 1000,
   });
   const efforts = effortsQ.data?.efforts || [];
@@ -153,10 +155,22 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   });
   const est = estimateQ.data;
 
-  const effortTabs = [{ key: '', label: 'All walk lists' }, ...efforts.map((e) => ({ key: String(e._id), label: e.name }))];
+  // Archived walk lists stay — an export is history — marked and listed last, and they count
+  // toward the 2+ gate below (lib/walkListOptions.js).
+  const walkLists = walkListOptions(efforts);
+  const effortTabs = [{ key: '', label: 'All walk lists' }, ...walkLists.map((e) => ({ key: String(e._id), label: walkListLabel(e) }))];
+  // Each round names its walk list ("North · Pass 2") — a bare "Pass 2" names a different round in
+  // every walk list — grouped in the walk-list tabs' order, then by round number.
+  const listRank = new Map(walkLists.map((e, i) => [String(e._id), i]));
+  const rankOf = (p) => listRank.get(String(p.effortId)) ?? walkLists.length;
   const passTabs = [
     { key: '', label: 'All rounds' },
-    ...passes.map((p) => ({ key: String(p._id), label: `Pass ${p.roundNumber} · ${p.name}` })),
+    ...[...passes]
+      .sort((a, b) => rankOf(a) - rankOf(b) || (a.roundNumber ?? 0) - (b.roundNumber ?? 0))
+      .map((p) => {
+        const list = walkLists[listRank.get(String(p.effortId))];
+        return { key: String(p._id), label: passOptionLabel(p, list ? walkListLabel(list) : null) };
+      }),
     { key: 'legacy', label: 'Legacy / no pass' },
   ];
   const canvasserTabs = [

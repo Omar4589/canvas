@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { changePrompt, ownSurveysHere, buildChangePrompt, clearOwnSurveysAtDoor, restoreOwnSurveys } from './doorChange.js';
-import { ACTION_PATHS, addVoterPath, addVoterBody, doorResultPath, surveyPath } from './doorPaths.js';
+import { ACTION_PATHS, addVoterPath, addVoterBody, doorResultBody, doorResultPath, surveyBody, surveyPath } from './doorPaths.js';
 
 // The "Change this door's result?" decisions (owner ruling 2026-10-02). The queue fixtures are built
 // from the SAME path/body builders the writers use (doorPaths.js), with the field offlineQueue adds,
@@ -73,15 +73,18 @@ test('ownSurveysHere counts this canvasser’s cached and queued surveys at THIS
 
   // Queued: a survey for v4 (still waiting to upload), and a walk-up voter added here whose add
   // AND survey are both still queued — the add's body carries the client-minted id as voterId.
-  const walkUp = addVoterBody({ voterId: 'w1', firstName: 'Sam', lastName: 'Q' });
+  // Every body as the writers build it, the book each door was tapped in included (b1 is h1's).
+  const survey = (turfId) => surveyBody({ surveyTemplateId: 't1', answers: [], note: null, turfId });
+  const walkUp = addVoterBody({ voterId: 'w1', firstName: 'Sam', lastName: 'Q', turfId: 'b1' });
+  assert.deepEqual(walkUp, { voterId: 'w1', firstName: 'Sam', lastName: 'Q', phone: null, email: null, turfId: 'b1' });
   const pending = [
-    queued(surveyPath('v4'), { surveyTemplateId: 't1', answers: [] }),
+    queued(surveyPath('v4'), survey('b1')),
     queued(addVoterPath('h1'), walkUp),
-    queued(surveyPath('w1'), { surveyTemplateId: 't1', answers: [] }),
-    queued(surveyPath('v5'), { surveyTemplateId: 't1', answers: [] }), // another door's voter
-    queued(addVoterPath('h2'), addVoterBody({ voterId: 'w2', firstName: 'A', lastName: 'B' })),
-    queued(surveyPath('w2'), { surveyTemplateId: 't1', answers: [] }), // another door's walk-up
-    queued(doorResultPath('h2', 'refused'), { note: null }), // another door's result: deletes nothing here
+    queued(surveyPath('w1'), survey('b1')),
+    queued(surveyPath('v5'), survey('b2')), // another door's voter
+    queued(addVoterPath('h2'), addVoterBody({ voterId: 'w2', firstName: 'A', lastName: 'B', turfId: 'b2' })),
+    queued(surveyPath('w2'), survey('b2')), // another door's walk-up
+    queued(doorResultPath('h2', 'refused'), doorResultBody({ turfId: 'b2' })), // another door's result: deletes nothing here
     queued('/mobile/households/h1/location', { lat: 1, lng: 2 }), // a pin fix here replaces nothing
   ];
   assert.equal(ownSurveysHere({ voters, householdId: 'h1', pending }), 3, 'v1 cached + v4 queued + the walk-up');
@@ -93,10 +96,10 @@ test('ownSurveysHere counts this canvasser’s cached and queued surveys at THIS
 test('a queued survey that a door result here was tapped AFTER is already gone: tap time decides', () => {
   // v4 lives at h1 (cached, not yet surveyed there); its survey is the queued one.
   const voters = [{ _id: 'v4', householdId: 'h1', surveyStatus: 'not_surveyed' }];
-  const v4 = (minute) => tapped(surveyPath('v4'), minute, { surveyTemplateId: 't1', answers: [] });
+  const v4 = (minute) => tapped(surveyPath('v4'), minute, surveyBody({ surveyTemplateId: 't1', answers: [], note: null, turfId: 'b1' }));
   // Every one of the seven results replaces — none may be missed by the path check.
   for (const action of Object.keys(ACTION_PATHS)) {
-    const result = (minute) => tapped(doorResultPath('h1', action), minute, { note: null });
+    const result = (minute) => tapped(doorResultPath('h1', action), minute, doorResultBody({ turfId: 'b1' }));
     assert.equal(ownSurveysHere({ voters, householdId: 'h1', pending: [v4(1), result(2)] }), 0, `${action} tapped after the survey`);
     assert.equal(ownSurveysHere({ voters, householdId: 'h1', pending: [result(1), v4(2)] }), 1, `${action} tapped before it`);
     // Queue order is not tap order: two failed uploads can land in either order. The server compares
@@ -107,7 +110,7 @@ test('a queued survey that a door result here was tapped AFTER is already gone: 
   assert.equal(ownSurveysHere({ voters, householdId: 'h1', pending: [queued(surveyPath('v4'), {}), queued(doorResultPath('h1', 'refused'), {})] }), 0);
   assert.equal(ownSurveysHere({ voters, householdId: 'h1', pending: [queued(doorResultPath('h1', 'refused'), {}), queued(surveyPath('v4'), {})] }), 1);
   // A walk-up voter added and surveyed, then a result: the same rule.
-  const add = tapped(addVoterPath('h1'), 1, addVoterBody({ voterId: 'w1', firstName: 'Sam', lastName: 'Q' }));
+  const add = tapped(addVoterPath('h1'), 1, addVoterBody({ voterId: 'w1', firstName: 'Sam', lastName: 'Q', turfId: 'b1' }));
   assert.equal(ownSurveysHere({ householdId: 'h1', pending: [add, tapped(surveyPath('w1'), 2), tapped(doorResultPath('h1', 'not_target'), 3)] }), 0);
   assert.equal(ownSurveysHere({ householdId: 'h1', pending: [add, tapped(doorResultPath('h1', 'not_target'), 2), tapped(surveyPath('w1'), 3)] }), 1);
   // Another door's result, and the add-a-person and pin-fix writes here, delete nothing.

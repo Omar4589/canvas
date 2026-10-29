@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-// Audit record for one "voted list" CSV upload — the unit of undo. Its
+// Audit record for one "voted list" upload (CSV or Excel) — the unit of undo. Its
 // VotedVoter rows reference it via uploadId.
 const votedUploadSchema = new mongoose.Schema(
   {
@@ -18,6 +18,11 @@ const votedUploadSchema = new mongoose.Schema(
     // undeclared field would be dropped at save with no error.
     idColumn: { type: String, default: null },
     matchedViaZeros: { type: Number, default: 0 },
+    // "Count only rows where" (docs/PROPOSAL_ID_LIST_EXCEL.md, call A): the counting column's NAME and
+    // how many rows counted, set only when rows were left out. Never which values were ticked: every
+    // VotedVoter row points back here, so stored values would describe each voter this upload marked.
+    keepColumn: { type: String, default: null },
+    keptRows: { type: Number, default: null },
     undone: { type: Boolean, default: false },
     undoneAt: { type: Date, default: null },
   },

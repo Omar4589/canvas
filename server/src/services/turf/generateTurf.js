@@ -1,8 +1,11 @@
+import { UnrecoverableError } from 'bullmq';
 import { Campaign } from '../../models/Campaign.js';
+import { Effort } from '../../models/Effort.js';
 import { Pass } from '../../models/Pass.js';
 import { Household } from '../../models/Household.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
+import { assertCampaignWritable, assertPassWritable, assertWalkListWritable } from '../../middleware/campaignWritable.js';
 import { attributeCut } from './attributeCut.js';
 import { geometricCut } from './geometricCut.js';
 import { resolveWalkList, isActiveTargetFilter } from '../walklist/resolveWalkList.js';
@@ -139,6 +142,71 @@ export async function cutExclusionFilter(args = {}) {
   return (await cutExclusionParts(args)).filter;
 }
 
+// ── The TURF jobs' own guard (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.5) ──
+// A queued job re-checks what its route checked when it was enqueued — the campaign is writable
+// (not archived, not being deleted), the pass isn't archived, its walk list isn't — because an
+// archive can land while the job waits in the queue or runs. A refusal throws BullMQ's
+// UnrecoverableError, so the job fails at once instead of retrying three times into the same
+// refusal (queues/index.js), and the Turf page's job line shows the guard's own sentence
+// (GET /turfs/jobs/:jobId → failedReason). The same rules and words as the routes: the job runs
+// middleware/campaignWritable.js's guards themselves.
+
+// Those guards answer through `res`; a job has none, so it lends them one that keeps the body.
+const guardRefusal = async (guard) => {
+  let body = null;
+  const res = {
+    status: () => res,
+    json: (b) => {
+      body = b;
+      return res;
+    },
+  };
+  return (await guard(res)) ? null : body;
+};
+
+// → the refusal ({ error, code }), or null when the job may write. Re-reads everything it checks —
+// what a job loaded at its start may be stale by the time it writes. `passId` checks the pass and
+// its walk list; `effortId` (a claim's TARGET walk list) checks the walk list alone.
+export const turfJobRefusal = async ({ campaignId, passId = null, effortId = null }) => {
+  const campaign = await Campaign.findById(campaignId, { isActive: 1, deletion: 1 }).lean();
+  if (!campaign) return { error: 'Campaign not found', code: 'campaign-not-found' };
+  const archivedOrGoing = await guardRefusal((res) => assertCampaignWritable(res, campaign));
+  if (archivedOrGoing) return archivedOrGoing;
+  if (passId) {
+    const pass = await Pass.findOne({ _id: passId, campaignId }, { status: 1, effortId: 1, roundNumber: 1, name: 1 }).lean();
+    if (!pass) return { error: 'Pass not found', code: 'pass-not-found' };
+    return guardRefusal((res) => assertPassWritable(res, pass));
+  }
+  if (effortId) {
+    const effort = await Effort.findOne({ _id: effortId, campaignId }, { name: 1, status: 1 }).lean();
+    if (!effort) return { error: 'Walk list not found', code: 'walk-list-not-found' };
+    return guardRefusal((res) => assertWalkListWritable(res, effort));
+  }
+  return null;
+};
+
+// The refusal, if there is one, as the UnrecoverableError that fails the job.
+export const assertTurfJobWritable = async (ids) => {
+  const refusal = await turfJobRefusal(ids);
+  if (refusal) throw new UnrecoverableError(refusal.error);
+};
+
+// Generate's post-insert undo: the books THIS run inserted that are still drafts, and their
+// household mirror. Never a published one — an Accept that landed mid-run stands, and so does its
+// mirror (a book accepted between the read and the delete is not deleted, so it keeps it too).
+// Drafts carry no assignments (both assign routes 409 `not-accepted`); swept anyway, as
+// wipeDraftBooks does.
+const dropOwnDrafts = async (insertedIds) => {
+  const drafts = (await Turf.find({ _id: { $in: insertedIds }, status: 'draft' }, { _id: 1 }).lean()).map((t) => t._id);
+  if (!drafts.length) return;
+  await Turf.deleteMany({ _id: { $in: drafts }, status: 'draft' });
+  const kept = new Set((await Turf.find({ _id: { $in: drafts } }, { _id: 1 }).lean()).map((t) => String(t._id)));
+  const gone = drafts.filter((id) => !kept.has(String(id)));
+  if (!gone.length) return;
+  await TurfAssignment.deleteMany({ turfId: { $in: gone } });
+  await Household.updateMany({ turfId: { $in: gone } }, { $set: { turfId: null, walkOrder: null } });
+};
+
 // Wipe a pass's DRAFT books cleanly: drop their assignments and clear the
 // household mirror for their members before deleting, so no orphaned assignments
 // or stale Household.turfId are left behind. Published books untouched. Two
@@ -159,11 +227,12 @@ export const wipeDraftBooks = async (passId) => {
 
 // a re-run / worker restart is clean). Mirrors turfId/walkOrder onto households.
 export async function generateTurf({ campaignId, passId, mode, params = {}, generationJobId, generatedBy, onProgress }) {
+  // A queued cut can be claimed AFTER a delete stamped the campaign — writing Turf rows
+  // mid-cascade would orphan them (services/campaigns/deletionState.js) — or after the
+  // campaign, the pass or its walk list was archived (§C.5).
+  await assertTurfJobWritable({ campaignId, passId });
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
-  // A queued cut can be claimed AFTER a delete stamped the campaign — writing Turf rows
-  // mid-cascade would orphan them (services/campaigns/deletionState.js).
-  if (campaign.deletion?.requestedAt) throw new Error('Campaign is being deleted');
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
   if (!pass) throw new Error('Pass not found');
 
@@ -262,11 +331,6 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 
   await onProgress?.({ phase: 'boundaries', pct: 55, booksTotal: books.length });
 
-  // Wipe prior drafts for this pass CLEANLY (shared helper — the drafts-only
-  // Discard scope is the same operation, exposed as an endpoint). The published
-  // guard on /generate means only draft books can exist on the pass at this point.
-  await wipeDraftBooks(passId);
-
   const turfDocs = [];
   const bookData = [];
   let done = 0;
@@ -314,6 +378,13 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   turfDocs.forEach((d, i) => { if (!d.boundary) d.boundary = territories[i] || null; });
 
   await onProgress?.({ phase: 'saving', pct: 90 });
+  // Checked again right before the run's first write: the clustering and boundaries above can
+  // take minutes on a big campaign, and an archive landing meanwhile must keep its drafts too.
+  await assertTurfJobWritable({ campaignId, passId });
+  // Wipe prior drafts for this pass CLEANLY (shared helper — the drafts-only
+  // Discard scope is the same operation, exposed as an endpoint). The published
+  // guard on /generate means only draft books can exist on the pass at this point.
+  await wipeDraftBooks(passId);
   const inserted = await Turf.insertMany(turfDocs);
 
   // Mirror turfId + walkOrder onto households (one book per household).
@@ -327,6 +398,17 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     await Household.bulkWrite(mirrorOps.slice(i, i + 2000), { ordered: false });
   }
 
+  // And once more AFTER the insert, because generate takes no recut lock (recutLock.js): an
+  // archive can land while it writes. If one did, the drafts this run made go again (never a
+  // book accepted meanwhile) and the job fails the same way. A run killed mid-insert and
+  // redelivered fails at its start check instead and may leave its drafts behind — harmless on
+  // an archived pass, which never reaches a phone and is view-only.
+  const late = await turfJobRefusal({ campaignId, passId });
+  if (late) {
+    await dropOwnDrafts(inserted.map((t) => t._id));
+    throw new UnrecoverableError(late.error);
+  }
+
   await onProgress?.({ phase: 'done', pct: 100, booksTotal: inserted.length });
   return { bookCount: inserted.length };
 }
@@ -338,10 +420,11 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
 // so territories stay non-overlapping. Walk-list passes only consider the frozen
 // list, so imports outside that list won't be picked up (documented limitation).
 export async function addSupplementalBooks({ campaignId, passId, name = 'New voters', maxDoors = 65, excludeRestricted = false, excludeNoSoliciting = false, excludeUnplaced = false, onProgress }) {
+  // Same guard as generateTurf above (mid-delete, archived campaign / pass / walk list). The job
+  // runs under the pass's recut lock (turfProcessor.js), so this is also the lock holder's re-read.
+  await assertTurfJobWritable({ campaignId, passId });
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
-  // Same mid-delete guard as generateTurf above.
-  if (campaign.deletion?.requestedAt) throw new Error('Campaign is being deleted');
   const pass = await Pass.findOne({ _id: passId, campaignId }).lean();
   if (!pass) throw new Error('Pass not found');
 
@@ -422,6 +505,10 @@ export async function addSupplementalBooks({ campaignId, passId, name = 'New vot
   });
 
   await onProgress?.({ phase: 'saving', pct: 65 });
+  // Again right before the insert: the job's recut lock fences this pass's own Archive, but not
+  // the next pass going live (activation ends this one without waiting for the lock), an archive
+  // of a draft's walk list (which locks only a LIVE pass), or the campaign's.
+  await assertTurfJobWritable({ campaignId, passId });
   const inserted = await Turf.insertMany(turfDocs);
 
   const mirrorOps = [];

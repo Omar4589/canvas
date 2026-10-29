@@ -10,6 +10,7 @@ import SurveyPreview from '../components/SurveyPreview.jsx';
 import WalkListSurveySelect from '../components/WalkListSurveySelect.jsx';
 import { activeBlocks, answerableQuestions } from '../lib/surveyRunner.js';
 import { responsesPhrase, responsesNoteOpening } from '../lib/surveyBuilderRules.js';
+import { isArchivedWalkList } from '../lib/walkListOptions.js';
 
 // In-campaign Survey screen (/campaigns/:campaignId/survey). Surveys are reusable
 // org-level templates; this screen manages the campaign's survey COVERAGE:
@@ -126,6 +127,14 @@ export default function CampaignSurveyPage() {
     onSuccess: (_res, vars) => {
       qc.invalidateQueries({ queryKey: ['admin', 'efforts', vars.campaignId] });
       qc.invalidateQueries({ queryKey: ['surveys'] }); // usage annotations changed
+    },
+    // Refused because the walk list (or the campaign) was archived after this page loaded, or because
+    // someone is archiving it right now: refetch both, so the row locks; the sentence shows below.
+    onError: (err, vars) => {
+      if (['walk-list-archived', 'campaign-archived', 'lifecycle-busy'].includes(err?.code)) {
+        qc.invalidateQueries({ queryKey: ['admin', 'efforts', vars.campaignId] });
+        qc.invalidateQueries({ queryKey: ['admin', 'campaigns'] });
+      }
     },
   });
 
@@ -344,6 +353,10 @@ export default function CampaignSurveyPage() {
             >
               {efforts.map((e) => {
                 const override = e.surveyTemplateId ? surveyById.get(String(e.surveyTemplateId)) : null;
+                // An archived walk list's survey is locked (the server refuses the change): a phone
+                // that was offline may still be sending answers to it, and a changed survey would
+                // refuse them.
+                const archived = isArchivedWalkList(e);
                 return (
                   <tr key={e._id} className="transition-colors hover:bg-sunken/60">
                     <td className="px-4 py-3">
@@ -362,7 +375,7 @@ export default function CampaignSurveyPage() {
                         <WalkListSurveySelect
                           value={e.surveyTemplateId || ''}
                           surveys={surveys}
-                          disabled={setOverride.isPending}
+                          disabled={setOverride.isPending || archived}
                           className={COMPACT}
                           onChange={(id) => setOverride.mutate({ effortId: e._id, surveyTemplateId: id, campaignId })}
                         />
@@ -374,6 +387,7 @@ export default function CampaignSurveyPage() {
                         {e.surveyTemplateId && override?.archivedAt && (
                           <Badge variant="neutral" dot>Archived</Badge>
                         )}
+                        {archived && <span className="text-xs text-fg-subtle">Unarchive to change</span>}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-fg">

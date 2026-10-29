@@ -16,13 +16,16 @@ import mongoose from 'mongoose';
 //   · its report names no other report: nav null, and the earlier-totals line with `before` instead of
 //     `since` — the same counts as on a link to all the reports;
 //   · deleting a report deletes its one-report links, a History row each ("deleted with its report");
-//   · the server's checks.links counts only the links that can open the report, and says why none can
-//     over THOSE links first (disabled, expired, locked — each names its fix); 'other_reports' only when
-//     no link of any state opens the report but the campaign has others (code review round 1, LINK-2);
 //   · a link to all the reports, a link from before the field included, is unchanged: single false.
+//
+// Since one link per report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md): no route makes a link to all the
+// reports any more (REPORT_REQUIRED) — the one here is inserted as one from before looks; a report gets
+// one link (a second Share answers with it), so a report's second and third links are inserted as ones
+// from before; and the publish-time link check (checks.links) is gone — a draft never has a link.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-single-links';
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
 process.env.CLIENT_REPORT_QUEUE_TIMEOUT_MS = '300';
+delete process.env.RETIRE_ALL_REPORTS_LINKS;
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -44,6 +47,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { SurveyResponse } = await import('../src/models/SurveyResponse.js');
 const { processClientReportJob } = await import('../src/services/reports/clientReportBuilds.js');
 const { getQueue, QUEUE_NAMES } = await import('../src/queues/index.js');
+const bcrypt = (await import('bcryptjs')).default;
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -106,11 +110,6 @@ const publish = async (r) => {
   return ClientReport.findById(r._id).lean();
 };
 const made = async (camp, body) => publish(await runBuild((await create(camp, body))._id));
-const checksOf = async (id) => {
-  const res = await call('GET', `/admin/client-reports/${id}`);
-  assert.strictEqual(res.status, 200, JSON.stringify(res.json));
-  return res.json.checks.links;
-};
 
 // A link through the real route, and a share token for it.
 const makeLink = async (camp, { label, reportId, as } = {}) => {
@@ -132,6 +131,15 @@ const pub = (link, path, { method = 'GET' } = {}) => call(method, `/share/${link
 const linkFor = async (camp, opts) => {
   const share = await makeLink(camp, opts);
   return { ...share, access: await accessFor(share.token) };
+};
+// A link as one made before one link per report looks — to all the reports (no reportId), or a report's
+// second link — inserted directly, since no route makes either any more.
+const oldLink = async (camp, { label, reportId, token = `old-${new ObjectId()}` } = {}) => {
+  const doc = await ReportShareLink.create({
+    organizationId: ctx.org._id, campaignId: camp._id, token, label, passwordHash: await bcrypt.hash(PASSWORD, 4),
+    expiresAt: new Date(Date.now() + 30 * 86400e3), isActive: true, ...(reportId ? { reportId } : {}),
+  });
+  return { id: String(doc._id), token, label, reportId: reportId ? String(reportId) : null, access: await accessFor(token) };
 };
 
 before(async () => {
@@ -203,7 +211,7 @@ before(async () => {
     rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
   });
 
-  ctx.all = await linkFor(ctx.camp, { label: 'Candidate' });
+  ctx.all = await oldLink(ctx.camp, { label: 'Candidate' });
   ctx.one = await linkFor(ctx.camp, { label: 'Board', reportId: ctx.r2._id });
 });
 
@@ -239,18 +247,23 @@ test('a link to one report is made only for a report the client sees now; every 
   assert.strictEqual(leads.json.share.reportId, String(ctx.r1._id));
   const theirs = await call('POST', '/admin/client-reports/shares', { as: ctx.lead, body: { campaignId: String(ctx.other._id), password: PASSWORD, reportId: String(ctx.otherReport._id) } });
   assert.strictEqual(theirs.status, 403);
-  // null is a link to all the reports, as is no reportId at all.
-  const nul = await post({ label: 'Null', reportId: null });
-  assert.strictEqual(nul.status, 201);
-  assert.deepStrictEqual([nul.json.share.reportId, nul.json.share.report], [null, null]);
+  // A link to all the reports is no longer made: null, or no reportId at all, is refused
+  // (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1).
+  for (const body of [{ label: 'Null', reportId: null }, { label: 'Null' }]) {
+    const nul = await post(body);
+    assert.deepStrictEqual([nul.status, nul.json.code], [400, 'REPORT_REQUIRED']);
+  }
+  assert.strictEqual(await ReportShareLink.countDocuments({ label: 'Null' }), 0);
 
   // The rows: a link to all the reports has reportId and report null; a link to one names its report,
-  // its dates and its tab as the tabs read now.
+  // its dates and its tab as the tabs read now, and the tab's id.
   const list = await call('GET', `/admin/client-reports/shares?campaignId=${ctx.camp._id}`);
   assert.strictEqual(list.status, 200);
   const row = (id) => list.json.shares.find((s) => s.id === String(id));
-  assert.deepStrictEqual([row(ctx.all.id).reportId, row(ctx.all.id).report], [null, null]);
-  assert.deepStrictEqual(row(ctx.one.id).report, { id: String(ctx.r2._id), weekStart: '2026-07-13', weekEnd: '2026-07-19', scopeLabel: 'Whole campaign', takenDown: false });
+  assert.deepStrictEqual([row(ctx.all.id).reportId, row(ctx.all.id).report, row(ctx.all.id).allReports], [null, null, true]);
+  assert.deepStrictEqual(row(ctx.one.id).report, {
+    id: String(ctx.r2._id), weekStart: '2026-07-13', weekEnd: '2026-07-19', scopeLabel: 'Whole campaign', takenDown: false, seriesId: String(ctx.r2.seriesId),
+  });
   assert.strictEqual(row(ctx.one.id).reportId, String(ctx.r2._id));
   // A walk-list report's link names its tab.
   const walkLink = await linkFor(ctx.camp, { label: 'Walker', reportId: ctx.walk._id });
@@ -380,8 +393,11 @@ test('the report on a link to one report names no other: nav null, and the earli
 });
 
 test('deleting a report deletes its one-report links, a History row each — the rest stay', { skip }, async () => {
-  await linkFor(ctx.camp, { label: 'Walk board', reportId: ctx.walk._id });
-  await linkFor(ctx.camp, { label: 'Walk donor', reportId: ctx.walk._id });
+  // A second Share on it answers with the link it has; two more from before one link per report.
+  const again = await call('POST', '/admin/client-reports/shares', { body: { campaignId: String(ctx.camp._id), password: PASSWORD, reportId: String(ctx.walk._id) } });
+  assert.deepStrictEqual([again.status, again.json.code, again.json.share.label], [409, 'REPORT_HAS_LINK', 'Walker']);
+  await oldLink(ctx.camp, { label: 'Walk board', reportId: ctx.walk._id });
+  await oldLink(ctx.camp, { label: 'Walk donor', reportId: ctx.walk._id });
   // Its three links (Walker, from the first test, too), and every other link of the campaign.
   const doomed = await ReportShareLink.find({ reportId: ctx.walk._id }).lean();
   assert.deepStrictEqual(doomed.map((l) => l.label).sort(), ['Walk board', 'Walk donor', 'Walker']);
@@ -433,39 +449,20 @@ test('a link made while its report is deleted goes with it, never left opening n
   assert.deepStrictEqual(rows.map((r) => [r.field, !!r.toValue.reportDeleted]), [['reportLink.created', false], ['reportLink.deleted', true]]);
 });
 
-test('checks.links counts only the links that open this report, says why over those first, and names other_reports only when none does (K8, LINK-2)', { skip }, async () => {
+// The publish-time link check is gone (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1, D5): a draft can never
+// have a link of its own — Share makes it once the report is published — so Before you publish no longer
+// counts links, working or not, of either kind.
+test('the report’s checks no longer count links: a draft never has one of its own', { skip }, async () => {
   const p1 = await made(ctx.checks, { weekStart: '2026-07-06', weekEnd: '2026-07-12' });
-  const p2 = await made(ctx.checks, { weekStart: '2026-07-13', weekEnd: '2026-07-19' });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'no_link' });
-  const forP1 = await makeLink(ctx.checks, { label: 'Board', reportId: p1._id });
-  assert.deepStrictEqual(await checksOf(p1._id), { usable: 1, labels: ['Board'], reason: null });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'other_reports' }, 'a working link, but it opens another report');
-  const everyone = await makeLink(ctx.checks, { label: 'Candidate' });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 1, labels: ['Candidate'], reason: null });
-  assert.deepStrictEqual((await checksOf(p1._id)).labels.sort(), ['Board', 'Candidate']);
-  // The link to all of them disabled, expired or locked while Board (p1's own) works: the reason is about
-  // the link that opens p2, and names its fix — never "your links open other reports" (LINK-2).
-  const { expiresAt } = await ReportShareLink.findById(everyone.id).lean();
-  await call('PATCH', `/admin/client-reports/shares/${everyone.id}`, { body: { isActive: false } });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'disabled' }, 'enable it');
-  await call('PATCH', `/admin/client-reports/shares/${everyone.id}`, { body: { isActive: true } });
-  await ReportShareLink.updateOne({ _id: everyone.id }, { $set: { expiresAt: new Date(Date.now() - 60e3) } });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'expired' }, 'renew it');
-  const now = Date.now();
-  const failures = Array.from({ length: 50 }, (_, i) => ({ at: new Date(now - 1000 * (i + 1)), id: `k${i}` }));
-  await ReportShareLink.updateOne({ _id: everyone.id }, { $set: { expiresAt, failedUnlockAt: failures } });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'locked' }, 'unlock or rotate it');
-  assert.deepStrictEqual(await checksOf(p1._id), { usable: 1, labels: ['Board'], reason: null });
-  // No link of any state opens p2, but the campaign has another — working or not: other_reports.
-  assert.strictEqual((await call('DELETE', `/admin/client-reports/shares/${everyone.id}`)).status, 200);
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'other_reports' });
-  await call('PATCH', `/admin/client-reports/shares/${forP1.id}`, { body: { isActive: false } });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 0, labels: [], reason: 'other_reports' }, 'a disabled link elsewhere is still elsewhere');
-  assert.deepStrictEqual(await checksOf(p1._id), { usable: 0, labels: [], reason: 'disabled' }, "p1's own link names its fix");
-  // A link from before the field counts as a link to all the reports.
-  await ReportShareLink.collection.insertOne({
-    organizationId: ctx.org._id, campaignId: ctx.checks._id, token: 'checks-legacy', label: 'Old', isActive: true,
-    passwordHash: 'x', expiresAt: new Date(Date.now() + 86400e3), createdAt: new Date(), updatedAt: new Date(),
-  });
-  assert.deepStrictEqual(await checksOf(p2._id), { usable: 1, labels: ['Old'], reason: null });
+  const draft = await runBuild((await create(ctx.checks, { weekStart: '2026-07-13', weekEnd: '2026-07-19' }))._id);
+  await makeLink(ctx.checks, { label: 'Board', reportId: p1._id });
+  await oldLink(ctx.checks, { label: 'Old' });
+  for (const id of [p1._id, draft._id]) {
+    const res = await call('GET', `/admin/client-reports/${id}`);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.json));
+    assert.ok(res.json.checks && typeof res.json.checks === 'object', 'the checks are still there');
+    assert.ok(!('links' in res.json.checks), 'but no link count');
+  }
+  const res = await call('POST', '/admin/client-reports/shares', { body: { campaignId: String(ctx.checks._id), password: PASSWORD, reportId: String(draft._id) } });
+  assert.deepStrictEqual([res.status, res.json.code], [409, 'REPORT_NOT_SHOWN']);
 });

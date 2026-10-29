@@ -404,20 +404,45 @@ const publishNow = async (id) => {
   return call('POST', `/admin/client-reports/${id}/publish`, asAdmin({ snapshotId: String(r.snapshotId), editVersion: r.editVersion ?? 0 }));
 };
 
+// Each report is read through its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), made the first time a
+// path names it (`/reports/<id>…`); the hub (`/reports`) through the published report's.
 const SHARE_PASSWORD = 'correct-horse-battery';
-const shareToken = async () => {
-  if (ctx.shareToken) return ctx.shareToken;
+const shareLinks = new Map();
+const shareLinkFor = async (reportId) => {
+  const key = String(reportId);
+  if (shareLinks.has(key)) return shareLinks.get(key);
   const bcrypt = (await import('bcryptjs')).default;
+  const token = `build-suite-${key}`;
   await ReportShareLink.create({
-    organizationId: ctx.org._id, campaignId: ctx.camp._id, token: 'build-suite-token',
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, token, reportId,
     passwordHash: await bcrypt.hash(SHARE_PASSWORD, 4), expiresAt: new Date(Date.now() + 86400000), isActive: true,
   });
-  const unlock = await call('POST', '/share/build-suite-token/unlock', { body: { password: SHARE_PASSWORD } });
+  const unlock = await call('POST', `/share/${token}/unlock`, { body: { password: SHARE_PASSWORD } });
   assert.strictEqual(unlock.status, 200);
-  ctx.shareToken = unlock.json.accessToken;
-  return ctx.shareToken;
+  const link = { token, access: unlock.json.accessToken };
+  shareLinks.set(key, link);
+  return link;
 };
-const shared = async (path) => call('GET', `/share/build-suite-token${path}`, { headers: { 'X-Share-Token': await shareToken() } });
+const shared = async (path) => {
+  const { token, access } = await shareLinkFor(path.match(/^\/reports\/([0-9a-f]{24})/)?.[1] ?? ctx.published._id);
+  return call('GET', `/share/${token}${path}`, { headers: { 'X-Share-Token': access } });
+};
+// An old link to all the campaign's reports, from before one link per report: until
+// RETIRE_ALL_REPORTS_LINKS turns them off, it reads the hub's wording (the earlier-totals line names the
+// report it compares with).
+const sharedAll = async (path) => {
+  if (!ctx.allLink) {
+    const bcrypt = (await import('bcryptjs')).default;
+    await ReportShareLink.create({
+      organizationId: ctx.org._id, campaignId: ctx.camp._id, token: 'build-suite-all',
+      passwordHash: await bcrypt.hash(SHARE_PASSWORD, 4), expiresAt: new Date(Date.now() + 86400000), isActive: true,
+    });
+    const unlock = await call('POST', '/share/build-suite-all/unlock', { body: { password: SHARE_PASSWORD } });
+    assert.strictEqual(unlock.status, 200);
+    ctx.allLink = unlock.json.accessToken;
+  }
+  return call('GET', `/share/build-suite-all${path}`, { headers: { 'X-Share-Token': ctx.allLink } });
+};
 
 test('create claims a recompute and answers 201 with the build; a dead queue parks it with a Retry', { skip }, async () => {
   const report = await createReport();
@@ -1284,17 +1309,27 @@ test('earlier totals: a late knock in a sent period shows as one neutral line; t
   assert.strictEqual(String(second.comparedReportId), String(first._id));
   assert.strictEqual(second.earlierTotals.doorsKnocked, first.stats.cumulative.totals.doorsKnocked + 1);
   assert.strictEqual((await publishNow(second._id)).status, 200);
+  // Through its own link the line names no other report: "Totals from before <its first day>".
+  const own = { changes: [{ card: 'doorsKnocked', delta: 1 }], since: null, before: second.weekStart };
   let one = await shared(`/reports/${second._id}`);
-  assert.deepStrictEqual(one.json.report.earlierTotals, {
+  assert.deepStrictEqual(one.json.report.earlierTotals, own);
+  // Through an old link to all the reports, the hub's wording names the earlier report…
+  let all = await sharedAll(`/reports/${second._id}`);
+  assert.deepStrictEqual(all.json.report.earlierTotals, {
     changes: [{ card: 'doorsKnocked', delta: 1 }],
     since: { weekStart: first.weekStart, weekEnd: first.weekEnd },
   });
+  // …and drops that clause when it's taken down; the report's own line never named it.
   await call('POST', `/admin/client-reports/${first._id}/take-down`, asAdmin());
+  all = await sharedAll(`/reports/${second._id}`);
+  assert.deepStrictEqual(all.json.report.earlierTotals, { changes: [{ card: 'doorsKnocked', delta: 1 }], since: null });
   one = await shared(`/reports/${second._id}`);
-  assert.deepStrictEqual(one.json.report.earlierTotals, { changes: [{ card: 'doorsKnocked', delta: 1 }], since: null });
+  assert.deepStrictEqual(one.json.report.earlierTotals, own);
   await call('DELETE', `/admin/client-reports/${first._id}`, asAdmin());
-  one = await shared(`/reports/${second._id}`);
-  assert.strictEqual(one.json.report.earlierTotals, null, 'gone with the report it compared against');
+  for (const read of [shared, sharedAll]) {
+    one = await read(`/reports/${second._id}`);
+    assert.strictEqual(one.json.report.earlierTotals, null, 'gone with the report it compared against');
+  }
 });
 
 // Round-1 review fixes. Each test runs on a campaign of its own in the suite's org: the main series
@@ -1568,7 +1603,8 @@ test('GET /:id carries the build and what is worth a look before publishing', { 
   assert.strictEqual(c.periodNotOver, false);
   assert.ok(c.numbersAsOf);
   assert.strictEqual(typeof c.openMockFlags, 'number');
-  assert.ok(c.links.usable >= 1, 'the suite has a usable link');
+  // No link count: a draft never has a link of its own (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1, D5).
+  assert.ok(!('links' in c), 'the publish-time link check is gone');
   assert.strictEqual(res.json.build.status, 'idle');
   assert.ok(res.json.seriesLabel);
   // A visible follow-up chart whose parent is hidden is flagged (its total shows the parent's Yes).

@@ -9,7 +9,8 @@ import mongoose from 'mongoose';
 //
 //   · an area report names every other shown report on the link that could narrow down what its areas
 //     keep hidden (one that maps the same question, or charts it for a narrower scope);
-//   · the usable-link line names why there is none — no link, expired, LOCKED, disabled;
+//   · there is no link check any more (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1, D5): a draft can never
+//     have a link of its own, so `checks.links` is gone, whatever links the campaign has;
 //   · Erase's dry run names, by period, the later drafts Next copied the text into.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-report-checks';
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
@@ -139,26 +140,22 @@ after(async () => {
   if (URI) await mongoose.disconnect();
 });
 
-test('the usable-link line names why there is none: no link, locked, expired, disabled', { skip }, async () => {
+test('no link check: a draft can never have a link of its own, so checks.links is gone — links or none', { skip }, async () => {
   const draft = await create(ctx.links, { weekStart: '2026-07-06', weekEnd: '2026-07-12' });
   let c = await checksOf(draft._id);
-  assert.deepStrictEqual([c.links.usable, c.links.reason], [0, 'no_link']);
-  const made = await call('POST', '/admin/client-reports/shares', { campaignId: String(ctx.links._id), label: 'Candidate' });
-  assert.strictEqual(made.status, 201);
-  const id = made.json.share.id;
-  c = await checksOf(draft._id);
-  assert.deepStrictEqual([c.links.usable, c.links.reason, c.links.labels], [1, null, ['Candidate']]);
-  const now = Date.now();
-  await ReportShareLink.updateOne({ _id: id }, { $set: { failedUnlockAt: Array.from({ length: 50 }, (_, i) => ({ at: new Date(now - 1000 * (i + 1)), id: `l${i}` })) } });
-  c = await checksOf(draft._id);
-  assert.deepStrictEqual([c.links.usable, c.links.reason], [0, 'locked'], '"Your only link is locked — unlock or rotate it"');
-  await call('POST', `/admin/client-reports/shares/${id}/unlock`);
-  await ReportShareLink.updateOne({ _id: id }, { $set: { expiresAt: new Date(now - 1000) } });
-  c = await checksOf(draft._id);
-  assert.deepStrictEqual([c.links.usable, c.links.reason], [0, 'expired']);
-  await call('PATCH', `/admin/client-reports/shares/${id}`, { isActive: false });
-  c = await checksOf(draft._id);
-  assert.deepStrictEqual([c.links.usable, c.links.reason], [0, 'disabled']);
+  assert.ok(!('links' in c), 'no link check on a draft');
+  assert.strictEqual(typeof c.periodNotOver, 'boolean', 'the other checks are all still there');
+  // Published, with its own link and an old link to all the campaign's reports: still none.
+  const published = await publish(await rebuild(draft._id));
+  const link = (fields) =>
+    ReportShareLink.create({
+      organizationId: ctx.org._id, campaignId: ctx.links._id, token: `checks-${new ObjectId()}`, passwordHash: 'x',
+      expiresAt: new Date(Date.now() + 86400e3), isActive: true, ...fields,
+    });
+  await link({ reportId: published._id, oneLinkGuard: true });
+  await link({});
+  c = await checksOf(published._id);
+  assert.ok(!('links' in c), 'none on a published report with links either');
 });
 
 test('an area report names the other reports on the link that could narrow down its hidden answers', { skip }, async () => {

@@ -29,6 +29,7 @@ const { VotedPendingId } = await import('../src/models/VotedPendingId.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { reapplyVotedLists } = await import('../src/services/voted/reapplyVotedLists.js');
 const { ID_LIST_MAX_BYTES, ID_LIST_TOO_LARGE } = await import('../src/middleware/idListUpload.js');
+const { workbook, sheetXml, is, num, row } = await import('./support/xlsxBuild.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -271,4 +272,194 @@ test('a file that reaches 50 MB is refused on all four upload routes, says what 
   }
   assert.strictEqual(await VotedUpload.countDocuments(), uploads);
   assert.strictEqual(await SavedSearch.countDocuments(), searches);
+});
+
+// ── Excel (.xlsx) lists — docs/PROPOSAL_ID_LIST_EXCEL.md ─────────────────────────────────────────────
+// Their own Nebraska-shaped campaign, so the marks above and below never meet.
+async function uploadXlsx(path, buf, fields = {}) {
+  const fd = new FormData();
+  fd.append('file', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'returns.xlsx');
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  const res = await fetch(`${base}/api${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ctx.tok}`, 'X-Org-Id': String(ctx.org._id) },
+    body: fd,
+  });
+  let json = null;
+  try { json = await res.json(); } catch { /* empty */ }
+  return { status: res.status, json };
+}
+const RETURNS = [
+  ['Registrant_ID', 'Ballot_Status'],
+  [2235089, 'ACCE'],
+  [2215451, 'REJE'],
+  [334675, 'ACCE'],
+  [9999999, 'ACCE'],
+];
+const returnsXlsx = (rows = RETURNS, { tabs = [], hidden = [] } = {}) =>
+  workbook({
+    sheets: [
+      {
+        name: 'CD-2 Records',
+        xml: sheetXml(
+          rows
+            .map((cells, r) =>
+              row(
+                r + 1,
+                cells.map((v, i) => (typeof v === 'number' ? num(`${'AB'[i]}${r + 1}`, v) : is(`${'AB'[i]}${r + 1}`, v))),
+                hidden.includes(r + 1) ? 'hidden="1"' : ''
+              )
+            )
+            .join('')
+        ),
+      },
+      ...tabs.map((name) => ({ name, xml: sheetXml('') })),
+    ],
+  });
+let neX;
+const vx = (p) => `/admin/campaigns/${neX._id}/voted${p}`;
+const seedNebraska = async () => {
+  if (neX) return;
+  neX = await Campaign.create({ organizationId: ctx.org._id, name: 'NE Excel', type: 'survey', state: 'NE', isActive: true });
+  const doors = await Household.insertMany([hh(ctx.org._id, neX._id, 'NE'), hh(ctx.org._id, neX._id, 'NE'), hh(ctx.org._id, neX._id, 'NE')]);
+  await Voter.insertMany([
+    voter(ctx.org._id, neX._id, doors[0]._id, '2235089', 'Jer'),
+    voter(ctx.org._id, neX._id, doors[1]._id, '2215451', 'Kar'),
+    voter(ctx.org._id, neX._id, doors[2]._id, '334675', 'Kei'),
+  ]);
+};
+
+test('an Excel list previews and applies like its CSV twin, matched on Registrant_ID; Undo reverts it', { skip }, async () => {
+  await seedNebraska();
+  const pv = await uploadXlsx(vx('/preview'), await returnsXlsx(RETURNS, { tabs: ['Summary', 'README'] }));
+  assert.strictEqual(pv.status, 200, JSON.stringify(pv.json));
+  const twin = await upload(vx('/preview'), RETURNS.map((r) => r.join(',')).join('\n') + '\n');
+  for (const k of ['idColumn', 'columns', 'totalRows', 'idsInFile', 'matched', 'willMark', 'notFound', 'doorsWillDrop', 'sampleIds']) {
+    assert.deepStrictEqual(pv.json[k], twin.json[k], k);
+  }
+  assert.strictEqual(pv.json.idColumn, 'Registrant_ID');
+  assert.strictEqual(pv.json.matched, 3);
+  assert.strictEqual(pv.json.sheetName, 'CD-2 Records');
+  assert.deepStrictEqual(pv.json.otherSheets, ['Summary', 'README']);
+  assert.strictEqual(twin.json.sheetName, null);
+
+  const ap = await uploadXlsx(vx('/import'), await returnsXlsx(), { idColumn: pv.json.idColumn });
+  assert.strictEqual(ap.status, 200, JSON.stringify(ap.json));
+  assert.strictEqual(ap.json.marked, 3);
+  const upl = await VotedUpload.findOne({ _id: ap.json.uploadId }).lean();
+  assert.strictEqual(upl.fileName, 'returns.xlsx');
+  assert.strictEqual(upl.keepColumn, null, 'nothing was left out');
+  const undo = await post(vx('/undo'), { uploadId: ap.json.uploadId });
+  assert.strictEqual(undo.status, 200, JSON.stringify(undo.json));
+  assert.strictEqual(await VotedVoter.countDocuments({ campaignId: neX._id }), 0);
+  // Its CSV twin applies to the same marks.
+  const apCsv = await upload(vx('/import'), RETURNS.map((r) => r.join(',')).join('\n') + '\n');
+  for (const k of ['marked', 'notFound', 'doorsDropped', 'matched', 'totalRows']) assert.strictEqual(apCsv.json[k], ap.json[k], k);
+  await post(vx('/undo'), { uploadId: apCsv.json.uploadId });
+  await VotedPendingId.deleteMany({ campaignId: neX._id });
+});
+
+test('Count only rows where: values before filtering; apply marks and parks only the kept rows; the record keeps the column and the count, never the values', { skip }, async () => {
+  await seedNebraska();
+  const listed = await uploadXlsx(vx('/preview'), await returnsXlsx(), { keepColumn: 'Ballot_Status' });
+  assert.strictEqual(listed.status, 200, JSON.stringify(listed.json));
+  assert.deepStrictEqual(listed.json.keep.values, [
+    { value: 'ACCE', rows: 3 },
+    { value: 'REJE', rows: 1 },
+  ]);
+  assert.deepStrictEqual(listed.json.keep.selected, ['ACCE', 'REJE']);
+  assert.strictEqual(listed.json.willMark, 3);
+
+  const fields = { idColumn: 'Registrant_ID', keepColumn: 'Ballot_Status', keepSelected: JSON.stringify(['ACCE']) };
+  const counted = await uploadXlsx(vx('/preview'), await returnsXlsx(), fields);
+  assert.strictEqual(counted.json.willMark, 2, 'the REJE ballot is left out');
+  assert.strictEqual(counted.json.keptRows, 3);
+  assert.strictEqual(counted.json.totalRows, 4);
+  assert.strictEqual(counted.json.notFound, 1);
+  assert.strictEqual(counted.json.keep.values.length, 2, 'the unticked value stays listed');
+
+  const ap = await uploadXlsx(vx('/import'), await returnsXlsx(), fields);
+  assert.strictEqual(ap.status, 200, JSON.stringify(ap.json));
+  assert.strictEqual(ap.json.marked, 2);
+  assert.strictEqual(ap.json.keptRows, 3);
+  const marked = (await VotedVoter.find({ campaignId: neX._id }).lean()).map((m) => m.stateVoterId).sort();
+  assert.deepStrictEqual(marked, ['2235089', '334675']);
+  const parked = (await VotedPendingId.find({ campaignId: neX._id }).lean()).map((p) => p.stateVoterId);
+  assert.deepStrictEqual(parked, ['9999999'], 'only a kept row is remembered');
+  const upl = await VotedUpload.findOne({ _id: ap.json.uploadId }).lean();
+  assert.strictEqual(upl.keepColumn, 'Ballot_Status');
+  assert.strictEqual(upl.keptRows, 3);
+  assert.ok(!JSON.stringify(upl).includes('ACCE'), 'the ticked values are not stored');
+  const hist = await fetch(`${base}/api${vx('')}`, { headers: { Authorization: `Bearer ${ctx.tok}`, 'X-Org-Id': String(ctx.org._id) } }).then((r) => r.json());
+  assert.strictEqual(hist.uploads[0].keepColumn, 'Ballot_Status');
+
+  const bad = await uploadXlsx(vx('/preview'), await returnsXlsx(), { keepColumn: 'Ballot_Status', keepSelected: 'ACCE' });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(bad.json.code, 'keep-selected');
+  const missing = await uploadXlsx(vx('/preview'), await returnsXlsx(), { keepColumn: 'Nope' });
+  assert.strictEqual(missing.status, 400);
+  assert.strictEqual(missing.json.code, 'keep-column');
+  await post(vx('/undo'), { uploadId: ap.json.uploadId });
+});
+
+test('a malformed Count only rows where request is refused, never read as count every row', { skip }, async () => {
+  await seedNebraska();
+  const before = await VotedUpload.countDocuments();
+  const fd = new FormData();
+  fd.append('file', new Blob([await returnsXlsx()]), 'returns.xlsx');
+  fd.append('keepColumn', 'Ballot_Status');
+  fd.append('keepColumn', 'Ballot_Status'); // twice: multer hands the route an array
+  fd.append('keepSelected', JSON.stringify(['ACCE']));
+  const twice = await fetch(`${base}/api${vx('/import')}`, { method: 'POST', headers: { Authorization: `Bearer ${ctx.tok}`, 'X-Org-Id': String(ctx.org._id) }, body: fd });
+  assert.strictEqual(twice.status, 400);
+  assert.strictEqual((await twice.json()).code, 'keep-selected');
+  const orphan = await uploadXlsx(vx('/import'), await returnsXlsx(), { keepSelected: JSON.stringify(['ACCE']) });
+  assert.strictEqual(orphan.status, 400, 'values with no column');
+  assert.strictEqual(orphan.json.code, 'keep-selected');
+  assert.strictEqual(await VotedUpload.countDocuments(), before, 'nothing marked');
+});
+
+test('refusals come back coded with no columns; the could-not-detect 400 carries the tab and the title-row line', { skip }, async () => {
+  await seedNebraska();
+  const before = await VotedUpload.countDocuments();
+  const hidden = await uploadXlsx(vx('/import'), await returnsXlsx(RETURNS, { hidden: [3], tabs: ['Summary'] }));
+  assert.strictEqual(hidden.status, 400);
+  assert.strictEqual(hidden.json.code, 'hidden-rows');
+  assert.deepStrictEqual(hidden.json.columns, [], 'never the column list: the page would show the picker instead');
+  assert.strictEqual(hidden.json.sheetName, 'CD-2 Records');
+  assert.deepStrictEqual(hidden.json.otherSheets, ['Summary']);
+  assert.match(hidden.json.error, /^1 row on the CD-2 Records tab is hidden/);
+  assert.strictEqual(await VotedUpload.countDocuments(), before, 'nothing written');
+
+  const damaged = await uploadXlsx(vx('/preview'), Buffer.from('PK\x03\x04 not a workbook'));
+  assert.strictEqual(damaged.json.code, 'damaged');
+  const legacy = await uploadXlsx(vx('/preview'), Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]));
+  assert.strictEqual(legacy.json.code, 'legacy-xls');
+
+  const titled = await uploadXlsx(vx('/preview'), await returnsXlsx([['Douglas County Returns'], ['SOSID', 'Voter ID'], [5, 6]], { tabs: ['Summary'] }));
+  assert.strictEqual(titled.status, 400);
+  assert.strictEqual(titled.json.code, null);
+  assert.deepStrictEqual(titled.json.columns, ['Douglas County Returns']);
+  assert.strictEqual(titled.json.headerRowHint, 2);
+  assert.strictEqual(titled.json.sheetName, 'CD-2 Records');
+});
+
+test('a saved search from an Excel list; its refusals carry a code too', { skip }, async () => {
+  await seedNebraska();
+  const wl = (p) => `/admin/campaigns/${neX._id}/walklists${p}`;
+  const pv = await uploadXlsx(wl('/from-csv/preview'), await returnsXlsx());
+  assert.strictEqual(pv.status, 200, JSON.stringify(pv.json));
+  assert.strictEqual(pv.json.idColumn, 'Registrant_ID');
+  assert.strictEqual(pv.json.matched, 3);
+  assert.strictEqual(pv.json.sheetName, 'CD-2 Records');
+  const saved = await uploadXlsx(wl('/from-csv'), await returnsXlsx(), { name: 'From Excel', idColumn: pv.json.idColumn });
+  assert.strictEqual(saved.status, 201, JSON.stringify(saved.json));
+  const doc = await SavedSearch.findOne({ campaignId: neX._id, name: 'From Excel' }).lean();
+  assert.strictEqual(doc.source, 'csv');
+  assert.strictEqual(doc.sourceMeta.fileName, 'returns.xlsx');
+  assert.strictEqual(doc.householdCount, 3);
+  const hidden = await uploadXlsx(wl('/from-csv/preview'), await returnsXlsx(RETURNS, { hidden: [2] }));
+  assert.strictEqual(hidden.status, 400);
+  assert.strictEqual(hidden.json.code, 'hidden-rows');
+  assert.deepStrictEqual(hidden.json.columns, []);
 });

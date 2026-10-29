@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { shouldConfirmResurvey, buildResurveyPrompt } from '../../../../lib/resurvey';
 import { changePrompt, buildChangePrompt } from '../../../../lib/doorChange';
-import { surveyPath } from '../../../../lib/doorPaths';
+import { surveyPath, surveyBody, doorTurfId } from '../../../../lib/doorPaths';
 import { surveyForDoor } from '../../../../lib/doorSurvey';
 import { optimisticSubmit } from '../../../../lib/recordAction';
 import { isPaused } from '../../../../lib/pace';
@@ -139,16 +139,20 @@ export default function VoterSurvey() {
     if (firedRef.current) return; // double-tap: the first submit is already in flight
     firedRef.current = true;
     setIsSubmitting(true);
+    // The book the door is in at Save (lib/doorPaths.js doorTurfId): a survey that uploads after its
+    // pass ended still counts in that pass, and the pending overlay below follows that book.
+    const turfId = doorTurfId(qc.getQueryData(['bootstrap']), voter.householdId);
 
     optimisticSubmit(qc, {
       path: surveyPath(id),
-      body: {
+      body: surveyBody({
         surveyTemplateId: survey._id,
         // The form's POST rows (buildSubmitRows: one per visible ANSWERABLE question) and the
         // trimmed note, or null.
         answers,
         note,
-      },
+        turfId,
+      }),
       optimisticPatch: (prev) => ({
         ...prev,
         voters: prev.voters.map((v) =>
@@ -164,12 +168,14 @@ export default function VoterSurvey() {
             : h
         ),
       }),
-      pending: [{ id: voter.householdId, status: 'surveyed' }],
+      pending: [{ id: voter.householdId, status: 'surveyed', turfId }],
       // Refresh the canvasser's Today's Progress counts (Responses/Remaining) on submit.
       invalidateKeys: [['mobile', 'me']],
+      // The answer is for the pass the survey counted in; a door a new pass has taken since the tap
+      // keeps the status the refetch gave it there.
       reconcile: (prev, response) => {
         const status = response?.household?.status;
-        if (!status) return prev;
+        if (!status || doorTurfId(prev, voter.householdId) !== turfId) return prev;
         return {
           ...prev,
           households: prev.households.map((h) =>

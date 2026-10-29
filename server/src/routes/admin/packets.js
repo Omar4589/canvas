@@ -47,18 +47,27 @@ const idList = (v) =>
 // What can be printed: published books on active AND draft rounds, plus saved searches.
 // Draft is deliberate — a pass cannot be activated until its books are published, so
 // "print the night before launch" is exactly the draft-pass / published-books state.
+// An ARCHIVED walk list offers no pass at all — its frozen drafts, and a live pass left from
+// before archiving ended it — the same as an archived pass: this is a picker for work, and
+// that walk list is read-only (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.4). Server-side, so no
+// client can offer one.
 router.get('/sources', async (req, res, next) => {
   try {
     const campaignId = req.campaign._id;
 
     // Walk lists (the Effort model) are the top level a user picks from — a campaign runs
     // several in parallel, each with its own rounds, and a bare "Pass 3" doesn't say which.
-    const efforts = await Effort.find({ campaignId }, { name: 1 }).sort({ createdAt: 1 }).lean();
+    const efforts = await Effort.find({ campaignId }, { name: 1, status: 1 }).sort({ createdAt: 1 }).lean();
     const effortNameById = new Map(efforts.map((e) => [String(e._id), e.name]));
     const effortRank = new Map(efforts.map((e, i) => [String(e._id), i]));
+    const archivedEffortIds = efforts.filter((e) => e.status === 'archived').map((e) => e._id);
 
     const passes = await Pass.find(
-      { campaignId, status: { $in: ['active', 'draft'] } },
+      {
+        campaignId,
+        status: { $in: ['active', 'draft'] },
+        ...(archivedEffortIds.length ? { effortId: { $nin: archivedEffortIds } } : {}),
+      },
       { name: 1, roundNumber: 1, status: 1, effortId: 1 }
     ).lean();
     // Group by walk list first, then by round — sorting on roundNumber alone interleaves
@@ -107,7 +116,7 @@ router.get('/sources', async (req, res, next) => {
     for (const t of turfs) {
       if (t.status !== 'published') continue; // ranked above, but a draft book can't be printed
       const arr = byPass.get(String(t.passId));
-      if (!arr) continue; // a book on an archived round — not offered for printing
+      if (!arr) continue; // a book on an archived round or an archived walk list — not offered for printing
       arr.push({
         id: String(t._id),
         name: t.name,

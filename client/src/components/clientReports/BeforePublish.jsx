@@ -2,12 +2,13 @@ import { Button } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { SectionTitle } from './parts.jsx';
 import { formatCivil, formatPeriod, todayIn } from './reportDates.js';
-import { reportLinkReason } from './linkState.js';
 
 // "Before you publish" (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md Part 1, §G3, §F4, §O5, §O6): what is
 // worth a look before a report goes to the client, from the server's checks
 // (services/reports/clientReportChecks.js). Nothing here blocks Publish. "!" marks what could mislead
 // or expose something; "i" what is good to know. Operator-only: none of it reaches the client.
+// Nothing here is about links: a draft can never have one — Share makes its link once it's published
+// (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D5) — so "Nothing needs a look." can still be the answer.
 
 const CARD_WORDS = {
   doorsKnocked: ['door', 'doors'],
@@ -64,7 +65,7 @@ const Item = ({ tone, children, action = null }) => (
   </li>
 );
 
-const BeforePublish = ({ checks, report, shares, labelOf, tz, onRecompute, onReviewMocks, copiedReviewed, onCopiedReviewed, busy }) => {
+const BeforePublish = ({ checks, report, labelOf, tz, onRecompute, onReviewMocks, copiedReviewed, onCopiedReviewed, busy }) => {
   if (!checks) return null;
   if (!report.snapshotId) {
     return (
@@ -138,11 +139,12 @@ const BeforePublish = ({ checks, report, shares, labelOf, tz, onRecompute, onRev
       </Item>
     );
   }
-  // Area reports: other shown reports on the same link that could narrow down hidden area answers.
+  // Area reports: other shown reports your client can open that could narrow down hidden area answers —
+  // each report has its own link now, so it's whoever holds more than one (§D6), not "the same link".
   for (const a of c.areaNarrowedBy || []) {
     items.push(
       <Item key={`an:${a.key}`} tone="warn">
-        “{a.label}”: other reports on the same link could narrow down the answers its areas keep hidden —{' '}
+        “{a.label}”: other reports your client can open could narrow down the answers its areas keep hidden —{' '}
         {a.reports.map((r) => `${r.scopeLabel && r.scopeLabel !== 'Whole campaign' ? `${r.scopeLabel}, ` : ''}${r.period} (${HOW[r.how] || r.how})`).join('; ')}.
       </Item>
     );
@@ -156,10 +158,6 @@ const BeforePublish = ({ checks, report, shares, labelOf, tz, onRecompute, onRev
       </Item>
     );
   }
-  // Only the links that can open THIS report count (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, K8):
-  // the list once it has loaded (`shares` is null until then), else the server's count in c.links.
-  const noLink = reportLinkReason({ shares, reportId: report._id ?? report.id, published: report.status === 'published', server: c.links });
-  if (noLink) items.push(<Item key="links" tone="warn">{noLink.text}</Item>);
   if (c.copiedNotesUnreviewed && c.copiedFrom) {
     items.push(
       <Item key="copied" tone="warn">

@@ -18,6 +18,7 @@ import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { api } from '../../../lib/api';
 import { loadActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, shiftDays, deviceTimezone } from '../../../lib/dateRanges';
+import { walkListOptions, walkListLabel } from '../../../lib/walkListOptions';
 import { rateFromPct, makeRateColors } from '../../../lib/rates';
 import { metricHelp } from '../../../lib/metricHelp';
 import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
@@ -633,13 +634,15 @@ export default function AdminTimeline() {
             presets: TIMELINE_PRESETS,
             requireFrom: true,
           },
+          // Archived walk lists stay pickable (their knocks are history) — marked, listed last, and
+          // counted by the 2+ gate (lib/walkListOptions.js).
           {
             key: 'effort',
             title: 'Walk list',
             hidden: efforts.length <= 1,
             options: [
               { key: '', label: 'All walk lists' },
-              ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name })),
+              ...walkListOptions(efforts).map((ef) => ({ key: String(ef._id), label: walkListLabel(ef) })),
             ],
             selected: effortId,
             onSelect: setEffortId,

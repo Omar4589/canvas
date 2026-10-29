@@ -27,7 +27,7 @@ The hexagons are see-through so the streets show under them, and the legend's co
 Two things still worth knowing:
 
 - An area where every home that answered gave the same answer tells your client how each of them answered.
-- On a link to all your reports, your client sees every report on it. Another week's report, a team or walk-list report, or a report with exact doors can narrow things down. The builder lists any that could. (A link to just one report shows only that report, but one person can hold more than one link, so the builder still lists every report that could.)
+- Other reports your client can open can narrow things down: another week's report, a team or walk-list report, or a report with exact doors. Each report has its own link, but one person can hold several links, so the builder lists every report that could.
 
 How each door went (surveyed, didn't answer, and so on) shows for every area, even one with a single home.
 

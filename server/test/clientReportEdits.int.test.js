@@ -54,8 +54,22 @@ const call = async (method, path, body) => {
   try { json = await res.json(); } catch { /* empty */ }
   return { status: res.status, json };
 };
+// Each report through its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), made the first time a path
+// names it: `/reports/<id>…`.
+const shareLinks = new Map();
 const shared = async (path) => {
-  const res = await fetch(`${base}/api/share/${ctx.link}${path}`, { headers: { 'X-Share-Token': ctx.access } });
+  const id = path.match(/^\/reports\/([0-9a-f]{24})/)[1];
+  if (!shareLinks.has(id)) {
+    const token = `edits-link-${id}`;
+    await ReportShareLink.create({
+      organizationId: ctx.org._id, campaignId: ctx.camp._id, token, label: 'Client', reportId: id,
+      passwordHash: await bcrypt.hash('edits-password-1', 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
+    });
+    const unlock = await fetch(`${base}/api/share/${token}/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'edits-password-1' }) });
+    shareLinks.set(id, { token, access: (await unlock.json()).accessToken });
+  }
+  const { token, access } = shareLinks.get(id);
+  const res = await fetch(`${base}/api/share/${token}${path}`, { headers: { 'X-Share-Token': access } });
   let json = null;
   try { json = await res.json(); } catch { /* empty */ }
   return { status: res.status, json };
@@ -162,17 +176,11 @@ before(async () => {
   });
   await ClientReportMapPoint.collection.insertMany([1, 2, 3].map((i) => point(H._id, i)));
   await ClientReportMapPoint.collection.insertMany([1, 2].map((i) => point(U._id, i)));
-  await ReportShareLink.create({
-    organizationId: org._id, campaignId: camp._id, token: 'edits-link', label: 'Client',
-    passwordHash: await bcrypt.hash('edits-password-1', 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
-  });
-  Object.assign(ctx, { H, U, link: 'edits-link' });
+  Object.assign(ctx, { H, U });
 
   server = http.createServer(createApp());
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
-  const res = await fetch(`${base}/api/share/edits-link/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'edits-password-1' }) });
-  ctx.access = (await res.json()).accessToken;
 });
 
 after(async () => {

@@ -873,11 +873,12 @@ router.get('/:householdId/activity', async (req, res, next) => {
       })
       .sort((a, b) => (b.roundNumber ?? -1) - (a.roundNumber ?? -1));
 
-    // The round a desk mark with NO explicit passId lands on for THIS door (effort's active
-    // round → its single draft → null; Intake → null) — the same rule restrict-doors applies,
-    // so a client keys its "is this door desk-restricted this round" read on
+    // The round a desk mark with NO explicit passId is on for THIS door (effort's active
+    // round → its single draft → null; Intake → null) — the rule restrict-doors applies to an
+    // unmark, so a client keys its "is this door desk-restricted this round" read on
     // `scopePassId || currentPassId` rather than guessing newest/active (rounds above list
-    // ONLY rounds with entries).
+    // ONLY rounds with entries). Read as an unmark, so a door of an archived walk list keeps its
+    // mark and Unmark; the clients refuse a new mark there from the walk list's own status.
     const currentPassId = hh
       ? await currentDeskPassForDoor({ campaignId: hh.campaignId, effortId: hh.effortId })
       : null;

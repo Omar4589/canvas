@@ -2,14 +2,19 @@ import { Button, Modal } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { errorText } from './parts.jsx';
 import { formatCivil, formatPeriod, todayIn } from './reportDates.js';
-import { reportLinksLine } from './linkState.js';
+import { hasWorkingAllReportsLink } from './linkState.js';
 import { displayStatusOf } from './buildState.js';
 
 // Publish this report? (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G5, §F3, §O1). Publish is not a
 // build: it freezes the numbers you previewed, at once. The confirm says what is worth knowing first
 // — a period not over, numbers over an hour old, knocks that arrived during the build (with
-// Recompute first), mock-GPS flags, copied notes — and which links will show it, or why none can.
-// Publishing while a recompute is queued or running publishes these numbers and cancels it.
+// Recompute first), mock-GPS flags, copied notes. Publishing while a recompute is queued or running
+// publishes these numbers and cancels it.
+//
+// What happens next (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D5): a draft never has a link, so the
+// subtitle says Share makes its link once it's published — or, while an old link to all your reports
+// still works (`shares`, null until the list is in, and the switch `allReportsRetired`), that the old
+// link shows it at once. No line about links beyond that.
 
 const Warn = ({ children, action = null }) => (
   <li className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-warning-fg">
@@ -43,10 +48,11 @@ const REASON_WORDS = {
 };
 export const recomputeReasons = (reasons = []) => reasons.map((r) => REASON_WORDS[r] || r).join(', ');
 
-const PublishDialog = ({ report, checks, build, shares, tz, previewFresh, mapStale = false, busy, error, onPublish, onRecompute, onClose }) => {
-  // The links that will show it: the ones that can open THIS report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md
-  // §D, K8) — the list once loaded (`shares` null until then), else the checks' count.
-  const links = reportLinksLine({ shares, reportId: report._id ?? report.id, server: checks?.links });
+const PublishDialog = ({ report, checks, build, shares = null, allReportsRetired = false, tz, previewFresh, mapStale = false, busy, error, onPublish, onRecompute, onClose }) => {
+  const period = formatPeriod(report.weekStart, report.weekEnd);
+  const subtitle = hasWorkingAllReportsLink(shares, allReportsRetired)
+    ? `${period} — your old link to all your reports shows it as soon as you publish; Share makes its own link.`
+    : `${period} — after you publish, Share makes its link for your client.`;
   const live = displayStatusOf(build);
   const liveBuild = live === 'queued' || live === 'running' || live === 'waiting';
   const asOf = checks?.numbersAsOf ? formatInTz(checks.numbersAsOf, tz) : null;
@@ -61,7 +67,7 @@ const PublishDialog = ({ report, checks, build, shares, tz, previewFresh, mapSta
     <Modal
       size="lg"
       title="Publish this report?"
-      subtitle={`${formatPeriod(report.weekStart, report.weekEnd)} — your client sees it as soon as you publish.`}
+      subtitle={subtitle}
       onClose={busy ? undefined : onClose}
       closable={!busy}
       footer={
@@ -108,10 +114,6 @@ const PublishDialog = ({ report, checks, build, shares, tz, previewFresh, mapSta
           <Warn>The notes were copied from {formatPeriod(checks.copiedFrom.weekStart, checks.copiedFrom.weekEnd)} and haven’t been reviewed.</Warn>
         )}
         <Dot>Your client sees exactly the preview.</Dot>
-        {links.text && <Dot tone={links.ok ? 'muted' : 'danger'}>{links.text}</Dot>}
-        {(links.expiringSoon || []).map((s) => (
-          <Dot key={s.id}>The {s.label || 'unlabelled'} link expires {formatInTz(s.expiresAt, tz, { month: 'short', day: 'numeric' }, false)} — extend it so your client keeps access.</Dot>
-        ))}
         {!previewFresh && <Dot>Updating the preview — Publish is ready when it is.</Dot>}
       </ul>
       {error && (

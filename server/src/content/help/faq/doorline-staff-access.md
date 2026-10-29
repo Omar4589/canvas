@@ -20,6 +20,10 @@ stated reason — and those records are retained.
 The usual reason is support you asked for: a bug report or a data question that can only be answered
 by looking at your account.
 
+**Client report link passwords are never shown to Doorline staff, even during a support session.**
+Staff can make a report's link only with a password made up for them or the one your last link uses,
+and can change a link's password only by having one made up; they never see a password or type one in.
+
 ## Checking a specific person's record
 
 Open any voter's profile and scroll to the bottom — the **"Doorline staff access"** card answers it

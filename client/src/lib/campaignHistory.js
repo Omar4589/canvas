@@ -30,6 +30,12 @@ const FIELD_LABELS = {
   unknock: 'Entries',
   answerEdit: 'Survey answers edited',
   answerEditUndo: 'Survey answer edit undone',
+  // Walk-list archive acts (services/passes/passLifecycle.js, source 'walk_list_lifecycle'). Their rows
+  // read as walkListSentence below; these labels are the fallback for a row without `details`.
+  walkListArchived: 'Walk list archived',
+  walkListUnarchived: 'Walk list unarchived',
+  passArchived: 'Pass archived',
+  passBroughtBack: 'Pass brought back',
 };
 
 const DATE_FIELDS = new Set(['goalDate', 'electionDay', 'earlyVotingStart', 'earlyVotingEnd']);
@@ -140,6 +146,61 @@ export const answerEditSentence = (item) => {
   return { headline: 'Survey answers edited', detail: String(item.toValue || '') };
 };
 
+// One sentence for a walk-list archive row (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.9), who did it first:
+//   "Ada archived walk list North — ended Pass 3 · GOTV"
+//   "Ada unarchived walk list North — Pass 3 · GOTV stayed ended"
+//   "Ada brought back North · Pass 3 · GOTV as a draft"
+//   "One-time check ended North · Pass 3 · GOTV"
+// Built from the row's `details` — { walkList, pass, outcome }: the walk list's name and the pass's
+// "Pass 3 · GOTV" as they were then — with fixed templates, never by splitting fromValue/toValue (walk
+// list and pass names are free text). The one-time repair writes no actor and the server names it
+// "One-time check" (no id, no status), so that row doesn't say it twice. Null for any other row, or one
+// missing the facts its sentence needs: it reads its plain fromValue/toValue instead.
+// The sentence for each lifecycle row, by field and then details.outcome; an outcome this copy doesn't
+// know returns null (the row reads its plain from/to, as an old phone's does). The same code is in
+// mobile/lib/campaignHistory.js — walkListSentence.parity.test.js holds the two in step.
+const LIFECYCLE_SENTENCES = {
+  walkListArchived: {
+    ended: (who, list, pass) => `${who} archived walk list ${list} — ended ${pass}`,
+    'nothing-live': (who, list) => `${who} archived walk list ${list}`,
+  },
+  walkListUnarchived: {
+    'brought-back': (who, list, pass) => `${who} unarchived walk list ${list} — brought back ${pass}`,
+    'stayed-ended': (who, list, pass) => `${who} unarchived walk list ${list} — ${pass} stayed ended`,
+    'nothing-ended': (who, list) => `${who} unarchived walk list ${list}`,
+  },
+  passArchived: {
+    'by-hand': (who, where) => `${who} archived ${where}`,
+    repair: (who, where) => `${who} ended ${where}`,
+  },
+  passBroughtBack: {
+    live: (who, where) => `${who} brought back ${where}`,
+    draft: (who, where) => `${who} brought back ${where} as a draft`,
+  },
+};
+// The two outcomes that name no pass: nothing was live to end, nothing had ended to bring back.
+const NO_PASS_OUTCOMES = new Set(['nothing-live', 'nothing-ended']);
+
+export const walkListSentence = (item) => {
+  const d = item?.details;
+  const template = d && LIFECYCLE_SENTENCES[item?.field]?.[d.outcome];
+  if (!template) return null;
+  const who = item.by?.name || 'Someone';
+  const pass = d.pass ? String(d.pass) : null;
+  if (item.field === 'walkListArchived' || item.field === 'walkListUnarchived') {
+    if (!d.walkList || (!pass && !NO_PASS_OUTCOMES.has(d.outcome))) return null;
+    return template(who, String(d.walkList), pass);
+  }
+  if (!pass) return null;
+  // "North · Pass 3 · GOTV", or the pass alone if its walk list was gone when the row was written.
+  const where = d.walkList ? `${d.walkList} · ${pass}` : pass;
+  // The server names the actorless repair row "One-time check" (no id), so only a repair row carrying
+  // someone else's name — or none — needs to say where it came from.
+  const isCheck = item.by?.id == null && item.by?.name === 'One-time check';
+  const fromRepair = d.outcome === 'repair' && !isCheck ? ' (one-time check)' : '';
+  return `${template(who, where)}${fromRepair}`;
+};
+
 // ── The Client Reports tab's History (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F9) ─────────────────
 // Rows with source 'client_report': a report's life (clientReport.*), a team's (clientReportSeries.*)
 // and a client link's (reportLink.*). WEB ONLY: the campaign feed the phone reads filters these rows
@@ -156,6 +217,9 @@ const REPORT_ROW = {
   'clientReport.refreshDiscarded': 'New numbers discarded',
   'clientReport.takenDown': 'Taken down',
   'clientReport.putBackUp': 'Put back up',
+  // Archive tidies the operator's list only (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4).
+  'clientReport.archived': 'Archived',
+  'clientReport.unarchived': 'Unarchived',
   'clientReport.deleted': 'Deleted',
   'clientReport.remapped': 'Switched to areas',
 };
@@ -169,11 +233,13 @@ const SERIES_ROW = {
 const LINK_ROW = {
   'reportLink.created': 'Link created',
   'reportLink.passwordChanged': 'Link password changed — everyone was signed out',
-  'reportLink.rotated': 'Link rotated — new address, everyone was signed out',
+  // Share's words (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C7): New address, turned off, turned on — the
+  // fields keep their names (rotated, disabled, enabled), so older rows read the same way.
+  'reportLink.rotated': 'Link given a new address — everyone was signed out',
   'reportLink.renewed': 'Expired link renewed — new address',
   'reportLink.extended': 'Link extended',
-  'reportLink.disabled': 'Link disabled — everyone was signed out',
-  'reportLink.enabled': 'Link enabled',
+  'reportLink.disabled': 'Link turned off — everyone was signed out',
+  'reportLink.enabled': 'Link turned on',
   'reportLink.wrongPasswords': 'Wrong passwords on a link',
   'reportLink.locked': 'Link locked after 50 wrong passwords',
   'reportLink.unlocked': 'Link unlocked',
@@ -229,9 +295,9 @@ export const reportRowName = (item, seriesLabels = null) => {
 
 /**
  * One row of the Client Reports History, as { headline, subject, detail }:
- *   subject  — what it is about: "Oct 13 – Oct 19, 2026 · Paid team report", "Paid team", or the
- *              link's label
- *   headline — what happened: "Published", "Crews changed", "Link rotated — new address, …"
+ *   subject  — what it is about: "Oct 13 – Oct 19, 2026 · Paid team report", "Paid team"; a link by
+ *              its report, the same way (an older link row, written without one, by its label)
+ *   headline — what happened: "Published", "Crews changed", "Link given a new address — …"
  *   detail   — the specifics, or '' (the earlier text itself is rendered by the drawer)
  * `seriesLabels` (series id → current label) names the tab of a report row, and the team of a series
  * row written before rows named it themselves (an old "Team ended" or "Crews changed").
@@ -273,7 +339,16 @@ export const clientReportHistoryLine = (item, { seriesLabels = null } = {}) => {
     return { headline: SERIES_ROW[f], subject, detail };
   }
   if (LINK_ROW[f]) {
-    const subject = valueLabel(item.toValue) || valueLabel(item.fromValue) || 'A client link';
+    // A link is named by its report, as a report row is (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C7: the
+    // server stamps the report's period and tab on every link row) — new links have no label. A deleted
+    // link to all your reports says so (toValue.allReports; older rows can't tell the two kinds apart);
+    // an older row without a period still reads by its label.
+    const name = item.periodLabel ? reportRowName(item, seriesLabels) : null;
+    const subject = name
+      ? `${name} report`
+      : f === 'reportLink.deleted' && item.toValue?.allReports
+        ? 'An old link to all your reports'
+        : valueLabel(item.toValue) || valueLabel(item.fromValue) || 'A client link';
     let detail = '';
     if (f === 'reportLink.wrongPasswords') {
       const n = item.toValue?.count ?? item.toValue?.failures ?? null;
@@ -282,6 +357,13 @@ export const clientReportHistoryLine = (item, { seriesLabels = null } = {}) => {
       detail = `${count(item.toValue.cleared)} wrong passwords cleared`;
     } else if (f === 'reportLink.passwordChanged' && item.toValue?.wasOpenLink) {
       detail = 'A password was added to an open link';
+    } else if (f === 'reportLink.passwordChanged' && Number(item.toValue?.alsoChanged) > 0) {
+      // Change password's "Also change it on the other links" (§C3): the link changed by hand says how
+      // many others changed with it; each of those has its own row, marked changedTogether.
+      const n = Number(item.toValue.alsoChanged);
+      detail = `Also changed on ${count(n)} other ${n === 1 ? 'link' : 'links'} that used the same password`;
+    } else if (f === 'reportLink.passwordChanged' && item.toValue?.changedTogether) {
+      detail = 'Changed along with other links that used the same password';
     } else if (f === 'reportLink.deleted' && item.toValue?.reportDeleted) {
       // A link to just one report goes with its report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, Cascade).
       detail = 'Deleted with its report';

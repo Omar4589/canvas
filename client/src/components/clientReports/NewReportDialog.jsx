@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { Button, Modal, Select } from '../ui/index.js';
-import { ErrorBanner } from './parts.jsx';
+import { ErrorBanner, errorText } from './parts.jsx';
 import { formatPeriod, periodDays, todayIn, daysBetween } from './reportDates.js';
 import { allTimeChoice, dateChoices, dayLabel, duplicateText, periodLabel, totalsSentence, weekName, weekNudge } from './newReportChoices.js';
 import { seriesKey } from './hooks.js';
 import { quotedNames } from './TeamDialog.jsx';
 import { periodPhrase } from '../../lib/reportDerive.js';
+import { walkListLabel, walkListOptions } from '../../lib/walkListOptions.js';
 
 // New report (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G2, §F4, §F10). Covers the whole campaign or a
 // team (one or more crews under a name the client reads), optionally only one walk list. Creating
@@ -42,7 +43,9 @@ import { periodPhrase } from '../../lib/reportDerive.js';
 //     §O4), which hands back here with the team, the dates and the title as they were;
 //   · REPORT_EXISTS (SIMPLIFY §E) — the tab already has a report for these dates: Open the draft (or
 //     Open it), or Make a second one (the request Create sent, again, with allowDuplicate — the dates
-//     stay as they were while the prompt names them);
+//     stay as they were while the prompt names them). An archived one says "— it’s archived." and adds
+//     Unarchive, which brings it back into the list right here (docs/PROPOSAL_CLIENT_REPORT_LINKS.md
+//     Part 1 §4); the note under Make a second one says each report gets its own link (Part 1 §6);
 //   · `existing: true` on a 200 — two people pressed Create at once and the database let one draft in:
 //     "<name> made the <tab> report for <dates> a moment ago — you're both in it.", with Open it; the
 //     form stays as it was when Create was pressed (code review WEEK-2 — the list gains the draft, and
@@ -107,9 +110,10 @@ const NewReportDialog = ({
   const [effortPick, setEffortId] = useState(initial.effortId || '');
   // The team and the walk list picked — else the first of each, from the lists as they are NOW: both can
   // arrive or change after the dialog opened (the walk lists load beside it, the picker is read again),
-  // and a pick fixed at open would leave a select showing one the request doesn't send.
+  // and a pick fixed at open would leave a select showing one the request doesn't send. The first walk
+  // list is the first open one (walkListOptions lists archived ones last), or the first if all are.
   const teamId = teamPick || teams[0]?.id || '';
-  const effortId = effortPick || efforts[0]?._id || '';
+  const effortId = effortPick || walkListOptions(efforts)[0]?._id || '';
   const [title, setTitle] = useState(initial.title || '');
   // The picked date choice ('first' | 'last' | 'this' | 'move' | 'pick'); null until the operator picks
   // one — then `initial.dates` decide (below). Pick dates' two days, kept across Continue.
@@ -305,6 +309,17 @@ const NewReportDialog = ({
       onWeekChanged?.(next);
     },
   });
+  // Unarchive, from the duplicate prompt (docs/PROPOSAL_CLIENT_REPORT_LINKS.md Part 1 §4): the report that
+  // holds these dates comes back into its tab's list, and the prompt then reads as it does for any report
+  // of these dates — Unarchive gone, so the keyboard goes back to the prompt's first button.
+  const unarchive = useMutation({
+    mutationFn: (reportId) => api(`/admin/client-reports/${reportId}/unarchive`, { method: 'POST' }),
+    onSuccess: (_res, reportId) => {
+      setDuplicate((d) => (d && d.reportId === reportId ? { ...d, archivedAt: null } : d));
+      setFocusTo({ at: 'duplicate' });
+      onReportsChanged?.();
+    },
+  });
   // Continue goes through the team picker (TeamDialog's continue mode), which re-validates the crews
   // the way Change crews does and answers each refusal there; this dialog reopens on the team after.
   const canContinue = !!onContinueTeam && endedSeries?.kind === 'team';
@@ -456,9 +471,9 @@ const NewReportDialog = ({
               Only one walk list
               {oneWalkList && (
                 <Select value={effortId} onChange={(e) => { setEffortId(e.target.value); resetDates(); resetPrompts(); }} className="py-1 text-sm">
-                  {efforts.map((ef) => (
+                  {walkListOptions(efforts).map((ef) => (
                     <option key={ef._id} value={ef._id}>
-                      {ef.name}
+                      {walkListLabel(ef)}
                     </option>
                   ))}
                 </Select>
@@ -679,13 +694,22 @@ const NewReportDialog = ({
               <Button size="sm" disabled={!duplicate.reportId} onClick={() => onOpenReport(duplicate.reportId)}>
                 {duplicate.status === 'draft' ? 'Open the draft' : 'Open it'}
               </Button>
-              <Button size="sm" variant="secondary" onClick={makeSecond}>
+              {duplicate.archivedAt && (
+                <Button size="sm" variant="secondary" disabled={!duplicate.reportId} loading={unarchive.isPending} onClick={() => unarchive.mutate(duplicate.reportId)}>
+                  Unarchive
+                </Button>
+              )}
+              <Button size="sm" variant="secondary" disabled={unarchive.isPending} onClick={makeSecond}>
                 Make a second one
               </Button>
             </div>
-            {/* A taken-down report stays hidden: the client sees only the new one (FRESH-5). */}
+            {unarchive.error && unarchive.variables === duplicate.reportId && <p className="mt-1.5 text-danger-fg">Couldn’t unarchive it. {errorText(unarchive.error)}</p>}
+            {/* Each report has its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md Part 1 §6); a taken-down
+                one stays hidden until it is put back up (FRESH-5). */}
             <p className="mt-1.5">
-              {duplicate.takenDown ? 'Your client sees only the new one; the taken-down one stays hidden unless you put it back up.' : 'Your client sees both once both are published.'}
+              {duplicate.takenDown
+                ? 'The taken-down one stays hidden until you put it back up. The new one gets its own link once it’s published.'
+                : 'Each one gets its own link once it’s published.'}
             </p>
           </div>
         )}

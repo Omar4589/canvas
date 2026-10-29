@@ -216,6 +216,7 @@ test('New report looks first: REPORT_EXISTS names the draft, the published repor
     reportId: firstId,
     status: 'draft',
     takenDown: false,
+    archivedAt: null, // not archived (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4: clientReportArchive.int.test.js)
     weekStart: '2026-07-06',
     weekEnd: '2026-07-12',
     allTime: false, // a dated report (an all-time one is named by its last day: clientReportAllTime.int.test.js)

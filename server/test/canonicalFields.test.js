@@ -201,3 +201,22 @@ test('parseVoterIdList dependency: an early-vote list picks the state-issued ID 
   // L2's ID alone is still found.
   assert.equal(suggestMapping(['LALVOTERID', 'Voters_FirstName']).stateVoterId, 'LALVOTERID');
 });
+
+test('the word splitter is linear: the same words as the old quadratic pattern, without the stall', () => {
+  // Through suggestMapping, the only door to it: the old `([A-Z]+)([A-Z][a-z])` split took 1.5 s on
+  // 32,767 capitals with no lowercase after them (docs/PROPOSAL_ID_LIST_EXCEL.md §A.7).
+  const oldSplit = (s) => s.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  const newSplit = (s) => s.replace(/([A-Z])(?=[A-Z][a-z])/g, '$1 ');
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const alphabet = 'AAAAABBCDZaabcz09_ -.';
+  for (let i = 0; i < 300000; i += 1) {
+    let s = '';
+    for (let j = 0, n = 1 + Math.floor(rnd() * 24); j < n; j += 1) s += alphabet[Math.floor(rnd() * alphabet.length)];
+    assert.equal(newSplit(s), oldSplit(s), s);
+  }
+  for (const h of ['ABCDef', 'ABCDefGHIjk', 'NCOAAddress', 'StateVoterID', 'USHouseDistrict', 'FLVoterId']) assert.equal(newSplit(h), oldSplit(h), h);
+  const started = Date.now();
+  suggestMapping(['A'.repeat(32767), 'Voter ID']);
+  assert.ok(Date.now() - started < 50, `took ${Date.now() - started} ms`);
+});

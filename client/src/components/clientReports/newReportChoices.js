@@ -154,15 +154,19 @@ const article = (word) => (/^[aeiou]/i.test(word || '') ? 'an' : 'a');
 
 /**
  * REPORT_EXISTS in words (§E): the report this tab already has for these dates, by its state. `d` is
- * the refusal ({ status, takenDown, weekStart, weekEnd, scopeLabel }); `scopeLabel` the dialog's own
- * name for the tab, should the refusal not carry one.
+ * the refusal ({ status, takenDown, archivedAt, weekStart, weekEnd, scopeLabel }); `scopeLabel` the
+ * dialog's own name for the tab, should the refusal not carry one. An archived one still holds its dates
+ * (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4) and says so — "— it’s archived." — beside Open it and
+ * Unarchive, rather than send you to a list it isn't in.
  */
 export const duplicateText = (d, { today, scopeLabel }) => {
   const label = d.scopeLabel || scopeLabel || 'Whole campaign';
   // An all-time report (§N) is named by its last day: "an all-time Whole campaign report through Oct 28".
   const what = d.allTime ? `all-time ${label} report through ${dayLabel(d.weekEnd, today)}` : `${label} report for ${periodLabel(d.weekStart, d.weekEnd, today)}`;
-  if (d.status === 'draft') return `You already have a draft ${what}.`;
-  if (d.takenDown) return `You already published ${article(what)} ${what}, taken down.`;
+  const archived = d.archivedAt ? ' — it’s archived' : '';
+  if (d.status === 'draft') return `You already have a draft ${what}${archived}.`;
+  if (d.takenDown) return `You already published ${article(what)} ${what}, taken down${archived}.`;
+  if (archived) return `You already published ${article(what)} ${what}${archived}.`;
   return `You already published ${article(what)} ${what}. To bring its numbers up to date, open it and press Refresh numbers.`;
 };
 

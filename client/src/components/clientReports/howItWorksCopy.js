@@ -20,13 +20,15 @@ export const STEPS = [
     body: 'the preview is exactly what your client will see. Once it’s published, its numbers stay as they are until you press Refresh numbers.',
   },
   {
+    // Each report has its own link, and a new one starts with the last link's password
+    // (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D6).
     title: 'Share it',
-    body: 'Share gives you a message with the link to paste into your email or text; send the link’s password separately. Or open the report and press Download PDF.',
+    body: 'Share makes the report’s link and a message to paste into your email or text. Next week’s link keeps this week’s password, so you send a password only the first time, or after you change it. Or open the report and press Download PDF.',
   },
 ];
 
 /** Phones (below 640 px) get these short lines instead, and no Help line. */
-export const PHONE_STEPS = ['Make a report — usually Last week; then Next report each week.', 'Check the preview, then publish.', 'Share the link; send its password separately.'];
+export const PHONE_STEPS = ['Make a report — usually Last week; then Next report each week.', 'Check the preview, then publish.', 'Share its link; send the password the first time.'];
 
 export const HELP_LINE = 'More in the Help Center →';
 export const HELP_PATH = '/help/client-reports';

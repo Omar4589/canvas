@@ -37,6 +37,7 @@ import {
 import NetInfo from '@react-native-community/netinfo';
 import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { reconcilePendingHouseholds, reconcilePendingLocations, recordHouseholdAction, setPace } from '../../lib/recordAction';
+import { bookClosed } from '../../lib/doorPaths';
 import { isPaused } from '../../lib/pace';
 import { foldDeltaVoters, foldDeltaHouseholds, returningDoorIds, changesPath } from '../../lib/deltaFold';
 import { isOutcomeOn } from '../../lib/outcomeToggles';
@@ -869,11 +870,21 @@ export default function MapScreen() {
       </SafeAreaView>
     );
   }
+  // No doors at all. A canvasser whose book closed under them (an archived walk list, an unassigned or
+  // reassigned book, a new pass) is told so rather than read as never having had one; the saved
+  // selection stays, so a book brought back reappears on the next refresh (lib/doorPaths.js bookClosed).
   if (activeCampaign && data && (data.households?.length || 0) === 0) {
+    const closed = bookClosed({ selectedBookIds: selectedBookSet, data });
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={[styles.loadingText, { fontWeight: '700', fontSize: 16 }]}>No turf assigned yet</Text>
-        <Text style={styles.loadingText}>Your admin will assign you a book to start canvassing.</Text>
+        <Text style={[styles.loadingText, { fontWeight: '700', fontSize: 16 }]}>
+          {closed ? 'No book right now' : 'No turf assigned yet'}
+        </Text>
+        <Text style={styles.loadingText}>
+          {closed
+            ? 'The office closed or reassigned the book you were working. Anything you saved still counts.'
+            : 'Your admin will assign you a book to start canvassing.'}
+        </Text>
         <Pressable onPress={onRefresh} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Refresh</Text>
         </Pressable>

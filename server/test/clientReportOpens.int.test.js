@@ -16,6 +16,10 @@ import jwt from 'jsonwebtoken';
 // per open, never moving the report's updatedAt; old documents (no views, an explicit null viewCount)
 // count from zero. The old viewCount/lastViewedAt totals are frozen: "N views before per-link counts"
 // is a before-the-upgrade number, so no open since moves it (§P3, code review ADMINUX-12).
+//
+// Every link here opens one report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2): the report counted most
+// has two, as a report that got a second link before one link per report keeps both; every other report
+// is opened through a link of its own.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-report-opens';
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
 
@@ -115,15 +119,21 @@ before(async () => {
     rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
     visibility: { visibleQuestionKeys: [], mapAnswerKeys: [], showMap: false },
   });
-  const mkLink = async (token, label) => {
+  const mkLink = async (token, label, reportId = report._id) => {
     const l = await ReportShareLink.create({
-      organizationId: org._id, campaignId: camp._id, token, label,
+      organizationId: org._id, campaignId: camp._id, token, label, reportId,
       passwordHash: await bcrypt.hash(`${token}-password`, 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
     });
     return { id: l._id, token, access: null };
   };
   const link = await mkLink('opens-candidate', 'Candidate');
   const second = await mkLink('opens-consultant', 'Consultant');
+  // A link of its own for any other report, unlocked.
+  ctx.linkTo = async (reportId) => {
+    const l = await mkLink(`opens-${reportId}`, 'Board', reportId);
+    l.access = await unlockOf(l.token, `${l.token}-password`);
+    return l;
+  };
   Object.assign(ctx, { camp, report, link, second });
 
   server = http.createServer(createApp());
@@ -204,9 +214,13 @@ test('the open needs the link’s access, and only a shown report counts', { ski
     weekStart: '2026-07-13', weekEnd: '2026-07-19', timeZone: 'America/Chicago',
     rangeStartUtc: new Date('2026-07-13T05:00:00Z'), rangeEndUtc: new Date('2026-07-20T05:00:00Z'),
   });
-  const res = await post(`/share/${ctx.link.token}/reports/${taken._id}/opened`, { 'X-Share-Token': ctx.link.access });
-  assert.strictEqual(res.status, 404);
-  assert.strictEqual(res.json.code, 'REPORT_NOT_FOUND');
+  // Through its own link: taken down, it reads as gone — and through another report's link, too.
+  const own = await ctx.linkTo(taken._id);
+  for (const l of [own, ctx.link]) {
+    const res = await post(`/share/${l.token}/reports/${taken._id}/opened`, { 'X-Share-Token': l.access });
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(res.json.code, 'REPORT_NOT_FOUND');
+  }
   assert.strictEqual((await ClientReport.findById(taken._id).lean()).views?.byLink, undefined, 'nothing counted');
 });
 
@@ -218,11 +232,12 @@ test('an old report — no views, an explicit null viewCount — counts from zer
     rangeStartUtc: new Date('2026-06-01T05:00:00Z'), rangeEndUtc: new Date('2026-06-08T05:00:00Z'),
     viewCount: null, lastViewedAt: null, createdAt: now, updatedAt: now,
   });
-  const r = await open({ reportId: insertedId });
+  const oldLink = await ctx.linkTo(insertedId);
+  const r = await open({ reportId: insertedId, link: oldLink });
   assert.strictEqual(r.viewCount, null, 'the before-the-upgrade total is untouched');
   assert.strictEqual(r.lastViewedAt, null);
-  assert.strictEqual(linkCount(r), 1);
-  const m = await open({ reportId: insertedId, session: signUserToken(ctx.lead) });
+  assert.strictEqual(linkCount(r, oldLink), 1);
+  const m = await open({ reportId: insertedId, link: oldLink, session: signUserToken(ctx.lead) });
   assert.strictEqual(member(m, 'leads'), 1);
   assert.strictEqual(m.viewCount, null, 'a member’s open leaves it alone too');
   // A report that HAD old views keeps exactly that number however often it is opened since.
@@ -232,9 +247,10 @@ test('an old report — no views, an explicit null viewCount — counts from zer
     rangeStartUtc: new Date('2026-05-25T05:00:00Z'), rangeEndUtc: new Date('2026-06-01T05:00:00Z'),
     viewCount: 7, lastViewedAt: new Date('2026-06-02T12:00:00Z'), createdAt: now, updatedAt: now,
   });
-  await open({ reportId: withViews });
-  const w = await open({ reportId: withViews });
+  const viewsLink = await ctx.linkTo(withViews);
+  await open({ reportId: withViews, link: viewsLink });
+  const w = await open({ reportId: withViews, link: viewsLink });
   assert.strictEqual(w.viewCount, 7);
   assert.strictEqual(new Date(w.lastViewedAt).toISOString(), '2026-06-02T12:00:00.000Z');
-  assert.strictEqual(linkCount(w), 2);
+  assert.strictEqual(linkCount(w, viewsLink), 2);
 });

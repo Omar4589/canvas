@@ -142,8 +142,7 @@ eas build --profile staging --platform android
 eas submit --profile production --platform ios     --id <ios-production-build-id>
 eas submit --profile production --platform android --id <android-production-build-id>
 eas submit --profile staging    --platform android --id <android-staging-build-id>
-eas submit --profile staging    --platform ios     --id <ios-staging-build-id> \
-  --groups "Team (Expo)" --what-to-test "what changed since the last staging build"
+eas submit --profile staging    --platform ios     --id <ios-staging-build-id> --groups "Team (Expo)"
 ```
 
 > 🛑 **Never `eas submit --latest`.** It picks the newest build for the **platform**, ignoring the
@@ -152,7 +151,9 @@ eas submit --profile staging    --platform ios     --id <ios-staging-build-id> \
 > `--id`. (Omitting both `--id` and `--latest` drops into an interactive picker, which is also safe.)
 
 `--groups` (iOS only) assigns the build to a TestFlight group at submit time instead of clicking
-through App Store Connect afterwards. `--what-to-test` fills in the TestFlight release note.
+through App Store Connect afterwards. **Don't pass `--what-to-test`** (on `eas submit` or `eas build`):
+it sends a changelog, which Expo allows on the Enterprise plan only, and the submission fails to
+schedule (2026-10-27). Type the TestFlight note in App Store Connect instead.
 
 > **Build the staging pair LAST.** `autoIncrement` bumps the version code per build, and Google Play
 > serves a tester whichever build has the highest code they qualify for. If production ends up above
@@ -193,8 +194,7 @@ same fingerprint, so OTAs keep landing on it and the nag already reads it as cur
 
 ```bash
 eas build --profile staging --platform ios
-eas submit --profile staging --platform ios --id <ios-staging-build-id> \
-  --groups "Team (Expo)" --what-to-test "fresh build, the last one expired"
+eas submit --profile staging --platform ios --id <ios-staging-build-id> --groups "Team (Expo)"
 ```
 
 The new build carries whatever is on `main`, so treat it like an `ota:staging` from `main`: a

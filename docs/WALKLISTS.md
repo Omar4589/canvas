@@ -13,7 +13,8 @@ between "who's in my universe" and "which crew works which doors."
 
 Related: [EFFORTS.md](EFFORTS.md) (walk lists own disjoint doors; saved searches seed/claim them),
 [IMPORTS.md](IMPORTS.md) (how new voters/addresses reach the pool and Intake),
-[EARLY_VOTING.md](EARLY_VOTING.md) (the same Voter-ID CSV matcher marks voted voters),
+[EARLY_VOTING.md](EARLY_VOTING.md) (the same Voter-ID list reader and matcher, CSV or Excel, marks
+voted voters),
 [PASSES_AND_TURF.md](PASSES_AND_TURF.md) (a saved search's doors get cut into books inside a round),
 [EXPORTS.md](EXPORTS.md) (a saved search also scopes the Export Center's filtered-voters export).
 
@@ -39,7 +40,8 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
    filters with **AND** (match all) or **OR** (match any). Use this when the people you want can be
    *described* by their data.
    - **Door status:** pick a **"from pass"** to filter on the status *within that round* (e.g. "not-home
-     in Round 1"); leave it blank to filter on the door's **all-rounds targeting status** — its whole
+     in Round 1" — each pass in that list names its walk list, *North · Pass 2*, so two walk lists' "Pass
+     1"s can be told apart); leave it blank to filter on the door's **all-rounds targeting status** — its whole
      history, one status per door, in this order: *Restricted* if any round ever recorded it (it wins
      over everything until unmarked or unknocked); else *Surveyed* if surveyed in any round; else the
      most recent of *Refused / Wrong address / No soliciting / Not a target voter*; else *Not home* when
@@ -62,13 +64,20 @@ On the **Saved Searches** page, the "Build a saved search" panel has two modes:
      but skips every door that already answered *Yard Sign Delivered*. Statuses use the door's all-rounds
      targeting status (above); survey answers match any round.
 
-2. **Upload a Voter-ID CSV** — upload a file that has a column of Voter IDs. The app matches those IDs
+2. **Upload file** — upload a CSV or Excel file (`.xlsx`) that has a column of Voter IDs, in the box
+   labelled **Voter-ID file (CSV or Excel)**. The app matches those IDs
    to this campaign's voters and freezes the doors they live at into a saved search. Use this when you already
    have an **exact list** of people that filters can't express — e.g. "the voters who voted in the
-   first election," handed to you as a spreadsheet.
+   first election," handed to you as a spreadsheet. An Excel file is read the way the Early Voting page
+   reads one ([EARLY_VOTING.md](EARLY_VOTING.md)): only its first visible tab (the preview names it when
+   there are others), and a file with rows hidden in Excel is refused with how many. When the Voter ID
+   column isn't found, the column your newest uploaded saved search used comes up already chosen, if
+   this file has it; press **Match column** to use it.
 
-Both produce the same thing: a frozen saved search you can seed/claim into a walk list. A saved search shows a
-**"from CSV"** badge when it was built by upload.
+The panel's choice reads **Filter builder | Upload file**. Both produce the same thing: a frozen saved
+search you can seed/claim into a walk list. A saved search shows an **uploaded** badge when it was
+built by upload (the file name is on the badge's tooltip), and the Walk Lists page's menus say
+**· uploaded** after it.
 
 A third kind is **auto-created for you**: when a **voter import** adds new target voters to homes you've
 **already worked**, and you tick the import's "revisit" checkbox, the app freezes those homes into a saved
@@ -84,9 +93,9 @@ that saved search. (Only geocoded doors are included — see *Things to know* be
 
 ## The multi-voter-door rule
 
-A saved search is a set of **doors**. When you upload a Voter-ID CSV, a door joins the saved search if **any** of
+A saved search is a set of **doors**. When you upload a Voter-ID list, a door joins the saved search if **any** of
 its voters is in your file. And because walk lists own whole doors, **claiming a door later moves *all*
-the voters at it**, not just the ones in your file. The CSV preview shows both numbers — *matched
+the voters at it**, not just the ones in your file. The upload's preview shows both numbers — *matched
 voters* and *voters at those doors* — so the difference is visible. (At a 2-voter home where only one
 person is in your file, the door still joins, and both voters come along when a walk list claims it.)
 
@@ -114,12 +123,12 @@ Two things to remember:
 - It exports the saved search's **frozen** set — the same doors/voters it was saved with, not a fresh
   re-resolve. Build a new saved search if you want current data.
 - It exports **whole doors:** every voter at each door is included (the same whole-door rule as
-  everywhere else), not only the voters who matched a filter or a CSV upload.
+  everywhere else), not only the voters who matched a filter or an upload.
 
 The download is **authenticated** — it goes through your logged-in session like the rest of the app — so
 the file isn't a public link you can forward; re-download it from the saved search when you need it again.
 
-## Why the CSV upload exists
+## Why the upload exists
 
 Two jobs the filter builder can't do:
 
@@ -128,7 +137,11 @@ Two jobs the filter builder can't do:
 - **Re-carve specific doors out of a finished walk list.** Say your first walk list is done/archived and you
   import a runoff list; a voter at an address that walk list already owns stays on that walk list (archiving
   doesn't release doors). Upload that runoff list as a saved search, then claim it into a new walk list with a
-  re-carve to move exactly those doors over. (Brand-new addresses don't need this — they land in Intake
+  re-carve to move exactly those doors over. This still works when the old walk list is **archived** —
+  an archived walk list is read-only, but claiming doors *out* of it is allowed; only claiming doors
+  *into* it is refused until it's unarchived ([EFFORTS.md](EFFORTS.md)). Its archived books shrink as the
+  doors leave, so if one of its passes is brought back later, it comes back with the doors it still has
+  (or as a draft, if none are left). (Brand-new addresses don't need this — they land in Intake
   automatically and any walk list can claim them.)
 
 ## Things to know
@@ -136,8 +149,17 @@ Two jobs the filter builder can't do:
 - **IDs not yet imported won't match.** A Voter ID that isn't in this campaign's universe lands in
   "not in this campaign." Import those voters first (they then appear in Intake), or download the
   unmatched IDs from the preview, fix the file, and re-upload.
-- **Files can be up to 50 MB.** Only the Voter ID column is used, so for a bigger file save a copy with
-  just that column. A file over the limit is turned away the moment you pick it.
+- **Files can be up to 50 MB**, CSV or Excel. Only the Voter ID column is used, so for a bigger file save
+  a copy with just that column. A file over the limit is turned away the moment you pick it. An Excel
+  file's first tab must also unpack to 320 MB or less (about 184,000 rows of a 35-column file, fewer for
+  wider ones); past that it's refused with *This Excel file is too big for us to read. Only the Voter ID
+  column is used, so save a copy with just that column and upload it.* Old-format, password-protected,
+  damaged and chart-first workbooks are refused with the fix, as on Early Voting.
+- **Picked the same file again after fixing it?** The preview re-runs. **Edited it after picking it?**
+  Pick it again before saving: the browser can't send a file that changed after it was chosen.
+- **A save that errors after a long wait may still have worked.** A very large list can take longer to
+  save than the browser waits, and the save carries on without it. Check the saved searches list before
+  trying again, or you'll end up with two.
 - **Doors with no map coordinates are left out** of a saved search (they can't be cut). The preview reports how
   many were skipped.
 - **Deleting a saved search** only removes the saved selection — it never changes which walk list owns a door.
@@ -147,10 +169,11 @@ Two jobs the filter builder can't do:
 # Part 2 — Technical reference
 
 Server: [routes/admin/walklists.js](../server/src/routes/admin/walklists.js) (CRUD + filter
-preview/save + CSV preview/save + distinct values + CSV export),
+preview/save + list-upload preview/save + distinct values + CSV export),
 [services/walklist/resolveWalkList.js](../server/src/services/walklist/resolveWalkList.js) (filter
 resolver), [services/import/parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)
-(CSV matcher + door resolver, shared with early voting),
+(the Voter-ID list reader and matcher, CSV or Excel, + door resolver, shared with early voting; the
+Excel reader is [services/import/readIdColumn.js](../server/src/services/import/readIdColumn.js)),
 [services/surveys/answerAgg.js](../server/src/services/surveys/answerAgg.js) (`answerFilterClause` /
 `answerTagClause`, the survey-answer and survey-tag match clauses).
 
@@ -158,7 +181,7 @@ resolver), [services/import/parseVoterIdList.js](../server/src/services/import/p
 
 | Model | File | Notes |
 |---|---|---|
-| `SavedSearch` | [models/SavedSearch.js](../server/src/models/SavedSearch.js) | A **frozen** selection (the `SavedSearch` model — formerly `WalkList`, collection still `walklists` — backs the user-facing **saved search**). `filter` (the builder's criteria, kept for reference), frozen `householdIds`/`voterIds` + `householdCount`/`voterCount` (the source of truth — saved searches do **not** re-resolve), `source` (`'filter'` \| `'csv'` \| **`'import'`** — auto-generated by a voter import's revisit-list toggle, see below), and `sourceMeta` (`fileName`, `idColumn`, `idsInFile`, `matchedVoters`, `notFound`, **`importJobId`**) for provenance/audit. |
+| `SavedSearch` | [models/SavedSearch.js](../server/src/models/SavedSearch.js) | A **frozen** selection (the `SavedSearch` model — formerly `WalkList`, collection still `walklists` — backs the user-facing **saved search**). `filter` (the builder's criteria, kept for reference), frozen `householdIds`/`voterIds` + `householdCount`/`voterCount` (the source of truth — saved searches do **not** re-resolve), `source` (`'filter'` \| `'csv'` \| **`'import'`** — auto-generated by a voter import's revisit-list toggle, see below; **`'csv'` means built by upload, CSV or Excel alike** — the value predates Excel uploads and is kept so stored rows and the clients' `source === 'csv'` checks stay valid), and `sourceMeta` (`fileName`, `idColumn`, `idsInFile`, `matchedVoters`, `matchedViaZeros`, `notFound`, **`importJobId`**) for provenance/audit. |
 
 Inside `filter`, survey predicates are split across two fields because they combine differently:
 
@@ -169,7 +192,7 @@ Inside `filter`, survey predicates are split across two fields because they comb
 | `exclude` | `excludeFilterSchema` (the same fields as `filter` minus `combine`/`exclude`, default `null`) | The **NOT branch**. Resolves through the same predicate machinery; its sets are always **OR'd together** and then **subtracted** from the include result — `combine` never applies to it, no nesting. Undeclared keys are silently stripped by the strict schema, which is why this is a declared sub-schema and not a Mixed blob. |
 
 A saved search is **campaign-scoped**; the frozen ids are the truth, so seeding/claiming never re-runs the
-filter or re-reads the CSV.
+filter or re-reads the uploaded file (which is never kept).
 
 ## B. The two resolvers
 
@@ -218,16 +241,22 @@ filter or re-reads the CSV.
     per-question `answerFilters` (those would each be separate sets and so get AND/OR'd globally). Like
     the other survey predicates, it honors `filter.priorPassId` (scoping to that round's responses) when
     set. If the campaign has no template, tag filters are skipped.
-- **CSV →
+- **Uploaded list (CSV or Excel) →
   [parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)** — two functions:
-  - `parseAndMatch(campaign, buffer, idColumn)` — PapaParse the CSV, auto-detect the ID column
-    (`idColumn` → `suggestMapping().stateVoterId` → `/voter\s*id/i` → fail), match **inside this
+  - `parseAndMatch(campaign, buffer, idColumn)` — read the file with `readIdList` (a CSV through Papa,
+    an `.xlsx` through [readIdColumn.js](../server/src/services/import/readIdColumn.js), told apart by
+    the file's bytes; an old-format or password-protected workbook refused), pick the ID column with
+    `pickIdColumn` (`idColumn` → `suggestMapping().stateVoterId` → `/voter\s*id/i` → Nebraska's
+    registrant names → fail; names over 255 characters never auto-matched), match **inside this
     campaign with leading zeros ignored** through
     [`findVotersByVoterIds`](../server/src/services/voters/voterIdLookup.js) (the one lookup for IDs
-    that come from outside the database; see [EARLY_VOTING.md](EARLY_VOTING.md) Part 2 §B). Returns
-    `{ columns, col, totalRows, csvCount, spellings, noId, inCampaign, notFound, notFoundIds,
-    matchedViaZeros, zeroMatchExample, sampleIds }`. **This is the same matcher early voting uses**
-    ([voted.js](../server/src/routes/admin/voted.js) imports it).
+    that come from outside the database). Both halves are in [EARLY_VOTING.md](EARLY_VOTING.md) Part 2
+    §B. Returns
+    `{ columns, col, totalRows, keptRows, keep, sheetName, otherSheets, csvCount, spellings, noId,
+    inCampaign, notFound, notFoundIds, matchedViaZeros, zeroMatchExample, sampleIds }` (no `keep` is
+    passed here, so `keep` is `null` and `keptRows` equals `totalRows`), or a refusal
+    `{ error, code, columns, sheetName, otherSheets, headerRowHint }`. **This is the same matcher early
+    voting uses** ([voted.js](../server/src/routes/admin/voted.js) imports it).
   - `resolveHouseholdsFromVoterMatch(campaign, inCampaign)` — distinct households of the matched voters,
     intersected with **cuttable** (active, coordinate-bearing) doors; `voterIds` = **all** voters at
     those doors (whole-door semantics, mirroring the filter resolver). Returns
@@ -236,15 +265,16 @@ filter or re-reads the CSV.
 
 ## C. Endpoints
 
-Mounted at `/admin/campaigns/:campaignId/walklists`, admin-only.
+Mounted at `/admin/campaigns/:campaignId/walklists`, behind `requireCampaignManager` (org admins, and
+team leads for the campaigns they manage).
 
 | Method · path | Body | Returns |
 |---|---|---|
 | `GET /` | — | `{ walkLists }` (id arrays projected out; includes `source`/`sourceMeta`) |
 | `POST /preview` | `{ filter }` | `{ householdCount, voterCount, sample }` — filter dry-run, no save |
 | `POST /` | `{ name, filter }` | `201 { walkList }` — save a filter saved search |
-| `POST /from-csv/preview` | `multipart`: `file` (+ optional `idColumn`) | `{ idColumn, columns, sampleIds, totalRows, idsInFile, spellings, noId, matched, matchedViaZeros, zeroMatchExample, householdCount, voterCount, noCoordinates, notFound, notFoundIds, ownedDoors, intakeDoors, ownedByEffort, sample }` — no save |
-| `POST /from-csv` | `multipart`: `file`, `name` (+ optional `idColumn`) | `201 { walkList }` — save a CSV saved search (`source: 'csv'`; `sourceMeta` records `idColumn` and `matchedViaZeros`). The page sends the column the preview matched on |
+| `POST /from-csv/preview` | `multipart`: `file` (CSV or `.xlsx`; the path predates Excel) (+ optional `idColumn`) | `{ idColumn, columns, sheetName, otherSheets, sampleIds, totalRows, idsInFile, spellings, noId, matched, matchedViaZeros, zeroMatchExample, householdCount, voterCount, noCoordinates, notFound, notFoundIds, ownedDoors, intakeDoors, ownedByEffort, sample }` — no save |
+| `POST /from-csv` | `multipart`: `file`, `name` (+ optional `idColumn`) | `201 { walkList }` — save an uploaded saved search (`source: 'csv'` for either format; `sourceMeta` records `fileName`, `idColumn` and `matchedViaZeros`). The page sends the column the preview matched on |
 | `GET /distinct` | — | filter-value pickers (genders, parties, precincts, …) |
 | `GET /:id/export.csv` | — | downloads the saved search's frozen voters as an **authenticated** CSV (`text/csv` + `Content-Disposition` attachment). Columns: **Voter ID, First Name, Last Name, Party, Age, Phone, Precinct, Address, City, State, ZIP**. |
 | `GET /:id` · `DELETE /:id` | — | fetch / delete a saved search (delete never touches door ownership) |
@@ -252,6 +282,8 @@ Mounted at `/admin/campaigns/:campaignId/walklists`, admin-only.
 Preview and save each upload the file (stateless re-parse, cheap) — the same two-call pattern the Early
 Voting page uses. Both go through `uploadIdList` (50 MB cap; a 413 `file-too-large` that says what to do
 — [EARLY_VOTING.md](EARLY_VOTING.md) §C), and the page refuses an oversized file as soon as it's picked.
+Every parse 400 is `{ error, code, columns, sheetName, otherSheets, headerRowHint }`, the same shape and
+codes as Early Voting's (EARLY_VOTING.md §C); until 2026-10-28 this route dropped the `code`.
 
 **Route order matters.** `GET /:id/export.csv` is registered **before** `GET /:id` so the literal
 `export.csv` segment isn't swallowed by the `:id` param route.
@@ -269,13 +301,16 @@ Voting page uses. Both go through `uploadIdList` (50 MB cap; a 413 `file-too-lar
   quotes); the download filename is the saved search name sanitized to `[A-Za-z0-9_-]`, capped at 60
   chars, defaulting to `walklist.csv`.
 - **Authenticated, not a public link.** It rides the same `requireAuth` + `orgContext` +
-  `requireOrgRole('admin')` chain as every other route here, scoped by `campaignId`. The client fetches
+  `requireCampaignManager` chain as every other route here (org admins and the campaign's team leads,
+  since the team-lead role, `edd2e59`, replaced `requireOrgRole('admin')`, which this line still named
+  until 2026-10-28; [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)'s export table already lists
+  *admin or lead*), scoped by `campaignId`. The client fetches
   it with the bearer token + `X-Org-Id` header and saves the blob — there's no shareable URL.
 
 ## D. How a saved search reaches a walk list (unchanged machinery)
 
 A saved search is just `householdIds`. Both seed and claim live in
-[efforts.js](../server/src/routes/admin/efforts.js) and treat a CSV saved search identically to a filter saved search:
+[efforts.js](../server/src/routes/admin/efforts.js) and treat an uploaded saved search identically to a filter saved search:
 
 - **Seed at create** (`POST /efforts`, `seedWalkListId`) — enqueues an Intake-only claim job (the
   same `claim` job the claim endpoint uses; response carries `claimJobId`).
@@ -284,17 +319,27 @@ A saved search is just `householdIds`. Both seed and claim live in
   affected/emptied) unless `force:true` (the re-carve), which **enqueues** the move as a background
   job — donor passes are snapshotted first (`reason:'move'`), locked while it runs, and the shrunk
   books rebuilt in bulk. **Disjointness is preserved by construction** — see [EFFORTS.md §B](EFFORTS.md).
+  Since 2026-10-28 a claim INTO an archived walk list is refused (409 `walk-list-archived`, and the job
+  re-checks its target before any move), while an archived walk list as the **donor** works as before —
+  its archived passes' books shrink, lock and snapshot like any donor's ([EFFORTS.md](EFFORTS.md) §I).
 
 ## E. Deliberate decisions / gotchas
 
-- **No sticky graduation for not-yet-imported IDs.** Unlike early voting's `VotedPendingId`, a CSV saved
-  search does **not** remember unmatched IDs to fold in later — that would mutate a saved search that is frozen by
+- **No sticky graduation for not-yet-imported IDs.** Unlike early voting's `VotedPendingId`, an uploaded
+  saved search does **not** remember unmatched IDs to fold in later — that would mutate a saved search that is frozen by
   design. Unmatched IDs are reported (`notFound`) and downloadable; voters imported later reach walk lists
   via **Intake**, the designed control point.
 - **Whole-door voter count.** `voterCount` counts *all* voters at the resolved doors, not just the
   matched ones — because claiming moves the whole door. The preview shows `matched` separately.
 - **Coordinate guard.** Matched doors without coordinates are excluded (reported as `noCoordinates`) so
   a saved search never holds uncuttable doors.
+- **A save that outlasts the router.** Heroku cuts a request at 30 seconds while the dyno keeps
+  working, so a save of a very large list can answer the browser with an error and still create the
+  saved search; saving again makes a second one. Nothing dedupes it; Part 1 and the Help Center say to
+  check the list before trying again.
+- **Fixed 2026-10-28: a refused file showed an empty column picker.** The page tested the 400's
+  `columns` for truthiness, so a refusal with `columns: []` drew an empty "pick a column" box and hid
+  its reason. It now goes through the shared `refusalView` like the other two Voter-ID pages.
 - **Import-generated revisit list (`source: 'import'`).** Not created via the walklists routes — the voter
   import pipeline makes it when `ImportJob.revisitNewVoters` is set: `collectRevisitHomes(importJob, campaign, counts)`
   ([services/import/collectRevisitHomes.js](../server/src/services/import/collectRevisitHomes.js)) takes the newly-
@@ -308,6 +353,6 @@ A saved search is just `householdIds`. Both seed and claim live in
 
 | File | Renders |
 |---|---|
-| [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | "Build a saved search" with a **Filter builder / Upload CSV** toggle (CSV: file → auto-preview with matched/doors/owned-doors warning/unmatched download → name + save), and the saved-searches column (with a "from CSV" badge). The filter builder embeds `AnswerFilters` for survey predicates; the survey-tag palette (`f.answerTagFilters` ↔ `tagValue`/`onTagChange`) and the per-saved-search **Download CSV** action (`exportCsv`, which fetches `…/export.csv` with the bearer token + `X-Org-Id` and saves the returned blob) live here. |
+| [client/src/pages/WalkListsPage.jsx](../client/src/pages/WalkListsPage.jsx) | "Build a saved search" with a **Filter builder \| Upload file** toggle (upload: a CSV or Excel file, `accept=".csv,.tsv,.txt,.xls,.xlsx"`, labelled **Voter-ID file (CSV or Excel)** → auto-preview with the tab note, matched/doors/owned-doors warning/unmatched download → name + save; the input is cleared after each pick so the same file re-runs, the chosen file shown under it; a refusal through `refusalView(error, { page: 'saved-searches' })`, and the column box's pre-chosen column from the newest uploaded saved search's `sourceMeta.idColumn`, via [lib/idListPreview.js](../client/src/lib/idListPreview.js)), and the saved-searches column (with an **uploaded** badge whose tooltip is the file name, else *Built from an uploaded Voter-ID list*). The filter builder embeds `AnswerFilters` for survey predicates; the survey-tag palette (`f.answerTagFilters` ↔ `tagValue`/`onTagChange`) and the per-saved-search **Download CSV** action (`exportCsv`, which fetches `…/export.csv` with the bearer token + `X-Org-Id` and saves the returned blob) live here. |
 | [client/src/components/AnswerFilters.jsx](../client/src/components/AnswerFilters.jsx) | The shared survey-answer picker. A **By tag** chip row (rendered when a tag palette is available and `onTagChange` is wired) toggles `answerTagFilters: [{ tag }]`, case-insensitively, **above** the per-question option rows. Also embedded by [TurfsPage.jsx](../client/src/pages/TurfsPage.jsx). |
-| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | "Seed door-set" + Claim dropdowns list every saved search (CSV ones tagged `· CSV`); the claim panel surfaces the `409 doors-owned` re-carve. |
+| [client/src/pages/EffortsPage.jsx](../client/src/pages/EffortsPage.jsx) | "Seed door-set" + Claim dropdowns list every saved search (uploaded ones tagged `· uploaded`; the create form's help says saved searches are *built from filters or an uploaded Voter-ID list*); the claim panel surfaces the `409 doors-owned` re-carve. |

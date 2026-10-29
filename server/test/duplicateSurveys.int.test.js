@@ -67,10 +67,14 @@ before(async () => {
     timeZone: 'America/Chicago',
   });
   const effort = await Effort.create({ organizationId: org._id, campaignId: camp._id, name: 'North' });
+  // One live pass per walk list: Rounds 1 and 2 ended as the next went live. The report reads only
+  // each response's round number and name, never the round's state.
+  const LIVE_AT = new Date('2026-06-09T12:00:00Z');
   const [p1, p2, p3] = await Promise.all([1, 2, 3].map((n) =>
     Pass.create({
       organizationId: org._id, campaignId: camp._id, effortId: effort._id, roundNumber: n,
-      name: `Round ${n}`, status: 'active', activatedAt: new Date('2026-06-09T12:00:00Z'),
+      name: `Round ${n}`, activatedAt: LIVE_AT,
+      ...(n < 3 ? { status: 'archived', archivedAt: LIVE_AT, archivedFrom: 'active', archivedVia: 'next-pass' } : { status: 'active' }),
     })
   ));
   const template = await SurveyTemplate.create({ organizationId: org._id, name: 'S', createdBy: admin._id, version: 1 });

@@ -105,6 +105,8 @@ On a campaign with more than one round, know that *still current* is decided que
 
 Most campaigns use one survey for everyone. When a group needs different questions, a **walk list can override the campaign default** with its own — set it on the Survey tab's coverage table or on the Walk Lists page. Each door gets the right questions automatically. See [Running more than one survey](multiple-surveys).
 
+An **archived** walk list's survey choice is locked (*Unarchive to change*) until you unarchive it: a phone that was offline could still be sending answers to that survey, and a changed survey would refuse them.
+
 ## Reading the results
 
 Each question gets its own card on the campaign's **Home** page, with one row per answer.

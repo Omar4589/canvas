@@ -224,11 +224,14 @@ const bucketFor = (status) => {
 // Doors that WILL be skipped (completed, already restricted) still ride along in markIds: the
 // server's own per-round classification is exact where ours can be stale, and under scope
 // 'unknocked' it needs the reached doors present to count them.
-export const planDoorSelection = (rows, { forRound = false, sendsPassId = forRound } = {}) => {
+// `frozenEffortIds` (a Set of walk-list ids): doors of an archived walk list — or of the archived pass a
+// page is scoped to — can't take a mark (the server refuses the WHOLE batch, 409 walk-list-archived /
+// pass-archived), so they're dropped here like Intake doors. Unmark is left alone: it stays allowed.
+export const planDoorSelection = (rows, { forRound = false, sendsPassId = forRound, frozenEffortIds = null } = {}) => {
   const list = rows || [];
   const markIds = [];
   const unmarkIds = [];
-  const cannotMarkReasons = { intake: 0, excluded: 0, doNotKnock: 0 };
+  const cannotMarkReasons = { intake: 0, archived: 0, excluded: 0, doNotKnock: 0 };
   let cannotMark = 0;
   let unknocked = 0;
   let reached = 0;
@@ -240,16 +243,18 @@ export const planDoorSelection = (rows, { forRound = false, sendsPassId = forRou
     const id = idOf(row);
     if (!id) continue;
     const intake = row.effortId === null;
+    const archived = !intake && !!frozenEffortIds?.has(String(row.effortId));
     const excluded = row.excludedFromTurf === true;
     const dnk = row.doNotKnock === true;
 
     if (!intake || sendsPassId) unmarkIds.push(id);
 
-    if (intake || excluded || dnk) {
+    if (intake || archived || excluded || dnk) {
       cannotMark += 1;
       // One door can trip more than one gate; name the first that applies, biggest first, so the
       // reasons sum to `cannotMark` and the popover's lines add up.
       if (intake) cannotMarkReasons.intake += 1;
+      else if (archived) cannotMarkReasons.archived += 1;
       else if (excluded) cannotMarkReasons.excluded += 1;
       else cannotMarkReasons.doNotKnock += 1;
       continue;

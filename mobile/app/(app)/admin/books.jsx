@@ -26,6 +26,7 @@ import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import EffortPicker from '../../../components/EffortPicker';
+import { openWalkLists } from '../../../lib/walkListOptions';
 import { radius, spacing } from '../../../lib/theme';
 import { useTheme } from '../../../lib/ThemeContext';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
@@ -157,15 +158,20 @@ export default function AdminBooks() {
     queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
     enabled: !!cId,
   });
+  // Assigning books is work, so archived walk lists are never offered here — not in the picker, not
+  // as the default pick below (report screens keep them, marked: lib/walkListOptions.js). The server
+  // refuses every book write on one anyway.
   const effortList = useMemo(
     () =>
-      (effortsQ.data?.efforts || []).map((e) => ({
+      openWalkLists(effortsQ.data?.efforts).map((e) => ({
         id: String(e._id),
         name: e.name,
         activeRound: e.activeRound || null,
       })),
     [effortsQ.data]
   );
+  // The campaign has walk lists, and every one is archived: one empty state, nothing to pick.
+  const allArchived = (effortsQ.data?.efforts || []).length > 0 && effortList.length === 0;
   const currentEffortId =
     effortId && effortList.some((e) => e.id === effortId)
       ? effortId
@@ -355,8 +361,18 @@ export default function AdminBooks() {
     qc.invalidateQueries({ queryKey: ['admin', 'efforts', cId] });
   };
   // Surface the server's own message (a paused org's writes 402 with friendly
-  // copy; api() exposes it as err.message) instead of silently reverting.
-  const onAssignError = (err) => setAssignError(err?.message || 'Could not update the assignment.');
+  // copy; api() exposes it as err.message) instead of silently reverting. A walk list or pass archived
+  // since this screen loaded (on the web, say) refuses every write with 409: refresh too, so the screen
+  // moves off it (archived walk lists aren't offered here) instead of failing on every tap until the
+  // admin leaves — the web's refreshAfterRefusal.
+  const onAssignError = (err) => {
+    setAssignError(err?.message || 'Could not update the assignment.');
+    if (err?.status === 409 && ['walk-list-archived', 'pass-archived'].includes(err?.data?.code)) {
+      qc.invalidateQueries({ queryKey: ['admin', 'efforts', cId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'turfs', cId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'turf-assignments', cId] });
+    }
+  };
   const assignMut = useMutation({
     mutationFn: ({ turfId, userId }) =>
       api(`/admin/campaigns/${cId}/turfs/${turfId}/assignments`, { method: 'POST', body: { userIds: [userId] } }),
@@ -1208,6 +1224,8 @@ export default function AdminBooks() {
           <Empty styles={styles}>Pick a campaign to manage book assignments.</Empty>
         ) : loading ? (
           <ActivityIndicator color={colors.brand} />
+        ) : allArchived ? (
+          <Empty styles={styles}>No open walk lists. Unarchive one on the web to assign books.</Empty>
         ) : !passId ? (
           <Empty styles={styles}>
             No active round for {currentEffort?.name || 'this walk list'}. Cut/activate a round on the web dashboard.

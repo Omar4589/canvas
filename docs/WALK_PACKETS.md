@@ -45,7 +45,8 @@ Three panes:
   walk list it belongs to, or a **saved search**. A campaign runs several walk lists at once and
   each has its own rounds, so a bare "Pass 3" wouldn't say which operation it belongs to.
   Rounds that aren't live are offered too and carry their status — printing a `draft` round is
-  the normal "print the night before launch" case. Below the dropdown sit **that round's books**;
+  the normal "print the night before launch" case. An archived round isn't offered, and nor is any
+  round of an **archived walk list** (since 2026-10-28): unarchive the walk list first. Below the dropdown sit **that round's books**;
   tick as many as you like and each becomes its own stapled packet — unless you set **Doors per
   packet**, which splits big books into several smaller ones (see below). A running total at the
   bottom shows packets, doors, and sheets, and warns before you cross the door limit rather than
@@ -331,7 +332,10 @@ Mounted at `/admin/campaigns/:campaignId/packets` in `routes/index.js`, after
 
 **`GET /sources`** → `{ cap, hasSurvey, rounds: [{ id, name, roundNumber, status, effortId, effortName, books: [{ id, name, doorCount, colorIndex, assignedTo, boundary, centroid }] }], walkLists: [{ id, name, doorCount, voterCount }] }`
 
-Published books on `active`/`draft` rounds only — a book on an archived round is not offered.
+Published books on `active`/`draft` rounds only — a book on an archived round is not offered, and
+since 2026-10-28 no round of an **archived walk list** is either (left out server-side in
+[packets.js](../server/src/routes/admin/packets.js): its drafts are frozen and it is read-only, so the
+studio, a work picker, doesn't offer it — report filters keep it).
 Draft rounds are deliberate: a pass cannot be activated until its books are published, so
 "print the night before launch" IS the draft-pass / published-books state. `doorCount` is the
 cut-time count, so the picker labels it as approximate; the live knockable count is resolved at
@@ -502,7 +506,7 @@ or after.
 
 The supported prep flow — new pass, draw or cut books, **Accept, never Activate** — leaves the
 live round untouched where it matters: book membership (`Turf.householdIds`), assignments,
-knock history, and everything a phone resolves. Only **Activate** archives a round.
+knock history, and everything a phone resolves. Of those steps, only **Activate** ends the live round.
 
 One thing does move: `Household.turfId` / `walkOrder` are a single global **mirror** that every
 cut re-points at itself, so cutting the draft moves the mirror off the live round's books. Two
@@ -525,9 +529,9 @@ its book's stored order; touches nothing on any other round.)
 
 ## Where the round choice lives
 
-`GET /sources` returns **published books on active AND draft rounds** — a pass cannot be
-activated until its books are published, so "print before launch" is exactly the
-draft-pass / published-books state. A round with no *published* books is filtered out of the
+`GET /sources` returns **published books on active AND draft rounds** of walk lists that aren't
+archived — a pass cannot be activated until its books are published, so "print before launch" is exactly
+the draft-pass / published-books state. A round with no *published* books is filtered out of the
 dropdown entirely: it can't be printed, so an option leading to an empty list would only look
 broken. That is the usual reason a freshly cut round seems missing — **Accept** its books.
 

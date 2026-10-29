@@ -396,11 +396,22 @@ test('11. client report: create, shape, publish, preview, share, tear down', { s
   expectOk(await asLead('GET', `/admin/client-reports/${rid}/preview/map`), 'preview map');
   expectOk(await asLead('POST', `/admin/client-reports/${rid}/take-down`), 'take down');
   expectOk(await asLead('POST', `/admin/client-reports/${rid}/put-back-up`), 'put back up');
-  const share = await asLead('POST', '/admin/client-reports/shares', { campaignId: String(ctx.A._id), label: 'Client' });
-  expectOk(share, 'mint share link');
-  assert.ok(share.json.generatedPassword, 'the minted password is returned once');
-  expectOk(await asLead('GET', `/admin/client-reports/shares?campaignId=${ctx.A._id}`), 'list shares');
-  expectOk(await asLead('DELETE', `/admin/client-reports/shares/${share.json.share.id}`), 'kill share');
+  // The report's own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2): made, its password shown again
+  // (the seal key set for these steps, so Doorline keeps it), changed everywhere, gone.
+  const savedKey = process.env.CREDENTIAL_SEAL_KEY;
+  process.env.CREDENTIAL_SEAL_KEY = Buffer.alloc(32, 4).toString('base64');
+  try {
+    const share = await asLead('POST', '/admin/client-reports/shares', { campaignId: String(ctx.A._id), reportId: rid, label: 'Client' });
+    expectOk(share, 'mint share link');
+    assert.ok(share.json.generatedPassword, 'the minted password is returned right away');
+    expectOk(await asLead('GET', `/admin/client-reports/shares?campaignId=${ctx.A._id}`), 'list shares');
+    expectOk(await asLead('GET', `/admin/client-reports/shares/${share.json.share.id}/password`), 'show its password');
+    expectOk(await asLead('PATCH', `/admin/client-reports/shares/${share.json.share.id}`, { generatePassword: true, alsoChanged: true }), 'change its password everywhere');
+    expectOk(await asLead('DELETE', `/admin/client-reports/shares/${share.json.share.id}`), 'kill share');
+  } finally {
+    if (savedKey === undefined) delete process.env.CREDENTIAL_SEAL_KEY;
+    else process.env.CREDENTIAL_SEAL_KEY = savedKey;
+  }
   expectOk(await asLead('POST', `/admin/client-reports/${rid}/unpublish`), 'unpublish');
   expectOk(await asLead('DELETE', `/admin/client-reports/${rid}`), 'delete report');
 });

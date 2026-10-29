@@ -82,9 +82,11 @@ before(async () => {
   Object.assign(ids, { org: oid(), campaign: oid(), door: oid(), pinDoor: oid(), u1: oid(), u2: oid(), u3: oid(), u4: oid(), u5: oid(), mover: oid() });
 
   await Household.collection.insertMany([
-    { _id: ids.door, organizationId: ids.org, campaignId: ids.campaign, addressLine1: '1 Audit Ave', city: 'Town', state: 'GA', zipCode: '30342', location: { type: 'Point', coordinates: [P.lng, P.lat] }, coordSource: 'import' },
+    // normalizedAddress as production requires it: unique per campaign, so two doors without one collide
+    // once the model's index exists (the test preload's build at connect made that the usual order).
+    { _id: ids.door, organizationId: ids.org, campaignId: ids.campaign, addressLine1: '1 Audit Ave', city: 'Town', state: 'GA', zipCode: '30342', normalizedAddress: '1 AUDIT AVE|TOWN|GA|30342', location: { type: 'Point', coordinates: [P.lng, P.lat] }, coordSource: 'import' },
     // Moved by a lead AFTER the knock in row F: the pin-downgrade path.
-    { _id: ids.pinDoor, organizationId: ids.org, campaignId: ids.campaign, addressLine1: '2 Audit Ave', city: 'Town', state: 'GA', zipCode: '30342', location: { type: 'Point', coordinates: [PIN_72.lng, PIN_72.lat] }, coordSource: 'corrected', correctedAt: new Date(NOW - 10 * 60 * 1000), correctedBy: ids.mover },
+    { _id: ids.pinDoor, organizationId: ids.org, campaignId: ids.campaign, addressLine1: '2 Audit Ave', city: 'Town', state: 'GA', zipCode: '30342', normalizedAddress: '2 AUDIT AVE|TOWN|GA|30342', location: { type: 'Point', coordinates: [PIN_72.lng, PIN_72.lat] }, coordSource: 'corrected', correctedAt: new Date(NOW - 10 * 60 * 1000), correctedBy: ids.mover },
   ]);
 
   const nearTime = new Date(RECENT.getTime() - 30 * 60 * 1000);

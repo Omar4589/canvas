@@ -12,6 +12,7 @@ tags: refresh, sync, field, books, assignment, door settings, outcome buttons, a
 The field app has two refresh speeds, and which one applies depends on what you changed:
 
 - **Live (within ~30 seconds):** a pin move, a door's status, a door dropping off because everyone there has voted — and a **voter-detail correction** (a fixed name, party, and so on), which reaches the field the same way. These patch onto the canvasser's map automatically. So do the campaign's **door settings** — an outcome button turned on or off, or a change to who can add a person at the door: the phone applies them on its own while the canvasser is on the map, and a canvasser who's on a door screen at that moment gets them once they're back on the map.
+- **Also live:** a pass going live or ending — including when its walk list is archived, or a pass is brought back. The phone notices on its next update (within ~30 seconds while the map is open, or when the canvasser next opens the app) and loads its books again on its own.
 - **Only on a full refresh:** a door's **book** (moving, merging, splitting, or adding a supplemental book) or **who's assigned** a book. These wait until the canvasser taps **Refresh** (↻) on their map, reopens/switches the campaign, or restarts the app.
 
 So if you reshuffle books or reassign people mid-shift, **tell them to tap Refresh** so the losing canvasser drops the door and the new one picks it up. Nothing is miscounted in the meantime — a door briefly visible in two places still bills once per pass.

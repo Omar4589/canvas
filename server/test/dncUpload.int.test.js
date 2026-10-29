@@ -28,6 +28,7 @@ const { DncPendingId } = await import('../src/models/DncPendingId.js');
 const { recomputeFullyDnc } = await import('../src/services/dnc/recomputeFullyDnc.js');
 const { reapplyDncLists } = await import('../src/services/dnc/reapplyDncLists.js');
 const { undoImport } = await import('../src/services/import/undoImport.js');
+const { workbook, sheetXml, is, row } = await import('./support/xlsxBuild.js');
 const { ID_LIST_MAX_BYTES, ID_LIST_TOO_LARGE } = await import('../src/middleware/idListUpload.js');
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -426,4 +427,67 @@ test('18. a file that reaches 50 MB is refused on both upload routes, says what 
     assert.deepStrictEqual(r.json, { error: ID_LIST_TOO_LARGE, code: 'file-too-large' }, path);
   }
   assert.strictEqual(await DncUpload.countDocuments(), uploads);
+});
+
+// ── Excel (.xlsx) lists — docs/PROPOSAL_ID_LIST_EXCEL.md. Their own state, so nothing above is touched.
+test('19. an Excel do-not-contact list previews and flags like a CSV, inside the declared state; refusals are coded', { skip }, async () => {
+  const nv = await Campaign.create({ organizationId: ctx.org._id, name: 'Camp NV', type: 'survey', state: 'NV', isActive: true });
+  const [d1, d2] = await Household.insertMany([hh(ctx.org._id, nv._id, { state: 'NV' }), hh(ctx.org._id, nv._id, { state: 'NV' })]);
+  await Voter.insertMany([voter(ctx.org._id, nv._id, d1._id, 'NV-1', 'Nia'), voter(ctx.org._id, nv._id, d2._id, 'NV-2', 'Ned')]);
+  const xlsx = (hiddenRow = null) =>
+    workbook({
+      sheets: [
+        {
+          name: 'List',
+          xml: sheetXml(
+            ['Voter ID', 'NV-1', 'NV-2', 'NV-NOPE'].map((v, i) => row(i + 1, [is(`A${i + 1}`, v)], hiddenRow === i + 1 ? 'hidden="1"' : '')).join('')
+          ),
+        },
+        { name: 'Notes', xml: sheetXml('') },
+      ],
+    });
+  const send = async (path, buf, fields) => {
+    const fd = new FormData();
+    fd.append('file', new Blob([buf]), 'dnc.xlsx');
+    for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+    const res = await fetch(`${base}/api${path}`, { method: 'POST', headers: { Authorization: `Bearer ${ctx.adminTok}`, 'X-Org-Id': String(ctx.org._id) }, body: fd });
+    return { status: res.status, json: await res.json() };
+  };
+  const pv = await send('/admin/dnc/preview', await xlsx(), { state: 'NV' });
+  assert.strictEqual(pv.status, 200, JSON.stringify(pv.json));
+  assert.strictEqual(pv.json.matched, 2);
+  assert.strictEqual(pv.json.willFlag, 2);
+  assert.strictEqual(pv.json.notFound, 1);
+  assert.strictEqual(pv.json.sheetName, 'List');
+  assert.deepStrictEqual(pv.json.otherSheets, ['Notes']);
+
+  const ap = await send('/admin/dnc/import', await xlsx(), { state: 'NV', idColumn: pv.json.idColumn });
+  assert.strictEqual(ap.status, 200, JSON.stringify(ap.json));
+  assert.strictEqual(await Voter.countDocuments({ campaignId: nv._id, 'doNotContact.flagged': true }), 2);
+  const upl = await DncUpload.findOne({ fileName: 'dnc.xlsx' }).lean();
+  assert.strictEqual(upl.idColumn, 'Voter ID');
+
+  const hidden = await send('/admin/dnc/preview', await xlsx(3), { state: 'NV' });
+  assert.strictEqual(hidden.status, 400);
+  assert.strictEqual(hidden.json.code, 'hidden-rows');
+  assert.deepStrictEqual(hidden.json.columns, []);
+  assert.strictEqual(hidden.json.sheetName, 'List');
+  assert.ok(Array.isArray(hidden.json.states) && hidden.json.states.includes('NV'), 'the state picker list rides along');
+
+  // The state rule holds for a workbook: Georgia's 55555 (Gus) is reported outside Nevada, never flagged.
+  const mixed = await workbook({ sheets: [{ name: 'List', xml: sheetXml(['Voter ID', 'NV-1', '55555'].map((v, i) => row(i + 1, [is(`A${i + 1}`, v)])).join('')) }] });
+  const mixedPv = await send('/admin/dnc/preview', mixed, { state: 'NV' });
+  assert.strictEqual(mixedPv.status, 200, JSON.stringify(mixedPv.json));
+  assert.strictEqual(mixedPv.json.outsideState.count, 1);
+  assert.deepStrictEqual(mixedPv.json.outsideState.samples[0].states, ['GA']);
+
+  // No Voter ID column: the code-less 400 with the column list, the tab and the states.
+  const noColumn = await workbook({ sheets: [{ name: 'List', xml: sheetXml(['SOSID', 'NV-1'].map((v, i) => row(i + 1, [is(`A${i + 1}`, v)])).join('')) }, { name: 'Notes', xml: sheetXml('') }] });
+  const nc = await send('/admin/dnc/preview', noColumn, { state: 'NV' });
+  assert.strictEqual(nc.status, 400);
+  assert.strictEqual(nc.json.code, null);
+  assert.deepStrictEqual(nc.json.columns, ['SOSID']);
+  assert.strictEqual(nc.json.sheetName, 'List');
+  assert.deepStrictEqual(nc.json.otherSheets, ['Notes']);
+  assert.strictEqual(nc.json.headerRowHint, null);
 });

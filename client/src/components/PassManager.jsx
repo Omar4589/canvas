@@ -2,13 +2,30 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import StatCard from './StatCard.jsx';
+import { useCampaignSelection } from './CampaignSelector.jsx';
 import { Card, Badge, Button, Input, Modal } from './ui';
+import {
+  ArchivePassDialog,
+  ArchiveWalkListDialog,
+  BringBackPassDialog,
+  UnarchiveWalkListDialog,
+  invalidateLifecycle,
+  isTemporaryError,
+  noticeText,
+  refreshAfterRefusal,
+} from './walkListLifecycle';
 import { formatInTz } from '../lib/datetime.js';
 import { ratePct } from '../lib/rates.js';
+import { archivedPassDetail, walkListActions } from '../lib/walkListState.js';
+import { passShortLabel } from '../lib/walkListOptions.js';
 
 // Effort-scoped pass management, shared by the full-page PassesPage wrapper
 // (variant="full") and the Walk Lists drawer (variant="compact"). The effort is
 // fixed by the caller — there is no walk-list picker here.
+//
+// An archived pass shows how it ended and, while it can, Bring back
+// (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.2). An archived walk list — or campaign — makes every pass
+// view-only: no New pass, Activate, Archive, Delete or Bring back.
 
 const STATUS_VARIANT = { draft: 'neutral', active: 'success', archived: 'neutral' };
 
@@ -79,7 +96,7 @@ function Avatars({ users = [] }) {
 // Activate a pass, but guard the silent dead-end: a pass with published books but
 // ZERO canvasser assignments activates fine yet shows the field nothing. Warn
 // (non-blocking) when that's the case; "Activate anyway" proceeds.
-function ActivateButton({ campaignId, pass, onActivate }) {
+function ActivateButton({ campaignId, pass, onActivate, pending = false }) {
   const [confirm, setConfirm] = useState(false);
   const asgQ = useQuery({
     queryKey: ['turf-pass-assignments', campaignId, pass._id],
@@ -88,14 +105,17 @@ function ActivateButton({ campaignId, pass, onActivate }) {
   });
   const assignmentCount = (asgQ.data?.assignments || []).length;
 
+  // A second click while the first is on its way would meet the walk list's lifecycle lock and read
+  // "someone else is changing this walk list" while the pass goes live — so it's ignored.
   function click() {
+    if (pending) return;
     if (asgQ.isSuccess && assignmentCount === 0) setConfirm(true);
     else onActivate();
   }
 
   return (
     <>
-      <button onClick={click} className="text-xs font-semibold text-success hover:underline">
+      <button onClick={click} disabled={pending} className="text-xs font-semibold text-success hover:underline disabled:opacity-60">
         Activate
       </button>
       {confirm && (
@@ -121,7 +141,9 @@ function ActivateButton({ campaignId, pass, onActivate }) {
   );
 }
 
-function PassDetail({ campaignId, pass, tz }) {
+// viewOnly: an archived pass, or any pass of an archived walk list or campaign — Turf Cutting shows
+// its books as they were, so the links say View, never Cut.
+function PassDetail({ campaignId, pass, tz, viewOnly = false }) {
   const turfsQ = useQuery({
     queryKey: ['turfs', campaignId, pass._id],
     queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${pass._id}`),
@@ -147,15 +169,23 @@ function PassDetail({ campaignId, pass, tz }) {
         {pass.activatedAt && (
           <span>Activated {formatInTz(pass.activatedAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false)}</span>
         )}
-        <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut / assign books →</a>
+        <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">
+          {viewOnly ? 'View books →' : 'Cut / assign books →'}
+        </a>
         <a href={`/campaigns/${campaignId}/map?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Audit →</a>
       </div>
       {turfsQ.isLoading ? (
         <div className="text-xs text-fg-muted">Loading books…</div>
       ) : !turfs.length ? (
         <div className="text-xs text-fg-muted">
-          No books cut yet.{' '}
-          <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut books →</a>
+          {viewOnly ? (
+            'No books were cut for this pass.'
+          ) : (
+            <>
+              No books cut yet.{' '}
+              <a href={`/campaigns/${campaignId}/turfs?passId=${pass._id}`} className="font-medium text-brand-accent hover:underline">Cut books →</a>
+            </>
+          )}
         </div>
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-md border border-border bg-card">
@@ -182,43 +212,89 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
   const compact = variant === 'compact';
   const [name, setName] = useState('');
   const [openId, setOpenId] = useState(null);
-  const [archiveTarget, setArchiveTarget] = useState(null); // pass pending archive-confirm
-  const [archiveText, setArchiveText] = useState('');
+  // The open box: { kind: 'archive' | 'bring-back', passId } for a pass, or { kind: 'unarchive' | 'end' }
+  // for the walk list.
+  const [dialog, setDialog] = useState(null);
+  // The line left after archiving or bringing back a pass, with its Undo (lifecycleCopy.noticeText).
+  const [notice, setNotice] = useState(null);
 
   const passesQ = useQuery({
     queryKey: ['admin', 'passes', campaignId, effortId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/passes?effortId=${effortId}`),
     enabled: !!campaignId && !!effortId,
+    // A row whose Bring back is held for a moment ("Try again in a minute": a book operation holds the
+    // pass) checks again on its own, so the button comes back without a reload.
+    refetchInterval: (query) => ((query.state.data?.passes || []).some((p) => p.bringBack?.temporary) ? 30_000 : false),
   });
   const passes = passesQ.data?.passes || [];
+  // The walk list and the campaign come from the caches both callers already hold.
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+  });
+  const effort = (effortsQ.data?.efforts || []).find((e) => String(e._id) === String(effortId)) || null;
+  const { selected } = useCampaignSelection(campaignId);
+  const campaignArchived = selected?.isActive === false;
+  const walkListArchived = effort?.status === 'archived';
+  const readOnly = campaignArchived || walkListArchived;
+  // An archived walk list whose pass is still live — archived before this change, until the one-time
+  // check runs — offers "End Pass 3" beside Unarchive, as its Walk Lists row does.
+  const endPassLabel = walkListActions(effort, { campaignArchived }).endPass;
 
   const totalBooks = useMemo(() => passes.reduce((s, p) => s + (p.turfCount || 0), 0), [passes]);
   const activePass = passes.find((p) => p.status === 'active');
   const nextNumber = useMemo(() => passes.reduce((m, p) => Math.max(m, p.roundNumber || 0), 0) + 1, [passes]);
+  const formatDay = (iso) => formatInTz(iso, tz, { month: 'short', day: 'numeric' }, false);
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['admin', 'passes', campaignId] });
-    qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
-    qc.invalidateQueries({ queryKey: ['admin', 'setup-status', campaignId] });
-    qc.invalidateQueries({ queryKey: ['campaign-rollup'] });
-  };
+  const invalidate = () => invalidateLifecycle(qc, campaignId);
+  // A 409 means this page may be behind (someone archived the walk list, the pass or the campaign):
+  // refetch, and show the server's sentence.
+  const onRefusal = (err) => refreshAfterRefusal(qc, campaignId, err);
 
   const create = useMutation({
     mutationFn: () => api(`/admin/campaigns/${campaignId}/passes`, { method: 'POST', body: { name, effortId } }),
     onSuccess: () => { setName(''); invalidate(); },
+    onError: onRefusal,
   });
   const action = useMutation({
     mutationFn: ({ id, op }) => api(`/admin/campaigns/${campaignId}/passes/${id}/${op}`, { method: 'POST' }),
     onSuccess: invalidate,
-  });
-  const archive = useMutation({
-    mutationFn: (id) => api(`/admin/campaigns/${campaignId}/passes/${id}/archive`, { method: 'POST', body: { confirmArchive: true } }),
-    onSuccess: () => { setArchiveTarget(null); setArchiveText(''); invalidate(); },
+    onError: onRefusal,
   });
   const del = useMutation({
     mutationFn: (id) => api(`/admin/campaigns/${campaignId}/passes/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+    onError: onRefusal,
   });
+  // Undo for the line after: an archive is undone by Bring back, a bring back by archiving again (its
+  // box was just confirmed, so the flag is sent as-is).
+  const undo = useMutation({
+    mutationFn: (n) =>
+      n.kind === 'pass-archived'
+        ? api(`/admin/campaigns/${campaignId}/passes/${n.pass._id}/bring-back`, { method: 'POST', body: {} })
+        : api(`/admin/campaigns/${campaignId}/passes/${n.pass._id}/archive`, { method: 'POST', body: { confirmArchive: true } }),
+    onSuccess: (res, n) => {
+      invalidate();
+      setNotice(
+        n.kind === 'pass-archived'
+          ? { kind: 'pass-back', pass: n.pass, to: res?.to || null, downgraded: res?.downgraded || null }
+          : { kind: 'pass-archived', pass: n.pass }
+      );
+    },
+    onError: onRefusal,
+  });
+  const noticeLine = notice ? noticeText(notice) : null;
+  // A refused Undo says why on its own line, and a permanent refusal (say a newer pass went live since)
+  // takes the link away — it could never work (code review round 2).
+  const undoRefused = undo.error?.status === 409 && !isTemporaryError(undo.error);
+  const passRef = (p) => ({ _id: p._id, roundNumber: p.roundNumber, name: p.name });
+  // The box reads the row as it is NOW: a refetch after a refusal updates what it says.
+  const dialogPass = dialog?.passId ? passes.find((p) => String(p._id) === String(dialog.passId)) || null : null;
+  const openDialog = (next) => {
+    undo.reset();
+    setDialog(next);
+  };
 
   // Lit-drop campaigns knock to drop literature, not to survey — same column, different unit.
   const isLitDrop = campaignType === 'lit_drop';
@@ -239,7 +315,41 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
         </div>
       )}
 
-      {compact ? (
+      {campaignArchived ? (
+        // The Walk Lists page carries the campaign's own banner above its drawers.
+        !compact && (
+          <div className="mb-6 rounded-md border border-border bg-sunken px-3 py-2 text-sm text-fg-muted">
+            This campaign is archived, so its passes are read-only. Reactivate it on the Campaigns page to make changes.
+          </div>
+        )
+      ) : walkListArchived ? (
+        compact ? (
+          // The drawer above already offers Unarchive; one button per view.
+          <p className="mb-3 text-xs text-fg-muted">Passes are view only while {effort.name} is archived.</p>
+        ) : (
+          <div
+            className={`mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border px-4 py-2.5 text-sm ${
+              endPassLabel ? 'border-warning/30 bg-warning-tint text-warning-fg' : 'border-border bg-sunken text-fg-muted'
+            }`}
+          >
+            <span className="min-w-0">
+              {endPassLabel
+                ? `${effort.name} is archived, but ${passShortLabel(effort.activeRound)} is still live. Its other passes are view only.`
+                : `${effort.name} is archived, so its passes are view only. Their history stays in every report.`}
+            </span>
+            <span className="flex shrink-0 flex-wrap gap-2">
+              {endPassLabel && (
+                <Button variant="secondary" size="sm" onClick={() => openDialog({ kind: 'end' })}>
+                  {endPassLabel}
+                </Button>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => openDialog({ kind: 'unarchive' })}>
+                Unarchive {effort.name}
+              </Button>
+            </span>
+          </div>
+        )
+      ) : compact ? (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Input
             value={name}
@@ -266,9 +376,34 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
           </div>
           {create.error && <div className="mt-2 text-xs text-danger">{create.error.message}</div>}
           <p className="mt-2 text-xs text-fg-muted">
-            A new pass numbers itself (leave the name blank for “Pass {nextNumber}”). Create a pass → cut its books on the Turf Cutting page → Activate it here. Passes are one-way (draft → active → archived); each walk list can have one active pass.
+            A new pass numbers itself (leave the name blank for “Pass {nextNumber}”). Create a pass → cut its books on the Turf Cutting page → Activate it here. Each walk list has one live pass at a time; activating the next pass ends the current one. An archived pass can be brought back until a newer pass on its walk list goes live.
           </p>
         </Card>
+      )}
+
+      {noticeLine && (
+        <div role="status" className={`mb-2 flex items-start gap-3 text-xs ${noticeLine.tone === 'warning' ? 'text-warning-fg' : 'text-success-fg'}`}>
+          <span className="flex-1">
+            {noticeLine.text}
+            {noticeLine.undo && !readOnly && !undoRefused && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => undo.mutate(notice)}
+                  disabled={undo.isPending}
+                  className="font-semibold underline disabled:opacity-60"
+                >
+                  {undo.isPending ? 'Undoing…' : 'Undo'}
+                </button>
+              </>
+            )}
+            {undo.error && <span className="ml-1 text-danger">{undo.error.message}</span>}
+          </span>
+          <button type="button" onClick={() => setNotice(null)} className="shrink-0 font-semibold hover:opacity-70" aria-label="Dismiss">
+            ×
+          </button>
+        </div>
       )}
 
       <Card className="overflow-hidden">
@@ -290,6 +425,7 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
           <tbody>
             {passes.map((p) => {
               const open = openId === p._id;
+              const endedDetail = p.status === 'archived' ? archivedPassDetail(p, { formatDate: formatDay, effortName: effort?.name }) : '';
               return (
                 <Fragment key={p._id}>
                   <tr
@@ -307,7 +443,21 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
                       )}
                     </td>
                     <td className="px-4 py-2">
-                      <Badge variant={STATUS_VARIANT[p.status] || 'neutral'} className="capitalize">{p.status}</Badge>
+                      {p.status === 'archived' ? (
+                        // "Archived · Oct 27 by Ada · by hand", then why it can't come back when it can't. An
+                        // archived walk list's banner already says why none of its passes can.
+                        <div className="flex flex-col items-start gap-0.5">
+                          <span className="inline-flex flex-wrap items-center gap-x-1.5">
+                            <Badge variant={STATUS_VARIANT.archived}>Archived</Badge>
+                            {endedDetail && <span className="text-xs text-fg-muted">{endedDetail}</span>}
+                          </span>
+                          {!readOnly && p.bringBack && !p.bringBack.ok && p.bringBackMessage && (
+                            <span className="text-[11px] text-fg-subtle">{p.bringBackMessage}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <Badge variant={STATUS_VARIANT[p.status] || 'neutral'} className="capitalize">{p.status}</Badge>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{p.turfCount}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-fg">{(p.knockCount || 0).toLocaleString()}</td>
@@ -320,23 +470,32 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
                       {p.createdAt ? formatInTz(p.createdAt, tz, { month: 'short', day: 'numeric', year: 'numeric' }, false) : '—'}
                     </td>
                     <td className="space-x-2 px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                      {p.status === 'draft' && (
+                      {!readOnly && p.status === 'draft' && (
                         <ActivateButton
                           campaignId={campaignId}
                           pass={p}
                           onActivate={() => action.mutate({ id: p._id, op: 'activate' })}
+                          pending={action.isPending}
                         />
                       )}
                       {/* A draft can hold knocks (a discard that kept them, a restored snapshot): the server
                           refuses to delete it — its history stays — so it offers Archive instead. */}
-                      {(p.status === 'active' || (p.status === 'draft' && p.knockCount > 0)) && (
-                        <button onClick={() => { setArchiveText(''); setArchiveTarget(p); }} className="text-xs text-fg-muted hover:underline">
+                      {!readOnly && (p.status === 'active' || (p.status === 'draft' && p.knockCount > 0)) && (
+                        <button onClick={() => openDialog({ kind: 'archive', passId: p._id })} className="text-xs text-fg-muted hover:underline">
                           Archive
                         </button>
                       )}
-                      {p.status === 'draft' && !(p.knockCount > 0) && (
+                      {!readOnly && p.status === 'draft' && !(p.knockCount > 0) && (
                         <button onClick={() => del.mutate(p._id)} className="text-xs text-danger hover:underline">
                           Delete
+                        </button>
+                      )}
+                      {!readOnly && p.status === 'archived' && p.bringBack?.ok && (
+                        <button
+                          onClick={() => openDialog({ kind: 'bring-back', passId: p._id })}
+                          className="text-xs font-semibold text-brand-accent hover:underline"
+                        >
+                          Bring back
                         </button>
                       )}
                     </td>
@@ -344,7 +503,7 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
                   {open && (
                     <tr className="border-t border-border bg-sunken/50">
                       <td colSpan={colSpan} className="px-4 py-3">
-                        <PassDetail campaignId={campaignId} pass={p} tz={tz} />
+                        <PassDetail campaignId={campaignId} pass={p} tz={tz} viewOnly={readOnly || p.status === 'archived'} />
                       </td>
                     </tr>
                   )}
@@ -359,51 +518,61 @@ export default function PassManager({ campaignId, effortId, tz, variant = 'full'
           </tbody>
         </table>
       </Card>
+      {/* Activate's refusals (pass-archived, another-pass-live, walk-list-archived…) are the server's sentence. */}
       {action.error && <div className="mt-2 text-sm text-danger">{action.error.message}</div>}
       {del.error && <div className="mt-2 text-sm text-danger">{del.error.message}</div>}
 
-      {archiveTarget && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-overlay/40 p-4" onClick={() => setArchiveTarget(null)}>
-          <div className="w-full max-w-md rounded-lg bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-fg">
-              Archive Pass {archiveTarget.roundNumber} — {archiveTarget.name}?
-            </h3>
-            <p className="mt-2 text-sm text-fg-muted">
-              Archiving is <strong>one-way</strong> — a pass can't be reopened, and canvassers lose it in the field.
-              <strong> Knock history is kept</strong> (add a new pass to keep going).
-            </p>
-            {archiveTarget.knockCount > 0 && (
-              <div className="mt-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
-                {archiveTarget.knockCount.toLocaleString()} knock{archiveTarget.knockCount === 1 ? '' : 's'} already recorded in this pass.
-              </div>
-            )}
-            {archiveTarget.knockCount > 0 && (
-              <label className="mt-3 block text-sm">
-                <span className="mb-1 block text-xs font-medium text-fg-muted">Type <strong>archive</strong> to confirm</span>
-                <input
-                  value={archiveText}
-                  onChange={(e) => setArchiveText(e.target.value)}
-                  autoFocus
-                  placeholder="archive"
-                  className="w-full rounded border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-danger focus:outline-none"
-                />
-              </label>
-            )}
-            {archive.error && <div className="mt-2 text-xs text-danger">{archive.error.message}</div>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setArchiveTarget(null)} disabled={archive.isPending} className="rounded px-3 py-1.5 text-sm text-fg-muted hover:bg-sunken">
-                Cancel
-              </button>
-              <button
-                onClick={() => archive.mutate(archiveTarget._id)}
-                disabled={archive.isPending || (archiveTarget.knockCount > 0 && archiveText.trim().toLowerCase() !== 'archive')}
-                className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-              >
-                {archive.isPending ? 'Archiving…' : 'Archive pass'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {dialog?.kind === 'archive' && dialogPass && (
+        <ArchivePassDialog
+          campaignId={campaignId}
+          pass={dialogPass}
+          effortName={effort?.name}
+          onClose={() => setDialog(null)}
+          onDone={() => {
+            setDialog(null);
+            setNotice({ kind: 'pass-archived', pass: passRef(dialogPass) });
+          }}
+        />
+      )}
+      {dialog?.kind === 'bring-back' && dialogPass && (
+        <BringBackPassDialog
+          campaignId={campaignId}
+          pass={dialogPass}
+          effortName={effort?.name}
+          onClose={() => setDialog(null)}
+          onDone={(res) => {
+            setDialog(null);
+            setNotice({ kind: 'pass-back', pass: passRef(dialogPass), to: res?.to || null, downgraded: res?.downgraded || null });
+          }}
+        />
+      )}
+      {dialog?.kind === 'unarchive' && effort && (
+        <UnarchiveWalkListDialog
+          campaignId={campaignId}
+          effort={effort}
+          onClose={() => setDialog(null)}
+          onDone={(res) => {
+            setDialog(null);
+            setNotice({
+              kind: 'walk-list-unarchived',
+              name: effort.name,
+              pass: res?.endedPass || null,
+              to: res?.to || null,
+              bringBackError: res?.bringBackError || null,
+            });
+          }}
+        />
+      )}
+      {dialog?.kind === 'end' && effort && (
+        <ArchiveWalkListDialog
+          campaignId={campaignId}
+          effort={effort}
+          onClose={() => setDialog(null)}
+          onDone={(res) => {
+            setDialog(null);
+            setNotice({ kind: 'pass-ended', name: effort.name, pass: res?.endedPass || null });
+          }}
+        />
       )}
     </div>
   );

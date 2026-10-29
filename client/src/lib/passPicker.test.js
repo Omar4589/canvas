@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickDefaultPass, groupPassesByEffortStatus } from './passPicker.js';
+import { pickDefaultPass, groupPassesByState, passPickerLabel, passState } from './passPicker.js';
 
 // NOTE THE DEFAULT. Effort.status defaults to 'active' in the model, so in real data virtually
 // every walk list is 'active' regardless of whether anyone is walking it. These fixtures mirror
@@ -112,36 +112,148 @@ test('degenerate inputs do not throw', () => {
   assert.equal(pickDefaultPass({ passes: [pass('p', 'gone')], efforts: [] })._id, 'p');
 });
 
-test('grouping uses the same tiers as the ranking, keeps every pass, drops empty groups', () => {
-  const efforts = [effort('e-run', '01'), effort('e-arch', '01', 'archived')];
+// ── The dropdown: grouped by what each pass IS (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3) ──
+
+const named = (id, name, status = 'active') => ({ _id: id, name, status, createdAt: '2026-08-01T00:00:00Z' });
+const round = (id, effortId, roundNumber, status = 'draft', name = `Pass ${roundNumber}`) => ({
+  _id: id,
+  effortId,
+  roundNumber,
+  name,
+  status,
+  turfCount: 3,
+  createdAt: '2026-08-01T00:00:00Z',
+});
+const ids = (group) => group.options.map((o) => o.value);
+const labels = (group) => group.options.map((o) => o.label);
+const groupOf = (groups, key) => groups.find((g) => g.key === key);
+
+test('grouping: Live, Drafts, Archived by the pass itself, and every pass of an archived walk list is Archived', () => {
+  const efforts = [named('e-north', 'North'), named('e-west', 'West', 'archived')];
   const passes = [
-    pass('p-run', 'e-run', { status: 'active' }),
-    pass('p-arch', 'e-arch'),
-    pass('p-orphan', 'gone'),
+    round('n1', 'e-north', 1, 'archived'), // ended by Pass 2 — an archived pass of a RUNNING walk list
+    round('n2', 'e-north', 2, 'active'),
+    round('n3', 'e-north', 3, 'draft'),
+    round('w1', 'e-west', 1, 'archived'),
+    round('w2', 'e-west', 2, 'draft'), // a frozen draft of an archived walk list
+    round('orphan', 'gone', 1, 'draft'),
   ];
-  const groups = groupPassesByEffortStatus({ passes, efforts });
+  const groups = groupPassesByState({ passes, efforts });
 
-  assert.deepEqual(groups.map((g) => g.key), ['running', 'idle', 'archived']);
-  assert.deepEqual(groups[0].passes.map((p) => p._id), ['p-run']);
-  assert.deepEqual(groups[1].passes.map((p) => p._id), ['p-orphan'], 'an orphan is idle, not hidden');
-  assert.deepEqual(groups[2].passes.map((p) => p._id), ['p-arch']);
+  assert.deepEqual(groups.map((g) => g.key), ['live', 'drafts', 'archived']);
+  assert.deepEqual(groups.map((g) => g.label), ['Live', 'Drafts', 'Archived']);
+  assert.deepEqual(ids(groupOf(groups, 'live')), ['n2']);
+  // The old grouping put North's ended Pass 1 under "Active round" and an orphan under "Not started".
+  assert.deepEqual(ids(groupOf(groups, 'drafts')), ['n3', 'orphan'], 'an orphan goes by its own status, never hidden');
+  assert.deepEqual(ids(groupOf(groups, 'archived')), ['n1', 'w1', 'w2']);
 
-  const total = groups.reduce((n, g) => n + g.passes.length, 0);
+  const total = groups.reduce((n, g) => n + g.options.length, 0);
   assert.equal(total, passes.length, 'grouping never loses a pass');
 });
 
-test('the chosen default is always inside the FIRST non-empty group', () => {
-  // Guards the ranking and the grouping against drifting apart.
-  const efforts = [effort('e-run', '03'), effort('e-idle', '09'), effort('e-arch', '01', 'archived')];
+test('grouping: a running walk list keeps its live pass under Live — not under Archived like the old tiers', () => {
+  // The old tiers sorted by the WALK LIST: a live pass of a list with an archived Effort.status went
+  // under "Archived", and an ended pass of a running list under "Active round".
+  const efforts = [named('e', 'Main')];
+  const passes = [round('p1', 'e', 1, 'archived'), round('p2', 'e', 2, 'active')];
+  const groups = groupPassesByState({ passes, efforts });
+  assert.deepEqual(ids(groupOf(groups, 'live')), ['p2']);
+  assert.deepEqual(ids(groupOf(groups, 'archived')), ['p1']);
+});
+
+test('labels: walk list · Pass N · name, skipping a name that only repeats "Pass N", marked on an archived walk list', () => {
+  const efforts = [named('e-north', 'North'), named('e-west', 'West', 'archived')];
   const passes = [
-    pass('p-idle-uncut', 'e-idle', { turfCount: 0, day: '09' }),
-    pass('p-run-cut', 'e-run', { status: 'active', turfCount: 6 }),
-    pass('p-arch', 'e-arch', { turfCount: 0 }),
+    round('n2', 'e-north', 2, 'archived'), // auto-named "Pass 2"
+    round('n3', 'e-north', 3, 'active', 'GOTV'),
+    round('w1', 'e-west', 1, 'archived'),
+    round('w2', 'e-west', 2, 'draft'),
+    round('w3', 'e-west', 3, 'active'), // still live: an archive from before the one-time repair
   ];
-  const chosen = pickDefaultPass({ passes, efforts });
-  const first = groupPassesByEffortStatus({ passes, efforts })[0];
-  assert.ok(
-    first.passes.some((p) => p._id === chosen._id),
-    `default ${chosen._id} should sit in the first group (${first.key})`
-  );
+  const groups = groupPassesByState({ passes, efforts });
+  assert.deepEqual(labels(groupOf(groups, 'live')), ['North · Pass 3 · GOTV']);
+  assert.deepEqual(labels(groupOf(groups, 'archived')), [
+    'North · Pass 2', // an archived pass of an open walk list: the heading says it all
+    'West · Pass 1 · walk list archived',
+    'West · Pass 2 (draft) · walk list archived',
+    'West · Pass 3 (still live) · walk list archived',
+  ]);
+  // A pass whose walk list is missing still gets a readable label.
+  assert.equal(passPickerLabel(round('o', 'gone', 4), null), 'Walk list · Pass 4');
+});
+
+test('sorting: by walk list name, then round number, within each group', () => {
+  const efforts = [named('e-s', 'South'), named('e-c', 'Central'), named('e-p10', 'Precinct 10'), named('e-p2', 'Precinct 2')];
+  const passes = [
+    round('s3', 'e-s', 3),
+    round('c1', 'e-c', 1),
+    round('s1', 'e-s', 1),
+    round('p10', 'e-p10', 1),
+    round('p2', 'e-p2', 1),
+  ];
+  const drafts = groupOf(groupPassesByState({ passes, efforts }), 'drafts');
+  assert.deepEqual(labels(drafts), [
+    'Central · Pass 1',
+    'Precinct 2 · Pass 1', // numeric: "Precinct 2" before "Precinct 10"
+    'Precinct 10 · Pass 1',
+    'South · Pass 1',
+    'South · Pass 3',
+  ]);
+});
+
+test('sorting: two walk lists with the same name keep their passes apart', () => {
+  const efforts = [named('e-a', 'Main'), named('e-b', 'Main')];
+  const passes = [round('b1', 'e-b', 1), round('a2', 'e-a', 2), round('b2', 'e-b', 2), round('a1', 'e-a', 1)];
+  assert.deepEqual(ids(groupOf(groupPassesByState({ passes, efforts }), 'drafts')), ['a1', 'a2', 'b1', 'b2']);
+});
+
+test('passState: own status, overridden by an archived walk list', () => {
+  const open = named('e', 'North');
+  const archived = named('e', 'North', 'archived');
+  assert.equal(passState({ status: 'active' }, open), 'live');
+  assert.equal(passState({ status: 'draft' }, open), 'drafts');
+  assert.equal(passState({ status: 'archived' }, open), 'archived');
+  assert.equal(passState({ status: 'draft' }, archived), 'archived');
+  assert.equal(passState({ status: 'active' }, archived), 'archived');
+  assert.equal(passState({ status: 'draft' }, null), 'drafts');
+});
+
+test('degenerate grouping inputs do not throw', () => {
+  assert.deepEqual(groupPassesByState(), []);
+  assert.deepEqual(groupPassesByState({ passes: [], efforts: null }), []);
+});
+
+test('the default is never under Archived unless every pass is (every small campaign shape)', () => {
+  // Guards the landing rule and the headings against drifting apart. Exhaustive over two walk lists
+  // (each open or archived) holding up to two passes each, in every status, cut or uncut.
+  const kinds = [];
+  for (const status of ['draft', 'active', 'archived']) for (const turfCount of [0, 3]) kinds.push({ status, turfCount });
+  const passSets = [[], ...kinds.map((k) => [k]), ...kinds.flatMap((a) => kinds.map((b) => [a, b]))];
+  let checked = 0;
+  for (const aState of ['active', 'archived']) {
+    for (const bState of ['active', 'archived']) {
+      const efforts = [effort('e-a', '02', aState), effort('e-b', '07', bState)];
+      for (const aSet of passSets) {
+        for (const bSet of passSets) {
+          const passes = [
+            ...aSet.map((k, i) => pass(`a${i}`, 'e-a', { ...k, day: `0${i + 1}` })),
+            ...bSet.map((k, i) => pass(`b${i}`, 'e-b', { ...k, day: `0${i + 3}` })),
+          ];
+          if (!passes.length) continue;
+          const chosen = pickDefaultPass({ passes, efforts });
+          const archived = groupPassesByState({ passes, efforts }).find((g) => g.key === 'archived');
+          const archivedIds = new Set((archived?.options || []).map((o) => o.value));
+          if (archivedIds.has(String(chosen._id))) {
+            assert.equal(
+              archivedIds.size,
+              passes.length,
+              `default ${chosen._id} sits under Archived while a live or draft pass exists: ${JSON.stringify({ efforts, passes })}`
+            );
+          }
+          checked += 1;
+        }
+      }
+    }
+  }
+  assert.ok(checked > 7000, `checked ${checked} shapes`);
 });

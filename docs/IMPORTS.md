@@ -12,7 +12,7 @@ voters are linked to canonical People across orgs, and how new doors reach the f
 
 Related: [PERSONS.md](PERSONS.md) (the canonical cross-org People the import links to),
 [EFFORTS.md](EFFORTS.md) (Intake → assign to an effort), [WALKLISTS.md](WALKLISTS.md) (turn a
-Voter-ID CSV into a walk list without re-importing the universe), [VOTERS.md](VOTERS.md),
+Voter-ID list, CSV or Excel, into a walk list without re-importing the universe), [VOTERS.md](VOTERS.md),
 [EXPORTS.md](EXPORTS.md) (the Export Center can *reconstruct* a CSV under the vendor's columns —
 it is not the original file, which is deleted after import).
 
@@ -112,11 +112,18 @@ apart by reading the file's **contents**, never its name:
   The app cannot read it and **refuses it with the remedy**: open it in Excel, **File → Save As →
   Excel Workbook (.xlsx)**, and upload the `.xlsx`. It also tops out at 65,536 rows, so a large voter
   file was never one of these to begin with.
+- **A password-protected (or access-restricted) workbook**, even one named `.xlsx`. Excel wraps an
+  encrypted workbook in the same old binary container, so it gets the same refusal, and since
+  2026-10-28 the message names both: *This is an old-format Excel file (.xls, Excel 97–2003) or a
+  password-protected one, which we cannot read. Open it in Excel, remove any password or access
+  restriction, then use File → Save As → Excel Workbook (.xlsx), and upload the .xlsx.*
 
 Before this distinction existed, a real `.xls` was read as though it were text: the mapping step
 showed a single column of binary junk and zero rows, so a **format** problem looked like a **column**
-problem. The same content-first rule now applies to the Voter-ID uploads (walk list from CSV, early
-voting, do-not-contact), which share one parser.
+problem. The same content-first rule applies to the three Voter-ID list uploads (Early Voting, the
+Do-not-contact list, a saved search from a list), which share one reader, with the same message. Since
+2026-10-28 those three also read `.xlsx` themselves, with a reader of their own that keeps only the
+columns it needs — the first visible tab only, as here; see [EARLY_VOTING.md](EARLY_VOTING.md).
 
 **If an Excel file has several tabs, only the first
 one is imported** — the leftmost tab you can see (hidden sheets are skipped, and it isn't necessarily
@@ -498,7 +505,7 @@ Intake by construction** — no import-processor change was needed. They become 
 effort claims them (`POST .../efforts/:id/claim` — a queued background job since the 2026-08 hardening —
 then a supplemental cut, also queued). See [EFFORTS.md](EFFORTS.md) §B.
 
-Separately, an uploaded **Voter-ID CSV** can be turned directly into a walk list (matched by
+Separately, an uploaded **Voter-ID list** (CSV or Excel) can be turned directly into a walk list (matched by
 `stateVoterId`, no universe re-import) and used to seed/claim an effort — handy when you already have an
 exact list of people. IDs not already in the universe simply won't match; import them first. See
 [WALKLISTS.md](WALKLISTS.md).
@@ -730,7 +737,14 @@ feeds the client's oversized warning before the user maps 24 columns. `peekUploa
 `PK` zip signature; `looksLegacyXls(buffer)` matches **only** the 8-byte OLE2 Compound File signature
 `D0 CF 11 E0 A1 B1 1A E1` that leads every Excel 97–2003 workbook, and raises the typed
 `LegacyXlsError` (`code: 'legacy-xls'`, HTTP 400, message carries the Save-As remedy) from
-`streamParse`, `parseUpload`, `peekUpload` **and** `parseIdsAndFindVoters`. It deliberately does
+`streamParse`, `parseUpload` and `peekUpload`; the Voter-ID list reader (`readIdList` and
+`parseAndMatchState` in [parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js))
+returns it as a coded refusal instead, `code` included (the three uploads' 400s dropped it until
+2026-10-28). Since 2026-10-28 the message also names a **password-protected** workbook, which Excel
+wraps in the same OLE2 container, with one remedy for both (remove the password or restriction, then
+Save As `.xlsx`): the same class, `name`, `code` and call sites, so `typedParseRefusal` and the
+worker's unrecoverable check, which key on `name`, and the tests, which match `/old-format Excel
+file/`, are unchanged. It deliberately does
 **not** trigger on the `.xls` extension: vendors ship delimited *text* named `.xls` (Florida's export
 is tab-separated), Papa sniffs the delimiter, and those files import correctly — refusing on the name
 would break a working upload. Untrapped, an OLE2 buffer fell through to the CSV branch and Papa read
@@ -743,7 +757,9 @@ worker could only fail; `importProcessor` still classes `LegacyXlsError` as **un
 job queued before this shipped fails once instead of burning its retry schedule. Both typed parse
 refusals (`ImportTooLargeError`, `LegacyXlsError`) are mapped to a coded 400 by one helper,
 `typedParseRefusal`. Client `accept` lists were widened to match what the parser really handles —
-`.csv,.tsv,.txt,.xls,.xlsx` on the Import page, `.csv,.tsv,.txt,.xls` on the three Voter-ID uploads.
+`.csv,.tsv,.txt,.xls,.xlsx` on the Import page, and since 2026-10-28 on the three Voter-ID uploads too
+(`.csv,.tsv,.txt,.xls` until then, when they read text only; an `.xlsx` that reached them, renamed,
+was read as text and failed as *Could not detect a Voter ID column*).
 
 **One parse seam, now streaming:** `streamParse(buffer, filename, { onRow, maxRows, maxCells })`
 ([services/import/parseUpload.js](../server/src/services/import/parseUpload.js)) reads **CSV via
@@ -783,8 +799,42 @@ genuine streaming-writer workbook, the untouched safe order, and three multi-tab
 reversed tabs, reversed tabs *plus* a hostile dep order) each asserting preview and import land on the
 same tab.
 
+**Prefixed workbooks (2026-10-28).** `listWorkbookSheets` matches the tab list under any namespace
+prefix — `<x:sheets>`, `<x:sheet>`, and the relationship id under whatever prefix the file declared.
+A workbook written as `<x:workbook><x:sheets>` used to match nothing and fall back to `sheet1.xml`,
+which can be a **hidden** tab, shown silently by the mapping step's preview (reproduced in the
+Voter-ID Excel plan's review, [PROPOSAL_ID_LIST_EXCEL.md](PROPOSAL_ID_LIST_EXCEL.md) §A.6). The preview
+now names the first visible tab. **The import itself still can't read such a workbook:** exceljs's
+streaming reader (`streamParse`) throws on a prefixed `workbook.xml` (`Cannot read properties of
+undefined (reading 'sheets')`), before this change and after it, so the job fails with that message
+rather than importing a hidden tab — one of the Import defects the plan left for a separate look (§G).
+Ordinary workbooks resolve exactly as before. `sheetChoice(workbookXml, relsXml)` (pure, beside
+`resolveFirstSheetTarget`) returns `{ target, name, others }` by this rule — `sheetChoiceFrom` over a
+list already parsed; `peekUpload`'s `resolveSheet` calls it, unchanged in behaviour. **The tab list,
+the rels and `styles.xml` are parsed by a saxes walk** (`walkXml` in parseUpload.js), not regexes, each
+part once: either quote, any prefix (saxes in its plain mode, prefixes resolved from the declarations
+seen), the relationship id found by its namespace, attribute values decoded once. The regexes were
+quadratic on crafted text (in the Voter-ID plan's code review a 1.5 KB upload froze the web dyno for
+12.7 s, and this preview had the same exposure), and missed single-quoted attributes. The walk stops,
+keeping what it read, at 64 levels, 100 XML errors, 256 attributes on one tag or 200,000 in a part (an
+attribute costs an object: the plan's second code review held the dyno 14.7 s with a part packed with
+distinct ones), and collects at most 10,000 tabs or relationships. `dateStylesFromXml` moved into
+parseUpload.js beside it, and checks a number format in one pass each for brackets and quotes (the
+regexes it replaced rescanned from every `[`); one visible difference in the mapping step's samples: a
+custom format with quoted text, like `0" days"`, is no longer taken for a date (its entities used to be
+read undecoded). The Voter-ID
+Excel reader ([readIdColumn.js](../server/src/services/import/readIdColumn.js)) uses the same functions
+and, unlike the Import, refuses rather than guess `sheet1.xml` when the first visible tab can't be
+resolved to a part and the zip holds more than one worksheet (or its one worksheet is another tab's), and
+refuses a chart, dialog or macro sheet first. These and the linear word splitter (*Mapping auto-suggest is deliberately narrow*, below)
+are the only Voter Import changes from that plan; the Import's own Excel readers did **not** get the
+new reader's checks. The plan's review found defects in them that it left for a separate look (its
+§G, the owner's call): among them, `streamParse` returns phonetic text instead of a cell's value and
+only the last run of inline rich text, checks no CRC, never settles on a sheet whose compressed data
+is cut short, and reads rows hidden in Excel; `peekUpload` inflates its small parts whole.
+
 **And the mapping step says so.** `listWorkbookSheets(workbookXml, relsXml)` returns every tab as
-`{ name, target }` in tab order — the same list `resolveFirstSheetTarget` picks from, so the two can't
+`{ name, target, hidden }` in tab order — the same list `resolveFirstSheetTarget` picks from, so the two can't
 drift. `peekUpload` names the tab by **matching on `target`**, never by position: when the rels are
 unreadable the target falls back to `sheet1.xml` and position would print a guess as fact, so instead
 `sheetName` goes `null` and the mapping step stays silent. That yields **`sheetName`** and
@@ -879,7 +929,14 @@ Every guard answers a real wrong suggestion:
 - **Word alignment.** Alias-inside-header needs the alias ≥ 4 chars (so `cd`/`sd`/`hd` can't hit
   inside unrelated headers), and a 4-char alias must be whole words of the header — `wordsOf` splits at
   separators, case changes and letter/digit edges. `unit` is not in `Hamlet_Community_Area`, `city`
-  not in `Ethnicity`, `town` not in `Township`; `Unit Number` and `Res_City` still match.
+  not in `Ethnicity`, `town` not in `Township`; `Unit Number` and `Res_City` still match. **Its
+  capital-run split is linear since 2026-10-28:** `/([A-Z])(?=[A-Z][a-z])/g` in place of
+  `/([A-Z]+)([A-Z][a-z])/g`, the same split, but the old pattern backtracked quadratically on a long
+  run of capitals with no lowercase letter after it: 1.5 s for 32,767 capitals (re-measured 2026-10-28:
+  1,561 ms old, under 1 ms new, identical output on 200,007 random and real headers), and in the
+  Voter-ID Excel plan's review ([PROPOSAL_ID_LIST_EXCEL.md](PROPOSAL_ID_LIST_EXCEL.md) §A.7) a 330 KB
+  workbook of 15,000 such headers ran past 7 minutes, blocking the web dyno. One fix for every caller:
+  this mapping step and the three Voter-ID list uploads.
 - **Fragments.** Header-inside-alias needs the header ≥ 6 chars and a fragment of **one** field's
   aliases only — `Residence` is part of four fields' names and is claimed by none.
 
@@ -890,9 +947,15 @@ rows with **zero errors as 12,324 one-voter doors** (the right mapping gives 10,
 suggestion is the right mapping, field for field, pinned in
 [canonicalFields.test.js](../server/test/canonicalFields.test.js).
 
-**The suggester also picks the ID column of every Voter-ID list upload.** `parseVoterIdList` (early
-voting, walk list from CSV, do-not-contact) uses the request's `idColumn` when it names one, else
-`suggestMapping(columns).stateVoterId`, else the first header matching `/voter\s*id/i`. All three
+**The suggester also picks the ID column of every Voter-ID list upload.** `pickIdColumn` in
+`parseVoterIdList` (Early Voting, a saved search from a list, do-not-contact; a CSV and an `.xlsx`
+alike) uses the request's `idColumn` when the file has a column by that name; else, over the column
+names of 255 characters or fewer (a longer name stays listed for the picker but is never
+auto-matched, since matching costs grow with a name's length), `suggestMapping(columns).stateVoterId`,
+else the first header matching `/voter\s*id/i`, else (since 2026-10-28) a header normalising to
+`registrantid` or `textregistrantid` (Nebraska's `Registrant_ID` and `TEXT_REGISTRANT_ID`), else the
+first matching `/registrant[\s_-]*id/i`. The registrant names are recognised on these three uploads
+only, never by the Voter Import's mapping. All three
 pages show the pick (**Matched on column**, with sample values) and let the admin change it through the
 shared [`IdColumnPicker`](../client/src/components/IdColumnPicker.jsx); the apply always sends the
 column the preview matched on. Two consequences of the rules above: a registration-number header

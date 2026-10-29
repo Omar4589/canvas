@@ -161,6 +161,22 @@ const linkFor = async (camp, { label, reportId } = {}) => {
   return { ...res.json.share, access: unlock.json.accessToken };
 };
 const pub = (link, path) => call('GET', `/share/${link.token}${path}`, { as: null, headers: { 'X-Share-Token': link.access } });
+// A link to all of a campaign's reports, as one made before one link per report looks
+// (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1): no route makes one now, but until RETIRE_ALL_REPORTS_LINKS
+// turns them off, it is what reaches the client's hub with several reports, and their Older / Newer.
+const oldAllReportsLink = async (camp, { label } = {}) => {
+  const { ReportShareLink } = await import('../src/models/ReportShareLink.js');
+  const bcrypt = (await import('bcryptjs')).default;
+  const token = `all-time-old-${new ObjectId()}`;
+  await ReportShareLink.create({
+    organizationId: ctx.org._id, campaignId: camp._id, token, label, passwordHash: await bcrypt.hash(PASSWORD, 4),
+    expiresAt: new Date(Date.now() + 30 * 86400e3), isActive: true,
+  });
+  ipN += 1;
+  const unlock = await call('POST', `/share/${token}/unlock`, { as: null, body: { password: PASSWORD }, headers: { 'X-Forwarded-For': `10.9.${ipN >> 8}.${ipN & 255}` } });
+  assert.strictEqual(unlock.status, 200, JSON.stringify(unlock.json));
+  return { token, access: unlock.json.accessToken };
+};
 
 before(async () => {
   if (!URI) return;
@@ -334,8 +350,9 @@ test('an all-time report’s build: its period IS its running total; it compares
   const list = await call('GET', `/admin/client-reports?campaignId=${camp._id}`);
   assert.deepStrictEqual(list.json.reports.map((r) => [r.id, r.allTime]), [[String(all._id), true], [String(w1._id), false]]);
 
-  // The client's hub, its Older / Newer, and the earlier-totals line naming week 1.
-  const link = await linkFor(camp, { label: 'Client' });
+  // The client's hub, its Older / Newer, and the earlier-totals line naming week 1 — through an old link to
+  // all the reports, the only kind that lists several.
+  const link = await oldAllReportsLink(camp, { label: 'Client' });
   const hub = await pub(link, '/reports');
   assert.strictEqual(hub.status, 200, JSON.stringify(hub.json));
   assert.deepStrictEqual(hub.json.reports.map((r) => [r.id, r.allTime]), [[String(all._id), true], [String(w1._id), false]]);

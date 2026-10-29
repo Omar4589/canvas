@@ -64,7 +64,6 @@ const checks = {
   conditionsUnknown: false,
   earlierTotals: null,
   earlierReportsRefreshed: 0,
-  links: { usable: 0, labels: [], reason: 'no_link' },
   team: null,
 };
 
@@ -74,7 +73,8 @@ const checks = {
 // `extra`: more of GET /:id's answer (liveInputs); `campaign`: the campaign list row; `preview`: what
 // POST /:id/preview answers, with the preview map recorded instead of drawn; `wide`: 1280 px and up.
 // `storage`: localStorage entries the browser already holds (a copy kept on this device).
-// `shares`: the campaign's links list (null: still loading). `stateful`: the page's own state outlives
+// `shares`: the campaign's links list (null: still loading); `sharesExtra`: the rest of that answer
+// (contract K1 — allReportsRetired, staffUnderGrant). `stateful`: the page's own state outlives
 // one render too (refs as well), so a test can press a button (`click`, through the Button props the
 // page and its Publish confirm render) and `rerender` to see what it opened.
 const build = async ({
@@ -89,6 +89,7 @@ const build = async ({
   wide = false,
   storage = {},
   shares = [],
+  sharesExtra = {},
   stateful = false,
 }) => {
   writeFileSync(join(dir, 'authStub.jsx'), `export const useAuth = () => ({ isOrgAdmin: true, isSuperAdmin: false, user: { id: 'u1' }, homePath: '/' });`);
@@ -98,6 +99,9 @@ const build = async ({
 export default ShareStub;`);
   // The dialogs portal into document.body: rendered in place instead (the render smoke tests' shim).
   writeFileSync(join(dir, 'portalShim.js'), `export * from 'react-dom';\nexport const createPortal = (children) => children;`);
+  // The page's banners, recorded so a test can press one's action (Unarchive on an archived report).
+  writeFileSync(join(dir, 'bannerShim.jsx'), `import RealBanner from '${join(here, '../components/NextStepBanner.jsx')}';
+export default function NextStepBanner(props) { globalThis.__banners.push(props); return <RealBanner {...props} />; }`);
   writeFileSync(join(dir, 'uiShim.jsx'), `export * from '${join(here, '../components/ui/index.js')}';
 import { Button as RealButton } from '${join(here, '../components/ui/index.js')}';
 export const Button = (props) => {
@@ -159,6 +163,7 @@ globalThis.__navigations = [];
 globalThis.__mapProps = [];
 globalThis.__shareProps = [];
 globalThis.__buttons = [];
+globalThis.__banners = [];
 globalThis.__preview = ${preview ? JSON.stringify({ report: preview, survey: { questions: [] } }) : 'null'};
 globalThis.__listeners = { add: [], remove: [] };
 globalThis.__refStore = ${persistRefs || stateful ? '{ i: 0, refs: [] }' : 'null'};
@@ -190,10 +195,11 @@ globalThis.fetch = (url, init = {}) => {
 export const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: ${staleTime} } } });
 qc.setQueryData(['admin', 'campaigns'], { campaigns: [${JSON.stringify({ _id: CID, name: 'Ward 3', type: 'survey', isActive: true, timeZone: 'America/New_York', ...campaign })}] });
 qc.setQueryData(['admin', 'client-report', '${reportDoc._id}'], ${JSON.stringify({ report: reportDoc, campaignName: 'Ward 3', orgName: 'Fox Bryant', seriesLabel: 'Whole campaign', openMockFlags: 2, build: buildView, checks, ...extra })});
-${shares ? `qc.setQueryData(['admin', 'client-report-shares', '${CID}'], { shares: ${JSON.stringify(shares)} });` : '// The links list is still on its way.'}
+${shares ? `qc.setQueryData(['admin', 'client-report-shares', '${CID}'], { shares: ${JSON.stringify(shares)}, ...${JSON.stringify(sharesExtra)} });` : '// The links list is still on its way.'}
 qc.setQueryData(['admin', 'branding'], { hasLogo: false });
 const page = () => {
   globalThis.__buttons = [];
+  globalThis.__banners = [];
   return renderToString(<QueryClientProvider client={qc}><MemoryRouter initialEntries={['${path || `/campaigns/${CID}/reports/${reportDoc._id}`}']}><Routes><Route path="/campaigns/:campaignId/reports/:id" element={<ClientReportBuilderPage />} /></Routes></MemoryRouter></QueryClientProvider>);
 };
 export const html = page();
@@ -217,6 +223,12 @@ export const click = (label) => {
   if (!b) throw new Error('No “' + label + '” button on the page');
   if (b.disabled) throw new Error('“' + label + '” is disabled');
   return b.onClick();
+};
+// Presses the action of the last render's banner whose action is \`label\`.
+export const pressBanner = (label) => {
+  const b = globalThis.__banners.filter((p) => p.action?.label === label).pop();
+  if (!b) throw new Error('No banner with “' + label + '”');
+  return b.action.onClick();
 };
 export const shareProps = () => globalThis.__shareProps;
 export const navigations = () => globalThis.__navigations;
@@ -267,6 +279,7 @@ export const listeners = () => globalThis.__listeners;
           b.onResolve({ filter: /auth\/AuthContext\.jsx$/ }, () => ({ path: join(dir, 'authStub.jsx') }));
           b.onResolve({ filter: /components\/ClientReportMap\.jsx$/ }, () => ({ path: join(dir, 'mapStub.jsx') }));
           b.onResolve({ filter: /clientReports\/ShareDialog\.jsx$/ }, () => ({ path: join(dir, 'shareStub.jsx') }));
+          b.onResolve({ filter: /components\/NextStepBanner\.jsx$/ }, (a) => (/ClientReportBuilderPage\.jsx$/.test(a.importer) ? { path: join(dir, 'bannerShim.jsx') } : undefined));
           b.onResolve({ filter: /^react-dom$/ }, (a) => (/Overlay\.jsx$|Popover\.jsx$/.test(a.importer) ? { path: join(dir, 'portalShim.js') } : undefined));
           // The page's and its Publish confirm's buttons, recorded so a test can press one.
           b.onResolve({ filter: /ui\/index\.js$/ }, (a) => (/ClientReportBuilderPage\.jsx$|PublishDialog\.jsx$/.test(a.importer) ? { path: join(dir, 'uiShim.jsx') } : undefined));
@@ -622,10 +635,10 @@ test('a refusal the builder re-read for says what the page now shows, never "try
   assert.equal(m.errorText({ code: 'STATUS_CHANGED' }), 'This report was just published or changed — reload it.');
 });
 
-// ── Links to one report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contracts K8, K9) ──────────────
-// A link opens every published report of the campaign, or just one (its reportId). The builder asks
-// only the links that can open THIS report, Share replaces Copy message, and Take down names the
-// report's own one-report links.
+// ── One link per report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D4, §D5, contracts K1, K7, K12) ─────────
+// A report's own link is the one whose reportId is this report; a link to all of the campaign's reports
+// (reportId null) is an old one, and another report's link is that report's. Share — wherever the row has
+// it — manages the report's one link; publishing points at Share; an archived report says so.
 
 const FAR = new Date(Date.now() + 60 * 86400000).toISOString();
 const OTHER_RID = '6a00000000000000000000ee';
@@ -641,14 +654,15 @@ const shareRow = (over = {}) => ({
   failures: { last24h: 0, last7d: 0, total: 0 },
   reportId: null,
   report: null,
+  createdAt: '2026-07-01T14:00:00Z',
   ...over,
 });
-const toThis = { reportId: RID, report: { id: RID, weekStart: '2026-10-13', weekEnd: '2026-10-19', scopeLabel: 'Whole campaign' } };
-const toOther = { reportId: OTHER_RID, report: { id: OTHER_RID, weekStart: '2026-10-06', weekEnd: '2026-10-12', scopeLabel: 'Whole campaign' } };
+const toThis = { reportId: RID, report: { id: RID, weekStart: '2026-10-13', weekEnd: '2026-10-19', scopeLabel: 'Whole campaign', takenDown: false, seriesId: '6a00000000000000000000cc' } };
+const toOther = { reportId: OTHER_RID, report: { id: OTHER_RID, weekStart: '2026-10-06', weekEnd: '2026-10-12', scopeLabel: 'Whole campaign', takenDown: false, seriesId: '6a00000000000000000000cc' } };
 const allLink = shareRow();
-const boardHere = shareRow({ id: 'l2', token: 'tok2', label: 'Board', ...toThis });
-const donorHere = shareRow({ id: 'l3', token: 'tok3', label: 'Donor', ...toThis });
-const treasurerThere = shareRow({ id: 'l4', token: 'tok4', label: 'Treasurer', ...toOther });
+const ownHere = shareRow({ id: 'l2', token: 'tok2', label: '', createdAt: '2026-10-21T14:00:00Z', ...toThis });
+const extraHere = shareRow({ id: 'l3', token: 'tok3', label: 'Donor', createdAt: '2026-10-20T14:00:00Z', ...toThis });
+const otherThere = shareRow({ id: 'l4', token: 'tok4', label: '', ...toOther });
 const publishedDoc = (over = {}) => report({ status: 'published', publishedAt: '2026-10-20T14:00:00Z', ...over });
 const shapedOf = (status = 'draft') => ({
   id: RID,
@@ -666,28 +680,29 @@ const shapedOf = (status = 'draft') => ({
   areaCellCount: 0,
 });
 
-test('Share replaces Copy message on a report the client can see — never on a draft or a taken-down one, and it waits for the links list (§D)', async () => {
-  const shown = await build({ reportDoc: publishedDoc(), shares: [treasurerThere] });
-  const t = text(shown.html);
-  assert.ok(!t.includes('Copy message'), 'Copy message is gone');
+test('Share wherever the row has it — a published report, shown or taken down; never a draft — and it waits for the links list; the header carries the row’s visits (§D4)', async () => {
+  const shown = await build({ reportDoc: publishedDoc(), shares: [otherThere] });
+  assert.ok(!text(shown.html).includes('Copy message'));
   const share = shown.buttonProps('Share');
   assert.ok(share, 'Share is in the header');
   assert.ok(!share.disabled, 'never held for want of a link: Share makes one');
   const loading = await build({ reportDoc: publishedDoc(), shares: null });
-  assert.equal(loading.buttonProps('Share').disabled, true, 'held until the links list is in, so it never says no link opens it too early');
+  assert.equal(loading.buttonProps('Share').disabled, true, 'held until the links list is in, so it never offers to make a link the report already has');
   assert.equal((await build({ reportDoc: report() })).buttonProps('Share'), null, 'a draft has nothing to share');
   const down = await build({ reportDoc: publishedDoc({ takenDownAt: '2026-10-22T14:00:00Z' }) });
-  assert.equal(down.buttonProps('Share'), null, 'nor a taken-down report');
+  assert.ok(down.buttonProps('Share'), 'a taken-down report keeps Share, to manage its link');
   assert.ok(down.buttonProps('Put back up'));
-  // Which link it was opened through is named once the links list is in — never "a deleted link" before.
-  const viewed = publishedDoc({ views: { byLink: { l1: { opens: 2 } } } });
-  assert.ok(!text((await build({ reportDoc: viewed, shares: null })).html).includes('Opened via'));
-  assert.ok(text((await build({ reportDoc: viewed, shares: [allLink] })).html).includes('Opened via Candidate: about 2 visits'));
+  // Its visits, through every link it ever had — no links list needed.
+  const viewed = publishedDoc({ views: { byLink: { l1: { opens: 2 }, gone: { opens: 1 } }, members: { leads: { opens: 1 } } } });
+  for (const shares of [null, [allLink]]) {
+    const t = text((await build({ reportDoc: viewed, shares })).html);
+    assert.ok(t.includes('About 3 visits · your organization: 1 visit') && !t.includes('Opened via'), t.slice(0, 400));
+  }
 });
 
-test('Share opens the dialog with the report, its links and who is asking; a link made there refreshes the list and History (K9)', async () => {
-  const shares = [allLink, boardHere, treasurerThere];
-  const m = await build({ reportDoc: publishedDoc(), shares, stateful: true, preview: shapedOf('published') });
+test('Share opens with the report as Share needs it, its links, the switch and who is asking; a link made there refreshes the list and History (K12); a report Create finds taken down or deleted is read again (code review V2-2)', async () => {
+  const shares = [allLink, ownHere, otherThere];
+  const m = await build({ reportDoc: publishedDoc(), shares, sharesExtra: { allReportsRetired: true, staffUnderGrant: true }, stateful: true, preview: shapedOf('published') });
   assert.equal(m.shareProps().length, 0, 'closed until asked');
   m.click('Share');
   const again = m.rerender();
@@ -697,45 +712,64 @@ test('Share opens the dialog with the report, its links and who is asking; a lin
   assert.equal(props.report.weekStart, '2026-10-13');
   assert.equal(props.report.weekEnd, '2026-10-19');
   assert.equal(props.report.scope.seriesLabel, 'Whole campaign');
+  assert.equal(props.report.seriesId, '6a00000000000000000000cc', 'its tab, for Same as your last link');
   assert.equal(props.report.campaignType, 'survey');
+  assert.equal(props.report.status, 'published');
+  assert.equal(props.report.takenDownAt, null);
   assert.deepEqual(props.report.cumulative, { doorsKnocked: 5, surveysTaken: 3 }, 'the numbers the client sees, for the message');
-  assert.deepEqual(props.shares.map((s) => s.id), ['l1', 'l2', 'l4'], 'every link: the dialog picks the ones that open it');
+  assert.deepEqual(props.shares.map((s) => s.id), ['l1', 'l2', 'l4'], 'every link: Share picks the report’s own');
+  assert.equal(props.allReportsRetired, true);
+  assert.equal(props.staffUnderGrant, true);
   assert.equal(props.linksError, null, 'the list loaded (null shares and its error are for a list not in — LINK-3)');
   assert.equal(props.campaignId, CID);
   assert.equal(props.tz, 'America/New_York');
-  assert.equal(props.isAdmin, true);
   assert.equal(m.qc.getQueryState(['admin', 'client-report-shares', CID]).isInvalidated, false);
   props.onLinksChanged();
   assert.equal(m.qc.getQueryState(['admin', 'client-report-shares', CID]).isInvalidated, true, 'the links list is read again');
+  // Create refused REPORT_NOT_SHOWN or REPORT_NOT_FOUND: the report moved under this page — it, its build
+  // and the reports list are read again, so Share shows it taken down (the header then offers Put back
+  // up) or the page says it's gone.
+  const invalidated = [];
+  const real = m.qc.invalidateQueries.bind(m.qc);
+  m.qc.invalidateQueries = (f) => {
+    invalidated.push(JSON.stringify(f?.queryKey));
+    return real(f);
+  };
+  assert.equal(m.qc.getQueryState(['admin', 'client-report', RID]).isInvalidated, false);
+  props.onReportChanged();
+  assert.equal(m.qc.getQueryState(['admin', 'client-report', RID]).isInvalidated, true, 'the report is read again');
+  for (const key of [['admin', 'client-reports', CID], ['admin', 'client-report-build', RID]]) assert.ok(invalidated.includes(JSON.stringify(key)), `${key.join('/')}: ${invalidated.join(' ')}`);
+  m.qc.invalidateQueries = real;
   props.onClose();
   assert.ok(!text(m.rerender().html).includes('Share dialog'), 'and it closes');
+  // Taken down: Share still opens, and says so to Share.
+  const down = await build({ reportDoc: publishedDoc({ takenDownAt: '2026-10-22T14:00:00Z' }), shares, stateful: true, preview: shapedOf('published') });
+  down.click('Share');
+  down.rerender();
+  assert.equal(down.shareProps().pop().report.takenDownAt, '2026-10-22T14:00:00Z');
 });
 
-test('Take down names the links to just this report — never another report’s, nor one that can’t be opened anyway (§D)', async () => {
-  const shares = [allLink, boardHere, donorHere, treasurerThere, shareRow({ id: 'l5', label: 'Old board', isActive: false, ...toThis })];
-  const m = await build({ reportDoc: publishedDoc(), shares, stateful: true });
+test('Take down says its link shows “taken down” — only for a link of its own a client can still open (§D2)', async () => {
+  const m = await build({ reportDoc: publishedDoc(), shares: [allLink, ownHere, extraHere, otherThere], stateful: true });
   assert.ok(!text(m.html).includes('Take down this report?'));
   m.click('Take down');
   const t = text(m.rerender().html);
-  assert.ok(t.includes('Take down this report?'));
-  assert.ok(t.includes('Board and Donor, links to just this report, show “taken down” until you put it back up.'), t.slice(t.indexOf('Take down this report?'), t.indexOf('Take down this report?') + 500));
-  assert.ok(!t.includes('Treasurer') && !t.includes('Old board'));
-  assert.ok(t.includes('Your client stops seeing it.') && t.includes('Any build or new numbers waiting for review are cancelled.'), 'the rest of the confirm as it was');
-  // No link to just this report: no such line.
-  const plain = await build({ reportDoc: publishedDoc(), shares: [allLink, treasurerThere], stateful: true });
-  plain.click('Take down');
-  const p = text(plain.rerender().html);
-  assert.ok(p.includes('Take down this report?') && !p.includes('links to just this report') && !p.includes('a link to just this report'));
+  assert.ok(
+    t.includes('Your client stops seeing it. It stays exactly as it was — numbers, map and publish date — and Put back up shows it again. Its link shows “taken down” until you put it back up. Any build or new numbers waiting for review are cancelled.'),
+    t.slice(t.indexOf('Take down this report?'), t.indexOf('Take down this report?') + 500)
+  );
+  // No link of its own that opens (another report's link, an old link to all your reports, its own turned off): no such line.
+  for (const shares of [[allLink, otherThere], [shareRow({ ...ownHere, isActive: false })], [shareRow({ ...ownHere, expiresAt: '2020-01-01T00:00:00Z' })]]) {
+    const plain = await build({ reportDoc: publishedDoc(), shares, stateful: true });
+    plain.click('Take down');
+    const p = text(plain.rerender().html);
+    assert.ok(p.includes('Take down this report?') && !p.includes('Its link shows'), shares.map((s) => s.id).join(', '));
+  }
 });
 
-test('published here: the banner asks for a link only when no link opens THIS report, and points at Share (§D, WALK-5)', async () => {
-  const cases = [
-    { shares: [treasurerThere], title: 'Published — create a link so your client can open it.', action: 'Share →', not: 'Your client can see it now.' },
-    { shares: [allLink, treasurerThere], title: 'Published. Your client can see it now.', action: 'Copy the message for your client →', not: 'create a link' },
-    { shares: [boardHere], title: 'Published. Your client can see it now.', action: 'Copy the message for your client →', not: 'create a link' },
-  ];
-  for (const c of cases) {
-    const m = await build({ reportDoc: report(), shares: c.shares, stateful: true, preview: shapedOf() });
+test('published here: one banner — “Published — Share makes its link for your client.” — with Share, whatever links the campaign has (§D4)', async () => {
+  for (const shares of [[], [allLink], [otherThere]]) {
+    const m = await build({ reportDoc: report(), shares, stateful: true, preview: shapedOf() });
     m.answer((url, init) => (/\/publish$/.test(url) && init.method === 'POST' ? { status: 200, body: { report: publishedDoc({ editVersion: 5 }) } } : null));
     // Mounted, as in a browser: the screen takes its version and the saver its settings.
     const cleanups = m.pageEffects.map((fn) => fn()).filter((f) => typeof f === 'function');
@@ -745,24 +779,56 @@ test('published here: the banner asks for a link only when no link opens THIS re
     m.click('Publish');
     for (let i = 0; i < 100 && !m.qc.getQueryData(['admin', 'client-report', RID]).report.publishedAt; i += 1) await tick(10);
     const t = text(m.rerender().html);
-    assert.ok(t.includes(c.title), `${c.shares.map((s) => s.label).join(', ')}: ${t.slice(0, 600)}`);
-    assert.ok(t.includes(c.action));
-    assert.ok(!t.includes(c.not));
+    assert.ok(t.includes('Published — Share makes its link for your client. Share →'), `${shares.map((s) => s.id).join(', ')}: ${t.slice(0, 600)}`);
+    assert.ok(!/Your client can see it now|create a link|Copy the message/.test(t));
     const sent = m.fetches().find((f) => /\/publish$/.test(f.url));
     assert.deepEqual(sent.body, { snapshotId: '6a00000000000000000000dd', editVersion: 4 }, 'the snapshot and the version the screen showed');
     cleanups.forEach((f) => f());
   }
 });
 
-test('the links list not in yet: Before you publish reads the server’s count, its new reason included — never a guess from an empty list (K8)', async () => {
-  const draftWords = 'No link opens this report yet. After you publish, Share makes one.';
-  const pending = await build({ reportDoc: report(), shares: null, extra: { checks: { ...checks, links: { usable: 0, labels: [], reason: 'other_reports' } } } });
-  assert.ok(text(pending.html).includes(draftWords), 'the server says every working link opens another report');
-  const counted = text((await build({ reportDoc: report(), shares: null, extra: { checks: { ...checks, links: { usable: 1, labels: ['Candidate'], reason: null } } } })).html);
-  assert.ok(!counted.includes('No link') && !counted.includes('None of your links'), 'a link the server counted: no warning while the list loads');
-  // Loaded: the list decides, only the links that open THIS report counted.
-  const listed = text((await build({ reportDoc: report(), shares: [treasurerThere], extra: { checks: { ...checks, links: { usable: 1, labels: ['Treasurer'], reason: null } } } })).html);
-  assert.ok(listed.includes(draftWords), 'another report’s link opens nothing here');
-  const fine = text((await build({ reportDoc: report(), shares: [allLink, treasurerThere] })).html);
-  assert.ok(!fine.includes('No link') && !fine.includes(draftWords), 'a link to all your reports will show it');
+test('the Publish confirm says Share makes the link — or, while an old link to all your reports still works, that the old link shows it at once; Before you publish says nothing about links (§D5)', async () => {
+  const open = async (opts) => {
+    const m = await build({ reportDoc: report(), stateful: true, preview: shapedOf(), ...opts });
+    const cleanups = m.pageEffects.map((fn) => fn()).filter((f) => typeof f === 'function');
+    await m.click('Publish…');
+    const t = text(m.rerender().html);
+    cleanups.forEach((f) => f());
+    return t;
+  };
+  const AFTER = 'Oct 13 – Oct 19 — after you publish, Share makes its link for your client.';
+  const WINDOW = 'Oct 13 – Oct 19 — your old link to all your reports shows it as soon as you publish; Share makes its own link.';
+  const t = await open({ shares: [allLink] });
+  assert.ok(t.includes(WINDOW) && !t.includes(AFTER), t);
+  assert.ok((await open({ shares: [allLink], sharesExtra: { allReportsRetired: true } })).includes(AFTER), 'once the switch has turned the old links off');
+  assert.ok((await open({ shares: [otherThere] })).includes(AFTER));
+  assert.ok((await open({ shares: null })).includes(AFTER), 'the links list not in yet');
+  // Before you publish: no link line on a draft — with or without the list, whatever links there are.
+  for (const shares of [null, [], [allLink], [otherThere]]) {
+    const b = text((await build({ reportDoc: report(), shares })).html);
+    assert.ok(b.includes('Before you publish') && !/No link|None of your links|It shows on/.test(b), `${JSON.stringify(shares)}`);
+  }
+});
+
+test('an archived report says so, with Unarchive — which asks the server and reads the report again (§D4, K7)', async () => {
+  assert.ok(!text((await build({ reportDoc: publishedDoc() })).html).includes('Archived —'));
+  // A draft can be archived too.
+  assert.ok(text((await build({ reportDoc: report({ archivedAt: '2026-10-27T14:00:00Z' }) })).html).includes('Archived — it’s out of your list.'));
+  // Built last: the harness's recorded buttons and banners are the last page's.
+  const m = await build({ reportDoc: publishedDoc({ archivedAt: '2026-10-27T14:00:00Z' }), stateful: true });
+  const flat = m.html.replace(/<!-- -->/g, '');
+  assert.ok(text(m.html).includes('Archived — it’s out of your list. Nothing changes for your client. Unarchive →'), text(m.html).slice(0, 800));
+  assert.match(flat.slice(flat.indexOf('Archived — it’s out of your list.')), /^[^]*?<button type="button"[^>]*>Unarchive →<\/button>/);
+  m.answer((url, init) => (/\/unarchive$/.test(url) && init.method === 'POST' ? { status: 200, body: { report: publishedDoc() } } : null));
+  m.qc.setQueryData(['admin', 'client-reports', CID], { reports: [] });
+  const before = m.fetches().length;
+  // The banner's button is NextStepBanner's own: pressed through the props the page hands it.
+  m.pressBanner('Unarchive');
+  for (let i = 0; i < 100 && !m.qc.getQueryState(['admin', 'client-report', RID]).isInvalidated; i += 1) await tick(10);
+  const sent = m.fetches().slice(before).find((f) => /\/unarchive$/.test(f.url));
+  assert.ok(sent, 'POST /:id/unarchive');
+  assert.equal(sent.method, 'POST');
+  assert.equal(sent.url, `/api/admin/client-reports/${RID}/unarchive`);
+  assert.equal(m.qc.getQueryState(['admin', 'client-report', RID]).isInvalidated, true, 'the report is read again');
+  assert.equal(m.qc.getQueryState(['admin', 'client-reports', CID]).isInvalidated, true, 'and the list');
 });

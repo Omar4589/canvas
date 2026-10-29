@@ -15,6 +15,7 @@ import { knocksPipeline, billableDoorsOf, contactRate, connectionRate, KNOCK_ACT
 import { archiveOverwrittenResponses, snapshotFromArchive, claimCopiesForWriteBack, releaseCopies, deleteUnlessReplaced } from '../surveys/archiveOverwrite.js';
 import { bumpLive } from '../platform/platformStats.js';
 import { doorKey } from './doorKey.js';
+import { isSameTap } from './sameTap.js';
 import { unknockHistoryRowId } from './unknockLease.js';
 import { visitsClause } from './answerScope.js';
 import { sweptAfter } from '../platform/lateWriteSweep.js';
@@ -745,3 +746,31 @@ export async function struckByUnknock({ campaignId, householdId, passId, userId,
   ).lean();
   return run ? run._id : null;
 }
+
+// The same tombstone for one exact tap, in whatever pass its struck delivery counted. A replay is
+// attributed on arrival (services/canvass/attribution.js), so a retry can resolve to a different pass
+// than the first delivery an admin struck — a pass ended, started or came back in between — and the
+// visit key above (door, pass, canvasser) misses it. This looks for THE tap among the frozen rows
+// (sameTap.js: canvasser, door, millisecond, action, voter), never for other work at the door: striking
+// by a visit key from another pass would also strike that pass's own, unstruck knocks. Same standing rule
+// as struckByUnknock. The visit-key prefix keeps the lookup on its index; no run touched this door, no
+// chunk is read.
+export const tapStruckInAnyPass = async ({ campaignId, householdId, userId, ts, actionType, voterId = null }) => {
+  const chunks = await UnknockRunChunk.find(
+    { campaignId, visitKeys: new RegExp(`^${String(householdId)}\\|`), frozenAt: { $gte: ts } },
+    { runId: 1, rows: 1 }
+  ).lean();
+  const runIds = chunks
+    .filter((c) =>
+      (c.rows || []).some(
+        (r) => String(r.householdId) === String(householdId) && String(r.userId) === String(userId) && isSameTap(r, { ts, actionType, voterId })
+      )
+    )
+    .map((c) => c.runId);
+  if (!runIds.length) return null;
+  const run = await UnknockRun.findOne(
+    { _id: { $in: runIds }, revertedAt: null, $or: [{ status: 'completed' }, { status: 'pending', deletingAt: { $ne: null } }] },
+    { _id: 1 }
+  ).lean();
+  return run ? run._id : null;
+};

@@ -16,6 +16,7 @@ import BulkReviewBar from '../components/BulkReviewBar.jsx';
 import { REASON_META, SEV_RANK } from '../lib/flags.js';
 import { postBulkReview, countBulkReview, undoBulkReview, invalidateFlagCaches, BULK_VERB } from '../lib/bulkReview.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
+import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 import PausedCanvassers from '../components/audit/PausedCanvassers.jsx';
 import PacePausePanel from '../components/audit/PacePausePanel.jsx';
@@ -404,9 +405,9 @@ export default function AuditPage() {
               className="rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="">All walk lists</option>
-              {efforts.map((ef) => (
+              {walkListOptions(efforts).map((ef) => (
                 <option key={ef._id} value={ef._id}>
-                  {ef.name}
+                  {walkListLabel(ef)}
                 </option>
               ))}
             </select>

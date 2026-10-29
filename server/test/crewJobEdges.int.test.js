@@ -115,6 +115,11 @@ before(async () => {
   await mongoose.connect(URI);
   await mongoose.connection.db.dropDatabase();
   await Promise.all([CampaignAssignment.init(), CoordinatorChange.init(), CanvassActivity.init(), SurveyResponse.init()]);
+  // init() is memoized: when the model's background build finished before the drop above, it resolves at
+  // once and nothing rebuilds what the drop took, so the roster test below planned with no index at all
+  // (COLLSCAN, 0 keys) — a flake whose odds moved with the preload's timing (scripts/testIndexPreload.mjs).
+  // createIndexes() always builds them.
+  await CampaignAssignment.createIndexes();
   Object.assign(CREW_JOB, { secondPassMs: 20 });
 
   ctx.org = await Organization.create({ name: 'Crew Edges Org', slug: 'crew-edges-org', isActive: true });

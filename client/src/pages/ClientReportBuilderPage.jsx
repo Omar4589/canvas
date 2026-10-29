@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import { useAuth } from '../auth/AuthContext.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
 import { formatInTz } from '../lib/datetime.js';
@@ -45,7 +44,7 @@ import {
   toggleMap,
 } from '../components/clientReports/questionRules.js';
 import { formatDayOf, formatPeriod } from '../components/clientReports/reportDates.js';
-import { linksFor, opensLine, singleLinksOf, takeDownLinksText, usableLinks } from '../components/clientReports/linkState.js';
+import { linksFor, opensLine, takeDownLinksText } from '../components/clientReports/linkState.js';
 import { messageReportOf } from '../components/clientReports/copyMessage.js';
 import { statusOf } from '../components/clientReports/ReportRow.jsx';
 import {
@@ -89,6 +88,12 @@ import {
 // A PUBLISHED report changes only through Edit (words and removals, numbers frozen; Switch to areas
 // builds in the background) or Refresh numbers (a before-and-after, applied by hand). Take down hides
 // it, Put back up shows it again, unchanged.
+//
+// Its link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D4): Share, wherever the report's row has it — on a
+// published report, shown or taken down — makes and manages the report's one link. Publishing says so
+// ("Published — Share makes its link for your client."): a draft never has a link, so there is nothing
+// to count before then. The header carries the row's opens line. An archived report says so, with
+// Unarchive — which is also where Next report lands when it opens an archived report.
 //
 // Leaving: there is no data router (<BrowserRouter>, so no useBlocker). The builder guards its own
 // links (flushing a pending save first), flushes on unmount with fetch keepalive, and holds the
@@ -179,7 +184,6 @@ const ClientReportBuilderPage = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const { isOrgAdmin } = useAuth();
   const { campaign } = useCurrentCampaign(campaignId);
   const wide = useMediaQuery('(min-width: 1280px)');
   const [pane, setPane] = useState('settings');
@@ -210,12 +214,18 @@ const ClientReportBuilderPage = () => {
   const scopeKind = report?.scope?.kind || (report?.effortId ? 'walk_list' : 'campaign');
   const isTeam = TEAM_KINDS.has(scopeKind);
 
+  // The campaign's links (contract K1) — Share, Take down's line and the Publish confirm read them — with
+  // the switch for old links to all your reports, and whether this is Doorline staff under a support grant.
   const sharesQ = useQuery({
     queryKey: sharesKey(campaignId),
     queryFn: () => api(`/admin/client-reports/shares?campaignId=${campaignId}`),
     enabled: !!campaignId,
   });
   const shares = sharesQ.data?.shares || [];
+  // Null until the links list is here.
+  const linkList = sharesQ.data ? shares : null;
+  const allReportsRetired = !!sharesQ.data?.allReportsRetired;
+  const staffUnderGrant = !!sharesQ.data?.staffUnderGrant;
   const seriesQ = useQuery({
     queryKey: seriesKey(campaignId),
     queryFn: () => api(`/admin/client-reports/series?campaignId=${campaignId}`),
@@ -803,6 +813,13 @@ const ClientReportBuilderPage = () => {
     onSuccess: () => invalidate(),
     onError: fail('Couldn’t put the report back up.'),
   });
+  // Unarchive (contract K7) — back into its tab's list; nothing changes for the client either way. The
+  // report is read again (its banner goes), as after Take down.
+  const unarchiveM = useMutation({
+    mutationFn: () => api(`/admin/client-reports/${id}/unarchive`, { method: 'POST' }),
+    onSuccess: () => invalidate(false),
+    onError: fail('Couldn’t unarchive the report.'),
+  });
 
   // Refresh numbers.
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -983,8 +1000,8 @@ const ClientReportBuilderPage = () => {
   const scopeText = scopeKind === 'campaign' ? 'Whole campaign' : scopeKind === 'walk_list' ? `Walk list: ${scopeName}` : `Team: ${scopeName}`;
   // A draft with no snapshot has no numbers, whatever an older field says.
   const numbersAsOf = report.snapshotId || published ? checks?.numbersAsOf || report.statsComputedAt || report.publishedAt || null : null;
-  // Opened via which link: named once the links list is here (never "a deleted link" while it loads).
-  const opens = published && sharesQ.data ? opensLine(report, shares) : '';
+  // The row's opens line: every visit the report had, through any link it ever had (§D2).
+  const opens = published ? opensLine(report) : '';
   const notes = [
     report.contentEditedAt ? `Edited ${formatDayOf(report.contentEditedAt, tz)}` : null,
     report.numbersRefreshedAt ? `Numbers refreshed ${formatDayOf(report.numbersRefreshedAt, tz)}` : null,
@@ -1017,15 +1034,8 @@ const ClientReportBuilderPage = () => {
 
   const teamSeriesId = buildState?.teamChanged ? buildState.seriesId : null;
   const teamRow = (seriesQ.data?.series || []).find((s) => s.id === teamSeriesId) || null;
-  // The links list, or null until it has loaded: Before you publish and the Publish confirm then read
-  // the checks' count instead.
-  const linkList = sharesQ.isSuccess ? shares : null;
-  // Can a link open it (WALK-5)? Only the links that can open THIS report count — the links to all
-  // your reports and this report's own, never another report's (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md
-  // §D, contract K8): the list once loaded, else what the checks counted (the server counts the same).
-  const hasUsableLink = linkList ? usableLinks(linksFor(linkList, id)).length > 0 : (checks?.links?.usable ?? 0) > 0;
-  // Take down names this report's own links (§D): they show "taken down" until it is put back up.
-  const takeDownLinks = takeDownLinksText(singleLinksOf(shares, id));
+  // Take down says what happens to the report's own link (§D2): it shows "taken down" until it's back up.
+  const takeDownLinks = takeDownLinksText(linksFor(linkList, id));
   const elsewhereWords = elsewhere ? conflictWords(elsewhere.conflicts, { labelOf, theirs: settingsOf(report) }) : null;
   // An Update that only switches to areas isn't seen "right away" (WALK-8).
   const switchOnly =
@@ -1069,7 +1079,6 @@ const ClientReportBuilderPage = () => {
         <BeforePublish
           checks={checks}
           report={report}
-          shares={linkList}
           labelOf={labelOf}
           tz={tz}
           busy={recomputeM.isPending || buildLive}
@@ -1277,10 +1286,11 @@ const ClientReportBuilderPage = () => {
                 <Button variant="secondary" disabled={editing} title={editing ? 'Finish or cancel the edit first.' : undefined} onClick={() => setRefreshOpen(true)}>
                   Refresh numbers
                 </Button>
-                {/* Share replaces Copy message (§D): the message, the link it uses — and Make a link, so it
-                    is never held for want of one. It waits for the links list, so it never says that no
-                    link opens the report before the list is in. */}
-                {shown && (
+                {/* Share, wherever the row has it (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D4): the report's one
+                    link — made here the first time — and the message for it. On a taken-down report too, to
+                    manage its link. It waits for the links list, so it never offers to make a link the
+                    report already has. */}
+                {published && (
                   <Button
                     variant="secondary"
                     disabled={editing || sharesQ.isPending}
@@ -1332,19 +1342,24 @@ const ClientReportBuilderPage = () => {
         </NextStepBanner>
       )}
       {draftMode && saveState.status === 'error' && <ErrorBanner title="Couldn’t save your latest change." error={saveState.error} />}
-      {justPublished && shown && (hasUsableLink ? (
-        <NextStepBanner tone="success" title="Published." action={linkList ? { label: 'Copy the message for your client', onClick: () => setShareOpen(true) } : null}>
-          Your client can see it now.
-        </NextStepBanner>
-      ) : (
-        // No link can open THIS report yet (WALK-5; §D — links to other reports don't count): say what
-        // is missing, not "your client can see it". Share makes the link, here.
+      {/* A report just published has no link yet — a draft never has one (§D4) — so one banner, pointing at Share. */}
+      {justPublished && shown && (
         <NextStepBanner
           tone="success"
-          title="Published — create a link so your client can open it."
+          title="Published — Share makes its link for your client."
           action={sharesQ.isPending ? null : { label: 'Share', onClick: () => setShareOpen(true) }}
         />
-      ))}
+      )}
+      {/* Archive tidies the list only (§C4); Next report onto an archived report lands here too. */}
+      {report.archivedAt && (
+        <NextStepBanner
+          tone="info"
+          title="Archived — it’s out of your list."
+          action={unarchiveM.isPending ? null : { label: 'Unarchive', onClick: () => unarchiveM.mutate() }}
+        >
+          Nothing changes for your client.
+        </NextStepBanner>
+      )}
       {published && report.takenDownAt && (
         <NextStepBanner tone="warning" title={`Taken down ${formatDayOf(report.takenDownAt, tz)}.`}>
           Your client can’t see it. It stays exactly as it was; Put back up shows it again with its original publish date.
@@ -1441,7 +1456,9 @@ const ClientReportBuilderPage = () => {
           report={report}
           checks={checks}
           build={build}
+          // Whether an old link to all your reports still shows it the moment it's published (§D5).
           shares={linkList}
+          allReportsRetired={allReportsRetired}
           tz={tz}
           previewFresh={previewFresh}
           mapStale={!!mapStale}
@@ -1481,20 +1498,41 @@ const ClientReportBuilderPage = () => {
           onCancelBuild={() => cancelM.mutate()}
         />
       )}
-      {shareOpen && shown && (
+      {shareOpen && published && (
         <ShareDialog
-          report={{ ...messageReportOf(shaped ? { ...shaped, seriesLabel: data.seriesLabel } : { ...report, id: String(report._id), seriesLabel: data.seriesLabel }), campaignType: report.campaignType || campaign?.type }}
+          // The report as Share needs it (contract K12): the message's numbers — the preview's, the ones the
+          // client sees — its tab (the report's own series: Same as your last link looks there first), and
+          // whether the client can see it now.
+          report={{
+            ...messageReportOf({
+              ...(shaped ? { ...shaped } : { ...report, id: String(report._id) }),
+              seriesLabel: data.seriesLabel,
+              seriesId: report.seriesId ? String(report.seriesId) : null,
+            }),
+            campaignType: report.campaignType || campaign?.type,
+            status: report.status,
+            takenDownAt: report.takenDownAt || null,
+          }}
           // Null until the links list is here (code review LINK-3): Share then waits, or says it failed.
-          shares={sharesQ.data ? shares : null}
+          shares={linkList}
+          allReportsRetired={allReportsRetired}
+          staffUnderGrant={staffUnderGrant}
           linksError={sharesQ.error}
           campaignId={campaignId}
           tz={tz}
-          isAdmin={isOrgAdmin}
           onClose={() => setShareOpen(false)}
-          // A link made here: the list (the banner, the header's opens and Take down read it) and History.
+          // A link made here: the list (Take down's line and the Publish confirm read it) and History.
           onLinksChanged={() => {
             qc.invalidateQueries({ queryKey: sharesKey(campaignId) });
             qc.invalidateQueries({ queryKey: historyKey(campaignId) });
+          }}
+          // Create found the report taken down or deleted somewhere else (code review V2-2): it moved under
+          // this page, so the report, its build, its preview and the list are read again (as rereadOn
+          // does) — Share then shows it taken down and the header offers Put back up, or the page says
+          // the report is gone.
+          onReportChanged={() => {
+            qc.invalidateQueries({ queryKey: buildKey(id) });
+            invalidate();
           }}
         />
       )}

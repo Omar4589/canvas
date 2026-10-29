@@ -112,7 +112,7 @@ import { recomputeFullyVoted } from '../voted/recomputeFullyVoted.js';
 import { buildReportSnapshot } from '../reports/buildReportSnapshot.js';
 import { inputsFromSettings, newSnapshotKey } from '../reports/clientReportBuilds.js';
 import { ensureSeries, CAMPAIGN_LABEL } from '../reports/clientReportSeries.js';
-import { choiceKeysOf, closeUnderDeps, depsMap, questionDepsOf } from '../reports/reportVisibility.js';
+import { choiceKeysOf, closeUnderDeps, depsMap, questionDepsOf, periodLabelOf } from '../reports/reportVisibility.js';
 import {
   DAY_MS,
   SHARE_DEFAULT_DAYS,
@@ -121,7 +121,13 @@ import {
   lifetimeStart,
   passwordMeetsRule,
   plusOne,
+  isAllReportsLink,
+  sealLinkPassword,
+  openLinkPassword,
 } from '../reports/shareLinks.js';
+import { isOneLinkGuardError } from '../reports/clientReportIndexes.js';
+import { sealedSecretConfigured } from '../../utils/sealedSecret.js';
+import { isWellFormedText } from '../../utils/passwordText.js';
 import { zonedDayRange } from '../../utils/timezone.js';
 import { stageDemoActivity, persistDemoActivity, ARCHIVED_DAY_OFFSETS } from './demoActivity.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
@@ -675,95 +681,222 @@ async function publishClientReport({ campaign, template, adminId }) {
   return ClientReport.findById(report._id).lean();
 }
 
-async function ensureShareLink({ campaign, adminId, log, requireSharePassword }) {
-  // A generated password is printed ONCE and only its hash is stored, so on the button's path
-  // (log is a no-op) generating one would silently strand the client link behind a password
-  // nobody has. Refuse instead, and name the config var that fixes it.
-  if (requireSharePassword && !process.env.SEED_DEMO_SHARE_PASSWORD) {
-    // reportId: null — the demo link opens all the campaign's reports, never one (here and below:
-    // docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D); null also matches a link from before the field.
-    const existing = await ReportShareLink.findOne(
-      { campaignId: campaign._id, isActive: true, passwordHash: { $ne: null }, reportId: null },
-      '_id'
-    ).lean();
-    if (!existing) {
-      throw seedError(
-        'SEED_DEMO_SHARE_PASSWORD is not set and the demo share link has no password yet — set it in '
-          + 'Heroku → Config Vars first, or the generated password is lost the moment it is created.',
-        'SHARE_PASSWORD_UNSET',
-        409
-      );
-    }
-  }
-  // The demo link follows the same rules as every real link — password + expiry — because the
-  // privacy policy speaks about links as a CLASS ('report links are protected by a password'),
-  // and this seeder was the one remaining code path that minted an open, never-expiring link.
-  // The data behind it is synthetic, but a class statement admits no exceptions. Password comes
-  // from SEED_DEMO_SHARE_PASSWORD (so reviewers/demos get a stable one) or is generated and
-  // printed once. Expiry refreshes on every demo reset, so the link never dies mid-demo.
-  //
-  // And the hardened link's rules (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6, §O7;
-  // services/reports/shareLinks.js): a one-year life from lifetimeStartAt that no expiry passes, a
-  // credential version that a first password bumps, and passwordMeetsRule from the password's length
-  // (an env password shorter than 12 is flagged in the panel, never claimed to meet the rule). A
-  // reset whose life can't cover another 90 days renews the link the way the panel's Renew does — a
-  // new address (unless SEED_DEMO_SHARE_TOKEN pins it), a new life, the version bumped, the failure
-  // budget cleared. Pipeline writes with $literal: a bcrypt hash starts with '$'.
-  const now = new Date();
-  const wanted = new Date(now.getTime() + SHARE_DEFAULT_DAYS * DAY_MS);
-  const lit = (v) => ({ $literal: v });
-  let share = await ReportShareLink.findOne({ campaignId: campaign._id, isActive: true, reportId: null }).lean();
-  if (share) {
-    const set = {};
-    if (!share.passwordHash) {
-      const pw = process.env.SEED_DEMO_SHARE_PASSWORD || randomBytes(9).toString('base64url');
-      set.passwordHash = lit(await bcrypt.hash(pw, 10));
-      set.passwordMeetsRule = lit(passwordMeetsRule(pw));
-      set.credentialVersion = plusOne('credentialVersion');
-      log(`  · demo share link upgraded: password ${process.env.SEED_DEMO_SHARE_PASSWORD ? 'from SEED_DEMO_SHARE_PASSWORD' : `generated → ${pw} (save it now — it is not shown again)`}`);
-    }
-    // A link that never expired starts its life now, as Extend's "Set an expiry" does.
-    const start = share.expiresAt ? lifetimeStart(share) : now;
-    const end = new Date(start.getTime() + SHARE_MAX_DAYS * DAY_MS);
-    if (wanted <= end) {
-      // Never shorter than it is, never past the end of its life.
-      const current = share.expiresAt ? new Date(share.expiresAt).getTime() : 0;
-      set.expiresAt = lit(new Date(Math.min(Math.max(current, wanted.getTime()), end.getTime())));
-      if (!share.lifetimeStartAt) set.lifetimeStartAt = lit(start);
-    } else {
-      set.token = lit(process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'));
-      set.lifetimeStartAt = lit(now);
-      set.expiresAt = lit(wanted);
-      set.credentialVersion = plusOne('credentialVersion');
-      Object.assign(set, CLEARED_FOR_NEW_ADDRESS);
-      log(`  · demo share link renewed: its one-year life was up${process.env.SEED_DEMO_SHARE_TOKEN ? '' : ' — it has a new address'}`);
-    }
-    await ReportShareLink.updateOne({ _id: share._id }, [{ $set: set }]);
-    return ReportShareLink.findById(share._id).lean();
-  }
-  const pw = process.env.SEED_DEMO_SHARE_PASSWORD || randomBytes(9).toString('base64url');
-  if (!process.env.SEED_DEMO_SHARE_PASSWORD) {
-    log(`  · demo share link password generated → ${pw} (save it now — it is not shown again)`);
-  }
-  share = await ReportShareLink.create({
-    organizationId: campaign.organizationId,
-    campaignId: campaign._id,
-    token: process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'),
-    label: 'Client demo link',
-    passwordHash: await bcrypt.hash(pw, 10),
-    expiresAt: wanted,
-    lifetimeStartAt: now,
-    credentialVersion: 0,
-    passwordMeetsRule: passwordMeetsRule(pw),
-    failedUnlockAt: [],
-    failedUnlocksTotal: 0,
-    failedByDay: [],
-    createdBy: adminId,
-  });
-  return share;
-}
+// ── The demo's client link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5) ────────────────────────────────
+// The demo keeps ONE link and points it at the demo's report. It follows the rules every real link
+// does — a password, an expiry, one link per report — because the privacy policy speaks about links
+// as a CLASS ('report links are protected by a password') and its sentences about links admit no
+// exceptions: the data behind it is synthetic, but this seeder was once the one code path that minted
+// an open, never-expiring link, and it must never again mint what the app can't.
+//
+// Which link is the demo's: the demo campaign's link with token SEED_DEMO_SHARE_TOKEN when that's set,
+// else the newest active one labelled "Client demo link", else the newest so labelled. Links made in
+// the app have no label, and the demo organization's slug is unique, so no customer's link — and no
+// link made for a report during a pitch — can match. A demo link given a New address in the app no
+// longer matches the token, but its label still finds it. Read with its sealed password, which it keeps.
+const DEMO_LINK_LABEL = 'Client demo link';
+const findDemoLink = async (campaign) => {
+  const scope = { organizationId: campaign.organizationId, campaignId: campaign._id };
+  const read = (filter) => ReportShareLink.findOne({ ...scope, ...filter }).sort({ createdAt: -1, _id: -1 }).select('+passwordSealed').lean();
+  const token = process.env.SEED_DEMO_SHARE_TOKEN;
+  return (token && (await read({ token }))) || (await read({ label: DEMO_LINK_LABEL, isActive: true })) || read({ label: DEMO_LINK_LABEL });
+};
 
-async function resetActivityLayer(campaign, log) {
+// The report the demo link opens: the one just published, else the one it already opens if that's
+// still shown, else the campaign's newest shown report (newest last day first, as the reports list).
+// null when none is shown — a plain --apply after every report was taken down, say.
+const demoLinkTarget = async ({ campaign, published, link }) => {
+  if (published) return published;
+  const shown = { organizationId: campaign.organizationId, campaignId: campaign._id, status: 'published', takenDownAt: null };
+  const fields = { weekStart: 1, weekEnd: 1 };
+  const own = link?.reportId ? await ClientReport.findOne({ ...shown, _id: link.reportId }, fields).lean() : null;
+  return own || ClientReport.findOne(shown, fields).sort({ weekEnd: -1, createdAt: -1, _id: -1 }).lean();
+};
+
+// A password for a link that has none: SEED_DEMO_SHARE_PASSWORD (so reviewers and pitches get a stable
+// one), or generated and printed once — hashed, then sealed with that hash as its associated data
+// (sealLinkPassword: null without a seal key), and written in one go with the hash. passwordMeetsRule
+// from its length: an env password shorter than 12 is flagged in Share, never claimed to meet the rule.
+const newDemoPassword = async (log) => {
+  const env = process.env.SEED_DEMO_SHARE_PASSWORD;
+  const pw = env || randomBytes(9).toString('base64url');
+  const passwordHash = await bcrypt.hash(pw, 10);
+  const passwordSealed = sealLinkPassword(pw, passwordHash);
+  log(`  · demo link password ${env ? 'from SEED_DEMO_SHARE_PASSWORD' : `generated → ${pw} (${passwordSealed ? 'Share can show it again' : 'save it now — it is not shown again'})`}`);
+  return { passwordHash, passwordSealed, passwordMeetsRule: passwordMeetsRule(pw) };
+};
+
+// The link keeps its own password, and SEED_DEMO_SHARE_PASSWORD never replaces it — but when the env
+// password matches the kept hash (bcrypt.compare) and no sealed copy opens to it, it's sealed beside
+// that hash, so Share can show the demo password. The sealed copy, or null when there's nothing to seal.
+const sealedEnvPassword = async (link) => {
+  const env = process.env.SEED_DEMO_SHARE_PASSWORD;
+  if (!env || !link?.passwordHash || openLinkPassword(link.passwordSealed, link.passwordHash) === env) return null;
+  if (!(await bcrypt.compare(env, link.passwordHash))) return null;
+  return sealLinkPassword(env, link.passwordHash);
+};
+
+// The hardened link's life (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F6, §O7; services/reports/
+// shareLinks.js): a one-year life from lifetimeStartAt that no expiry passes. Every run moves the expiry
+// out to 90 days — never shorter than it is, never past the end of its life — so the link never dies
+// mid-demo; a run whose life can't cover another 90 days renews the link the way Share's Renew does: a
+// new address (unless SEED_DEMO_SHARE_TOKEN pins it), a new life, the version bumped, the failure budget
+// cleared. A pipeline write with $literal.
+const refreshDemoLinkLife = async (link, now, log) => {
+  const lit = (v) => ({ $literal: v });
+  const wanted = new Date(now.getTime() + SHARE_DEFAULT_DAYS * DAY_MS);
+  // A link that never expired starts its life now, as Extend's "Set an expiry" does.
+  const start = link.expiresAt ? lifetimeStart(link) : now;
+  const end = new Date(start.getTime() + SHARE_MAX_DAYS * DAY_MS);
+  const set = {};
+  if (wanted <= end) {
+    const current = link.expiresAt ? new Date(link.expiresAt).getTime() : 0;
+    set.expiresAt = lit(new Date(Math.min(Math.max(current, wanted.getTime()), end.getTime())));
+    if (!link.lifetimeStartAt) set.lifetimeStartAt = lit(start);
+  } else {
+    set.token = lit(process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'));
+    set.lifetimeStartAt = lit(now);
+    set.expiresAt = lit(wanted);
+    set.credentialVersion = plusOne('credentialVersion');
+    Object.assign(set, CLEARED_FOR_NEW_ADDRESS);
+    log(`  · demo link renewed: its one-year life was up${process.env.SEED_DEMO_SHARE_TOKEN ? '' : ' — it has a new address'}`);
+  }
+  await ReportShareLink.updateOne({ _id: link._id }, [{ $set: set }]);
+};
+
+/**
+ * Point the demo's one link at the demo's report (§C5). Returns { link, target, note }: the link as it
+ * now stands (null when there is none), the shown report it should open (null when none is shown), and
+ * the line the log and the summary give when something stopped it.
+ *
+ * - No demo link → one is made for the report: in the one-link guard, token SEED_DEMO_SHARE_TOKEN or a
+ *   new one, labelled "Client demo link", with a new password. --rebuild comes here: the shared deletion
+ *   cascade took the old link with its campaign, and its viewers sign in again.
+ * - A link to all your reports — the first run after one link per report shipped — is REPLACED, once:
+ *   deleted, and a new link to the report made with the same token, password hash and sealed copy, so no
+ *   link that opened all the reports survives and the address and password stay. Its viewers sign in
+ *   once more (a share token names its link's _id).
+ * - From then on it's RE-POINTED in place — the one place a link's report ever changes, in the demo
+ *   organization only — so its _id, token, password, sessions and counts all stay: nobody is signed out.
+ *   Then, as before, the env password sealed when it matches, a password for a link without one, and
+ *   the expiry refresh.
+ * - A report that already has another link (made during a pitch): the demo link stays where it is.
+ * - Nothing shown: nothing changes — no link is made, and none is touched (a link to all your reports is
+ *   never extended: the app refuses that too).
+ */
+const ensureDemoLink = async ({ campaign, adminId, published, log }) => {
+  const now = new Date();
+  const found = await findDemoLink(campaign);
+  const target = await demoLinkTarget({ campaign, published, link: found });
+  if (!target) {
+    const note = found ? 'no report is shown, so the demo link was left as it is' : 'no report is shown, so no demo link was made';
+    log(`  · ${note}`);
+    return { link: found, target: null, note };
+  }
+  const period = periodLabelOf(target);
+  const onTarget = !!found?.reportId && String(found.reportId) === String(target._id);
+  const taken = !onTarget && !!(await ReportShareLink.exists({ reportId: target._id, ...(found ? { _id: { $ne: found._id } } : {}) }));
+  const takenNote = (outcome) => `the ${period} report already has a link made in the app, so ${outcome}`;
+  const stopped = (note) => {
+    log(`  · ${note}`);
+    return { link: found, target, note };
+  };
+  const make = async (fields) =>
+    (
+      await ReportShareLink.create({
+        organizationId: campaign.organizationId,
+        campaignId: campaign._id,
+        label: DEMO_LINK_LABEL,
+        reportId: target._id,
+        oneLinkGuard: true,
+        isActive: true,
+        expiresAt: new Date(now.getTime() + SHARE_DEFAULT_DAYS * DAY_MS),
+        lifetimeStartAt: now,
+        credentialVersion: 0,
+        failedUnlockAt: [],
+        failedUnlocksTotal: 0,
+        failedByDay: [],
+        createdBy: adminId,
+        ...fields,
+      })
+    ).toObject();
+
+  if (!found) {
+    if (taken) return stopped(takenNote('no demo link was made'));
+    let link;
+    try {
+      link = await make({ token: process.env.SEED_DEMO_SHARE_TOKEN || randomBytes(24).toString('base64url'), ...(await newDemoPassword(log)) });
+    } catch (err) {
+      if (!isOneLinkGuardError(err)) throw err;
+      return stopped(takenNote('no demo link was made'));
+    }
+    log(`  · demo link made for the ${period} report`);
+    return { link, target, note: null };
+  }
+
+  if (isAllReportsLink(found)) {
+    const kept = takenNote('the demo link still opens every report, until a run finds that report free');
+    if (taken) return stopped(kept);
+    // Its password, kept — or, an open link from before passwords, a first one.
+    const password = found.passwordHash
+      ? { passwordHash: found.passwordHash, passwordSealed: (await sealedEnvPassword(found)) ?? found.passwordSealed ?? null, passwordMeetsRule: found.passwordMeetsRule }
+      : await newDemoPassword(log);
+    await ReportShareLink.deleteOne({ _id: found._id, organizationId: campaign.organizationId });
+    let link;
+    try {
+      // Labelled as every demo link is, so a later run finds it even once SEED_DEMO_SHARE_TOKEN is gone.
+      link = await make({ token: found.token, isActive: found.isActive === true, ...password });
+    } catch (err) {
+      // Never lose the demo's address and password: the old link goes back exactly as it was.
+      await ReportShareLink.collection.insertOne(found);
+      if (!isOneLinkGuardError(err)) throw err;
+      return stopped(kept);
+    }
+    log(`  · demo link replaced: it opened every report, now the ${period} report — same address and password (viewers sign in once more)`);
+    return { link, target, note: null };
+  }
+
+  let note = null;
+  if (!onTarget) {
+    let moved = false;
+    if (!taken) {
+      try {
+        moved = (await ReportShareLink.updateOne({ _id: found._id, organizationId: campaign.organizationId }, { $set: { reportId: target._id, oneLinkGuard: true } })).matchedCount > 0;
+      } catch (err) {
+        if (!isOneLinkGuardError(err)) throw err;
+      }
+    }
+    if (moved) log(`  · demo link now opens the ${period} report — the same link, so nobody is signed out`);
+    else {
+      note = takenNote('the demo link stays where it is');
+      log(`  · ${note}`);
+    }
+  }
+  const sealed = await sealedEnvPassword(found);
+  if (sealed) {
+    await ReportShareLink.updateOne({ _id: found._id, passwordHash: found.passwordHash }, { $set: { passwordSealed: sealed } });
+    log('  · demo link password (SEED_DEMO_SHARE_PASSWORD) sealed — Share can show it');
+  }
+  if (!found.passwordHash) {
+    // Never expected — an open link from before passwords opened all the reports, and was replaced
+    // above — but no demo link is ever left without one. Pinned to "still none", so a password set in
+    // Share meanwhile stands; a first password bumps the version, as the app's does.
+    const pw = await newDemoPassword(log);
+    const lit = (v) => ({ $literal: v });
+    await ReportShareLink.updateOne({ _id: found._id, passwordHash: null }, [
+      { $set: { passwordHash: lit(pw.passwordHash), passwordSealed: lit(pw.passwordSealed), passwordMeetsRule: lit(pw.passwordMeetsRule), credentialVersion: plusOne('credentialVersion') } },
+    ]);
+  }
+  await refreshDemoLinkLife(found, now, log);
+  return { link: await ReportShareLink.findById(found._id).lean(), target, note };
+};
+
+// The summary's client-portal line: the demo link's address and the report it opens — or why not.
+const clientPortalLine = ({ link, target, note }) =>
+  !link
+    ? `none — ${note}`
+    : `/r/${link.token}${link.isActive === true ? '' : ' (turned off — turn it on in Share)'} — ${note || `the ${periodLabelOf(target)} report`}`;
+
+async function resetActivityLayer(campaign, log, { keepLinkId = null } = {}) {
   const campaignId = campaign._id;
   // FlagReview joins the wipe: its actionId is a required ref to a CanvassActivity we are about
   // to delete, so skipping it orphans every review row. Campaign-scoped like its five siblings.
@@ -780,9 +913,11 @@ async function resetActivityLayer(campaign, log) {
   await ClientReportMapPoint.deleteMany({ clientReportId: { $in: reports.map((r) => r._id) } });
   await ClientReportAreaCell.deleteMany({ campaignId });
   await ClientReport.deleteMany({ campaignId });
-  // A link to one report goes with its report (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D), as
-  // DELETE /admin/client-reports/:id does; the demo's link to all its reports survives the reset.
-  await ReportShareLink.deleteMany({ campaignId, reportId: { $ne: null } });
+  // The campaign's links go with its reports — every one but the demo link (findDemoLink), which
+  // survives the reset and is pointed at the report this run publishes, so Rebuild demo day signs no
+  // viewer out (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5). Links made during a pitch go, and so does
+  // any other link to all the reports.
+  await ReportShareLink.deleteMany({ campaignId, ...(keepLinkId ? { _id: { $ne: keepLinkId } } : {}) });
   // The demo's report series go with its reports; a rebuild makes a fresh whole-campaign one.
   await ClientReportSeries.deleteMany({ campaignId });
   // fullyVoted is safe to clear — recomputeFullyVoted rebuilds it from the VotedVoter rows wiped
@@ -836,6 +971,9 @@ async function resetActivityLayer(campaign, log) {
  *                      created with the env password — there is nothing to clobber.
  * @param requireExisting true = refuse when the org/campaign/voters aren't built yet, so a
  *                      request can never fall into the cold-build path
+ * @param requireSharePassword true = refuse (SHARE_PASSWORD_UNSET), before any write, when a
+ *                      new demo link password would have nowhere to be kept — the button's path,
+ *                      whose log is a no-op (see the check below the floors)
  * @param historySeed   seed for the staged-knock rng. The CLI pins it (identical day every
  *                      run); the button varies it so each press looks like a different day,
  *                      which is what the old refresh button did with unseeded Math.random.
@@ -903,6 +1041,29 @@ export async function seedDemoOrg({
         `Demo org has ${haveVoters} of ${plannedVoters.length} voters — run 'npm run seed:demo -- --apply' `
           + 'from the console to finish the build. The import is far too slow to run inside a request.',
         'DEMO_IMPORT_REQUIRED',
+        409
+      );
+    }
+  }
+  // The demo link's password (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5), checked HERE too, before the
+  // first write, so a refused Rebuild demo day never wipes anything. On the button's path the log is a
+  // no-op, so a password generated there — for a new demo link, or one without a password — would strand
+  // the client link behind a password nobody has, unless it's sealed (CREDENTIAL_SEAL_KEY), which lets
+  // Share show it. So: refused only when there's no demo link with a password, no SEED_DEMO_SHARE_PASSWORD
+  // and no seal key. --rebuild deletes the demo link with its campaign, so it keeps none. An env password
+  // that isn't well-formed text is refused before it can reach bcrypt (utils/passwordText.js) — the
+  // environment can't really carry one, but bcrypt would take the whole process down.
+  const envSharePassword = process.env.SEED_DEMO_SHARE_PASSWORD;
+  if (envSharePassword && !isWellFormedText(envSharePassword)) {
+    throw seedError('SEED_DEMO_SHARE_PASSWORD is not well-formed text — set it again in Heroku → Config Vars.', 'SHARE_PASSWORD_INVALID', 409);
+  }
+  if (requireSharePassword && !envSharePassword && !sealedSecretConfigured()) {
+    const kept = existingCampaign && !rebuild ? await findDemoLink(existingCampaign) : null;
+    if (!kept?.passwordHash) {
+      throw seedError(
+        'SEED_DEMO_SHARE_PASSWORD is not set and the demo share link has no password yet — set it in '
+          + 'Heroku → Config Vars first, or the generated password is lost the moment it is created.',
+        'SHARE_PASSWORD_UNSET',
         409
       );
     }
@@ -1071,7 +1232,7 @@ export async function seedDemoOrg({
   let wipedSummary = null;
   if (reset) {
     log('\nreset: wiping activity layer (voters/books/accounts/share link survive)');
-    wipedSummary = await resetActivityLayer(campaign, log);
+    wipedSummary = await resetActivityLayer(campaign, log, { keepLinkId: (await findDemoLink(campaign))?._id ?? null });
   }
 
   // 4. Import voters through the real pipeline -------------------------------
@@ -1209,29 +1370,44 @@ export async function seedDemoOrg({
   // round's lifecycle window. R1 ran −14d → −7d (staged knocks on days −8..−12); R2
   // activated at the boundary (−6d) and owns today..−4. Refresh-demo-day re-stamps
   // dates the same way because it always restages.
+  //
+  // The lifecycle fields read as the app writes them (services/passes/passLifecycle.js): every pass
+  // ended here was ended by R2 going live — what activation stamps, so Bring back refuses it as it
+  // would in the app — lastActivatedAt rides with activatedAt, and R2, live, carries no archive.
   const activityCount = await CanvassActivity.countDocuments({ campaignId: campaign._id });
   const willStage = activityCount === 0;
+  const endedByR2 = { archivedFrom: 'active', archivedVia: 'next-pass', archivedBy: admin._id, endedByPassId: r2._id };
   await Pass.updateMany(
     { campaignId: campaign._id, effortId: effort._id, status: 'active', _id: { $ne: r2._id } },
-    { $set: { status: 'archived', archivedAt: new Date() } }
+    { $set: { status: 'archived', archivedAt: new Date(), ...endedByR2 } }
   );
+  const r1LiveAt = localTime(-14, 9 * 60);
   await Pass.updateOne(
     { _id: r1._id },
     {
       $set: {
         status: 'archived',
-        ...(willStage ? { activatedAt: localTime(-14, 9 * 60), archivedAt: localTime(-7, 18 * 60) } : {}),
+        ...endedByR2,
+        ...(willStage ? { activatedAt: r1LiveAt, lastActivatedAt: r1LiveAt, archivedAt: localTime(-7, 18 * 60) } : {}),
       },
     }
   );
+  const r2LiveAt = localTime(-6, 9 * 60);
   await Pass.updateOne(
     { _id: r2._id },
     {
       $set: {
         status: 'active',
-        ...(willStage ? { activatedAt: localTime(-6, 9 * 60), archivedAt: null } : {}),
+        archivedFrom: null, archivedVia: null, archivedBy: null, endedByPassId: null,
+        ...(willStage ? { activatedAt: r2LiveAt, lastActivatedAt: r2LiveAt, archivedAt: null } : {}),
       },
     }
+  );
+  // R2 is live, so the walk list is open — someone who archived it during a demo must not leave the
+  // refreshed demo reading "Archived · Pass 2 still live" with a view-only Turf page.
+  await Effort.updateOne(
+    { _id: effort._id },
+    { $set: { status: 'active', archivedAt: null, archivedBy: null, endedPassId: null } }
   );
   log(
     `   rounds: '${r1.name}' archived · '${r2.name}' active` +
@@ -1242,6 +1418,7 @@ export async function seedDemoOrg({
   let stagedSummary = null;
   let votedSummary = null;
   let reportSummary = null;
+  let publishedReport = null;
   if (activityCount > 0) {
     log(`8. history: skipped (${activityCount} activities exist — use --reset --apply to restage)`);
   } else {
@@ -1287,8 +1464,9 @@ export async function seedDemoOrg({
     });
     log(`9. early voting: ${voted.voters} voters marked · ${voted.doorsDropped} doors dropped`);
 
-    // 10. Client report + share link -------------------------------------------
+    // 10. Client report -----------------------------------------------------------
     const report = await publishClientReport({ campaign, template: template.toObject(), adminId: admin._id });
+    publishedReport = report;
     log(`10. published client report '${report.title}' (${report.weekStart} → ${report.weekEnd}, ${report.mapPointCount} map points)`);
 
     stagedSummary = {
@@ -1307,9 +1485,11 @@ export async function seedDemoOrg({
       mapPointCount: report.mapPointCount,
     };
   }
-  const share = await ensureShareLink({
-    campaign, adminId: admin._id, log, requireSharePassword,
-  });
+  // 11. The demo's client link — the demo report's own link, pointed at the report just published
+  // (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C5). On every run: one that publishes nothing keeps it on
+  // the report it opens while that's shown.
+  log('11. client link:');
+  const demo = await ensureDemoLink({ campaign, adminId: admin._id, published: publishedReport, log });
 
   // Summary --------------------------------------------------------------------
   const [hh, vv, tt, aa, ss] = await Promise.all([
@@ -1337,7 +1517,7 @@ export async function seedDemoOrg({
     const role = isAdmin ? 'ADMIN, deletion-LOCKED' : 'canvasser, DELETABLE — give this one to test deletion';
     log(`  ${u.email} / ${pw} — ${role} — book '${round2.reviewerTurfs[k].name}' kept clean`);
   });
-  log(`  client portal:   /r/${share.token}`);
+  log(`  client portal:   ${clientPortalLine(demo)}`);
   // Print the command as it must be typed in Heroku's Run console, which starts at the REPO
   // ROOT — `node src/utils/…` is relative to server/ and just errors there. See docs/OPERATIONS.md.
   log(`  restage after reviewers knock (and to recreate a deleted review account):`);
@@ -1374,7 +1554,16 @@ export async function seedDemoOrg({
     staged: stagedSummary,
     earlyVoting: votedSummary,
     report: reportSummary,
-    share: { token: share.token, url: `/r/${share.token}`, expiresAt: share.expiresAt },
+    // The demo link and the report it opens — url null when there's no demo link, and `note` saying why
+    // whenever it isn't on a shown report (none shown, or that report already has a link of its own).
+    share: {
+      token: demo.link?.token ?? null,
+      url: demo.link ? `/r/${demo.link.token}` : null,
+      expiresAt: demo.link?.expiresAt ?? null,
+      reportId: demo.link?.reportId ? String(demo.link.reportId) : null,
+      isActive: demo.link?.isActive === true,
+      note: demo.note,
+    },
     totals: { doors: hh, voters: vv, books: tt, activities: aa, surveys: ss },
     datesStamped: willStage,
     durationMs: Date.now() - startedAt,

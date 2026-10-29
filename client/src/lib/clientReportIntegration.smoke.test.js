@@ -80,7 +80,7 @@ export const builder = (qc, { reportDoc, checks, shaped }) => {
   return { html, mapProps: globalThis.__mapProps.slice() };
 };
 export const sectionsOf = (r) => deriveReportSections(r);
-export const before = (props) => wrap(newQc(), <BeforePublish tz="America/New_York" labelOf={(k) => k} copiedReviewed={false} onCopiedReviewed={() => {}} busy={false} shares={[]} {...props} />);
+export const before = (props) => wrap(newQc(), <BeforePublish tz="America/New_York" labelOf={(k) => k} copiedReviewed={false} onCopiedReviewed={() => {}} busy={false} {...props} />);
 export const confirm = (qc, props) =>
   wrap(qc, <CoordinatorConfirm isLoading={false} error={null} subjectName="Ann Crewone" busy={false} onCancel={() => {}} onConfirm={() => {}} {...props} />);
 export const hub = (data) =>
@@ -176,7 +176,6 @@ const checks = {
   earlierTotals: null,
   earlierReportRefreshed: null,
   earlierReportsRefreshed: 0,
-  links: { usable: 0, labels: [], reason: 'no_link' },
   team: null,
 };
 // What POST /:id/preview answers: the client's shape (services/reports/clientReportView.js).

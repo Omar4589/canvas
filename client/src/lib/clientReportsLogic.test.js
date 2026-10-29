@@ -4,23 +4,27 @@ import { addDays, daysBetween, periodDays, formatPeriod, gapBetween, gapsAbove }
 import { buildStateOf, displayStatusOf, buildPollInterval, isLiveBuild, freshestBuild } from '../components/clientReports/buildState.js';
 import {
   linkBadges,
-  noUsableLinkReason,
-  linksLine,
+  lockAdvice,
   extendChoices,
   usableLinks,
   failureLine,
   opensLine,
   shortUrl,
+  shareUrl,
   rotateConfirmLines,
-  disableConfirmText,
   renewText,
   linksFor,
   singleLinksOf,
-  linkOpens,
-  linkName,
-  deleteLinksText,
+  primaryLinkOf,
+  extraLinksOf,
+  allReportsLinksOf,
+  hasWorkingAllReportsLink,
+  beforeSendText,
+  fewerChangedLine,
 } from '../components/clientReports/linkState.js';
-import { copyMessageFor, linkMessageFor, messageReportOf } from '../components/clientReports/copyMessage.js';
+import * as linkStateModule from '../components/clientReports/linkState.js';
+import * as copyMessageModule from '../components/clientReports/copyMessage.js';
+import { copyMessageFor, messageReportOf } from '../components/clientReports/copyMessage.js';
 import { allTimeChoice, choiceText, dateChoices, duplicateText, monthsLabel, totalsSentence, weekName, weekNudge } from '../components/clientReports/newReportChoices.js';
 import { GOT_IT, GUIDE_TITLE, HELP_LINE, HELP_PATH, HOW_IT_WORKS_LINK, INTRO, PHONE_STEPS, STEPS } from '../components/clientReports/howItWorksCopy.js';
 import { rowsFor, toggleChart, toggleMap, setHeadline, showAll, showNone, depsMapOf, closeUnderDeps } from '../components/clientReports/questionRules.js';
@@ -32,7 +36,9 @@ import { clientReportHistoryLine, isClientReportField, earlierTextSummary, label
 // Since docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md: New report's dated choices and the week nudge (§C), the
 // duplicate prompt's words (§E), links to one report and the message's endings (§D), and the guide's
 // one copy source (§B). The week math itself (reportDates.js, contract K1) is pinned by its fixture
-// table in reportPeriods.parity.test.js.
+// table in reportPeriods.parity.test.js. Since docs/PROPOSAL_CLIENT_REPORT_LINKS.md: one link per report
+// (§C2) — a link to all your reports never counts as a report's — the link words in one vocabulary
+// (turned off, new address), the summed opens line, and the message's endings by what Share just did (§D1).
 
 const NOW = Date.parse('2026-10-24T15:00:00Z');
 const DAY = 86400000;
@@ -251,7 +257,9 @@ const keys = (s) => linkBadges(s, { now: NOW, tz: 'America/New_York' }).map((b) 
 
 test('links: every row state from §G7, and the short-password flag only when known', () => {
   assert.deepEqual(keys(link()), ['active']);
-  assert.deepEqual(keys(link({ isActive: false })), ['disabled']);
+  assert.deepEqual(keys(link({ isActive: false })), ['off']);
+  // One vocabulary (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §D1): turned off, turn on.
+  assert.deepEqual(linkBadges(link({ isActive: false }), { now: NOW })[0], { key: 'off', variant: 'neutral', label: 'Turned off', detail: 'Nobody can open it until you turn it on.' });
   assert.deepEqual(keys(link({ expiresAt: new Date(NOW + 5 * DAY + 1000).toISOString() })), ['expiring']);
   assert.equal(linkBadges(link({ expiresAt: new Date(NOW + 5 * DAY + 1000).toISOString() }), { now: NOW })[0].label, 'Expires in 5 days');
   assert.deepEqual(keys(link({ expiresAt: new Date(NOW - DAY).toISOString() })), ['expired']);
@@ -262,7 +270,9 @@ test('links: every row state from §G7, and the short-password flag only when kn
   assert.match(linkBadges(locked, { now: NOW, tz: 'America/New_York' })[0].detail, /after 50 wrong passwords\. Devices already signed in still work\./);
   assert.deepEqual(keys(link({ passwordMeetsRule: false })), ['active', 'short']);
   assert.deepEqual(keys(link({ passwordMeetsRule: null })), ['active'], 'unknown is never flagged');
-  assert.deepEqual(keys(link({ hasPassword: false, expiresAt: null, lifetimeEndsAt: null })), ['active', 'nopw', 'noexp'], 'a legacy open link');
+  // A link with no password or no expiry is an old link to all your reports — on the old-links card,
+  // never in Share — so the badges have nothing to add about either.
+  assert.deepEqual(keys(link({ hasPassword: false, expiresAt: null, lifetimeEndsAt: null })), ['active']);
   assert.equal(failureLine({ last24h: 12, last7d: 30, total: 41 }), '12 wrong passwords in the last day · 30 this week · 41 in total');
   // With the window's first wrong password (the server's failures.since): "since Oct 24, 9:12 AM EDT".
   assert.match(failureLine({ last24h: 12, since: '2026-10-24T13:12:00Z', last7d: 12, total: 12 }, 'America/New_York'), /^12 wrong passwords since Oct 24, 9:12\sAM EDT · 12 this week · 12 in total$/);
@@ -292,46 +302,57 @@ test('links: an expired link points only at Renew, and "devices still work" is s
   const fails = { last24h: 50, last7d: 50, total: 50 };
   // Expired a moment after it locked: nobody can open it (410), and Renew clears the wrong passwords.
   assert.deepEqual(keys(link({ expiresAt: new Date(NOW - 1000).toISOString(), lock, failures: fails })), ['expired'], 'no lock, no wrong-password badge');
-  // Locked while disabled: the disable signed every device out.
+  // Locked while turned off: turning it off signed every device out.
   const off = linkBadges(link({ isActive: false, lock, failures: fails }), { now: NOW, tz: 'America/New_York' });
-  assert.deepEqual(off.map((b) => b.key), ['disabled', 'locked']);
+  assert.deepEqual(off.map((b) => b.key), ['off', 'locked']);
   assert.match(off[1].detail, /after 50 wrong passwords\.$/);
   assert.ok(!off[1].detail.includes('still work'));
 });
 
-test('links: each confirm promises what the share routes do — rotate, disable, renew (ADMINUX-8)', () => {
+test('links: each confirm promises what the share routes do — New address and Renew, in one vocabulary (ADMINUX-8, LINKS §D1)', () => {
   const tz = 'America/New_York';
   const [rotated, after] = rotateConfirmLines(link({ expiresAt: '2026-12-01T17:00:00Z' }), { now: NOW, tz });
   assert.equal(rotated, 'It gets a new address, and everyone using the old one is signed out. The password stays the same. It still expires Dec 1, 2026.');
   assert.equal(after, 'Send your client the new link afterwards.');
-  // A locked link: rotate clears the wrong passwords with the old address.
+  // A locked link: a new address clears the wrong passwords with the old one.
   const lock = { locked: true, until: new Date(NOW + 3600000).toISOString() };
   assert.match(rotateConfirmLines(link({ lock }), { now: NOW, tz })[0], / It also lifts the lock\.$/);
-  // A disabled link stays disabled, so its new address opens nothing yet.
-  assert.equal(rotateConfirmLines(link({ isActive: false }), { now: NOW, tz })[1], 'It stays disabled — nobody can open the new address until you enable it. Then send your client the new link.');
-  // A legacy open link: no password to keep, no expiry to keep.
+  // A link that's turned off stays turned off, so its new address opens nothing yet.
+  assert.equal(rotateConfirmLines(link({ isActive: false }), { now: NOW, tz })[1], 'It stays turned off — nobody can open the new address until you turn it on.');
+  // A legacy open link (an old link to all your reports): no password to keep, no expiry to keep.
   assert.equal(rotateConfirmLines(link({ hasPassword: false, expiresAt: null }), { now: NOW, tz })[0], 'It gets a new address, and everyone using the old one is signed out.');
-  // Disable bumps the credential version: enabling again asks for the password again.
-  assert.equal(disableConfirmText(link()), 'Nobody can open it until you enable it again. Everyone using it now is signed out — once you enable it, they need the password again.');
-  assert.equal(disableConfirmText(link({ hasPassword: false })), 'Nobody can open it until you enable it again.');
   assert.equal(renewText(link()), 'Renew gives this link a new address — send your client the new link. The password stays the same.');
   assert.equal(
     renewText(link({ isActive: false })),
-    'Renew gives this link a new address. It stays disabled until you enable it — then send your client the new link. The password stays the same.'
+    'Renew gives this link a new address. It stays turned off until you turn it on — then send your client the new link. The password stays the same.'
   );
+  // There is no Turn off any more — Take down does that job for one report — so no confirm words for it.
+  assert.equal(linkStateModule.disableConfirmText, undefined);
+  // What a lock says to do: a new address, never "rotate".
+  const fails = { last24h: 50, last7d: 50, total: 50 };
+  assert.deepEqual(lockAdvice(link({ lock, failures: fails, rotateAdvice: true }), NOW), {
+    text: 'Someone else has this link — 50 wrong passwords is never your client. Give it a new address.',
+    tone: 'danger',
+  });
+  assert.deepEqual(lockAdvice(link({ failures: { last24h: 0, last7d: 52, total: 52 }, rotateAdvice: true }), NOW), {
+    text: '50 or more wrong passwords this week — someone else may have this link. Give it a new address.',
+    tone: 'warning',
+  });
+  assert.equal(lockAdvice(link({ expiresAt: new Date(NOW - 1000).toISOString(), lock, rotateAdvice: true }), NOW), null, 'an expired link is renewed instead');
+  assert.equal(lockAdvice(link(), NOW), null);
 });
 
-test('links: usable means active, unexpired and unlocked; the publish line names why none is', () => {
-  assert.equal(noUsableLinkReason([], NOW).text, 'No link yet — create one.');
-  assert.equal(noUsableLinkReason([link({ expiresAt: new Date(NOW - 1).toISOString() })], NOW).text, 'Your only link expired — renew it.');
-  assert.equal(noUsableLinkReason([link({ lock: { locked: true, until: new Date(NOW + 1000).toISOString() } })], NOW).text, 'Your only link is locked — unlock or rotate it.');
-  assert.equal(noUsableLinkReason([link({ isActive: false })], NOW).text, 'Your only link is disabled — enable it.');
-  assert.equal(noUsableLinkReason([link({ isActive: false }), link({ id: 'l2', expiresAt: new Date(NOW - 1).toISOString() })], NOW).code, 'mixed');
-  assert.equal(noUsableLinkReason([link({ isActive: false }), link({ id: 'l2' })], NOW), null);
+test('links: usable means active, unexpired and unlocked; the publish-time link words are gone (LINKS §D5)', () => {
+  assert.equal(usableLinks([link(), link({ id: 'l2', isActive: false }), link({ id: 'l3', expiresAt: new Date(NOW - 1).toISOString() })], NOW).length, 1);
+  assert.equal(usableLinks([link({ lock: { locked: true, until: new Date(NOW + 1000).toISOString() } })], NOW).length, 0);
   // A lock whose time has passed no longer counts.
   assert.equal(usableLinks([link({ lock: { locked: true, until: new Date(NOW - 1000).toISOString() } })], NOW).length, 1);
-  const line = linksLine([link(), link({ id: 'l2', label: 'Consultant' }), link({ id: 'l3', isActive: false })], NOW);
-  assert.equal(line.text, 'It shows on 2 links: Candidate, Consultant.');
+  // A draft can never have a link, so nothing asks "can a link open it?" before publishing: the reasons,
+  // the Publish confirm's line, the expiring-soon warning and the Link ready dialog's message went.
+  for (const gone of ['noUsableLinkReason', 'linksLine', 'reportLinkReason', 'reportLinksLine', 'linkOpens', 'linkName', 'deleteLinksText', 'reportUrl']) {
+    assert.equal(linkStateModule[gone], undefined, gone);
+  }
+  assert.equal(copyMessageModule.linkMessageFor, undefined, 'the Link ready dialog went with the links panel');
 });
 
 test('links: Extend shows the resulting date and offers only later ones, capped a year from creation', () => {
@@ -346,19 +367,23 @@ test('links: Extend shows the resulting date and offers only later ones, capped 
   assert.deepEqual(extendChoices(link({ expiresAt: new Date(NOW + 200 * DAY).toISOString(), lifetimeEndsAt: new Date(NOW + 200 * DAY).toISOString() }), NOW), []);
 });
 
-test('links: opens read "about", per link, with the organization and staff apart', () => {
-  const r = {
-    views: { byLink: { l1: { opens: 2 }, gone: { opens: 1 } }, members: { admins: { opens: 3 }, staff: { opens: 1 } } },
-    viewCount: 4,
-  };
+test('links: opens read "About N visits" — every link summed, old and deleted ones too — with the organization apart (LINKS Part 1 §5)', () => {
+  // Its own link, a link since deleted and an old link to all your reports: one count.
+  const r = { views: { byLink: { l1: { opens: 2 }, gone: { opens: 1 }, all: { opens: 2 } }, members: { admins: { opens: 1 }, leads: { opens: 1 } } } };
+  assert.equal(opensLine(r), 'About 5 visits · your organization: 2 visits');
+  assert.equal(opensLine({ views: { byLink: { l1: { opens: 1 } } } }), 'About 1 visit');
+  // Only the organization's own people: said, with a capital.
+  assert.equal(opensLine({ views: { byLink: {}, members: { others: { opens: 3 } } } }), 'Your organization: 3 visits');
+  // Doorline staff, and the views from before per-link counts, only when there are any.
   assert.equal(
-    opensLine(r, [link()]),
-    'Opened via Candidate: about 2 visits · a deleted link: about 1 · your organization: 3 visits · Doorline staff: 1 visit · 4 views before per-link counts'
+    opensLine({ views: { byLink: { l1: { opens: 1200 } }, members: { admins: { opens: 3 }, staff: { opens: 1 } } }, viewCount: 4 }),
+    'About 1,200 visits · your organization: 3 visits · Doorline staff: 1 visit · 4 views before per-link counts'
   );
-  assert.equal(opensLine({}, []), '');
+  assert.equal(opensLine({}), '');
+  assert.equal(opensLine(null), '');
 });
 
-test('the copy-ready message names the scope and dates, deep-links, and never carries the password', () => {
+test('the copy-ready message names the scope and dates, gives the link’s short address, and never carries the password', () => {
   const row = {
     id: 'r9',
     weekStart: '2026-10-13',
@@ -371,8 +396,17 @@ test('the copy-ready message names the scope and dates, deep-links, and never ca
   assert.equal(
     msg,
     'The Volunteer team report for Oct 13 – Oct 19 is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). ' +
-      'Open it here: https://doorline.app/r/tok1/reports/r9 — use the password I sent you.'
+      'Open it here: https://doorline.app/r/tok1 — use the password I sent you.'
   );
+  // The short address: a report's own link opens that report (LINKS §D1).
+  assert.equal(shareUrl('https://doorline.app', 'tok1'), 'https://doorline.app/r/tok1');
+  // The tab the report is on rides along, for Share's Same as … (contract K11).
+  assert.deepEqual(
+    [messageReportOf({ ...row, seriesId: 's-vol', seriesKey: 'kV' }).seriesId, messageReportOf({ ...row, seriesId: 's-vol', seriesKey: 'kV' }).seriesKey],
+    ['s-vol', 'kV']
+  );
+  assert.equal(messageReportOf({ ...row, scope: { ...row.scope, seriesKey: 'kS' } }).seriesKey, 'kS', 'a shaped report carries its key in its scope');
+  assert.deepEqual([messageReportOf(row).seriesId, messageReportOf(row).seriesKey], [null, null]);
   const whole = copyMessageFor({
     report: { ...messageReportOf({ ...row, scope: { kind: 'campaign', label: 'Whole campaign' }, seriesLabel: null }), campaignType: 'lit_drop' },
     link: link({ hasPassword: false }),
@@ -380,50 +414,81 @@ test('the copy-ready message names the scope and dates, deep-links, and never ca
   });
   assert.match(whole, /^The report for Oct 13 – Oct 19 is up: 3,412 doors knocked so far \(\+412 in that period\) and 0 lit dropped \(\+0\)\./);
   assert.ok(!/password/.test(whole), 'an open link’s message says nothing about a password');
-  assert.ok(!/k7Hq9mXr2wPz/.test(linkMessageFor({ link: link(), origin: 'https://doorline.app' })));
-  assert.equal(linkMessageFor({ link: link(), origin: 'https://doorline.app' }), 'Here\'s the link to our reports: https://doorline.app/r/tok1 — I’ll send the password separately.');
 });
 
 // A link to one report (SIMPLIFY §D): the share row's reportId and report.
 const oneReport = (over = {}) =>
   link({ id: 'b1', token: 'tokB', label: 'Board', reportId: 'r1', report: { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', scopeLabel: 'Whole campaign' }, ...over });
 
-test('links to one report: linksFor keeps the links that can open a report, before every usable / reason / line (SIMPLIFY §D, K8)', () => {
+test('one link per report: a report’s links are its own — a link to all your reports never counts as opening it (LINKS §C2, §D6)', () => {
   const legacy = link({ id: 'old', label: 'Old' }); // no reportId field at all: made before links to one report
   const all = link({ id: 'all', label: 'Candidate', reportId: null, report: null });
   const board = oneReport();
   const donor = oneReport({ id: 'd2', label: 'Donor', reportId: 'r2', report: { id: 'r2', weekStart: '2026-10-12', weekEnd: '2026-10-18', scopeLabel: 'Paid team' } });
   const shares = [legacy, all, board, donor];
-  assert.deepEqual(linksFor(shares, 'r1').map((s) => s.id), ['old', 'all', 'b1']);
-  assert.deepEqual(linksFor(shares, 'r3').map((s) => s.id), ['old', 'all'], 'another report’s link never counts');
-  assert.deepEqual(singleLinksOf(shares, 'r1').map((s) => s.id), ['b1']);
-  assert.deepEqual(singleLinksOf(shares, 'r3'), []);
+  assert.deepEqual(linksFor(shares, 'r1').map((s) => s.id), ['b1']);
+  assert.deepEqual(linksFor(shares, 'r3'), [], 'old links to all your reports never count; nor does another report’s link');
+  assert.deepEqual(singleLinksOf(shares, 'r1').map((s) => s.id), ['b1'], 'the same list, by its older name');
   assert.deepEqual(linksFor(null, 'r1'), []);
-  // The helpers' own signatures are unchanged — the filter comes first.
-  assert.equal(linksLine(linksFor([board, donor], 'r1'), NOW).text, 'It shows on 1 link: Board.');
-  assert.equal(noUsableLinkReason(linksFor([donor], 'r1'), NOW).text, 'No link yet — create one.');
   assert.equal(usableLinks(linksFor([donor, link({ id: 'x', isActive: false })], 'r2'), NOW).length, 1);
-  // What each opens, in the links list's and Share's words.
-  assert.equal(linkOpens(all), 'opens all your reports');
-  assert.equal(linkOpens(legacy), 'opens all your reports');
-  assert.equal(linkOpens(board), 'opens only the Oct 19 – Oct 25 report (Whole campaign)');
-  assert.equal(linkOpens(board, { thisReportId: 'r1' }), 'opens only this report');
-  assert.equal(linkOpens(donor, { thisReportId: 'r1' }), 'opens only the Oct 12 – Oct 18 report (Paid team)');
-  assert.equal(linkOpens(oneReport({ report: null })), 'opens only a deleted report', 'mid-race only');
-  assert.equal(linkName(board), 'Board — opens only the Oct 19 – Oct 25 report (Whole campaign)');
-  assert.equal(linkName(link({ label: '', reportId: null })), 'Unlabelled link — opens all your reports');
+  // The old links, for the card: newest first, with or without the reportId field.
+  assert.deepEqual(allReportsLinksOf([board, { ...legacy, createdAt: new Date(NOW - 9 * DAY).toISOString() }, { ...all, createdAt: new Date(NOW - DAY).toISOString() }]).map((s) => s.id), ['all', 'old']);
+  assert.deepEqual(allReportsLinksOf(null), []);
+  // Still working: turned on and not expired (a locked one serves the devices signed in to it), and
+  // never once the switch is on.
+  assert.equal(hasWorkingAllReportsLink([all, board], false, NOW), true);
+  assert.equal(hasWorkingAllReportsLink([{ ...all, lock: { locked: true, until: new Date(NOW + 3600000).toISOString() } }], false, NOW), true);
+  assert.equal(hasWorkingAllReportsLink([all], true, NOW), false, 'the switch turned them off');
+  assert.equal(hasWorkingAllReportsLink([{ ...all, isActive: false }, { ...legacy, expiresAt: new Date(NOW - DAY).toISOString() }, board], false, NOW), false);
+  assert.equal(hasWorkingAllReportsLink([board], false, NOW), false, 'a report’s own link isn’t one');
 });
 
-test('Delete names the report’s one-report links that still open, which go with it (SIMPLIFY §D)', () => {
-  assert.equal(deleteLinksText([oneReport()], NOW), 'Its link Board (just this report) stops working for good.');
-  assert.equal(deleteLinksText([oneReport(), oneReport({ id: 'd', label: 'Donor' })], NOW), 'Its links Board and Donor (just this report) stop working for good.');
-  assert.equal(
-    deleteLinksText([oneReport(), oneReport({ id: 'd', label: 'Donor' }), oneReport({ id: 'p', label: '' })], NOW),
-    'Its links Board, Donor and Unlabelled link (just this report) stop working for good.'
-  );
-  // A disabled or expired one already doesn't open; nothing to say without one.
-  assert.equal(deleteLinksText([oneReport({ isActive: false }), oneReport({ id: 'e', expiresAt: new Date(NOW - DAY).toISOString() })], NOW), '');
-  assert.equal(deleteLinksText([], NOW), '');
+test('a report that got two links before one link per report: the main one is the newest usable, else the newest; the rest are extras (LINKS §C2)', () => {
+  const at = (d) => new Date(NOW - d * DAY).toISOString();
+  const older = oneReport({ id: 'o', label: 'Board', createdAt: at(3) });
+  const newer = oneReport({ id: 'n', label: '', createdAt: at(1) });
+  assert.equal(primaryLinkOf([older, newer], 'r1', NOW).id, 'n', 'the newest');
+  assert.deepEqual(extraLinksOf([older, newer], 'r1', NOW).map((s) => s.id), ['o']);
+  // The newest can't be opened (expired, turned off, locked): the newest usable one is the main one.
+  for (const broken of [{ expiresAt: at(0.5) }, { isActive: false }, { lock: { locked: true, until: new Date(NOW + 3600000).toISOString() } }]) {
+    const b = { ...newer, ...broken };
+    assert.equal(primaryLinkOf([older, b], 'r1', NOW).id, 'o', JSON.stringify(broken));
+    assert.deepEqual(extraLinksOf([older, b], 'r1', NOW).map((s) => s.id), ['n']);
+  }
+  // None usable: the newest, still.
+  assert.equal(primaryLinkOf([{ ...older, isActive: false }, { ...newer, isActive: false }], 'r1', NOW).id, 'n');
+  // The server's own order (newest first) decides between rows without a date.
+  assert.equal(primaryLinkOf([oneReport({ id: 'first' }), oneReport({ id: 'second' })], 'r1', NOW).id, 'first');
+  // No link of its own: nothing — an old link to all your reports is never a report's main link.
+  assert.equal(primaryLinkOf([link({ id: 'all', reportId: null })], 'r1', NOW), null);
+  assert.deepEqual(extraLinksOf([link({ id: 'all', reportId: null })], 'r1', NOW), []);
+  assert.equal(primaryLinkOf(null, 'r1', NOW), null);
+});
+
+test('Share’s message waits for a link the client can open — what to do first, turned off before expired before locked (code review CC-1)', () => {
+  const gone = new Date(NOW - DAY).toISOString();
+  const lock = { locked: true, until: new Date(NOW + 3600000).toISOString() };
+  assert.equal(beforeSendText(link(), NOW), null, 'on, not expired, not locked: send it');
+  assert.equal(beforeSendText(link({ isActive: false }), NOW), 'Turn it on before you send it.');
+  assert.equal(beforeSendText(link({ expiresAt: gone }), NOW), 'Renew it before you send it.');
+  assert.equal(beforeSendText(link({ lock }), NOW), 'Unlock it before you send it.');
+  // Two at once: in the order the row's link line reads them — a client meets turned off, then expired.
+  assert.equal(beforeSendText(link({ isActive: false, expiresAt: gone, lock }), NOW), 'Turn it on before you send it.');
+  assert.equal(beforeSendText(link({ expiresAt: gone, lock }), NOW), 'Renew it before you send it.');
+  // A lock whose time has passed no longer holds it.
+  assert.equal(beforeSendText(link({ lock: { locked: true, until: new Date(NOW - 1000).toISOString() } }), NOW), null);
+  assert.equal(beforeSendText(null, NOW), null);
+});
+
+test('Change password’s other links changed fewer than offered: none reads as none, one is never partly changed (code review CC-7)', () => {
+  assert.equal(fewerChangedLine(1, 0), 'It wasn’t changed on the other link — someone changed it a moment ago; check its password.');
+  assert.equal(fewerChangedLine(3, 0), 'It wasn’t changed on the other 3 links — someone changed them a moment ago; check their passwords.');
+  assert.equal(fewerChangedLine(3, 1), 'Changed on 1 of the 3 other links — the rest were changed by someone else a moment ago; check their passwords.');
+  assert.equal(fewerChangedLine(3, 2), 'Changed on 2 of the 3 other links — the rest were changed by someone else a moment ago; check their passwords.');
+  // Every one offered changed (or more), nothing offered, or an answer that didn't say: no line.
+  for (const [offered, changed] of [[1, 1], [3, 3], [2, 5], [0, 0], [3, null], [3, undefined]]) {
+    assert.equal(fewerChangedLine(offered, changed), null, `${offered} offered, ${changed} changed`);
+  }
 });
 
 test('gap lines: the days no dated report covers, over the whole tab — overlapping reports and all-time ones never make a false gap (SIMPLIFY §N, code review)', () => {
@@ -494,27 +559,32 @@ test('Latest progress (SIMPLIFY §N): its choice, its line, its duplicate prompt
   };
   assert.equal(
     copyMessageFor({ report: { ...messageReportOf(row), campaignType: 'survey' }, link: link(), origin: 'https://doorline.app' }),
-    'The report through Oct 28 is up: 3,412 doors knocked so far and 1,980 surveys. Open it here: https://doorline.app/r/tok1/reports/r9 — use the password I sent you.'
+    'The report through Oct 28 is up: 3,412 doors knocked so far and 1,980 surveys. Open it here: https://doorline.app/r/tok1 — use the password I sent you.'
   );
   assert.equal(
     copyMessageFor({ report: { ...messageReportOf({ ...row, scope: { kind: 'team', label: 'Paid team' }, seriesLabel: 'Paid team' }), campaignType: 'lit_drop' }, link: link(), origin: 'https://doorline.app' }),
-    'The Paid team report through Oct 28 is up: 3,412 doors knocked so far and 900 lit dropped. Open it here: https://doorline.app/r/tok1/reports/r9 — use the password I sent you.'
+    'The Paid team report through Oct 28 is up: 3,412 doors knocked so far and 900 lit dropped. Open it here: https://doorline.app/r/tok1 — use the password I sent you.'
   );
 });
 
-test('the copy-ready message ends by its link: all your reports, just this one, or made a moment ago (SIMPLIFY §D)', () => {
+test('the copy-ready message ends by what Share just did: made up or typed, changed, or Same as … and opened again later (LINKS §D1, the owner’s rule)', () => {
   const report = { id: 'r1', weekStart: '2026-10-19', weekEnd: '2026-10-25', campaignType: 'survey', scope: { kind: 'campaign', label: 'Whole campaign' }, cumulative: { doorsKnocked: 3412, surveysTaken: 1980 }, period: { doorsKnocked: 412, surveysTaken: 260 } };
-  const msg = (l, justMade) => copyMessageFor({ report, link: l, origin: 'https://doorline.app', justMade });
+  const msg = (l, ending) => copyMessageFor({ report, link: l, origin: 'https://doorline.app', ending });
+  // Same as …, or the link opened again later (the default): the client has the password.
   assert.equal(
-    msg(link({ reportId: null })),
-    'The report for Oct 19 – Oct 25 is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). Open it here: https://doorline.app/r/tok1/reports/r1 — use the password I sent you.'
+    msg(oneReport()),
+    'The report for Oct 19 – Oct 25 is up: 3,412 doors knocked so far (+412 in that period) and 1,980 surveys (+260). Open it here: https://doorline.app/r/tokB — use the password I sent you.'
   );
-  assert.ok(msg(oneReport()).endsWith('Open it here: https://doorline.app/r/tokB/reports/r1 — use the password I sent you for this report.'));
-  assert.ok(msg(oneReport(), true).endsWith('— I’ll send you its password separately.'), 'made just now, a one-report link');
-  assert.ok(msg(link(), true).endsWith('— I’ll send you its password separately.'), 'made just now, an all-reports link');
-  assert.ok(msg(link({ hasPassword: false }), true).endsWith('/reports/r1.'), 'no password, no words about one');
-  for (const l of [link(), oneReport()]) assert.ok(!/k7Hq/.test(msg(l, true)), 'never the password');
-  assert.equal(linkMessageFor({ link: oneReport(), origin: 'https://doorline.app' }), 'Here\'s the link to this report: https://doorline.app/r/tokB — I’ll send the password separately.');
+  assert.equal(msg(oneReport(), 'sent'), msg(oneReport()));
+  // A password made up or typed in this Share: sent separately.
+  assert.ok(msg(oneReport(), 'new').endsWith('Open it here: https://doorline.app/r/tokB — I’ll send you its password separately.'));
+  // Right after Change password: the new one, sent separately.
+  assert.ok(msg(oneReport(), 'changed').endsWith('Open it here: https://doorline.app/r/tokB — I’ll send you the new password separately.'));
+  // No longer by the link's kind: the "…for this report" ending is gone.
+  assert.ok(!msg(oneReport()).includes('for this report'));
+  assert.ok(msg(link({ hasPassword: false }), 'new').endsWith('Open it here: https://doorline.app/r/tok1.'), 'no password, no words about one');
+  for (const ending of ['new', 'changed', 'sent']) assert.ok(!/k7Hq/.test(msg(oneReport(), ending)), 'never the password');
+  assert.ok(msg(oneReport(), 'nonsense').endsWith('— use the password I sent you.'), 'an unknown ending reads as the default');
 });
 
 test('the guide’s words live in one place, as Part 1 words them (SIMPLIFY §B) — the Help Center quotes these', () => {
@@ -529,10 +599,10 @@ test('the guide’s words live in one place, as Part 1 words them (SIMPLIFY §B)
     [
       'Make a report — press New report and pick the dates, usually Last week. After that, Next report on your newest report makes the following one in one click, with your settings and notes copied.',
       'Check it, then publish — the preview is exactly what your client will see. Once it’s published, its numbers stay as they are until you press Refresh numbers.',
-      'Share it — Share gives you a message with the link to paste into your email or text; send the link’s password separately. Or open the report and press Download PDF.',
+      'Share it — Share makes the report’s link and a message to paste into your email or text. Next week’s link keeps this week’s password, so you send a password only the first time, or after you change it. Or open the report and press Download PDF.',
     ]
   );
-  assert.deepEqual(PHONE_STEPS, ['Make a report — usually Last week; then Next report each week.', 'Check the preview, then publish.', 'Share the link; send its password separately.']);
+  assert.deepEqual(PHONE_STEPS, ['Make a report — usually Last week; then Next report each week.', 'Check the preview, then publish.', 'Share its link; send the password the first time.']);
   assert.equal(HELP_LINE, 'More in the Help Center →');
   assert.equal(HELP_PATH, '/help/client-reports');
   assert.equal(GOT_IT, 'Got it');

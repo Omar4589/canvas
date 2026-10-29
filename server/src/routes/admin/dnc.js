@@ -93,7 +93,18 @@ async function previewDrops(orgId, affected, newlyVoterIds) {
 // stripped Georgia id from a genuine Nebraska one (services/import/parseVoterIdList.js). Anything
 // the file names outside the state is reported, never flagged.
 const stateOf = (req) => String(req.body?.state || '').trim().toUpperCase();
-const matchFailure = (res, m) => res.status(400).json({ error: m.error, code: m.code || null, columns: m.columns, states: m.states || [] });
+// The tab and the title-row line ride along, so the page can say which tab it read and where the
+// column names seem to be (services/import/parseVoterIdList.js).
+const matchFailure = (res, m) =>
+  res.status(400).json({
+    error: m.error,
+    code: m.code || null,
+    columns: m.columns || [],
+    states: m.states || [],
+    sheetName: m.sheetName ?? null,
+    otherSheets: m.otherSheets ?? [],
+    headerRowHint: m.headerRowHint ?? null,
+  });
 
 // Dry run — no writes.
 router.post('/preview', uploadIdList, async (req, res, next) => {
@@ -108,6 +119,8 @@ router.post('/preview', uploadIdList, async (req, res, next) => {
       state: m.state,
       idColumn: m.col,
       columns: m.columns,
+      sheetName: m.sheetName,
+      otherSheets: m.otherSheets,
       sampleIds: m.sampleIds,
       totalRows: m.totalRows,
       idsInFile: m.csvCount,

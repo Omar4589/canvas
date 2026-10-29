@@ -9,7 +9,7 @@ import { TurfSnapshot } from '../../models/TurfSnapshot.js';
 import { snapshotPass } from '../turf/snapshot.js';
 import { computeWalkOrder } from '../turf/walkOrder.js';
 import { computeBoundary, computeCentroid } from '../turf/boundary.js';
-import { recomputePassTerritories } from '../turf/generateTurf.js';
+import { recomputePassTerritories, assertTurfJobWritable } from '../turf/generateTurf.js';
 import { acquireRecutLock, renewRecutLock, releaseRecutLock } from '../turf/recutLock.js';
 
 // Claiming doors into a walk list (materializing Household.effortId) — the service
@@ -135,6 +135,13 @@ export const previewClaimConflicts = async ({ owned }) => {
 //   - the book sweep is keyed off OWNERSHIP, not pre-move state — a re-run finds
 //     only books still holding now-foreign doors,
 //   - the 'move' snapshot dedupes on {passId, reason, jobId}.
+//
+// Claims INTO a walk list need it open and the campaign writable (docs/PROPOSAL_WALK_LIST_ARCHIVE.md
+// §C.5, generateTurf.js assertTurfJobWritable): checked at the start and again right before the
+// first door moves, since an archive can land while the job waits, locks or snapshots. A refusal
+// is an UnrecoverableError — no retries — and snapshots already taken are kept. Claims OUT of an
+// archived walk list (re-carving its doors into an open one) keep working: the donor passes are
+// never checked, so their books shrink, lock and snapshot exactly as before (F3).
 export const executeClaim = async ({
   campaignId,
   effortId,
@@ -145,10 +152,10 @@ export const executeClaim = async ({
   jobId = null,
   onProgress,
 }) => {
+  // The mid-delete guard (a queued claim must not write into a cascade) is part of it.
+  await assertTurfJobWritable({ campaignId, effortId });
   const campaign = await Campaign.findById(campaignId).lean();
   if (!campaign) throw new Error('Campaign not found');
-  // Same mid-delete guard as generateTurf: a queued claim must not write into a cascade.
-  if (campaign.deletion?.requestedAt) throw new Error('Campaign is being deleted');
   const effort = await Effort.findOne({ _id: effortId, campaignId }).lean();
   if (!effort) throw new Error('Walk list not found');
 
@@ -219,6 +226,9 @@ export const executeClaim = async ({
         await maybeRenew();
       }
     }
+
+    // ── The target re-check, before any door moves (see the header). ──
+    await assertTurfJobWritable({ campaignId, effortId });
 
     // ── Claim Intake doors outright (both paths). effortId:null filter makes a
     // re-run a no-op and guarantees we never steal a door force didn't cover. ──

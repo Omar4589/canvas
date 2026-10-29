@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { Drawer, Badge, Skeleton } from './ui/index.js';
 import { formatInTz } from '../lib/datetime.js';
-import { labelForField, formatValue, isNotable, teamMoveSummary, answerEditSentence } from '../lib/campaignHistory.js';
+import { labelForField, formatValue, isNotable, teamMoveSummary, answerEditSentence, walkListSentence } from '../lib/campaignHistory.js';
 
 // Who changed what on this campaign, newest first.
 //
@@ -20,8 +20,11 @@ function Row({ item, tz }) {
   const when = formatInTz(item.at, tz);
   const actor = item.by?.name || 'Unknown user';
   // A departed or deleted actor still gets named — hydrateCanvassers never drops an id — but the
-  // feed says so, because "Lee Lead did this" reads differently when Lee left in March.
-  const gone = item.by?.status && item.by.status !== 'active';
+  // feed says so, because "Lee Lead did this" reads differently when Lee left in March. The one-time
+  // repair's "One-time check" (no id, no status) is nobody who could leave, so it gets no badge.
+  const gone = item.by?.status && item.by.status !== 'active' && item.by.status !== 'system';
+  // A walk-list archive row is one sentence that opens with who did it (null for every other row).
+  const walkList = walkListSentence(item);
 
   return (
     <li className={`px-5 py-3.5 ${notable ? 'border-l-2 border-l-warning bg-warning-tint/30' : ''}`}>
@@ -32,6 +35,8 @@ function Row({ item, tz }) {
           <span className="font-medium">{answerEditSentence(item).headline}:</span>{' '}
           <span className="text-fg-muted">{answerEditSentence(item).detail}</span>
         </div>
+      ) : walkList ? (
+        <div className="text-sm text-fg">{walkList}</div>
       ) : (
         <div className="text-sm text-fg">
           <span className="font-medium">{labelForField(item.field)}</span>{' '}
@@ -42,9 +47,10 @@ function Row({ item, tz }) {
         </div>
       )}
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
-        <span>{actor}</span>
+        {/* The sentence already named them. */}
+        {!walkList && <span>{actor}</span>}
         {gone && <Badge variant="neutral">{item.by.status}</Badge>}
-        <span>·</span>
+        {(!walkList || gone) && <span>·</span>}
         <span>{when}</span>
       </div>
     </li>

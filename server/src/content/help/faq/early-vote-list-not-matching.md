@@ -6,7 +6,7 @@ kind: faq
 order: 74
 sourceDoc: EARLY_VOTING.md
 summary: Leading zeros no longer matter — so if a list still matches almost nothing, it's the column, the state, or a file that isn't a list of this campaign's voters.
-tags: early voting, do not contact, walk list, voter id, leading zeros, excel, not found, not in this campaign, matched on column
+tags: early voting, do not contact, walk list, voter id, leading zeros, excel, not found, not in this campaign, matched on column, returns file, ballot status, count only rows where
 ---
 
 **Leading zeros are not the reason any more.** Some states write voter IDs with zeros in front
@@ -26,6 +26,12 @@ So if a list still matches almost nothing, check these, in order:
    campaign's universe — the list covers the whole county, the campaign a targeted slice. That's normal;
    those IDs are remembered and marked automatically if the voters are imported later.
 
+**A file that lists ballots, not voters?** An election office's returns file often lists every ballot
+sent out, returned or not, plus rejected or suspended ones; uploaded whole, it would mark people who
+haven't voted. On Early Voting, choose **Count only rows where** under the preview, pick the status
+column and untick the values that don't mean voted, then press **Count these rows** (the walkthrough
+is in [Dropping voters who already voted](early-voting)).
+
 **A voter file, not a list?** If it's the **Voter Import** page refusing a file with a red note about
 leading zeros, that's a different thing: the file names voters already in the campaign under another
 spelling of their ID, and importing it would add each of them a second time. The note shows a pair
@@ -35,5 +41,5 @@ make the ID column match the campaign's spelling, and upload again.
 Two habits still help: don't open a voter file in Excel before uploading it, and know that *Save As
 CSV* strips the zeros too. The upload copes; the Voter Import page will tell you.
 
-The upload walkthrough is in [Dropping voters who already voted](early-voting); walk lists from a CSV
-are in [Saved searches](saved-searches).
+The upload walkthrough is in [Dropping voters who already voted](early-voting); saved searches built
+by uploading a list are in [Saved searches](saved-searches).

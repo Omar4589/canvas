@@ -9,6 +9,12 @@
 //
 // Connection-level on purpose, through mongoose.connection.db rather than the models: a model-based
 // version hung the runner's drop_db helper.
+//
+// The same race hides a UNIQUE index from the suites: the background build fails silently when a
+// suite's fixtures already hold a duplicate (config/db.js), and the suite then passes on data
+// production refuses. So the unique indexes the app relies on are built here too, before any
+// fixture — same keys, options and name as the model's, or createIndex conflicts with the
+// model's own build (test/liveIndex.int.test.js checks they match).
 import mongoose from 'mongoose';
 import { Db } from 'mongodb';
 
@@ -19,15 +25,31 @@ const HINTED = [
   ['surveyresponses', { campaignId: 1, submittedAt: -1 }],
 ];
 
-const ensureHintedIndexes = async (db) => {
+const ENFORCED = [
+  // One live pass per walk list (models/Pass.js, docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.12).
+  [
+    'passes',
+    { status: 1, effortId: 1 },
+    {
+      unique: true,
+      partialFilterExpression: { status: 'active', effortId: { $type: 'objectId' } },
+      name: 'one_live_pass_per_walk_list',
+    },
+  ],
+  // One link per client report (models/ReportShareLink.js REPORT_ONE_LINK_GUARD,
+  // docs/PROPOSAL_CLIENT_REPORT_LINKS.md).
+  ['reportsharelinks', { reportId: 1 }, { unique: true, partialFilterExpression: { oneLinkGuard: true }, name: 'report_one_link_guard' }],
+];
+
+const ensureTestIndexes = async (db) => {
   if (!db) return;
-  for (const [collection, keys] of HINTED) await db.collection(collection).createIndex(keys);
+  for (const [collection, keys, options] of [...HINTED, ...ENFORCED]) await db.collection(collection).createIndex(keys, options);
 };
 
 const connect = mongoose.connect.bind(mongoose);
 mongoose.connect = async (...args) => {
   const conn = await connect(...args);
-  await ensureHintedIndexes(mongoose.connection.db);
+  await ensureTestIndexes(mongoose.connection.db);
   return conn;
 };
 
@@ -35,9 +57,9 @@ const dropDatabase = Db.prototype.dropDatabase;
 Db.prototype.dropDatabase = async function dropThenRebuild(...args) {
   const result = await dropDatabase.apply(this, args);
   try {
-    await ensureHintedIndexes(this);
+    await ensureTestIndexes(this);
   } catch (err) {
-    console.error('[testIndexPreload] rebuilding hinted indexes after a drop failed:', err.message);
+    console.error('[testIndexPreload] rebuilding test indexes after a drop failed:', err.message);
   }
   return result;
 };

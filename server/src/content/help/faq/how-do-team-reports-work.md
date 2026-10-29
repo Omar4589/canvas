@@ -9,7 +9,7 @@ summary: A team is a name your client sees plus one or more crews. Each team rep
 tags: team report, client report, volunteer team, paid team, crew, coordinator, crew lead left, past doors, edit team, continue this team, ended team, door visits this period, doesn't add up
 ---
 
-When one client wants separate reports for, say, a **volunteer team** and a **paid team**, you make a **team** for each and give each its own reports. They sit in their own tab on the client's page, next to the whole campaign.
+When one client wants separate reports for, say, a **volunteer team** and a **paid team**, you make a **team** for each and give each its own reports. They sit in their own tab on your **Client Reports** page, next to the whole campaign, and each report has its own link to send.
 
 **A team is a name your client sees, plus one or more crews.** A crew is a crew lead (coordinator) and the canvassers who report to them on this campaign. "Paid team" can be Sam's crew and Dee's crew together; "Volunteer team" can be Maria's crew alone.
 

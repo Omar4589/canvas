@@ -45,7 +45,9 @@ Doorline support at hello@doorline.app), and a full crash screen when a screen c
 in non-stop.
 
 ### The Books tab
-Pick a **campaign** (and **effort**, if there's more than one — segmented for ≤3, a dropdown at 4+). It
+Pick a **campaign** (and **effort**, if there's more than one — segmented for ≤3, a dropdown at 4+). Only
+walk lists that aren't archived are offered (since the 2026-10-28 app update — an archived walk list is
+read-only); with none left it says *No open walk lists. Unarchive one on the web to assign books.* It
 works the effort's **active round** — a read-only **"Pass N · active"** chip under the pickers names it
 (custom round names append: "Pass 2 · GOTV sweep · active"), so the silent swap to a newly activated
 round is visible; there is deliberately no round switcher (drafts are cut on web, archived rounds are
@@ -310,8 +312,10 @@ tier-colored in the row's sub-line — over the same date range as the Activity 
 that has used **Not a target voter**, the sub-line counts those doors too). Keeping the
 rate in the sub-line leaves the right-hand column exactly one tabular number per row. The rows are
 counted exactly like the web dashboard's **By pass** table, so they always sum to the same Knocks
-headline — a footer under the group now says so — and knocks recorded before passes existed show as
-a "Legacy / no pass" row. Full counting model + the invoice-ready CSV export (web-only) in
+headline — a footer under the group now says so — and knocks no pass's book claims (recorded before
+passes existed, or at a door no book held) show as a "Legacy / no pass" row. Since 2026-10-28 a late
+knock from an updated phone counts in its own pass, so a pass's row can still grow after it ends while
+offline phones catch up ([METRICS.md](METRICS.md) → *By pass*). Full counting model + the invoice-ready CSV export (web-only) in
 [METRICS.md](METRICS.md).
 
 A long card folds, much as the web table does. Passes with nothing in the range collapse into the
@@ -414,7 +418,10 @@ callers (date-only canvasser sub-screens, the Map's control row, Help, Overlaps,
 
 Once a campaign has **two or more walk lists**, a **walk-list chip** — *All walk lists* until you
 pick one — appears in the filter row of several admin screens (a single-list campaign shows
-nothing; a "Main ·" prefix everywhere would be noise). Where it lives and what it scopes:
+nothing; a "Main ·" prefix everywhere would be noise). Archived walk lists stay in it, marked
+"(archived)" and listed after the open ones (they still count toward the two-or-more), because their
+history is in every number; the Exports sheet's round tabs name their walk list (*North · Pass 2*). Where
+it lives and what it scopes:
 
 - **The campaign screen** — picking a walk list scopes **Activity**, the **By pass** group,
   **Coverage** (its subtitle flips to *All-time walk-list progress*), and **Top canvassers**
@@ -744,7 +751,13 @@ as the web door panel already shows. Two overlap surfaces ride along, mirroring 
   status, while the mark is per-round: the server picks the door's walk list's **active** round, else its
   single draft round, else the Alert asks you to open the door from its book and try again; a door still
   in Intake reads *Not in a walk list — can't be marked* and the button is disabled (an older server that
-  omits `effortId` surfaces the same refusal as the Alert *This door isn't in a walk list yet*). Same mark
+  omits `effortId` surfaces the same refusal as the Alert *This door isn't in a walk list yet*). A door
+  of an **archived walk list** reads *North is archived — unarchive it to mark its doors.* with the button
+  off (the October 2026 phone update; an app without it offers Mark and shows the server's 409 sentence,
+  *Walk list "North" is archived — unarchive it to mark its doors.*, in the Alert). A desk mark already on
+  its draft still shows there with **Unmark restricted**, on every app version (the server's
+  `currentPassId` resolves as an unmark does); one on the pass that ended is reached from the web Map
+  opened on that pass. Same mark
   as the Books screen's book-level one (**Unmark restricted (N)** on the book counts it too); the history
   list tags desk marks *· desk mark*.
   See [PASSES_AND_TURF.md](PASSES_AND_TURF.md) → *Marking a single home restricted*.
@@ -1115,7 +1128,7 @@ marks the round the sheet names. A desk-marked house reads *Marked from the desk
 offers Unmark; a house a canvasser restricted at the door offers nothing. Because it is the same row
 as a book-level mark, the book's **Unmark restricted (N)** removes single-home marks too — the Map tab
 recolors on its own after either. Doors a canvasser already completed this round keep their result.
-Full rules (which round, Intake, archived rounds, skips) in [PASSES_AND_TURF.md](PASSES_AND_TURF.md).
+Full rules (which round, Intake, archived rounds and walk lists, skips) in [PASSES_AND_TURF.md](PASSES_AND_TURF.md).
 
 ---
 
@@ -1143,7 +1156,9 @@ way back short of restarting the app.
 by book or by canvasser.
 
 - Context: `CampaignChip` (archived campaigns selectable — see *The campaign chip* above) +
-  `EffortPicker`. It also re-syncs the cached campaign on FOCUS like its sibling chip screens;
+  `EffortPicker`, whose `effortList` always leaves archived walk lists out (`openWalkLists` from
+  [lib/walkListOptions.js](../mobile/lib/walkListOptions.js), the web helper's byte-identical mirror below
+  its header; since 2026-10-28). It also re-syncs the cached campaign on FOCUS like its sibling chip screens;
   without that, this always-mounted tab kept whatever the chip seated on first mount, so drilling
   into another campaign elsewhere and coming back showed one campaign's banner over another
   campaign's Assign buttons. Efforts come from `GET /admin/campaigns/:id/efforts`, whose
@@ -1205,8 +1220,9 @@ by book or by canvasser.
   map INSTANCE fits itself once: the List/Map and By canvasser toggles unmount the MapView, and a
   `mapShown` cleanup resets the ready/fitted flags so the next instance fits again instead of sitting
   at Mapbox's world view. JS-only change → OTA-safe.
-- Edge states: no active round / no published books / no campaign-assigned canvassers / no campaign
-  / **archived campaign** — banner, and every assign path suppressed (Select mode and the bulk bar,
+- Edge states: **every walk list archived** (*No open walk lists. Unarchive one on the web to assign
+  books.*) / no active round / no published books / no campaign-assigned canvassers / no campaign /
+  **archived campaign** — banner, and every assign path suppressed (Select mode and the bulk bar,
   including **Unassign all**; the map sheet's `⋯` restrict menu, both `AssignRow` buttons; the rows
   stay, so who held which book is still readable). The server refuses independently with a 409
   `campaign-archived` — covered for this route in `server/test/archivedCampaign.int.test.js`.
@@ -1238,7 +1254,10 @@ book's homes for assignment in context. Hidden route, pushed from the Books list
   with an optional `scope`, see [PASSES_AND_TURF.md](PASSES_AND_TURF.md)) — one writer,
   [services/canvass/deskRestrict.js](../server/src/services/canvass/deskRestrict.js). The book pop-up
   sends `passId: turf.passId`; the Map sheet sends the scope's `passId` when one is set, else lets the
-  server resolve (active round → single draft → `400 PASS_REQUIRED`). Classification on the phone is
+  server resolve (active round → single draft → `400 PASS_REQUIRED`). A door of an archived walk list
+  answers **409 `walk-list-archived`** before that branch (2026-10-28) — `deskMarkErrorMessage` maps a
+  non-Intake `PASS_REQUIRED` to "no current round — open the door from its book", the wrong advice there,
+  while a 409 falls through to the server's own sentence on every bundle. Classification on the phone is
   `doorMarkState(rounds, passId)` in `mobile/lib/restrictBooks.js` over `/activity`'s per-round entries
   (`via === 'bulk'` ⇒ desk; missing/undefined `via` ⇒ field — the desk never offers an undo it can't
   honor); prompts/Alert copy + `deskMarkErrorMessage` (`e.data.code === 'PASS_REQUIRED'` → the
@@ -1402,7 +1421,10 @@ renders the *Off until you turn it on* group for a survey campaign in one of thr
   2026-10-19 — `surveyConversion`, `unknock`, and `answerEdit` / `answerEditUndo` through
   `answerEditSentence`, which [admin/history.jsx](../mobile/app/(app)/admin/history.jsx) renders as
   one `InsetRow` sentence — shipping with the next OTA; [CAMPAIGNS.md](CAMPAIGNS.md) Part 2 →
-  *Change history*.)
+  *Change history*. The walk-list archive rows of 2026-10-28 follow the same path through
+  `walkListSentence` — *Ada archived walk list North — ended Pass 3 · GOTV*. A phone without the update
+  shows these rows in the plain *from … to …* form; a row written by the one-time check still names
+  *One-time check* there, never *Unknown user*, because the server names that actor with no status.)
 
 **The in-use gate.** Every phone admin figure, chip and tab that exists only for this outcome is
 gated on `outcomeInUse(campaign, 'not_target')` ([lib/outcomeToggles.js](../mobile/lib/outcomeToggles.js)):

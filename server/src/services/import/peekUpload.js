@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import unzipper from 'unzipper';
 import { SaxesParser } from 'saxes';
 import { StringDecoder } from 'node:string_decoder';
-import { looksXlsx, looksLegacyXls, LegacyXlsError, resolveFirstSheetTarget, listWorkbookSheets } from './parseUpload.js';
+import { looksXlsx, looksLegacyXls, LegacyXlsError, sheetChoice, dateStylesFromXml } from './parseUpload.js';
 
 // A true N-row peek for the mapping step: headers + a few sample rows, at a cost
 // of O(rows peeked), never O(file). parseUpload materializes EVERY row to serve
@@ -34,9 +34,6 @@ const colToIndex = (ref) => {
 // Excel date serial → ISO string (same output as parseUpload's ValueType.Date branch).
 const serialToIso = (serial) => new Date(Date.UTC(1899, 11, 30) + serial * 86400000).toISOString();
 
-// Built-in date numFmtIds + the y/m/d/h token heuristic for custom formats.
-const BUILTIN_DATE_IDS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
-const isDateFormat = (code) => /[ymdhs]/i.test(String(code).replace(/\[[^\]]*\]/g, '').replace(/"[^"]*"/g, ''));
 
 async function entryToString(entry, cap = 4 * 1024 * 1024) {
   const buf = await entry.buffer();
@@ -88,47 +85,17 @@ function streamEntry(entry, { onOpen, onText, onClose, onEnd }) {
 async function resolveSheet(byPath) {
   const wb = byPath['xl/workbook.xml'] ? await entryToString(byPath['xl/workbook.xml']) : '';
   const rels = byPath['xl/_rels/workbook.xml.rels'] ? await entryToString(byPath['xl/_rels/workbook.xml.rels']) : '';
-  const path = resolveFirstSheetTarget(wb, rels);
-  // Name the tab by the entry we actually READ, never by position: when the rels
-  // are unreadable the path above falls back to sheet1.xml, and position would
-  // then label the columns with some other tab's name.
-  const sheets = listWorkbookSheets(wb, rels);
-  const readIdx = sheets.findIndex((s) => s.target === path);
-  // Can't prove which tab the fallback landed on → say nothing at all. Listing
-  // "ignored" tabs here would include the one we actually read.
-  if (readIdx === -1) return { path, name: null, others: [] };
-  return {
-    path,
-    name: sheets[readIdx].name,
-    // Only tabs the user can SEE — a hidden sheet named as "ignored" would send
-    // them looking through a tab strip it isn't on.
-    others: sheets
-      .filter((s, i) => i !== readIdx && !s.hidden)
-      .map((s) => s.name)
-      .filter(Boolean),
-  };
+  // Named by the entry we actually READ, never by position; only tabs the user can see listed as
+  // ignored (sheetChoice says why). The Voter-ID list reader shares the same rule.
+  const { target: path, name, others } = sheetChoice(wb, rels);
+  return { path, name, others };
 }
 
 /** styles.xml → Set of cellXfs style indexes that render as dates. */
 async function dateStyleIndexes(byPath) {
-  const dates = new Set();
   const entry = byPath['xl/styles.xml'];
-  if (!entry) return dates;
-  const xml = await entryToString(entry, 1024 * 1024);
-  const customDateIds = new Set();
-  for (const m of xml.matchAll(/<numFmt\b[^>]*\bnumFmtId="(\d+)"[^>]*\bformatCode="([^"]*)"/g)) {
-    if (isDateFormat(m[2])) customDateIds.add(Number(m[1]));
-  }
-  const cellXfs = xml.match(/<cellXfs\b[\s\S]*?<\/cellXfs>/);
-  if (!cellXfs) return dates;
-  let idx = 0;
-  for (const m of cellXfs[0].matchAll(/<xf\b[^>]*>|<xf\b[^>]*\/>/g)) {
-    const fmt = m[0].match(/\bnumFmtId="(\d+)"/);
-    const id = fmt ? Number(fmt[1]) : 0;
-    if (BUILTIN_DATE_IDS.has(id) || customDateIds.has(id)) dates.add(idx);
-    idx += 1;
-  }
-  return dates;
+  if (!entry) return new Set();
+  return dateStylesFromXml(await entryToString(entry, 1024 * 1024));
 }
 
 async function peekXlsx(dir, rows) {

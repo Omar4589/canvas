@@ -407,11 +407,20 @@ rule, and the web pickers offer staff "You" only in an internal org (`useCampaig
   authorizes on the report/series/campaign's `campaignId` via `manages()`; the list scopes to
   `managedCampaignIds`. Leads keep full control of their campaigns' reports, team series and links
   (owner ruling 2026-10-23), including the client links in
-  [clientReportShares.js](../server/src/routes/admin/clientReportShares.js) and Restore in the tab's
-  History. Three things are admin-only: the org-wide report logo (`PUT`/`DELETE /admin/branding/logo`,
+  [clientReportShares.js](../server/src/routes/admin/clientReportShares.js), Archive, and Restore in the
+  tab's History. **Since 2026-10-28 that includes seeing a link's password**: Share's Show (`GET
+  /admin/client-reports/shares/:id/password`) answers the campaign's admins and leads (`loadShareInOrg`:
+  the organization, then `canManageCampaign`). A lead sees the password of every link on the campaigns
+  they manage, links sent to other people included, so a client given a lead account can too
+  (PRIVACY_VERIFICATION item 44(d)). **Doorline staff under a support grant can neither view nor type
+  a link password** (`403 STAFF_CANNOT_VIEW_PASSWORD`, `403 STAFF_CANNOT_SET_PASSWORD`; a password made
+  up for them is never in the answer), so a grant can't become lasting access to a report through
+  `/share`; staff in an internal organization, being members there, can. Three things are admin-only:
+  the org-wide report logo (`PUT`/`DELETE /admin/branding/logo`,
   [branding.js](../server/src/routes/admin/branding.js); leads may read it), Erase of an edit's earlier
   text (`POST /admin/campaigns/:campaignId/history/…/erase`, and `?eraseHistory=1` on a report delete),
-  and the legacy-link sweep below ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
+  and the legacy-link sweep below, which nothing in the app calls since 2026-10-28
+  ([CLIENT_PORTAL.md](CLIENT_PORTAL.md)).
 
 **Org-wide, read-for-leads** — `tags`: role `('admin','lead')` so a lead can `GET` the library (to
 filter by tag), but every mutation (create, edit, merge, delete) carries a per-route
@@ -567,7 +576,10 @@ part of clientReports.js) — except
 `POST /shares/revoke-legacy`, the org-wide sweep that kills every legacy-open link at once. That is
 an org operator's switch, so since 2026-08-07 it carries a per-route `requireOrgRole('admin')`;
 before that a lead could enumerate and bulk-revoke links on campaigns they held no grant for. Pinned
-by [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js).
+by [reportSecurity.int.test.js](../server/test/reportSecurity.int.test.js). Since 2026-10-28 nothing in
+the app calls it (the links panel is gone), and every legacy-open link is a link to all of a campaign's
+reports, which the `RETIRE_ALL_REPORTS_LINKS` switch turns off for every organization at once
+([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §K); the route still answers, admin-only.
 
 **The lead's crew surface** — `leadCrew` ([leadCrew.js](../server/src/routes/admin/leadCrew.js)) at
 `/admin/campaigns/:campaignId/crew`, behind `requireCampaignManager`:

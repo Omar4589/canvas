@@ -59,7 +59,25 @@ const call = async (method, p, { body, headers = {}, admin = true } = {}) => {
   try { json = await res.json(); } catch { /* empty */ }
   return { status: res.status, json };
 };
-const shared = (p) => call('GET', `/share/mig-token${p}`, { admin: false });
+// Each report through its own link (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), made the first time a path
+// names it — `/reports/<id>…`, or the hub of the report given — with a password, as every link has now.
+const shareLinks = new Map();
+const shared = async (p, report = ctx.L1) => {
+  const id = p.match(/^\/reports\/([0-9a-f]{24})/)?.[1] ?? String(report._id);
+  if (!shareLinks.has(id)) {
+    const bcrypt = (await import('bcryptjs')).default;
+    const token = `mig-token-${id}`;
+    await ReportShareLink.create({
+      organizationId: ctx.org._id, campaignId: ctx.camp._id, token, reportId: id,
+      passwordHash: await bcrypt.hash('mig-link-password', 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
+    });
+    const unlock = await call('POST', `/share/${token}/unlock`, { admin: false, body: { password: 'mig-link-password' } });
+    assert.strictEqual(unlock.status, 200, JSON.stringify(unlock.json));
+    shareLinks.set(id, { token, access: unlock.json.accessToken });
+  }
+  const { token, access } = shareLinks.get(id);
+  return call('GET', `/share/${token}${p}`, { admin: false, headers: { 'X-Share-Token': access } });
+};
 
 const RANGE_START = new Date('2026-07-06T05:00:00Z');
 const RANGE_END = new Date('2026-07-13T05:00:00Z');
@@ -160,9 +178,6 @@ before(async () => {
   const p1 = [legacyPoint(L1._id, 1, answers), legacyPoint(L1._id, 2, answers), legacyPoint(L1._id, 3, [{ questionKey: 'support', answer: 'No' }])];
   await ClientReportMapPoint.collection.insertMany([p1[2], p1[0], p1[1]]);
   await ClientReportMapPoint.collection.insertMany([legacyPoint(L2._id, 1, answers)]);
-  const bcrypt = (await import('bcryptjs')).default;
-  await ReportShareLink.create({ organizationId: org._id, campaignId: camp._id, token: 'mig-token', passwordHash: null, expiresAt: null, isActive: true });
-  void bcrypt;
   Object.assign(ctx, { L1, L2, L3, L4, L5, p1 });
 
   const app = createApp();
@@ -180,7 +195,8 @@ test('BEFORE the migration: every route works on raw legacy documents', { skip }
   const hub = await shared('/reports');
   assert.strictEqual(hub.status, 200, JSON.stringify(hub.json));
   assert.ok(hub.json.reports.some((r) => r.id === String(ctx.L1._id)));
-  assert.ok(!hub.json.reports.some((r) => r.id === String(ctx.L3._id)), 'never a draft');
+  const draft = await shared('/reports', ctx.L3);
+  assert.deepStrictEqual([draft.status, draft.json.gone, draft.json.reports], [200, true, []], 'never a draft');
 
   const one = await shared(`/reports/${ctx.L1._id}`);
   assert.strictEqual(one.status, 200);

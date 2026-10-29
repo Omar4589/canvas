@@ -16,6 +16,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useFocusedPoll } from '../../../lib/useFocusedPoll';
 import { fmtCount, inViewClip, explainCounts, universeLabel, MAP_HOUSEHOLD_CAP } from '../../../lib/mapCounts';
+import { walkListOptions, walkListLabel, isArchivedWalkList } from '../../../lib/walkListOptions';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Mapbox from '@rnmapbox/maps';
 import AppLocationPuck from '../../../components/AppLocationPuck';
@@ -585,7 +586,8 @@ export default function AdminMap() {
   });
 
   // Walk lists for the in-map picker (shared cache with Timeline/Notes/Audit). The chip only
-  // renders on a 2+ list campaign, but the query stays cheap and warm either way.
+  // renders on a 2+ list campaign, but the query stays cheap and warm either way. Archived walk
+  // lists count toward that gate and stay pickable, marked and listed last (lib/walkListOptions.js).
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', cId],
     queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
@@ -593,9 +595,8 @@ export default function AdminMap() {
   });
   const efforts = effortsQ.data?.efforts || [];
   const hasEffortPicker = efforts.length > 1;
-  const effortLabel = effortId
-    ? efforts.find((e) => String(e._id) === String(effortId))?.name || 'Walk list'
-    : 'All walk lists';
+  const pickedEffort = effortId ? efforts.find((e) => String(e._id) === String(effortId)) : null;
+  const effortLabel = effortId ? (pickedEffort ? walkListLabel(pickedEffort) : 'Walk list') : 'All walk lists';
 
   const households = mapQ.data?.households || [];
   const activities = mapQ.data?.activities || [];
@@ -866,6 +867,10 @@ export default function AdminMap() {
   // is what keeps the per-round button honest.
   const deskPassId = passId || hhActivityQ.data?.currentPassId || null;
   const doorMark = useMemo(() => doorMarkState(hhRounds, deskPassId), [hhRounds, deskPassId]);
+  // An ARCHIVED walk list takes no new mark — the server refuses it with 409 walk-list-archived — so the
+  // sheet says so instead of offering it (the web panel's rule). Unmark stays: removing a mark is allowed.
+  const doorWalkList = selected?.effortId ? efforts.find((e) => String(e._id) === String(selected.effortId)) || null : null;
+  const doorWalkListArchived = isArchivedWalkList(doorWalkList);
   // Name the round: from the door's own history when it has entries there, else from the
   // walk-list picker's active round (a door untouched in its current round has no history
   // row to name it), else plainly.
@@ -1799,10 +1804,10 @@ export default function AdminMap() {
                 active={!effortId}
                 onPress={() => { setScope({ effortId: '', passId: '', importId: '' }); setOpenMenu(null); }}
               />
-              {efforts.map((ef) => (
+              {walkListOptions(efforts).map((ef) => (
                 <MenuItem
                   key={String(ef._id)}
-                  label={ef.name}
+                  label={walkListLabel(ef)}
                   active={String(effortId) === String(ef._id)}
                   onPress={() => { setScope({ effortId: String(ef._id), passId: '', importId: '' }); setOpenMenu(null); }}
                 />
@@ -2300,12 +2305,15 @@ export default function AdminMap() {
                         ` — no longer in effect${doorMark.supersededBy?.canvasser ? ` (${doorMark.supersededBy.canvasser} worked this door)` : ''}. Still on file.`
                       : selected.effortId === null
                         ? "Not in a walk list — can't be marked."
-                        : `${deskRoundLabel} · Not restricted. A desk mark makes this door slate for canvassers — never anyone's work.`}
+                        : doorWalkListArchived
+                          ? `${doorWalkList.name || 'This walk list'} is archived — unarchive it to mark its doors.`
+                          : `${deskRoundLabel} · Not restricted. A desk mark makes this door slate for canvassers — never anyone's work.`}
               </Text>
               {doorMark.kind !== 'field' && (
                 <Pressable
                   disabled={
-                    deskMarkPending || (doorMark.kind === 'none' && !doorMark.superseded && selected.effortId === null)
+                    deskMarkPending ||
+                    (doorMark.kind === 'none' && !doorMark.superseded && (selected.effortId === null || doorWalkListArchived))
                   }
                   onPress={() => {
                     const address = `${selected.addressLine1 || ''}${selected.addressLine2 ? `, ${selected.addressLine2}` : ''}`.trim();
@@ -2326,7 +2334,9 @@ export default function AdminMap() {
                     styles.deskMarkButton,
                     (pressed ||
                       deskMarkPending ||
-                      (doorMark.kind === 'none' && !doorMark.superseded && selected.effortId === null)) && { opacity: 0.6 },
+                      (doorMark.kind === 'none' && !doorMark.superseded && (selected.effortId === null || doorWalkListArchived))) && {
+                      opacity: 0.6,
+                    },
                   ]}
                 >
                   <Text style={styles.deskMarkButtonText}>

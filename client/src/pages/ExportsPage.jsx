@@ -14,6 +14,8 @@ import { ACTION_LABELS, STATUS_LABELS } from '../lib/statusColors.js';
 import { outcomeInUse } from '../lib/outcomeToggles.js';
 import { loadExportOptions, saveExportOptions } from '../lib/exportOptions.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
+import { roundOptionRows } from '../lib/useRoundOptions.js';
+import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 
 // The Export Center: queue background CSV/ZIP exports (built on the worker dyno), then
 // download them from the history below until they expire. Admins see every type; leads see
@@ -305,6 +307,10 @@ export default function ExportsPage() {
     enabled: !!campaignId,
   });
   const passes = passesQ.data?.passes || [];
+  // The Round select's options: named by their walk list ("North · Pass 2") and ordered as every
+  // other round picker's (lib/useRoundOptions.js). No legacy count: the select keeps its own
+  // "Legacy / no pass".
+  const roundChoices = roundOptionRows({ passes, efforts });
   // Ledger-first (NOT the roster): a deleted canvasser's rows must stay exportable, and
   // this endpoint keeps them selectable. Bare array response.
   const canvassersQ = useQuery({
@@ -524,8 +530,8 @@ export default function ExportsPage() {
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Walk list</div>
               <Select className={selectCls} value={effortId} onChange={(e) => { setEffortId(e.target.value); setPassId(''); }}>
                 <option value="">All walk lists</option>
-                {efforts.map((ef) => (
-                  <option key={ef._id} value={ef._id}>{ef.name}</option>
+                {walkListOptions(efforts).map((ef) => (
+                  <option key={ef._id} value={ef._id}>{walkListLabel(ef)}</option>
                 ))}
               </Select>
             </div>
@@ -535,8 +541,8 @@ export default function ExportsPage() {
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Round</div>
               <Select className={selectCls} value={passId} onChange={(e) => setPassId(e.target.value)}>
                 <option value="">All rounds</option>
-                {passes.map((p) => (
-                  <option key={p._id} value={p._id}>{`Pass ${p.roundNumber} · ${p.name}`}</option>
+                {roundChoices.map((r) => (
+                  <option key={r.id} value={r.id}>{r.label}</option>
                 ))}
                 <option value="legacy">Legacy / no pass</option>
               </Select>

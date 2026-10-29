@@ -15,7 +15,7 @@ tags: print, packets, paper, pdf, volunteers, walk list, printable
 
 ## The three panes
 
-**Left — what to print.** One dropdown picks what you're printing: a **round**, listed under the walk list it belongs to, or a **saved search**. Your campaign runs several walk lists at once and each has its own rounds, so the walk list's name sits above its rounds — "Pass 3" on its own wouldn't tell you which one. Rounds that aren't live are in the list too, with their status shown; printing a **draft** round is the normal way to have packets ready before a round goes live.
+**Left — what to print.** One dropdown picks what you're printing: a **round**, listed under the walk list it belongs to, or a **saved search**. Your campaign runs several walk lists at once and each has its own rounds, so the walk list's name sits above its rounds — "Pass 3" on its own wouldn't tell you which one. Rounds that aren't live are in the list too, with their status shown; printing a **draft** round is the normal way to have packets ready before a round goes live. Archived rounds aren't offered, and neither is any round of an **archived walk list** — unarchive the walk list first.
 
 Underneath sit **that round's books**. Tick the ones you want, or use **All** and **Clear**. At the bottom, a running total shows how many packets, doors and sheets you've picked, and warns you before you go over the limit.
 

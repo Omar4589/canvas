@@ -478,11 +478,13 @@ const holdFirst = (obj, methods) => {
 };
 const within = (p, ms, what) => Promise.race([p, sleep(ms).then(() => { throw new Error(`${what} never happened`); })]);
 
-// A round of its own at door `d`, with one book and Cara's entry (and survey) there.
+// A round of its own at door `d`, with one book and Cara's entry (and survey) there. Live beside round
+// 1, so on a walk list of its own: one live pass per walk list (models/Pass.js). The door stays North's.
 let roundNo = 100;
 const freshRound = async (d, { actionType = 'survey_submitted' } = {}) => {
   roundNo += 1;
-  const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: ctx.effort._id, roundNumber: roundNo, name: `Round ${roundNo}`, status: 'active' });
+  const side = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, name: `Side ${roundNo}` });
+  const p = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, effortId: side._id, roundNumber: roundNo, name: `Round ${roundNo}`, status: 'active' });
   await Turf.create({ organizationId: ctx.org._id, campaignId: ctx.campaign._id, passId: p._id, name: `Book ${roundNo}`, mode: 'manual', status: 'published', householdIds: [ctx.homes[d]._id], doorCount: 1 });
   const at = new Date(Date.now() - 3600_000);
   const e = await CanvassActivity.create({
@@ -495,7 +497,7 @@ const freshRound = async (d, { actionType = 'survey_submitted' } = {}) => {
       passId: p._id, surveyTemplateId: ctx.template._id, submittedAt: at, answers: FAKE(), createdAt: at, updatedAt: at,
     });
   }
-  return { pass: p, entry: e };
+  return { pass: p, entry: e, walkList: side };
 };
 const discardClearing = async (p) => {
   const r = await call('POST', `/admin/campaigns/${ctx.campaign._id}/turfs/discard`, asAdmin({ passId: String(p._id), clearKnocks: true, confirmActive: true }));
@@ -711,7 +713,7 @@ test('L9-M1: a cleared snapshot holding a change undone after it can\'t be resto
 
 test('L9-M2: a relabel\'s Undo waits while a round holding its entries sits cleared with a snapshot it can take back', { skip }, async () => {
   const d = 9;
-  const { pass: p, entry: e } = await freshRound(d, { actionType: 'not_home' });
+  const { pass: p, entry: e, walkList } = await freshRound(d, { actionType: 'not_home' });
   const rc = await call('POST', `/admin/campaigns/${ctx.campaign._id}/reclassify-outcomes`, asAdmin({ to: 'refused', scope: { outcomes: ['not_home'] }, actionIds: [String(e._id)] }));
   assert.strictEqual(rc.status, 201, JSON.stringify(rc.json));
   const run = await ReclassifyRun.findOne({ campaignId: ctx.campaign._id }).sort({ createdAt: -1 }).lean();
@@ -720,7 +722,7 @@ test('L9-M2: a relabel\'s Undo waits while a round holding its entries sits clea
   const refused = await revert();
   assert.strictEqual(refused.status, 409, JSON.stringify(refused.json));
   assert.strictEqual(refused.json.code, 'ROUND_CLEARED_SINCE');
-  assert.match(refused.json.error, new RegExp(`North · Round ${roundNo}`));
+  assert.match(refused.json.error, new RegExp(`${walkList.name} · Round ${roundNo}`), 'it names the round with its walk list');
   assert.strictEqual((await restoreSnap(snapId)).status, 200);
   assert.strictEqual((await revert()).status, 200);
   assert.strictEqual((await CanvassActivity.findById(e._id).lean()).actionType, 'not_home', 'relabel undone');

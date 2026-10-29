@@ -31,7 +31,10 @@
 // `Effort.status === 'archived'` still demotes to the bottom tier, since that IS what that field
 // is for.
 //
-// Pure and dependency-free so the ranking is testable; the picker component only renders it.
+// Pure (its one import, walkListOptions.js, is pure too) so the ranking is testable; the picker
+// component only renders it.
+
+import { isArchivedWalkList, passOptionLabel } from './walkListOptions.js';
 
 const effortTier = (effort, hasActivePass) => {
   if (effort?.status === 'archived') return 2;
@@ -83,31 +86,64 @@ export function pickDefaultPass({ passes = [], efforts = [] } = {}) {
     )[0].pass;
 }
 
-// Dropdown grouping: every pass stays reachable (you may need to look back at an old round's
-// books), but they sit under their walk list's state so active work is at the top and archived
-// falls to the bottom. Returns [{ key, label, passes }], empty groups dropped.
-// Keyed by the SAME tier as the ranking above, so a heading can never disagree with where the
-// default landed.
+// ── Dropdown grouping ──
+// Every pass stays reachable (you may need to look back at an old round's books), grouped by what
+// each pass IS — Live, Drafts, Archived (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3). The old headings
+// came from the walk-list tiers above, which put an ended pass under "Active round", a finished
+// precinct under "Not started" and a pass canvassers were still walking under "Archived".
+//
+// The headings and the landing rule above now answer different questions, so they no longer share
+// a key. What still holds, and passPicker.test.js pins it: the default is never under Archived
+// unless every pass is.
 export const PASS_GROUPS = [
-  { key: 'running', label: 'Active round' },
-  { key: 'idle', label: 'Not started' },
+  { key: 'live', label: 'Live' },
+  { key: 'drafts', label: 'Drafts' },
   { key: 'archived', label: 'Archived' },
 ];
-const TIER_KEY = ['running', 'idle', 'archived'];
 
-export function groupPassesByEffortStatus({ passes = [], efforts = [] } = {}) {
+// A pass's own status decides, except that EVERY pass of an archived walk list is Archived: its
+// drafts are frozen there, and a pass still live there predates the one-time repair. A pass whose
+// walk list is missing goes by its own status — the picker never silently hides a pass that exists.
+export const passState = (pass, effort) => {
+  if (pass?.status === 'archived' || isArchivedWalkList(effort)) return 'archived';
+  return pass?.status === 'active' ? 'live' : 'drafts';
+};
+
+// "North · Pass 3 · GOTV" (passOptionLabel skips a name that only repeats "Pass N"). A pass of an
+// archived walk list says so, and says what it was when that is not plain from the heading:
+// "West · Pass 2 (draft) · walk list archived".
+export const passPickerLabel = (pass, effort) => {
+  const label = passOptionLabel(pass, effort?.name);
+  if (!isArchivedWalkList(effort)) return label;
+  const was = pass?.status === 'draft' ? ' (draft)' : pass?.status === 'active' ? ' (still live)' : '';
+  return `${label}${was} · walk list archived`;
+};
+
+// Walk list name, then round number. Two walk lists sharing a name stay apart (their id breaks the
+// tie before the round does), so one list's passes never interleave with the other's.
+const byWalkListThenRound = (a, b) =>
+  a.walkList.localeCompare(b.walkList, undefined, { numeric: true, sensitivity: 'base' }) ||
+  a.effortKey.localeCompare(b.effortKey) ||
+  (a.pass.roundNumber ?? 0) - (b.pass.roundNumber ?? 0);
+
+// Returns [{ key, label, options: [{ value, label, pass }] }], empty groups dropped.
+export const groupPassesByState = ({ passes = [], efforts = [] } = {}) => {
   const effortById = new Map((efforts || []).map((e) => [String(e._id), e]));
-  const runningEffortIds = new Set(
-    passes.filter((p) => p.status === 'active').map((p) => String(p.effortId))
-  );
   const buckets = new Map(PASS_GROUPS.map((g) => [g.key, []]));
-  for (const p of passes) {
-    const effort = effortById.get(String(p.effortId)) || null;
-    // A pass whose walk list is missing is tiered as idle by effortTier, so it is still listed —
-    // the picker must never silently hide a pass that exists.
-    buckets.get(TIER_KEY[effortTier(effort, runningEffortIds.has(String(p.effortId)))]).push(p);
+  for (const pass of passes || []) {
+    const effort = effortById.get(String(pass.effortId)) || null;
+    buckets.get(passState(pass, effort)).push({
+      pass,
+      label: passPickerLabel(pass, effort),
+      walkList: effort?.name || 'Walk list',
+      effortKey: String(pass.effortId ?? ''),
+    });
   }
-  return PASS_GROUPS.map((g) => ({ ...g, passes: buckets.get(g.key) })).filter(
-    (g) => g.passes.length > 0
-  );
-}
+  return PASS_GROUPS.map((g) => ({
+    ...g,
+    options: buckets
+      .get(g.key)
+      .sort(byWalkListThenRound)
+      .map(({ pass, label }) => ({ value: String(pass._id), label, pass })),
+  })).filter((g) => g.options.length > 0);
+};

@@ -16,8 +16,14 @@ import jwt from 'jsonwebtoken';
 // shortens; Renew changes the URL; every 404 carries a code; History rows hold no secret; the sign-in
 // token names its link by an opaque key, no id, and one issued before that keeps working until it
 // expires (PRIV-2).
+//
+// Since one link per report (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2), every link here opens a report of
+// its own — makeLink publishes one for it — and a raw legacy link names one too, unless the test is about
+// a link to all your reports (a legacy open link always is one): those keep a new password and a new
+// address until the switch, and nothing else (clientReportLinksRetired.int.test.js has the rest).
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-share-links';
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
+delete process.env.RETIRE_ALL_REPORTS_LINKS;
 
 const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
@@ -90,16 +96,34 @@ const rowOf = async (id) => (await admin('GET', `?campaignId=${ctx.camp._id}`)).
 const linkRows = (id) => CampaignChange.find({ shareLinkId: id }).sort({ createdAt: 1, _id: 1 }).lean();
 const near = (a, b, ms = 60 * 1000) => Math.abs(new Date(a).getTime() - new Date(b).getTime()) < ms;
 
-// A link the way the new code makes it, with a known password (bcrypt cost 4 keeps the suite fast).
+// A published report of its own week, as ctx.report is — each link opens one, and a report has one link.
+let weekN = 0;
+const freshReport = async () => {
+  weekN += 1;
+  const start = new Date(Date.UTC(2026, 6, 13) + weekN * 7 * DAY);
+  const day = (d) => d.toISOString().slice(0, 10);
+  return ClientReport.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, title: `Week ${weekN + 1}`, status: 'published', publishedAt: new Date(),
+    weekStart: day(start), weekEnd: day(new Date(start.getTime() + 6 * DAY)), timeZone: 'America/Chicago',
+    rangeStartUtc: start, rangeEndUtc: new Date(start.getTime() + 7 * DAY),
+    visibility: { visibleQuestionKeys: [], mapAnswerKeys: [], showMap: false },
+    stats: { cumulative: { totals: { doorsKnocked: 3 } }, period: { totals: { doorsKnocked: 3 } } },
+  });
+};
+// A link the way the new code makes it — on a report of its own — with a known password (bcrypt cost 4
+// keeps the suite fast).
 const makeLink = async (password = 'correct-horse-battery', extra = {}) => {
-  const res = await admin('POST', '', { campaignId: String(ctx.camp._id), label: extra.label || 'Candidate', password, ...(extra.expiresInDays ? { expiresInDays: extra.expiresInDays } : {}) });
+  const report = await freshReport();
+  const res = await admin('POST', '', { campaignId: String(ctx.camp._id), reportId: String(report._id), label: extra.label || 'Candidate', password, ...(extra.expiresInDays ? { expiresInDays: extra.expiresInDays } : {}) });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
   await ReportShareLink.updateOne({ _id: res.json.share.id }, { $set: { passwordHash: await bcrypt.hash(password, 4) } });
   return { ...res.json.share, password };
 };
-// A link inserted RAW, as one from before this change looks: none of the new fields.
+// A link inserted RAW, as one from before this change looks: none of the new fields. It opens a report of
+// its own unless `reportId: null` says it opens all of them (a link to all your reports).
 const rawLink = async (doc) => {
   const now = new Date();
+  const reportId = doc.reportId === undefined ? (await freshReport())._id : doc.reportId;
   const { insertedId } = await ReportShareLink.collection.insertOne({
     organizationId: ctx.org._id,
     campaignId: ctx.camp._id,
@@ -109,7 +133,9 @@ const rawLink = async (doc) => {
     createdAt: now,
     updatedAt: now,
     ...doc,
+    ...(reportId ? { reportId } : {}),
   });
+  if (!reportId) await ReportShareLink.collection.updateOne({ _id: insertedId }, { $unset: { reportId: '' } });
   return ReportShareLink.findById(insertedId).lean();
 };
 
@@ -166,11 +192,11 @@ after(async () => {
 
 test('B4 fixed: a password needs 12 or more characters, on create and on change', { skip }, async () => {
   for (const password of ['a', 'short', 'x'.repeat(11), '']) {
-    const res = await admin('POST', '', { campaignId: String(ctx.camp._id), password });
+    const res = await admin('POST', '', { campaignId: String(ctx.camp._id), reportId: String(ctx.report._id), password });
     assert.strictEqual(res.status, 400, `"${password}" refused`);
     assert.strictEqual(res.json.code, 'SHARE_PASSWORD_TOO_SHORT');
   }
-  const made = await admin('POST', '', { campaignId: String(ctx.camp._id), label: 'Twelve', password: 'twelve-chars' });
+  const made = await admin('POST', '', { campaignId: String(ctx.camp._id), reportId: String(ctx.report._id), label: 'Twelve', password: 'twelve-chars' });
   assert.strictEqual(made.status, 201, JSON.stringify(made.json));
   const s = made.json.share;
   assert.strictEqual(made.json.generatedPassword, undefined, 'nothing generated when the operator set one');
@@ -194,12 +220,12 @@ test('B4 fixed: a password needs 12 or more characters, on create and on change'
   }
 
   // A generated password is 12 characters and works.
-  const gen = await admin('POST', '', { campaignId: String(ctx.camp._id), label: 'Generated', expiresInDays: 30 });
+  const gen = await admin('POST', '', { campaignId: String(ctx.camp._id), reportId: String((await freshReport())._id), label: 'Generated', expiresInDays: 30 });
   assert.strictEqual(gen.status, 201);
   assert.strictEqual(gen.json.generatedPassword.length, 12);
   assert.ok(near(gen.json.share.expiresAt, Date.now() + 30 * DAY), 'the picker’s 30 days');
   assert.strictEqual((await unlock(gen.json.share.token, gen.json.generatedPassword)).status, 200);
-  assert.strictEqual((await admin('POST', '', { campaignId: String(ctx.camp._id), expiresInDays: 400 })).status, 400, 'never past a year');
+  assert.strictEqual((await admin('POST', '', { campaignId: String(ctx.camp._id), reportId: String((await freshReport())._id), expiresInDays: 400 })).status, 400, 'never past a year');
 });
 
 test('B7 fixed: before the password a link says only that it needs one; "Last opened" means access was granted', { skip }, async () => {
@@ -242,7 +268,7 @@ test('every share 404 carries a code; an expired link is 410; /logo with no logo
   const gone = await pub(`/${ctx.link.token}/reports/${new mongoose.Types.ObjectId()}`, ctx.access);
   assert.strictEqual(gone.status, 404);
   assert.strictEqual(gone.json.code, 'REPORT_NOT_FOUND');
-  const map = await pub(`/${ctx.link.token}/reports/${ctx.report._id}/map`, ctx.access);
+  const map = await pub(`/${ctx.link.token}/reports/${ctx.link.reportId}/map`, ctx.access);
   assert.strictEqual(map.status, 404);
   assert.strictEqual(map.json.code, 'MAP_NOT_SHARED');
   const stray = await pub(`/${ctx.link.token}/no-such-thing`, ctx.access);
@@ -293,8 +319,9 @@ test('B5 fixed: cv 0 → 1 → 2 — a password change and a rotate sign every d
   assert.strictEqual((await pub(`/${token}/reports`, third.json.accessToken)).status, 200);
 });
 
+// Every legacy open link is a link to all your reports: until the switch, it can still get a password.
 test('a first password on a legacy open link bumps cv, and gives it an expiry and a one-year life (C2)', { skip }, async () => {
-  const open = await rawLink({ token: 'open-legacy-token', passwordHash: null, expiresAt: null });
+  const open = await rawLink({ token: 'open-legacy-token', passwordHash: null, expiresAt: null, reportId: null });
   const row = await rowOf(open._id);
   assert.deepStrictEqual([row.isLegacyOpen, row.noPassword, row.neverExpires, row.lifetimeEndsAt, row.passwordMeetsRule], [true, true, true, null, null]);
   const openToken = (await unlock('open-legacy-token')).json.accessToken;
@@ -346,7 +373,7 @@ test('PRIV-2: a new sign-in token carries no id — its link by an opaque key; a
   const a = await makeLink('priv-two-password-a', { label: 'A' });
   const b = await makeLink('priv-two-password-b', { label: 'B' });
   const doc = await ReportShareLink.findById(a.id).lean();
-  const ids = [a.id, b.id, String(ctx.camp._id), String(ctx.org._id), String(ctx.report._id)];
+  const ids = [a.id, b.id, String(ctx.camp._id), String(ctx.org._id), String(ctx.report._id), a.reportId, b.reportId];
   for (const remember of [false, true]) {
     const access = (await unlock(a.token, a.password, { remember })).json.accessToken;
     const claims = jwt.decode(access);
@@ -365,7 +392,7 @@ test('PRIV-2: a new sign-in token carries no id — its link by an opaque key; a
     jwt.sign({ kind: 'share', shareId: String(doc._id), campaignId: String(doc.campaignId), cv: doc.credentialVersion ?? 0, ...extra }, SECRET, opts);
   assert.strictEqual((await pub(`/${a.token}/reports`, old())).status, 200, 'an old 24-hour token still reads');
   assert.strictEqual((await pub(`/${a.token}/reports`, old({}, { expiresIn: '30d' }))).status, 200, 'a remembered one too');
-  assert.strictEqual((await pub(`/${a.token}/reports/${ctx.report._id}`, old())).status, 200, 'the report as well as the hub');
+  assert.strictEqual((await pub(`/${a.token}/reports/${a.reportId}`, old())).status, 200, 'the report as well as the hub');
   assert.strictEqual((await pub(`/${b.token}/reports`, old())).status, 401, 'never on another link');
   assert.strictEqual((await pub(`/${a.token}/reports`, old({ campaignId: String(ctx.other._id) }))).status, 401, 'nor naming another campaign');
   assert.strictEqual((await pub(`/${a.token}/reports`, old({ cv: 7 }))).status, 401, 'cv is still checked');
@@ -580,19 +607,18 @@ test('expiry: the one-year cap, Extend never shortens, an expired link renews to
   assert.strictEqual((await pub(`/${s.token}/reports`, access)).status, 401, 'cv moved');
   assert.strictEqual((await unlock(s.token, link.password)).status, 200, 'the password is kept');
 
-  // A legacy link that never expires gets its first expiry from Extend, its life starting now.
-  const never = await rawLink({ token: 'never-expires', passwordHash: await bcrypt.hash('never-expires-pw', 4), expiresAt: null, createdAt: new Date(Date.now() - 500 * DAY) });
+  // A legacy link that never expires is a link to all your reports, and those are never extended any
+  // more (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1): Extend's "set an expiry" went with them.
+  const never = await rawLink({ token: 'never-expires', passwordHash: await bcrypt.hash('never-expires-pw', 4), expiresAt: null, createdAt: new Date(Date.now() - 500 * DAY), reportId: null });
   res = await admin('POST', `/${never._id}/extend`, { expiresInDays: 90 });
-  assert.strictEqual(res.status, 200, JSON.stringify(res.json));
-  assert.ok(near(res.json.share.expiresAt, Date.now() + 90 * DAY));
-  assert.ok(near(res.json.share.lifetimeEndsAt, Date.now() + 365 * DAY));
-  assert.strictEqual(res.json.share.neverExpires, false);
+  assert.deepStrictEqual([res.status, res.json.code], [409, 'ALL_REPORTS_LINK']);
+  assert.strictEqual((await ReportShareLink.findById(never._id).lean()).expiresAt, null, 'unchanged');
 });
 
 test('a lead manages links on her campaigns only; revoke-legacy stays admin-only', { skip }, async () => {
-  const mine = await call('POST', '/admin/client-reports/shares', { ...ctx.lead, body: { campaignId: String(ctx.camp._id), label: 'Lead link' } });
+  const mine = await call('POST', '/admin/client-reports/shares', { ...ctx.lead, body: { campaignId: String(ctx.camp._id), reportId: String((await freshReport())._id), label: 'Lead link' } });
   assert.strictEqual(mine.status, 201);
-  const theirs = await call('POST', '/admin/client-reports/shares', { ...ctx.lead, body: { campaignId: String(ctx.other._id) } });
+  const theirs = await call('POST', '/admin/client-reports/shares', { ...ctx.lead, body: { campaignId: String(ctx.other._id), reportId: String(new mongoose.Types.ObjectId()) } });
   assert.strictEqual(theirs.status, 403);
   assert.strictEqual((await call('GET', `/admin/client-reports/shares?campaignId=${ctx.other._id}`, { ...ctx.lead })).status, 403);
   assert.strictEqual((await call('POST', `/admin/client-reports/shares/${mine.json.share.id}/rotate`, { ...ctx.lead })).status, 200);
@@ -608,12 +634,16 @@ test('History: every link change writes a row, kept out of the general feed, hol
     assert.ok(fields.has(`reportLink.${f}`), `a reportLink.${f} row`);
   }
   assert.ok(rows.every((r) => r.source === 'client_report'));
-  const links = await ReportShareLink.find({}).lean();
+  const links = await ReportShareLink.find({}).select('+passwordSealed').lean();
   const dump = JSON.stringify(rows);
   for (const l of links) {
     assert.ok(!dump.includes(l.token), 'no URL token');
     assert.ok(!l.passwordHash || !dump.includes(l.passwordHash), 'no hash');
+    assert.ok(!l.passwordSealed || !dump.includes(l.passwordSealed), 'no sealed copy');
   }
+  // A link to one report names it (PROPOSAL_CLIENT_REPORT_LINKS.md §C7); one to all your reports can't.
+  assert.ok(rows.some((r) => r.clientReportId && r.periodLabel), 'link rows name their report');
+  assert.ok(rows.filter((r) => r.clientReportId).every((r) => /, 20\d\d$/.test(r.periodLabel)));
   for (const pw of ['the-real-password', 'second-password-2', 'finally-locked-1', 'to-be-deleted-pw', 'a-wrong-guess-123']) {
     assert.ok(!dump.includes(pw), `no password (${pw})`);
   }
@@ -627,7 +657,7 @@ test('History: every link change writes a row, kept out of the general feed, hol
 test('the migration fills the link fields only where missing, and a second run changes nothing', { skip }, async () => {
   const created = new Date('2026-01-02T03:04:05Z');
   const expiring = await rawLink({ token: 'mig-expiring', passwordHash: 'x', expiresAt: new Date(Date.now() + DAY), createdAt: created });
-  const open = await rawLink({ token: 'mig-open', passwordHash: null, expiresAt: null });
+  const open = await rawLink({ token: 'mig-open', passwordHash: null, expiresAt: null, reportId: null });
   const modern = await makeLink('a-modern-link-pw');
   const before = await ReportShareLink.findById(modern.id).lean();
   const quiet = () => {};
@@ -645,30 +675,34 @@ test('the migration fills the link fields only where missing, and a second run c
   assert.deepStrictEqual(second.links, { credentialVersion: 0, lifetimeStartAt: 0, failedUnlockAt: 0, failedUnlocksTotal: 0, failedByDay: 0 });
 });
 
-// docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contract K6: every row says what its link opens — a link to
-// all the campaign's reports (a link from before the field included) reads reportId and report null; a
-// link to one report names it — from every route that returns a row.
-test('every link row says what it opens: null on a link to all the reports, the report on a link to one', { skip }, async () => {
-  const opensAll = (s) => assert.deepStrictEqual([s.reportId, s.report], [null, null], JSON.stringify(s));
-  const link = await makeLink('a-long-rows-password', { label: 'Rows' });
-  opensAll(link);
-  opensAll(await rowOf(link.id));
-  opensAll(await rowOf((await rawLink({ token: 'rows-legacy', passwordHash: null, expiresAt: null }))._id));
-  opensAll((await admin('PATCH', `/${link.id}`, { label: 'Rows again' })).json.share);
-  opensAll((await admin('POST', `/${link.id}/extend`, { expiresInDays: 30 })).json.share);
-  opensAll((await admin('POST', `/${link.id}/rotate`)).json.share);
-  opensAll((await admin('POST', `/${link.id}/unlock`)).json.share);
-  await ReportShareLink.updateOne({ _id: link.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
-  opensAll((await admin('POST', `/${link.id}/renew`, { expiresInDays: 30 })).json.share);
-
-  const one = await admin('POST', '', { campaignId: String(ctx.camp._id), label: 'Board', password: 'a-long-rows-password', reportId: String(ctx.report._id) });
+// docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D, contract K6, and docs/PROPOSAL_CLIENT_REPORT_LINKS.md
+// contract K1: every row says what its link opens — a link to one report names it (with its tab's id); a
+// link to all the campaign's reports (a link from before the field included) reads reportId and report
+// null, allReports true — from every route that returns a row.
+test('every link row says what it opens: the report on a link to one, null on a link to all the reports', { skip }, async () => {
+  const report = await freshReport();
+  const one = await admin('POST', '', { campaignId: String(ctx.camp._id), label: 'Board', password: 'a-long-rows-password', reportId: String(report._id) });
   assert.strictEqual(one.status, 201, JSON.stringify(one.json));
-  const named = { id: String(ctx.report._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', scopeLabel: 'Whole campaign', takenDown: false };
-  assert.deepStrictEqual([one.json.share.reportId, one.json.share.report], [String(ctx.report._id), named]);
-  assert.deepStrictEqual((await rowOf(one.json.share.id)).report, named);
-  assert.deepStrictEqual((await admin('POST', `/${one.json.share.id}/rotate`)).json.share.report, named);
-  // Its History row holds the label and expiry, as every link's does — no report id, no token.
-  const [created] = await linkRows(one.json.share.id);
+  const id = one.json.share.id;
+  const named = { id: String(report._id), weekStart: report.weekStart, weekEnd: report.weekEnd, scopeLabel: 'Whole campaign', takenDown: false, seriesId: null };
+  const opensIt = (s) => assert.deepStrictEqual([s.reportId, s.report, s.allReports], [String(report._id), named, false], JSON.stringify(s));
+  opensIt(one.json.share);
+  opensIt(await rowOf(id));
+  opensIt((await admin('PATCH', `/${id}`, { label: 'Rows again' })).json.share);
+  opensIt((await admin('POST', `/${id}/extend`, { expiresInDays: 30 })).json.share);
+  opensIt((await admin('POST', `/${id}/rotate`)).json.share);
+  opensIt((await admin('POST', `/${id}/unlock`)).json.share);
+  await ReportShareLink.updateOne({ _id: id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  opensIt((await admin('POST', `/${id}/renew`, { expiresInDays: 30 })).json.share);
+
+  const opensAll = (s) => assert.deepStrictEqual([s.reportId, s.report, s.allReports], [null, null, true], JSON.stringify(s));
+  const legacy = await rawLink({ token: 'rows-legacy', passwordHash: null, expiresAt: null, reportId: null });
+  opensAll(await rowOf(legacy._id));
+  opensAll((await admin('POST', `/${legacy._id}/rotate`)).json.share);
+  // Its History row holds the label and expiry, as every link's does — and names its report beside them,
+  // never a token.
+  const [created] = await linkRows(id);
   assert.strictEqual(created.field, 'reportLink.created');
   assert.deepStrictEqual(Object.keys(created.toValue).sort(), ['expiresAt', 'label']);
+  assert.deepStrictEqual([String(created.clientReportId), created.seriesId], [String(report._id), null]);
 });

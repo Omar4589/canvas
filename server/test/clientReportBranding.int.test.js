@@ -118,13 +118,14 @@ before(async () => {
     return { user: u, token: signUserToken(u) };
   };
   const camp = await Campaign.create({ organizationId: org._id, name: 'Brand', type: 'survey', state: 'FL', isActive: true });
-  await ClientReport.create({
+  const report = await ClientReport.create({
     organizationId: org._id, campaignId: camp._id, status: 'published', publishedAt: new Date(),
     weekStart: '2026-07-06', weekEnd: '2026-07-12', timeZone: 'America/Chicago',
     rangeStartUtc: new Date('2026-07-06T05:00:00Z'), rangeEndUtc: new Date('2026-07-13T05:00:00Z'),
   });
+  // The report's own link, as every link is now (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C2).
   await ReportShareLink.create({
-    organizationId: org._id, campaignId: camp._id, token: 'brand-link',
+    organizationId: org._id, campaignId: camp._id, token: 'brand-link', reportId: report._id,
     passwordHash: await bcrypt.hash('brand-link-password', 4), expiresAt: new Date(Date.now() + 86400e3), isActive: true,
   });
   Object.assign(ctx, { org, camp, link: { token: 'brand-link' }, admin: await mk('Ada', 'admin'), lead: await mk('Lea', 'lead'), canvasser: await mk('Cal', 'canvasser') });

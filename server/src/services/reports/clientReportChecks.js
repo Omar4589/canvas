@@ -3,7 +3,6 @@ import { ClientReport } from '../../models/ClientReport.js';
 import { ClientReportAreaCell } from '../../models/ClientReportAreaCell.js';
 import { ClientReportSeries } from '../../models/ClientReportSeries.js';
 import { Effort } from '../../models/Effort.js';
-import { ReportShareLink } from '../../models/ReportShareLink.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
@@ -13,7 +12,6 @@ import { earlierTotalsLine, comparedReportNow, comparedSnapshotMoved } from './c
 import { legacyTemplatesFor } from './clientReportMap.js';
 import { teamOf } from './clientReportSeries.js';
 import { areaAnswerKeys } from './areaCells.js';
-import { isExpired, lockOf } from './shareLinks.js';
 import { normalizeTag, tagOptionMap } from '../surveys/tags.js';
 import {
   liveInputs,
@@ -167,35 +165,9 @@ const allTimeTeamFigures = async (report, inputs) => {
   return { allTime: true, canvassers: users.length };
 };
 
-// The link the client would open: is there a usable one — active, unexpired and not locked (G5, G6)
-// — and if not, why, so the last line can name the fix: create one, renew it, unlock or rotate it,
-// enable it. Only links that can open THIS report count (docs/PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D,
-// contract K8): every link to all the campaign's reports — reportId null, or missing on a link made
-// before the field, both of which `$in: [null, …]` matches — and this report's own one-report links.
-// The reason is worked out over THOSE links first, since each names a fix for this report: an expired
-// link to all the reports reads "renew it" even while a link to another report works (code review round
-// 1, LINK-2; the client's reportLinkReason follows the same rule). 'other_reports' only when no link of
-// any state opens this report but the campaign has others — each a link to one other report; 'no_link'
-// when it has none.
-const linkState = async (report) => {
-  const scope = { organizationId: report.organizationId, campaignId: report.campaignId };
-  const fields = { isActive: 1, expiresAt: 1, label: 1, failedUnlockAt: 1 };
-  const links = await ReportShareLink.find({ ...scope, reportId: { $in: [null, report._id] } }, fields).lean();
-  const now = new Date();
-  const usable = links.filter((l) => l.isActive && !isExpired(l, now) && !lockOf(l, now).locked);
-  let reason = null;
-  if (!usable.length) {
-    const active = links.filter((l) => l.isActive);
-    if (!links.length) {
-      const elsewhere = await ReportShareLink.exists({ ...scope, reportId: { $nin: [null, report._id] } });
-      reason = elsewhere ? 'other_reports' : 'no_link';
-    } else if (!active.length) reason = 'disabled';
-    // An active, unexpired link that still isn't usable is locked.
-    else if (active.some((l) => !isExpired(l, now))) reason = 'locked';
-    else reason = 'expired';
-  }
-  return { usable: usable.length, labels: usable.map((l) => l.label || ''), reason };
-};
+// No link check here (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C1, D5): "Before you publish" used to count
+// the links that could open the report (`checks.links`), but a draft can never have a link of its own —
+// Share makes it once the report is published — so the check went, rather than being re-scoped.
 
 // Why the earlier report's totals moved since it was sent (§F4), chosen by cause, for the builder
 // only — the client's line never carries a reason. On a team report: the team's crews themselves
@@ -255,12 +227,12 @@ const earlierTotalsCheck = async ({ report, inputs, team }) => {
   };
 };
 
-// Area reports (§F5, §O5): a link to all the campaign's reports shows every published one, so another
-// shown report that maps the same single-choice question — door by door, or by area for another
-// period, team or walk list — or charts it for a narrower scope (a team or a walk list), can narrow
-// down what this report's areas keep hidden. Named per question, so the operator can decide. A link to
-// one report (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §D) shows only that report, but one person can hold
-// several links, so every shown report still counts.
+// Area reports (§F5, §O5): another shown report that maps the same single-choice question — door by
+// door, or by area for another period, team or walk list — or charts it for a narrower scope (a team or
+// a walk list), can narrow down what this report's areas keep hidden, for anyone who can open both.
+// Named per question, so the operator can decide. Each report has its own link now
+// (docs/PROPOSAL_CLIENT_REPORT_LINKS.md), but one person can hold several — and an old link to all your
+// reports, until it's turned off, opens every one — so every shown report still counts.
 // `inputsOf` reads each report's live inputs — a report from before snapshots with every survey its
 // answers can have come from (LEGACY-1).
 const areaNarrowing = async ({ report, inputs, inputsOf, labelOf }) => {
@@ -388,10 +360,9 @@ export const publishChecks = async (report, { template = null, now = new Date() 
 
   const surveysForConditions = async () => (hasSnapshotInputs(report) && template ? [template] : legacyTemplates());
 
-  const [openMockFlags, earlier, links, teamFigures, areaNarrowedBy, conditionsUnknown] = await Promise.all([
+  const [openMockFlags, earlier, teamFigures, areaNarrowedBy, conditionsUnknown] = await Promise.all([
     scopedOpenMockFlags(report, inputs),
     earlierTotalsCheck({ report, inputs, team }),
-    linkState(report),
     // An all-time report keeps only the one-person check (allTimeTeamFigures, above).
     team && report.snapshotId ? (report.allTime ? allTimeTeamFigures(report, inputs) : teamPeriodFigures(report, inputs)) : null,
     areaNarrowing({ report, inputs, inputsOf, labelOf }),
@@ -424,7 +395,6 @@ export const publishChecks = async (report, { template = null, now = new Date() 
     // "was refreshed": the build recounted the series' previous shown report up to its own cut-off,
     // and its cards moved (0 or 1; earlierTotals says by how much, and why).
     earlierReportsRefreshed: earlier.earlierTotals ? 1 : 0,
-    links,
     team: teamFigures,
   };
 };

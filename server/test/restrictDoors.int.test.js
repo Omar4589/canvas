@@ -692,3 +692,56 @@ test('22. the 1000-id cap: a full batch is accepted, 1001 is refused WHOLE', { s
   assert.strictEqual((await deskRows({ householdId: ctx.d13._id })).length, 0, 'the whole batch is refused');
   assert.strictEqual(await statusOf(ctx.d13), 'refused');
 });
+
+test('23. an archived walk list’s doors answer 409 walk-list-archived — never PASS_REQUIRED — and unmarking still works', { skip }, async () => {
+  // docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.8. A walk list archived after its round ended: Round 1
+  // archived, Round 2 a draft frozen with the walk list.
+  const old = await Effort.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, name: 'Old Town' });
+  await Pass.create({
+    organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: old._id, roundNumber: 1, name: 'Round 1',
+    status: 'archived', activatedAt: new Date(Date.now() - 86400e3), archivedAt: new Date(),
+  });
+  const frozen = await Pass.create({ organizationId: ctx.org._id, campaignId: ctx.camp._id, effortId: old._id, roundNumber: 2, name: 'Round 2', status: 'draft' });
+  const [a, b] = await Household.insertMany([30, 31].map((n) => makeHousehold(ctx.org._id, ctx.camp._id, old._id, n)));
+
+  // Open, the door resolves to the single draft as any other (test 2's rule) — so what follows is
+  // the archive alone.
+  const open = await mark([a]);
+  assert.strictEqual(open.status, 200, JSON.stringify(open.json));
+  assert.strictEqual(open.json.passId, String(frozen._id));
+  assert.strictEqual(open.json.marked, 1);
+  await Effort.updateOne({ _id: old._id }, { $set: { status: 'archived', archivedAt: new Date() } });
+
+  const sentence = 'Walk list "Old Town" is archived — unarchive it to mark its doors.';
+  // No passId: its own 409, never PASS_REQUIRED — an already-released phone turns a non-Intake
+  // PASS_REQUIRED into "this walk list has no current round" (mobile/lib/restrictBooks.js).
+  const implicit = await mark([b]);
+  assert.strictEqual(implicit.status, 409, JSON.stringify(implicit.json));
+  assert.deepStrictEqual(implicit.json, { error: sentence, code: 'walk-list-archived' });
+  // The explicit frozen draft — the case round 2 of the plan's review reproduced being marked.
+  const explicit = await mark([b], frozen);
+  assert.strictEqual(explicit.status, 409, JSON.stringify(explicit.json));
+  assert.deepStrictEqual(explicit.json, { error: sentence, code: 'walk-list-archived' });
+  // A lasso that also takes an Intake door: the archive answers first, and nothing is written.
+  const mixed = await mark([b, ctx.d10]);
+  assert.strictEqual(mixed.status, 409, JSON.stringify(mixed.json));
+  assert.strictEqual(mixed.json.code, 'walk-list-archived');
+  assert.strictEqual((await deskRows({ householdId: b._id })).length, 0, 'nothing marked');
+
+  // /activity's currentPassId (routes/admin/households.js) resolves as an UNMARK does — the frozen draft —
+  // so the mark already there still shows, with its Unmark, on the web and on already-installed phones;
+  // the clients refuse a new mark from the walk list's status (code review round 2: resolved as a mark,
+  // it read null and the panel said "Not restricted").
+  const act = await call('GET', `/admin/households/${a._id}/activity`, asAdmin());
+  assert.strictEqual(act.status, 200);
+  assert.strictEqual(act.json.currentPassId, String(frozen._id));
+  const onDraft = act.json.rounds.find((r) => r.passId === String(frozen._id));
+  assert.deepStrictEqual(onDraft?.entries.map((e) => [e.actionType, e.via]), [['restricted', 'bulk']], 'the desk mark, on the round the panel reads');
+
+  // Unmarking stays allowed: with no passId the door still resolves to its draft, as before.
+  const off = await unmark([a]);
+  assert.strictEqual(off.status, 200, JSON.stringify(off.json));
+  assert.strictEqual(off.json.passId, String(frozen._id));
+  assert.strictEqual(off.json.unmarked, 1);
+  assert.strictEqual(await statusOf(a), 'unknocked');
+});

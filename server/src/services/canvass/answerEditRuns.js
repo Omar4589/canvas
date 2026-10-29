@@ -18,6 +18,7 @@ import { getQueue, QUEUE_NAMES, queueOp } from '../../queues/index.js';
 import { applyChunk, countChunk, undoRunPass, emptyCounts } from './answerEditWriter.js';
 import { isRecutLocked } from '../turf/recutLock.js';
 import { hydrateCanvassers } from '../reports/canvasserIdentity.js';
+import { couldComeBack } from '../passes/passLifecycle.js';
 import { DOOR_STATUS_LABELS } from '../../utils/statusPrecedence.js';
 import { sweepIfDeleting, sweptAfter } from '../platform/lateWriteSweep.js';
 import { UNKNOCK_REMOVING } from './unknockLease.js';
@@ -257,10 +258,13 @@ export const removalBusy = async (campaignId, { exceptUnknockId = null, exceptCo
  * knocks cleared after it, and the snapshot that can bring them back is unrestored. Undone now, the undo
  * finds nothing of the round's to take back, and the restore later brings the change's own work back
  * verbatim — a door stamped by an undone conversion, out of every tool's reach (code review round 8). Only
- * a snapshot its round can still take back holds the Undo: the round on file, not archived, and knocked
- * nowhere since — a round knocked again would get the old entries beside the new, and the restore failed
- * part-way (round 9: the refusal sent admins to exactly that restore, and held an Undo for good once the
- * round was deleted or archived). Past any other, the round's cleared work is gone with its snapshot: the
+ * a snapshot its round can still take back holds the Undo: the round on file, able to come back, and
+ * knocked nowhere since — a round knocked again would get the old entries beside the new, and the restore
+ * failed part-way (round 9: the refusal sent admins to exactly that restore, and held an Undo for good once
+ * the round was deleted or archived). "Able to come back" counts an ARCHIVED round that Bring back or
+ * Unarchive could still restore (couldComeBack, services/passes/passLifecycle.js) — skipping it let the
+ * undo through, and the restore after a bring-back then refused for good. A round ended by the next one
+ * going live can never come back, so it is skipped as before. Past any other, the round's cleared work is gone with its snapshot: the
  * Undo goes ahead and leaves that round alone (unknock.js), and the restore refuses for good once the
  * change is undone (turfs.js). A conversion or a relabel is matched by what the snapshot holds of its own
  * (its stamped entries, its desk answers, its copies); an unknock, whose entries were already gone, by the
@@ -286,22 +290,42 @@ export const roundClearedSince = async (campaignId, { unknock = null, conversion
     .sort({ createdAt: 1 })
     .lean();
   for (const snap of snaps) {
-    const pass = await Pass.findOne({ _id: snap.passId, campaignId, status: { $ne: 'archived' } }, { name: 1, roundNumber: 1, effortId: 1 }).lean();
+    const pass = await Pass.findOne(
+      { _id: snap.passId, campaignId },
+      { name: 1, roundNumber: 1, effortId: 1, status: 1, archivedAt: 1, archivedVia: 1, archivedFrom: 1, activatedAt: 1 }
+    ).lean();
     if (!pass || (await CanvassActivity.exists({ passId: snap.passId }))) continue;
-    const effort = pass.effortId ? await Effort.findById(pass.effortId, { name: 1 }).lean() : null;
+    if (pass.status === 'archived' && !(await couldComeBack(pass))) continue;
+    const effort = pass.effortId ? await Effort.findById(pass.effortId, { name: 1, status: 1 }).lean() : null;
     const round = pass.name || `Round ${pass.roundNumber}`;
-    return { passId: snap.passId, at: snap.createdAt, round: effort?.name ? `${effort.name} · ${round}` : round };
+    return {
+      passId: snap.passId,
+      at: snap.createdAt,
+      round: effort?.name ? `${effort.name} · ${round}` : round,
+      archived: pass.status === 'archived',
+      walkList: effort?.status === 'archived' ? effort.name : null,
+    };
   }
   return null;
 };
 // The refusal, naming the round and the day its knocks were cleared (round 9: with several walk lists the
 // admin searched every round's snapshots, one of them past the ten Turf Cutting lists).
-export const roundClearedRefusal = ({ round, at }, campaign) => {
+export const roundClearedRefusal = ({ round, at, archived = false, walkList = null }, campaign) => {
   let day;
   try {
     day = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: campaign?.timeZone || 'America/New_York' }).format(at);
   } catch {
     day = new Date(at).toISOString().slice(0, 10);
+  }
+  // An archived round (or a draft of an archived walk list) holds the snapshot too, because it can
+  // come back. Deleting the snapshot is allowed there (and on an archived campaign), so the way out
+  // never has to put a finished round back on the phones.
+  if (archived || walkList) {
+    const back = walkList ? `unarchive ${walkList} and ${archived ? 'bring the round back, then ' : ''}` : 'bring the round back, then ';
+    return {
+      error: `${round}${archived ? ' (archived)' : ''} had its knocks cleared on ${day}, after this change, and that snapshot could still come back with it — so this can't be undone yet. Delete that snapshot on Turf Cutting (Undo / snapshots), or ${back}restore it, then undo this change.`,
+      code: 'ROUND_CLEARED_SINCE',
+    };
   }
   return {
     error: `${round} had its knocks cleared on ${day}, after this change, and that snapshot can still be restored — so this can't be undone yet. Restore it on Turf Cutting (Undo / snapshots), discarding the round's new books first if it has any, then undo this change.`,

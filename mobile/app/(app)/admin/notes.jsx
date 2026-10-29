@@ -17,6 +17,7 @@ import { api } from '../../../lib/api';
 import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 import { loadActiveCampaign, saveActiveCampaign } from '../../../lib/cache';
 import { PRESETS, rangeFor, labelForRange, todayInTz, deviceTimezone } from '../../../lib/dateRanges';
+import { walkListOptions, walkListLabel } from '../../../lib/walkListOptions';
 import { spacing, radius, actionLabel, ACTION_LABELS } from '../../../lib/theme';
 import { formatInTz } from '../../../lib/datetime';
 import { useTheme } from '../../../lib/ThemeContext';
@@ -142,7 +143,9 @@ export default function AdminNotes() {
     return [{ key: '', label: 'Any author' }, ...opts];
   }, [assignmentsQ.data]);
 
-  // Walk-list / effort options (only shown when a campaign has more than one).
+  // Walk-list / effort options (only shown when a campaign has more than one). Archived walk lists
+  // stay — their notes are history — marked and listed last, and count toward that gate
+  // (lib/walkListOptions.js).
   const effortsQ = useQuery({
     queryKey: ['admin', 'efforts', cId],
     queryFn: () => api(`/admin/campaigns/${cId}/efforts`),
@@ -151,7 +154,10 @@ export default function AdminNotes() {
   });
   const efforts = effortsQ.data?.efforts || [];
   const effortTabs = useMemo(
-    () => [{ key: '', label: 'All walk lists' }, ...efforts.map((ef) => ({ key: String(ef._id), label: ef.name }))],
+    () => [
+      { key: '', label: 'All walk lists' },
+      ...walkListOptions(efforts).map((ef) => ({ key: String(ef._id), label: walkListLabel(ef) })),
+    ],
     [efforts]
   );
 

@@ -14,6 +14,7 @@ import { formatInTz } from '../lib/datetime.js';
 import { percentsTo100 } from '../lib/percent.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { useRoundOptions } from '../lib/useRoundOptions.js';
+import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import { TagResults } from '../components/QuestionResults.jsx';
 import TagTeamTable from '../components/TagTeamTable.jsx';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
@@ -141,8 +142,15 @@ export default function SurveyExplorerPage() {
   const efforts = effortsQ.data?.efforts || [];
 
   // Rounds, for the round filter — the shared hook, so this picker and the Dashboard's can
-  // never drift on labels, ordering, or the legacy sentinel. No polling here on purpose.
-  const { roundOptions } = useRoundOptions(campaignId);
+  // never drift on labels, ordering, or the legacy sentinel. No polling here on purpose. Narrowed
+  // to the picked walk list's rounds, as Door Outcomes' are.
+  const { roundOptions, allRoundOptions } = useRoundOptions(campaignId, { effortId });
+  // Rounds belong to walk lists: picking one clears a round that isn't in it (the legacy bucket is
+  // in none), or two sane-looking filters would sit over a permanently empty page.
+  const selectWalkList = (id) => {
+    const keepPass = !passId || !id || allRoundOptions.some((r) => r.id === passId && r.effortId === id);
+    updateParams({ effortId: id, ...(keepPass ? {} : { pass: '' }) });
+  };
 
   // The crew picker's options — the Dashboard/Timeline pattern: fed by a separate,
   // campaign-scoped, never-filtered /team-breakdown query (includes ledger-only coordinators,
@@ -447,14 +455,14 @@ export default function SurveyExplorerPage() {
           {efforts.length > 1 && (
             <select
               value={effortId}
-              onChange={(e) => updateParams({ effortId: e.target.value })}
+              onChange={(e) => selectWalkList(e.target.value)}
               title="Filter to one walk list"
               className={SELECT_CLS}
             >
               <option value="">All walk lists</option>
-              {efforts.map((ef) => (
+              {walkListOptions(efforts).map((ef) => (
                 <option key={ef._id} value={ef._id}>
-                  {ef.name}
+                  {walkListLabel(ef)}
                 </option>
               ))}
             </select>
@@ -482,7 +490,9 @@ export default function SurveyExplorerPage() {
               <option value="none">No coordinator</option>
             </select>
           )}
-          {roundOptions.length > 1 && (
+          {/* Kept while a round is picked, even if the walk list narrowed the choices to one: a
+              picked round must stay visible and clearable. */}
+          {(roundOptions.length > 1 || passId) && (
             <select
               value={passId}
               onChange={(e) => updateParams({ pass: e.target.value })}
@@ -490,6 +500,12 @@ export default function SurveyExplorerPage() {
               className={SELECT_CLS}
             >
               <option value="">All rounds</option>
+              {/* A deep link can carry a round this list doesn't offer (another walk list's) — named
+                  here, so the select never reads "All rounds" while the page is scoped to one (the
+                  canvasser and crew selects' rule). */}
+              {passId && !roundOptions.some((r) => r.id === passId) && (
+                <option value={passId}>{allRoundOptions.find((r) => r.id === passId)?.label || 'Selected round'}</option>
+              )}
               {roundOptions.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.label}

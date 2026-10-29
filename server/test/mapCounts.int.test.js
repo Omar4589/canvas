@@ -151,13 +151,18 @@ before(async () => {
   const [B1] = await Household.insertMany([hh(org._id, campB._id, null, 1, 'unknocked')]);
 
   // Rounds. P1/P2 on North both book N1..N4; PS1 on South books S1,S2; P0 on North has NO books.
-  const mkPass = (effortId, n, name) => Pass.create({
+  // One live pass per walk list, as in the field: P1 ended when P2 went live (between P1's last knock,
+  // DAY3, and P2's, DAY5), and P0 is a draft — a pass with no books never goes live. A pass scope reads
+  // the pass's books and its own ledger rows whatever its state, so an ended round's chips still
+  // count its own visits.
+  const mkPass = (effortId, n, name, extra = {}) => Pass.create({
     organizationId: org._id, campaignId: campA._id, effortId, roundNumber: n, name,
-    status: 'active', activatedAt: new Date('2026-06-09T12:00:00Z'),
+    status: 'active', activatedAt: new Date('2026-06-09T12:00:00Z'), ...extra,
   });
-  const P1 = await mkPass(effortN._id, 1, 'Round 1');
-  const P2 = await mkPass(effortN._id, 2, 'Round 2');
-  const P0 = await mkPass(effortN._id, 3, 'Round 3');
+  const P2_LIVE_AT = new Date('2026-06-13T12:00:00Z');
+  const P1 = await mkPass(effortN._id, 1, 'Round 1', { status: 'archived', archivedAt: P2_LIVE_AT, archivedFrom: 'active', archivedVia: 'next-pass' });
+  const P2 = await mkPass(effortN._id, 2, 'Round 2', { activatedAt: P2_LIVE_AT });
+  const P0 = await mkPass(effortN._id, 3, 'Round 3', { status: 'draft', activatedAt: null });
   const PS1 = await mkPass(effortS._id, 1, 'South 1');
   const mkTurf = (passId, name, ids) => Turf.create({
     organizationId: org._id, campaignId: campA._id, passId, name, mode: 'geometric', status: 'published',
@@ -319,6 +324,7 @@ test('userId mode: the chips count each canvasser\'s OWN disposition, like the p
 
 test('passId mode: per-round status — completion is sticky, and a knock in another round reads unknocked', { skip }, async () => {
   const { P1, P2, ann } = ctx;
+  // P1 is the ended round and P2 the live one on the same doors: each counts only its own visits.
   const p1 = await countsFor(`passId=${P1._id}`);
   assert.strictEqual(p1.statusMode, 'pass');
   assert.deepStrictEqual(p1.byStatus, counts({ surveyed: 1, not_home: 1, refused: 1, unknocked: 1 }),

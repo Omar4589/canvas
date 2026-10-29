@@ -313,15 +313,22 @@ test('a door another round\'s cut claimed still flows into a supplemental book h
   // pass 1 — silently, forever. Membership in THIS pass's books is the real test.
   const [d7] = await Household.insertMany([hh(ctx.org._id, ctx.camp._id, ctx.effort._id, 7)]);
   await Household.updateOne({ _id: d7._id }, { $set: { turfId: ctx.bookB._id } });
-  const result = await addSupplementalBooks({
-    campaignId: ctx.camp._id, passId: ctx.pass1._id, name: 'Late arrivals', maxDoors: 65,
-  });
-  assert.strictEqual(result.added, 1, 'the mirrored-away door must be swept in');
-  const created = await Turf.findOne({ _id: { $in: result.bookIds } }).lean();
-  assert.deepStrictEqual(created.householdIds.map(String), [String(d7._id)]);
-  // And doors already in one of THIS pass's books stay out — added exactly the one door.
-  await Turf.deleteMany({ _id: { $in: result.bookIds } });
-  await Household.updateOne({ _id: d7._id }, { $set: { turfId: ctx.bookB._id } });
+  // An archived pass takes no new books any more (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.5), so pass 1
+  // is a draft for this one test — what it proves is about membership, not about pass 1 being over.
+  await Pass.updateOne({ _id: ctx.pass1._id }, { $set: { status: 'draft' } });
+  try {
+    const result = await addSupplementalBooks({
+      campaignId: ctx.camp._id, passId: ctx.pass1._id, name: 'Late arrivals', maxDoors: 65,
+    });
+    assert.strictEqual(result.added, 1, 'the mirrored-away door must be swept in');
+    const created = await Turf.findOne({ _id: { $in: result.bookIds } }).lean();
+    assert.deepStrictEqual(created.householdIds.map(String), [String(d7._id)]);
+    // And doors already in one of THIS pass's books stay out — added exactly the one door.
+    await Turf.deleteMany({ _id: { $in: result.bookIds } });
+    await Household.updateOne({ _id: d7._id }, { $set: { turfId: ctx.bookB._id } });
+  } finally {
+    await Pass.updateOne({ _id: ctx.pass1._id }, { $set: { status: 'archived' } });
+  }
 });
 
 test('bootstrap doors carry the CANVASSER\'S OWN book id, whatever the mirror says', { skip }, async () => {

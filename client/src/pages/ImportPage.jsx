@@ -937,7 +937,7 @@ export default function ImportPage() {
                 single-tab files; when tabs WERE skipped, saying so turns "these
                 columns are wrong" into a fixable, self-explanatory problem. */}
             {fileNote?.sheetName && fileNote.otherSheets?.length > 0 && (
-              <div className="mb-3 rounded border border-info/30 bg-info-tint px-3 py-2 text-xs text-info">
+              <div className="mb-3 rounded border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg">
                 These columns come from the <strong>{fileNote.sheetName}</strong> tab — the first tab in the
                 file, and the only one imported.{' '}
                 {fileNote.otherSheets.length === 1

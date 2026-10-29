@@ -14,7 +14,7 @@ Everything needed to deploy and operate the turf-cutting feature. Built on a fea
 - **CSV import** moved onto the queue, now **vendor-agnostic** (column mapping + saved import profiles, GridFS file handoff, batched/idempotent writes). Voter identity is **org-scoped** (`{organizationId, stateVoterId}`).
 - **Collision behavior**: `surveyed`/`lit_dropped` sticky precedence, pass-scoped dedup, offline-safe pass attribution, same-day collision + per-day door-dedup reporting (campaign timezone).
 - **Turf generation**: attribute / geometric / manual cut → concave-hull boundary + walk order, as an async job.
-- **Walk lists** (frozen segment builder), **passes** (one-way rounds), **multi-canvasser assignment**, per-pass status, turf **edit ops**.
+- **Walk lists** (frozen segment builder), **passes** (rounds: draft → live → archived; an archived round can be brought back until a later one goes live), **multi-canvasser assignment**, per-pass status, turf **edit ops**.
 - **Admin UI**: Turf Cutting, Passes, Walk Lists, Assign modal, Jobs (Bull Board).
 
 ## New dependencies (already in package.json)
@@ -64,7 +64,7 @@ npm run dev                                     # terminal 3 (server :4000 + cli
 3. **Passes** — create a round from a walk list (or all voters).
 4. **Turf Cutting** — pick the campaign + pass; the map shows every eligible house (gray before a cut). Choose geometric (max doors, default 65 — compact, balanced books via capacity-balanced k-means) or attribute (group-by + optional cap-N), Generate → books render colored on the map → click a book in the list to isolate it on the map → **Accept**.
 5. **Assign** canvassers to each book (multiple per book allowed).
-6. **Passes → Activate** the round (one-way; requires accepted books). Per-pass progress shows on the Passes page.
+6. **Passes → Activate** the round (requires accepted books; it ends the walk list's previous round, which can't come back). Per-pass progress shows on the Passes page.
 7. **Jobs** (super-admin) — Bull Board for import/turf job observability.
 
 ## Re-cutting a pass (discard / undo / clear knocks)

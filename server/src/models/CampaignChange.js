@@ -50,11 +50,18 @@ const campaignChangeSchema = new mongoose.Schema(
     // They are KEPT OUT of the campaign's general feed by a filter in the history route's query, so
     // the web campaign History and the phone (which calls it unfiltered) see exactly what they saw
     // before, 200-row cap included; the tab asks for them with ?include=client_reports.
+    // 'walk_list_lifecycle' rows are archiving and unarchiving a walk list, and archiving and
+    // bringing back a pass (services/passes/passLifecycle.js; fields walkListArchived,
+    // walkListUnarchived, passArchived, passBroughtBack). Their from/to values are readable English
+    // for phones without the sentence renderer; `details` carries the same facts for it.
     source: {
       type: String,
-      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock', 'answer_edit', 'client_report'],
+      enum: ['admin_campaigns', 'outcome_reclassify', 'survey_conversion', 'unknock', 'answer_edit', 'client_report', 'walk_list_lifecycle'],
       required: true,
     },
+    // walk_list_lifecycle rows only: { walkList, pass, outcome } — names frozen as they were, so a
+    // sentence is built from a fixed template and never by splitting free-text names.
+    details: { type: mongoose.Schema.Types.Mixed, default: null },
     // Client-report rows. DECLARED, because strictQuery drops an undeclared filter key — Erase-all
     // by clientReportId would otherwise match every row of the campaign. An edit row keeps only the
     // EARLIER text, in fromValue (toValue stays null: the current text lives on the report), so each

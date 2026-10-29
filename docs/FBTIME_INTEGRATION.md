@@ -455,7 +455,14 @@ Linking a kept account again, to anyone, ends its "also counts".
 
 - **`CREDENTIAL_SEAL_KEY`** — 32 bytes base64, on web AND worker dynos. Absent = the integration is
   dormant (connect answers 503 `SEALING_UNCONFIGURED`, sync no-ops) — the mailer's dormant-switch
-  posture, so the code ships before the config exists.
+  posture, so the code ships before the config exists. **Since 2026-10-28 it is no longer FbTime's
+  alone:** it also seals each client report link's password, so the campaign's admins and leads can see
+  it again ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §K; sealed with the link's bcrypt hash as associated
+  data, so an FbTime key and a link password never open as each other). So an absent key also means no
+  link password is kept; **adding a missing key turns Connect on for every organization's admins** (the
+  key is Connect's only gate); and the key must **never be replaced or removed**, or every sealed FbTime
+  key and every kept link password stops opening ([OPERATIONS.md](OPERATIONS.md) → *The credential seal
+  key*).
 - `FBTIME_API_BASE` (defaults to the production URL from the provider contract),
   `FBTIME_TIMEOUT_MS`, `FBTIME_RECENT_CRON` / `FBTIME_DEEP_CRON`,
   `FBTIME_RECENT_WINDOW_DAYS` (7) / `FBTIME_DEEP_WINDOW_DAYS` (120).

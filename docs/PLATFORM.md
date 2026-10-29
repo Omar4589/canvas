@@ -142,12 +142,21 @@ so "signed out then in" and "session expired then in" landed in different places
   Doors, voters, the books themselves, and the `/r/` share link and its password all survive. The link
   keeps the one-year life every client link has ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §K): a reset moves
   its expiry out to 90 days from now, never shorter than it was and never past the end of its year; once
-  less than 90 days of that year remain, a reset **renews** it the way the panel's Renew does (a new year,
+  less than 90 days of that year remain, a reset **renews** it the way Share's Renew does (a new year,
   everyone signed out, and a **new address** unless `SEED_DEMO_SHARE_TOKEN` pins the token), so the URL in
-  a demo script can change about once a year. Since 2026-10-25 a reset also deletes the demo campaign's
-  links to **one** report (their reports are deleted with the rest), and the link it keeps or makes is
-  always a link to all the campaign's reports, never a one-report link (`ensureShareLink` looks only at
-  `reportId: null`).
+  a demo script can change about once a year. **Since 2026-10-28 the demo link is the demo report's own
+  link**, like every client link: a reset deletes the demo campaign's other links (their reports are
+  deleted with the rest) and points the demo link at the report it just published **in place** (same
+  link, address, password, sessions and counts), so a demo viewer stays signed in. The first reset after
+  that deploy **replaces** the old link to all the campaign's reports once, with a link to the demo report
+  at the same address and password; demo viewers sign in once more. If that report already has a link
+  someone made in the app (say, during a pitch), the demo link stays where it is; the seed's log (its
+  `client portal:` line) and the response's `share.note` say so, and so does the button's own message,
+  which ends "Client link: …" (on the button's path, a reset, the campaign's other links are deleted
+  first, so this case comes up on a plain `seed:demo -- --apply`). `--rebuild` deletes the whole demo
+  campaign, its link with it, and the seed makes a new demo link (viewers sign in again). The demo link is found by `SEED_DEMO_SHARE_TOKEN`, else by its label,
+  "Client demo link" (`ensureDemoLink`, [CLIENT_PORTAL.md](CLIENT_PORTAL.md) §K). The confirm lists it under
+  *Left alone*: "The share link — same URL and password; it opens the demo's report".
 
   Two things it deliberately will **not** do. It never changes an existing app-review account's
   **password** — Apple and Google keep the credentials already sitting in their review notes, so a

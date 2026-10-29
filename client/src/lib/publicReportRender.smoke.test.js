@@ -30,6 +30,7 @@ import ClientReportView, { ClientReportHeading } from '${join(here, '../componen
 import StatCard from '${join(here, '../components/StatCard.jsx')}';
 import { AreaLegend } from '${join(here, '../components/ClientReportMap.jsx')}';
 import { decodeAreas, areaLegend } from '${join(here, './reportMapData.js')}';
+export { getShareSession } from '${join(here, './shareSession.js')}';
 globalThis.fetch = () => new Promise(() => {});
 const qcNew = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 const wrap = (node, qc = qcNew()) => renderToString(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
@@ -115,6 +116,39 @@ test('the dead ends say what happened and what to do', () => {
   assert.match(m.notice({ kind: 'expired', message: 'This report link has expired. Ask your campaign contact for a new one.' }), /This report link has expired\. Ask your campaign contact for a new one\./);
   assert.match(m.notice({ kind: 'expired' }), /Ask the person who sent it to renew it\./);
   assert.match(m.notice({ kind: 'retry', onRetry: () => {} }), /Couldn&#x27;t load the report\.[\s\S]*Try again/);
+});
+
+test('a link to all your reports, once RETIRE_ALL_REPORTS_LINKS is on: the notice is the server\'s words as its title, with nothing under it', () => {
+  const RETIRED = { error: 'This link no longer works. Ask the person who sent it for the link to the latest report.', code: 'SHARE_RETIRED' };
+  // The title, then the card ends: no line under it, no Try again.
+  const titleOnly = /<p class="[^"]*font-semibold[^"]*">This link no longer works\. Ask the person who sent it for the link to the latest report\.<\/p><\/div>/;
+  const notice = m.notice({ kind: 'expired', message: RETIRED.error });
+  assert.match(notice, titleOnly);
+  assert.doesNotMatch(notice, /This link has expired\.|Ask the person who sent it to renew it\./, 'never the expired wording: it can\'t be renewed');
+
+  // The page's own path: a device signed in to the link, a read answering the switch's 410 through the
+  // session's one handler, then the layout — the notice, nothing about the campaign, no password box.
+  const stored = new Map([['doorline.share.RETIRED-TOKEN', 'jwt-retired']]);
+  globalThis.sessionStorage = {
+    getItem: (k) => (stored.has(k) ? stored.get(k) : null),
+    setItem: (k, v) => stored.set(k, String(v)),
+    removeItem: (k) => stored.delete(k),
+  };
+  try {
+    const session = m.getShareSession('RETIRED-TOKEN');
+    assert.equal(session.getSnapshot().accessToken, 'jwt-retired');
+    session.handleError(Object.assign(new Error(RETIRED.error), { status: 410, code: RETIRED.code, data: RETIRED }));
+    assert.equal(stored.size, 0, 'the token is dropped');
+    const page = m.layout('/r/RETIRED-TOKEN', [
+      [['share-meta', 'RETIRED-TOKEN'], { requiresPassword: true }],
+      [['share', 'RETIRED-TOKEN', null, 'reports'], { campaignName: 'Fall 2026', orgName: 'Fox Bryant', hasLogo: false, reports: [] }],
+    ]);
+    assert.match(page, titleOnly);
+    assert.doesNotMatch(page, /Fall 2026|Fox Bryant/);
+    assert.doesNotMatch(page, /type="password"|Sign out on this device/);
+  } finally {
+    delete globalThis.sessionStorage;
+  }
 });
 
 const hex = (lng, lat) => [[lng, lat], [lng + 0.01, lat], [lng + 0.01, lat + 0.01], [lng, lat]];

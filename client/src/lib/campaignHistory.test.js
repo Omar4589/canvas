@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { labelForField, formatValue, isNotable, answerEditSentence, teamMoveSummary } from './campaignHistory.js';
+import { labelForField, formatValue, isNotable, answerEditSentence, teamMoveSummary, walkListSentence } from './campaignHistory.js';
 
 // The History rows for the two door settings. The server stores only the field key and raw values
 // (a list as its sorted comma-join, an empty one as null), so a lost label or branch here breaks
@@ -72,4 +72,62 @@ test('a crew move says doors, then surveys, then notes; an unfinished one and a 
   assert.strictEqual(teamMoveSummary({ ...base, doorsMoved: 4, finishedBy: 'x' }).detail, '4 doors moved to Yan · Finished by a later change');
   assert.strictEqual(teamMoveSummary({ ...base, fromCoordinator: { name: 'Several teams' }, activitiesMoved: 2 }).headline, 'Pat: Several teams → Yan');
   assert.strictEqual(teamMoveSummary({ ...base, activitiesMoved: 5 }).detail, '5 doors moved to Yan', 'an older server: activitiesMoved only');
+});
+
+// The walk-list archive rows (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §C.9): one sentence each, who did it
+// first, built from the row's `details` with fixed templates — never by splitting its free-text
+// strings, so a name holding "·" or "—" comes through whole.
+const ADA = { id: 'u1', name: 'Ada', status: 'active' };
+const archiveRow = (field, details, by = ADA) => ({ kind: 'config', field, by, details, fromValue: 'before', toValue: 'after' });
+const sentence = (field, outcome, extra = {}) =>
+  walkListSentence(archiveRow(field, { walkList: 'North', pass: 'Pass 3 · GOTV', outcome, ...extra }));
+
+test('a walk-list archive row is one sentence for every outcome', () => {
+  assert.strictEqual(sentence('walkListArchived', 'ended'), 'Ada archived walk list North — ended Pass 3 · GOTV');
+  assert.strictEqual(sentence('walkListArchived', 'nothing-live', { pass: null }), 'Ada archived walk list North');
+  assert.strictEqual(sentence('walkListUnarchived', 'brought-back'), 'Ada unarchived walk list North — brought back Pass 3 · GOTV');
+  assert.strictEqual(sentence('walkListUnarchived', 'stayed-ended'), 'Ada unarchived walk list North — Pass 3 · GOTV stayed ended');
+  assert.strictEqual(sentence('walkListUnarchived', 'nothing-ended', { pass: null }), 'Ada unarchived walk list North');
+  assert.strictEqual(sentence('passArchived', 'by-hand'), 'Ada archived North · Pass 3 · GOTV');
+  assert.strictEqual(sentence('passBroughtBack', 'live'), 'Ada brought back North · Pass 3 · GOTV');
+  assert.strictEqual(sentence('passBroughtBack', 'draft'), 'Ada brought back North · Pass 3 · GOTV as a draft');
+  // An auto-named pass arrives as just "Pass 2" (the server's passLabel); names are used whole.
+  assert.strictEqual(
+    sentence('walkListArchived', 'ended', { walkList: 'Elm St · East — 2', pass: 'Pass 2' }),
+    'Ada archived walk list Elm St · East — 2 — ended Pass 2'
+  );
+  // A pass row whose walk list was already gone names the pass alone.
+  assert.strictEqual(sentence('passArchived', 'by-hand', { walkList: null }), 'Ada archived Pass 3 · GOTV');
+  // A departed actor is still named; a missing one reads as "Someone", as a crew move does.
+  assert.strictEqual(walkListSentence(archiveRow('passArchived', { walkList: 'North', pass: 'Pass 1', outcome: 'by-hand' }, null)), 'Someone archived North · Pass 1');
+});
+
+test('the one-time repair reads "One-time check ended …", never "Unknown user"', () => {
+  // The History route names the actorless row (routes/admin/campaigns.js).
+  const system = { id: null, name: 'One-time check' };
+  const repair = {
+    ...archiveRow('passArchived', { walkList: 'North', pass: 'Pass 3 · GOTV', outcome: 'repair' }, system),
+    fromValue: 'North · Pass 3 · GOTV · live',
+    toValue: 'North · Pass 3 · GOTV · archived (one-time check)',
+  };
+  assert.strictEqual(walkListSentence(repair), 'One-time check ended North · Pass 3 · GOTV');
+  // Should a repair row ever carry someone else's name, it still says where it came from.
+  assert.strictEqual(walkListSentence({ ...repair, by: ADA }), 'Ada ended North · Pass 3 · GOTV (one-time check)');
+  assert.strictEqual(walkListSentence({ ...repair, by: null }), 'Someone ended North · Pass 3 · GOTV (one-time check)');
+});
+
+test('walk-list rows are labelled, and one without its facts reads its plain strings', () => {
+  assert.strictEqual(labelForField('walkListArchived'), 'Walk list archived');
+  assert.strictEqual(labelForField('walkListUnarchived'), 'Walk list unarchived');
+  assert.strictEqual(labelForField('passArchived'), 'Pass archived');
+  assert.strictEqual(labelForField('passBroughtBack'), 'Pass brought back');
+  // No details (or not the facts its sentence needs): no sentence, and the generic row reads the
+  // readable strings the server stores for exactly this (old phones read them the same way).
+  const bare = { kind: 'config', field: 'passArchived', by: ADA, fromValue: 'North · Pass 3 · live', toValue: 'North · Pass 3 · archived' };
+  assert.strictEqual(walkListSentence(bare), null);
+  assert.strictEqual(walkListSentence({ ...bare, details: { walkList: 'North', pass: null, outcome: 'by-hand' } }), null);
+  assert.strictEqual(walkListSentence(archiveRow('walkListArchived', { walkList: null, pass: null, outcome: 'nothing-live' })), null);
+  assert.strictEqual(row('passArchived', bare.fromValue, bare.toValue), 'Pass archived: North · Pass 3 · live → North · Pass 3 · archived');
+  // Only the four walk-list fields get a sentence.
+  assert.strictEqual(walkListSentence({ kind: 'config', field: 'doorGoal', by: ADA, details: { outcome: 'ended' } }), null);
 });

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import NextStepBanner from './NextStepBanner.jsx';
+import { isStale } from './ArchiveNudge.jsx';
 import { Card, Badge, Button, IconButton, IconX } from './ui/index.js';
 
 // Per-campaign cold-start checklist. NON-BLOCKING: it signposts the ordered
@@ -23,7 +24,30 @@ const STATUS_BADGE = {
   skipped: { variant: 'neutral', dot: false, label: 'n/a' },
 };
 
-export default function SetupProgress({ campaignId }) {
+// The line that replaces the checklist once a campaign has canvassed and the one step left undone
+// is "Pass activated" — every pass ended, or every walk list archived (docs/PROPOSAL_WALK_LIST_ARCHIVE.md
+// §D.5). Setup isn't what's missing, a live pass is, so re-listing the done steps would bury it.
+// Null when the checklist (or nothing) shows instead. Pure, for setupProgressNote.smoke.test.js.
+//
+// The archive clause is an org admin's: a team lead can't archive a campaign. It also stays off
+// while ArchiveNudge shows above — DashboardPage renders that reminder for org admins on this same
+// isStale test — so the page never asks twice.
+export const noPassLiveNote = ({ status, campaign = null, isOrgAdmin = false, allWalkListsArchived = false }) => {
+  const steps = status?.steps || [];
+  if (!status?.hasCanvassed) return null;
+  const activated = steps.find((s) => s.key === 'roundActivated');
+  if (!activated || activated.status === 'done') return null;
+  // `skipped` steps don't apply to this campaign (a lit drop's survey), so they count as done here,
+  // as they do toward `complete`.
+  if (!steps.every((s) => s === activated || s.status === 'done' || s.status === 'skipped')) return null;
+  const archiveClause = isOrgAdmin && !isStale(campaign) ? ' — or archive the campaign if you’re done' : '';
+  return allWalkListsArchived
+    ? `No pass is live right now. Unarchive a walk list or create one${archiveClause}.`
+    : `No pass is live right now. Start one on Walk Lists${archiveClause}.`;
+};
+
+// `campaign` and `allWalkListsArchived` only word the no-pass-live note (noPassLiveNote above).
+export default function SetupProgress({ campaignId, campaign = null, allWalkListsArchived = false }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { isOrgAdmin } = useAuth();
@@ -92,6 +116,17 @@ export default function SetupProgress({ campaignId }) {
       );
     }
     return null;
+  }
+
+  // Knocks have started and only the live pass is missing (its pass ended, or its walk lists were
+  // archived): one line pointing at the next pass, not the whole checklist again.
+  const noPassLive = noPassLiveNote({ status: data, campaign, isOrgAdmin, allWalkListsArchived });
+  if (noPassLive) {
+    return (
+      <NextStepBanner tone="info" action={{ label: 'Go to Walk Lists', to: `/campaigns/${campaignId}/efforts` }}>
+        {noPassLive}
+      </NextStepBanner>
+    );
   }
 
   // Once dismissed (server-stamped, or optimistically this session), the go-live

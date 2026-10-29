@@ -132,6 +132,9 @@ const clientReportSchema = new mongoose.Schema(
     rangeStartUtc: { type: Date, required: true },
     rangeEndUtc: { type: Date, required: true },
 
+    // 'archived' is an UNUSED value, kept so no old document fails validation: every public reader
+    // filters status: 'published', so a report given it would vanish from the client. Archive is
+    // archivedAt below and never touches status (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §A.5, §C4).
     status: {
       type: String,
       enum: ['draft', 'published', 'archived'],
@@ -265,6 +268,15 @@ const clientReportSchema = new mongoose.Schema(
     // null. There is no path from published back to draft.
     takenDownAt: { type: Date, default: null },
     takenDownBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Archive tidies the operator's list and nothing else (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §B, §C4):
+    // the report folds under Archived (N) on its tab, and the client's link keeps working. OPERATOR-SIDE
+    // ONLY — no public route, the PDF, Next, the period math or earlier totals read it; an archived
+    // report still holds its dates against a duplicate (New report only prefers naming one that isn't
+    // archived); and Publish, Take down and Put back up leave it as it is. Drafts can be archived.
+    // Missing on every report from before it, which reads as not archived ({ archivedAt: null } matches
+    // it too). Written only by POST /admin/client-reports/:id/archive and /unarchive, each a CAS.
+    archivedAt: { type: Date, default: null },
+    archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     // An accepted edit (or a switch to areas) on a published report — the client sees "Edited".
     contentEditedAt: { type: Date, default: null },
     contentEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

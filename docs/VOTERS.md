@@ -108,9 +108,10 @@ completely separate facts — neither one sets or implies the other:
 - **Surveyed** means **a canvasser recorded a survey** at the door, out in the field. It's the
   voter's survey status, and it's set *only* by submitting a survey in the app. (A survey *answer*
   like "Already Voted" is just a recorded answer — it does **not** mark the person voted.)
-- **Voted** means **the person was in an Early-Voters CSV you uploaded** on the Early Voting page.
-  It's set *only* by that upload (and the "sticky" re-apply of it), and it's tracked **per
-  campaign**. See [EARLY_VOTING.md](EARLY_VOTING.md).
+- **Voted** means **the person was on a voted-voters list you uploaded** (a CSV or Excel file) on
+  the Early Voting page — on one of the rows that counted, if you chose which rows count. It's set
+  *only* by that upload (and the "sticky" re-apply of it), and it's tracked **per campaign**. See
+  [EARLY_VOTING.md](EARLY_VOTING.md).
 
 So all four combinations are normal: surveyed-not-voted, voted-not-surveyed, both, or neither.
 **Order doesn't matter** — someone surveyed in the field weeks ago who later shows up on a
@@ -160,9 +161,17 @@ statuses above it isn't about what happened; it's a standing request:
   "Never come to my door" covers literature.
 - **Only an org admin can set or clear it**, always with a written reason. Both actions are
   recorded as a note on the voter, so the history lives in the profile and the Notes hub. You can
-  also upload a whole **do-not-contact list** (a CSV of Voter IDs) from the Voters page — it works
-  like the Early Voting upload, with a preview, per-upload undo, and "sticky" ids that flag voters
-  who enter your universe later. **The list is for one state, and the upload asks which:** IDs are
+  also upload a whole **do-not-contact list** (a CSV or Excel file of Voter IDs; the box reads
+  **Do-not-contact file (CSV or Excel)**) from the Voters page — it works like the Early Voting upload,
+  with a preview, per-upload undo, and "sticky" ids that flag voters who enter your universe later.
+  An Excel file is read the way Early Voting reads one: its first visible tab only (named on the
+  preview when there are others), a file with rows hidden in Excel refused with how many (skipping
+  those rows instead could leave someone off this list), and every other refusal the same; the
+  *Couldn't find a Voter ID column* box offers the column your newest upload **for that state** that
+  wasn't undone used (another state's office writes its lists another way). While a list is being
+  flagged, the state, the file box and the column picker are locked, so the running upload's result
+  is never hidden by a change.
+  It has no *Count only rows where*: every row counts. **The list is for one state, and the upload asks which:** IDs are
   matched inside that state's campaigns only (leading zeros ignored, either way round), because two
   states can issue the same digits. Anything the file names outside that state is **reported with a
   download, never flagged**; a list covering two states is two uploads. Files can be up to 50 MB; only
@@ -456,7 +465,13 @@ exists since the per-campaign-rows change); canvassers keep their book-scoped `h
 filter so undo attribution stays clean), `POST /undo` (reverts only rows carrying this upload's
 `uploadId` — admin-set flags are never touched), `GET /` (history + org totals). Both uploads go through
 `uploadIdList` (50 MB cap; a 413 `file-too-large` that says what to do — [EARLY_VOTING.md](EARLY_VOTING.md)
-§C), and the page refuses an oversized file as soon as it's picked.
+§C), and the page refuses an oversized file as soon as it's picked. Since 2026-10-28 the file can be a
+CSV or an `.xlsx`: `parseAndMatchState` reads it with the shared `readIdList`
+([EARLY_VOTING.md](EARLY_VOTING.md) §B; no `keep` here), the preview adds `sheetName`/`otherSheets`,
+and every parse 400 carries `{ error, code, columns, states, sheetName, otherSheets, headerRowHint }`
+(the codes listed in EARLY_VOTING.md §C). The order: the old-format check first (`legacy-xls`), then
+the state (`STATE_REQUIRED`, `STATE_UNKNOWN`), then the file is read, so a workbook's own refusals
+reach the page only once a state is picked.
 
 ## D. Invariants
 - **`recomputeSurveyStatus`** ([status.js](../server/src/services/canvass/status.js)) runs after any

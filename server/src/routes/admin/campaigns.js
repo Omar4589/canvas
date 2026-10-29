@@ -493,15 +493,22 @@ router.get('/:campaignId/history', async (req, res, next) => {
       };
     };
 
+    // Walk-list archive rows (services/passes/passLifecycle.js). The one-time repair writes them with
+    // no actor; naming it here, rather than leaving `by` null, is what keeps a phone WITHOUT the
+    // sentence renderer from printing "Unknown user". No `status` on purpose: a shipped phone appends
+    // any status but 'active' to the name ("One-time check (system)"). `details` feeds the renderer
+    // on updated clients.
+    const lifecycle = (r) => r.source === 'walk_list_lifecycle';
     const items = [
       ...configRows.map((r) => ({
         id: String(r._id),
         kind: 'config',
         at: r.createdAt,
-        by: who(r.byUserId),
+        by: lifecycle(r) && !r.byUserId ? { id: null, name: 'One-time check' } : who(r.byUserId),
         field: r.field,
         fromValue: r.fromValue ?? null,
         toValue: r.toValue ?? null,
+        ...(lifecycle(r) ? { details: r.details || null } : {}),
       })),
       ...teamRows.map((r) => ({
         id: String(r._id),

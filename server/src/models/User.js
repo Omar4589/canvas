@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { isWellFormedText } from '../utils/passwordText.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -93,11 +94,23 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Never a lone surrogate to bcrypt — it takes the whole process down (utils/passwordText.js). At sign-in
+// such a password simply doesn't match; where one is being set, it's refused with a 400. (`function`,
+// not an arrow: both read `this`.)
 userSchema.methods.verifyPassword = function (plain) {
+  if (!isWellFormedText(plain)) return Promise.resolve(false);
   return bcrypt.compare(plain, this.passwordHash);
 };
 
 userSchema.statics.hashPassword = function (plain) {
+  if (!isWellFormedText(plain)) {
+    return Promise.reject(
+      Object.assign(new Error('That password has a character that can’t be used. Try another.'), {
+        status: 400,
+        code: 'PASSWORD_INVALID',
+      })
+    );
+  }
   return bcrypt.hash(plain, 10);
 };
 

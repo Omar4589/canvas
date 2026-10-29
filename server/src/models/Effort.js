@@ -33,6 +33,20 @@ const effortSchema = new mongoose.Schema(
       default: 'active',
       index: true,
     },
+    // Who archived it and when (services/passes/passLifecycle.js). Cleared on unarchive — the
+    // campaign History keeps both. Null on walk lists archived before these fields existed.
+    archivedAt: { type: Date, default: null },
+    archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // The live pass the CURRENT archive ended, so Unarchive can offer to bring it back. Read only
+    // while the walk list is archived; each archive rewrites it, unarchive clears it.
+    endedPassId: { type: mongoose.Schema.Types.ObjectId, ref: 'Pass', default: null },
+    // Serializes every lifecycle write across ALL passes of this walk list — archive, unarchive,
+    // archive / bring back / activate a pass, and the deletes — which per-pass recut locks can't
+    // (two passes, two locks). Compare-and-set with Pass.recutLock's staleness rule.
+    lifecycleLock: {
+      lockedAt: { type: Date, default: null },
+      token: { type: String, default: null },
+    },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }

@@ -1,7 +1,7 @@
 // Re-home ledger rows whose walk list (effortId) or round (passId) was DELETED.
 //
 // Why this exists: knocks stamp the door's owner at write time (resolveAttribution,
-// routes/mobile/canvass.js), and deleting a walk list used to leave those stamps
+// services/canvass/attribution.js), and deleting a walk list used to leave those stamps
 // dangling — the by-pass report then shows them as a "Legacy / no pass" row that no
 // admin can explain (2026-08 incident: 5 knocks recorded while doors sat in a
 // temporary list, list deleted, knocks orphaned). The delete route now refuses when

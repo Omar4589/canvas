@@ -38,6 +38,7 @@ const cannotMarkLines = (plan) => {
   const r = plan.cannotMarkReasons || {};
   const lines = [];
   if (r.intake > 0) lines.push(`${n(r.intake)} ${s(r.intake, 'is', 'are')} not in a walk list yet`);
+  if (r.archived > 0) lines.push(`${n(r.archived)} ${s(r.archived, 'is', 'are')} on an archived walk list or pass`);
   if (r.excluded > 0) lines.push(`${n(r.excluded)} ${s(r.excluded, 'is', 'are')} excluded from books`);
   if (r.doNotKnock > 0) lines.push(`${n(r.doNotKnock)} ${s(r.doNotKnock, 'is', 'are')} marked do-not-knock`);
   return lines;

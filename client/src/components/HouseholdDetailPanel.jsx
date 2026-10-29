@@ -7,6 +7,7 @@ import { actionLabel } from '../lib/statusColors.js';
 import { pickRound, roundMarkFromEntries, completedInRound, isRestricted, unmarkButtonLabel } from '../lib/restrictMark.js';
 import { pinBadge, pinLine, needsScopeQuestion } from '../lib/pinBadges.js';
 import { baseAddressOf } from '../lib/streetName.js';
+import { isArchivedWalkList } from '../lib/walkListOptions.js';
 
 // The billable knock set — MUST mirror the server's KNOCK_ACTIONS
 // (services/reports/aggregations.js) so the inline overlap badge counts collisions the same
@@ -170,8 +171,9 @@ const DeskTag = () => (
 // slate on phones). Mirrors the Turf Cutting popup's RestrictSection; the strings are shared.
 //
 // Which round it speaks for: `passId` (the ?passId= deep link) when set, else the server's
-// `currentPassId` — the round a mark with no explicit passId lands on for THIS door (its walk
-// list's active round, else its single draft round). Classification (desk / field / completed /
+// `currentPassId` — the round a mark with no explicit passId is on for THIS door (its walk list's
+// active round, else its single draft round; on an archived walk list too, so its frozen draft's
+// mark still shows with Unmark — a new mark there is refused below, from the walk list's status). Classification (desk / field / completed /
 // reached) comes ONLY from that round's entries via lib/restrictMark.js — never from
 // `household.status`: in global mode that is the stored status across ALL rounds, and under a
 // canvasser filter it is that canvasser's own status, so neither matches the round this mark
@@ -211,16 +213,41 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
     <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColors?.restricted }} />
   );
 
+  // The door's walk list, from the list the Map page already holds (same key; the minute of
+  // staleTime keeps each door click from refetching it). An ARCHIVED walk list is read-only
+  // (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §B.8): the server refuses a mark on its doors — its frozen
+  // drafts included — with 409 walk-list-archived, so the panel says so before anyone tries.
+  // `archivedRefusal` (the server's sentence) covers a list archived since that one loaded, or a
+  // deep-linked round of another walk list.
+  const [archivedRefusal, setArchivedRefusal] = useState(null);
+  const effortsQ = useQuery({
+    queryKey: ['admin', 'efforts', campaignId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/efforts`),
+    enabled: !!campaignId,
+    staleTime: 60 * 1000,
+  });
+  const efforts = effortsQ.data?.efforts || [];
+  const walkList = h.effortId ? efforts.find((e) => String(e._id) === String(h.effortId)) || null : null;
+  const walkListArchived = isArchivedWalkList(walkList) || !!archivedRefusal;
+  const archivedLine = isArchivedWalkList(walkList)
+    ? `${walkList.name || 'This walk list'} is archived — unarchive it to mark its doors.`
+    : archivedRefusal;
+  const archivedEffortIds = new Set(efforts.filter(isArchivedWalkList).map((e) => String(e._id)));
+
   // Round picker, fetched on demand and filtered to the door's own walk list — a pass from
   // another walk list would be skipped as ineligible anyway. `effortId` is a newer /map field;
-  // when absent (older server) every non-archived round is listed.
+  // when absent (older server) every non-archived round is listed. A round of an archived walk
+  // list is never offered: its drafts are frozen.
   const passesQ = useQuery({
     queryKey: ['admin', 'passes', campaignId],
     queryFn: () => api(`/admin/campaigns/${campaignId}/passes`),
     enabled: !!campaignId && needPass,
   });
   const pickablePasses = (passesQ.data?.passes || []).filter(
-    (p) => p.status !== 'archived' && (h.effortId ? String(p.effortId) === String(h.effortId) : true)
+    (p) =>
+      p.status !== 'archived' &&
+      !archivedEffortIds.has(String(p.effortId)) &&
+      (h.effortId ? String(p.effortId) === String(h.effortId) : true)
   );
 
   const invalidate = () => {
@@ -271,6 +298,17 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
           setNeedPass(true);
         }
         setErr(null);
+        return;
+      }
+      // Archived since the walk lists loaded: block Mark with the server's sentence, and refresh the
+      // list so the pre-check's own line (and every other door's panel) catches up.
+      if (e?.code === 'walk-list-archived') {
+        setArchivedRefusal(e?.message || 'This walk list is archived — unarchive it to mark its doors.');
+        setOpen(false);
+        setNeedPass(false);
+        setPickedPassId('');
+        setErr(null);
+        qc.invalidateQueries({ queryKey: ['admin', 'efforts', campaignId] });
         return;
       }
       setErr(e?.message || 'Could not mark this door.');
@@ -401,9 +439,11 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
     ? "Not in books — can't be marked."
     : h.effortId === null || intake
       ? "Not in a walk list — can't be marked."
-      : completed
-        ? 'Surveyed this round — keeps its result.'
-        : null;
+      : walkListArchived
+        ? archivedLine
+        : completed
+          ? 'Surveyed this round — keeps its result.'
+          : null;
 
   return (
     <div className="border-b border-border px-4 py-3">
@@ -448,7 +488,9 @@ function RestrictedSection({ household, campaignId, passId, activity, loading, t
                 ))}
               </select>
               {passesQ.isSuccess && pickablePasses.length === 0 && (
-                <p className="mt-1 text-xs text-fg-subtle">This walk list has no round yet — create one first.</p>
+                <p className="mt-1 text-xs text-fg-subtle">
+                  {walkListArchived ? archivedLine : 'This walk list has no round yet — create one first.'}
+                </p>
               )}
             </div>
           )}

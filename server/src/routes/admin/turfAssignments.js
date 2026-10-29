@@ -2,7 +2,8 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { requireAuth, requireCampaignManager } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
-import { requireActiveCampaign } from '../../middleware/campaignWritable.js';
+import { requireActiveCampaign, assertPassWritable } from '../../middleware/campaignWritable.js';
+import { Pass } from '../../models/Pass.js';
 import { Turf } from '../../models/Turf.js';
 import { TurfAssignment } from '../../models/TurfAssignment.js';
 import { ensureCampaignAssignments, partitionAssignable } from '../../services/campaignRoster.js';
@@ -38,6 +39,23 @@ router.use(loadTurf);
 // After loadTurf so a missing book still answers 404 — an archived campaign is a
 // different refusal from a book that isn't there.
 router.use(requireActiveCampaign());
+
+// An archived pass is view-only, and an archived walk list freezes every pass of it, drafts
+// included (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §B.8): no assigning or unassigning its books —
+// 409 `pass-archived` / `walk-list-archived`, never 403 (the phone's admin Books calls both
+// routes). After the campaign guard, so an archived campaign keeps its own refusal; reads stay
+// open, so the book list can still show who held each book.
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const requireWritablePass = async (req, res, next) => {
+  try {
+    if (!WRITE_METHODS.has(req.method)) return next();
+    const pass = await Pass.findById(req.turf.passId, { status: 1, effortId: 1, roundNumber: 1, name: 1 }).lean();
+    if (await assertPassWritable(res, pass)) next();
+  } catch (err) {
+    next(err);
+  }
+};
+router.use(requireWritablePass);
 
 router.get('/', async (req, res, next) => {
   try {

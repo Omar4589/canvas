@@ -5,8 +5,8 @@ audience: lead
 kind: guide
 order: 15
 sourceDoc: PASSES.md
-summary: A pass is one planned sweep through a walk list's doors — how they're numbered, created, and closed.
-tags: passes, walk lists, billing, activate, archive, follow-up, target doors
+summary: A pass is one planned sweep through a walk list's doors — how they're numbered, created, closed, and brought back.
+tags: passes, walk lists, billing, activate, archive, bring back, undo, follow-up, target doors
 ---
 
 ## What a pass is
@@ -19,7 +19,7 @@ Pass numbers **restart per walk list**, so you'll have a North Pass 1 and a Sout
 
 ## Where you manage them
 
-Passes live *inside* a walk list, not on their own page. Open the **Walk Lists** page, open a walk list, and use the **Passes** panel. Everything — create, activate, archive — happens right there.
+Passes live *inside* a walk list, not on their own page. Open the **Walk Lists** page, open a walk list, and use the **Passes** panel. Everything — create, activate, archive, bring back — happens right there.
 
 ## Each pass shows its numbers
 
@@ -41,12 +41,28 @@ As you tick, a live count shows how many doors and voters match (and how many th
 >
 > Faded doors say why. The three checkboxes above **Generate** (restricted-access, no-soliciting, no reliable map spot) are applied on top of your target and are on by default. The count line names each one's share, clicking a faded house tells you the exact reason, and the panel warns before you cut into nothing — for instance ticking **Restricted** while **Exclude restricted-access homes** is on, or AND-ing a survey answer with statuses that can never carry one (a door with an answer reads Surveyed, or Restricted if it also carries a mark).
 
-## The lifecycle (one-way)
+## The lifecycle
 
-A pass moves in one direction only: **draft → active → archived.**
+A pass goes **draft → active → archived.**
 
 - **Draft** — build it: cut its books and [assign canvassers](assigning-canvassers).
 - **Active** — live in the field. Each walk list has **at most one active pass**, so activating a new pass archives that walk list's previous one. (Other walk lists keep running their own active passes independently.)
-- **Archived** — done. This is one-way; a pass is never reopened. Knock history is kept, and you add a new pass to keep going.
+- **Archived** — ended. Knock history is kept. A pass ends when you archive it, when you archive its walk list, or when the next pass on its walk list goes live.
 
-> Heads up: To activate a pass it needs at least one published book, plus a [survey](surveys) attached if it's a survey campaign. You can delete a draft that has no history, but anything live or with recorded knocks must be archived instead — you'll type `archive` to confirm. That includes a draft that still holds knocks after a Discard or a snapshot restore: it shows **Archive** instead of **Delete**. Deleting a draft pass also deletes its saved Discard snapshots, knocks you cleared into them included — restore one first if you want it back ([Recut books mid-pass](recut-books-mid-pass)).
+> Heads up: To activate a pass it needs at least one published book, plus a [survey](surveys) attached if it's a survey campaign. You can delete a draft that has no history, but anything live or with recorded knocks must be archived instead — you'll confirm first, and type `archive` once the pass has knocks. That includes a draft that still holds knocks after a Discard or a snapshot restore: it shows **Archive** instead of **Delete**. Deleting a draft pass also deletes its saved Discard snapshots, knocks you cleared into them included — restore one first if you want it back ([Recut books mid-pass](recut-books-mid-pass)).
+
+## Archiving a pass, and bringing it back
+
+**Archive** asks first, and says what it means. For a live pass: canvassers lose its books the next time their map refreshes. For a draft that holds knocks: nobody has its books. Either way, its knocks are kept. Right after, an **Undo** link brings it straight back.
+
+An archived pass says how it ended — by hand, when its walk list was archived, or when the next pass went live — and offers **Bring back**:
+
+- **Bring back works until a newer pass on that walk list has gone live.** A pass that ended because the next pass went live never comes back; its row says why instead of showing the button. To keep going after that, start a new pass.
+- **A pass that was live comes back live** — the same books go back to the same canvassers the next time their map refreshes. **A pass that was a draft** comes back as a draft.
+- **A pass with no doors left in its books comes back as a draft**, since there would be nothing to walk — say every door was moved into another walk list. The box tells you before you confirm.
+- **It can't come back** while another pass on the walk list is live (archive that one first), on a survey campaign with no survey attached, or on an archived campaign. If its walk list is archived, use **Unarchive** there — it offers to bring back the pass archiving ended (see [Walk lists](walk-lists)).
+- **Someone removed from the campaign** in the meantime doesn't get their book back; it comes back unassigned.
+
+On [Turf Cutting](page-turf-cutting) an archived pass is view-only: you see its books as they were, and the banner offers **Bring back** when it can come back. Archiving a pass and bringing one back both show in the campaign's [History](who-changed-the-door-goal). Archived something by mistake? See [I archived a walk list or a pass by mistake](undo-archive).
+
+Knocks a canvasser recorded on a pass with no signal, and sent after it ended, still count in that pass — after the app update. So a finished pass's numbers can keep growing for a little while as phones catch up. A late survey follows the usual rule for two canvassers who survey the same voter in one pass: the one that reaches Doorline last is kept, and the other is preserved on the voter's profile, where an admin can restore it.
