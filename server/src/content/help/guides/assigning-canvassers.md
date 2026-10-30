@@ -19,6 +19,8 @@ Manage it on the campaign's **Team** page. Click **Add people** and start with t
 
 The page lists **this campaign's** people. Org admins also get **From your organization** in the same Add people window: search, tick everyone you want (up to 500), pick one crew for all of them, and add — for staffing a new campaign in bulk. Someone who worked this campaign before brings their earlier doors here to the crew they rejoin, or to No team if you pick none.
 
+Org admins can also start from the person instead of the campaign. On the **Users** page, **Add member** (or **+ New** on the phone's **All campaigns** pill, with an app update) asks for the email, then lets you check the campaigns to put them on, each with its own crew. And a person's panel (web, under **Everywhere in your organization**) or profile (on the phone, with an app update) has **Add to campaigns**, for the campaigns they aren't on yet, and **Remove** beside each campaign, which asks first because their books there go back to the pool.
+
 ## Then assign their books
 
 Once people are on the team, assign books on **Turf Cutting**. Select the books, pick who walks them, and choose how to spread the work: give **everyone** the same books, split the **books** evenly between people, or split by **doors** so each person gets a similar number of doors to knock. See [turf and books](turf-and-books).

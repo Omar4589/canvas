@@ -39,6 +39,8 @@ import { isAdminRole, personAccess, personButtons, recentLimit, nextRecentSkip, 
 import { formatInTz } from '../../../../lib/datetime';
 import PasswordInput from '../../../../components/PasswordInput';
 import DeleteMemberSheet from '../../../../components/DeleteMemberSheet';
+import AddToCampaignsSheet from '../../../../components/AddToCampaignsSheet';
+import { removeQuestion } from '../../../../lib/addToCampaigns';
 import { radius, spacing, ACTION_LABELS } from '../../../../lib/theme';
 import { useTheme } from '../../../../lib/ThemeContext';
 import { useConsoleRole } from '../../../../lib/useConsoleRole';
@@ -283,9 +285,10 @@ function AdminUserProfile() {
     onError: (err) => flash('error', err.message),
   });
 
-  // The campaigns this person is on — read-only here. Assigning and unassigning happen on Users with
-  // that campaign picked, where the member sheet asks for the crew and says what moves first (plan §G):
-  // an Assign here would join them with no crew and move a returning person's doors unseen.
+  // The campaigns this person is on. Add to campaigns and Remove live here too now
+  // (docs/PROPOSAL_ADD_TO_CAMPAIGNS.md §D.4). It was read-only because an Assign here would have joined
+  // them with no crew and moved a returning person's doors unseen; Add to campaigns asks for a coordinator
+  // per campaign and shows their doors there, and Remove asks the member sheet's question first.
   const campaignsQ = useQuery({
     queryKey: ['admin', 'campaigns'],
     queryFn: () => api('/admin/campaigns'),
@@ -315,6 +318,46 @@ function AdminUserProfile() {
       flash('error', err.message);
     },
   });
+
+  // The Campaigns card's Add to campaigns and Remove: everything either touches — this person's campaign
+  // list and crews, the member list, and the roster and crews of the campaigns involved.
+  const [addCampaignsOpen, setAddCampaignsOpen] = useState(false);
+  const refreshCampaigns = (campaignIds) => {
+    qc.invalidateQueries({ queryKey: ['admin', 'membership-campaigns', userId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'member-crews', userId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'membership-campaign-history', userId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+    for (const cid of campaignIds) {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cid] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cid] });
+    }
+  };
+  // The campaign pill's Remove (DELETE …/assignments/:userId): their books there go back to the pool, and
+  // every door they knocked still counts.
+  const removeFromCampaign = useMutation({
+    mutationFn: ({ campaignId }) => api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
+    onSuccess: (_res, { campaignId, campaignName }) => {
+      refreshCampaigns([campaignId]);
+      flash('success', `Removed from ${campaignName}.`);
+    },
+    onError: (err, { campaignId }) => {
+      refreshCampaigns([campaignId]);
+      flash('error', err.message);
+    },
+  });
+  const confirmRemoveFromCampaign = (campaign) => {
+    const campaignId = String(campaign._id);
+    const crew = (crewsQ.data?.crews || []).find((c) => String(c.campaignId) === campaignId);
+    const q = removeQuestion({
+      name: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'them',
+      campaignName: campaign.name,
+      crewSize: crew?.crewSize || 0,
+    });
+    Alert.alert(q.title, q.message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => removeFromCampaign.mutate({ campaignId, campaignName: campaign.name }) },
+    ]);
+  };
 
   // Delete account (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md §E1). The viewer's own membership here
   // decides whether a billing admin's profile offers it: only to a viewer with billing access too.
@@ -347,6 +390,19 @@ function AdminUserProfile() {
   );
 
   if (usersQ.isLoading || !currentUser) {
+    return (
+      <SafeAreaView style={styles.screen} edges={['top']}>
+        <Header onBack={() => router.back()} />
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.brand} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Someone just added (Users → + New → Open them) can be opened a moment before the refreshed member list
+  // lands: a spinner while it does, never "User not found" for a person who is there.
+  if (!user && usersQ.isFetching) {
     return (
       <SafeAreaView style={styles.screen} edges={['top']}>
         <Header onBack={() => router.back()} />
@@ -987,9 +1043,10 @@ function AdminUserProfile() {
           </View>
           )}
 
-          {/* Campaigns — the ones they're on, read-only. Assigning and unassigning happen on Users
-              with that campaign picked, where the member sheet asks for the crew and shows what moves
-              first; each row goes there. Admin-only, as the list always was. */}
+          {/* Campaigns — the ones they're on, each opening Users on that campaign, with Remove beside it
+              and Add to campaigns under the list (docs/PROPOSAL_ADD_TO_CAMPAIGNS.md §D.4). Admin-only, as
+              the list always was. A switched-off account gets no Add until it's switched back on (that is
+              an org-wide act with its own question); a deleted one gets neither. */}
           {isAdminViewer && (
           <View style={styles.card}>
             <Text style={styles.sectionLabel}>Campaigns</Text>
@@ -997,37 +1054,62 @@ function AdminUserProfile() {
               <ActivityIndicator color={colors.brand} style={{ marginVertical: spacing.sm }} />
             ) : (
               (() => {
+                const active = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive);
                 const assigned = new Set((userCampaignsQ.data?.campaignIds || []).map(String));
-                const campaigns = (campaignsQ.data?.campaigns || []).filter(
-                  (c) => c.isActive && assigned.has(String(c._id))
+                const campaigns = active.filter((c) => assigned.has(String(c._id)));
+                const mayRemove = !user?.isDeleted;
+                const mayAdd = !user?.isDeleted && !!user?.isActive && active.some((c) => !assigned.has(String(c._id)));
+                return (
+                  <>
+                    {campaigns.length === 0 ? <Text style={styles.campaignEmpty}>Not on any active campaign.</Text> : null}
+                    {campaigns.map((c) => {
+                      const cid = String(c._id);
+                      const removing = removeFromCampaign.isPending && removeFromCampaign.variables?.campaignId === cid;
+                      return (
+                        <View key={cid} style={styles.campaignRow}>
+                          <Pressable
+                            onPress={() => router.push(`/(app)/admin/users?campaignId=${cid}`)}
+                            accessibilityRole="button"
+                            accessibilityHint="Opens Users on this campaign"
+                            style={({ pressed }) => [styles.campaignRowMain, pressed && { opacity: 0.7 }]}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.campaignName}>{c.name}</Text>
+                              <Text style={styles.campaignMeta}>
+                                {c.state}
+                                {c.type === 'lit_drop' ? ' · Lit drop' : ' · Survey'}
+                              </Text>
+                            </View>
+                            <Text style={styles.campaignChevron}>›</Text>
+                          </Pressable>
+                          {mayRemove ? (
+                            <Pressable
+                              onPress={() => confirmRemoveFromCampaign(c)}
+                              disabled={removeFromCampaign.isPending}
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Remove from ${c.name}`}
+                              style={[styles.campaignRemove, removeFromCampaign.isPending && { opacity: 0.5 }]}
+                            >
+                              <Text style={styles.campaignRemoveText}>{removing ? 'Removing…' : 'Remove'}</Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                    {mayAdd ? (
+                      <Pressable
+                        onPress={() => setAddCampaignsOpen(true)}
+                        accessibilityRole="button"
+                        style={({ pressed }) => [styles.campaignAdd, pressed && { opacity: 0.7 }]}
+                      >
+                        <Text style={styles.campaignAddText}>+ Add to campaigns</Text>
+                      </Pressable>
+                    ) : null}
+                  </>
                 );
-                if (campaigns.length === 0) {
-                  return <Text style={styles.campaignEmpty}>Not on any active campaign.</Text>;
-                }
-                return campaigns.map((c) => {
-                  const cid = String(c._id);
-                  return (
-                    <Pressable
-                      key={cid}
-                      onPress={() => router.push(`/(app)/admin/users?campaignId=${cid}`)}
-                      accessibilityRole="button"
-                      accessibilityHint="Opens Users on this campaign"
-                      style={({ pressed }) => [styles.campaignRow, pressed && { opacity: 0.7 }]}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.campaignName}>{c.name}</Text>
-                        <Text style={styles.campaignMeta}>
-                          {c.state}
-                          {c.type === 'lit_drop' ? ' · Lit drop' : ' · Survey'}
-                        </Text>
-                      </View>
-                      <Text style={styles.campaignChevron}>›</Text>
-                    </Pressable>
-                  );
-                });
               })()
             )}
-            <Text style={styles.campaignFooter}>Assign or unassign from Users on that campaign.</Text>
           </View>
           )}
 
@@ -1201,6 +1283,16 @@ function AdminUserProfile() {
           onDeleted={onAccountDeleted}
         />
       ) : null}
+
+      {addCampaignsOpen ? (
+        <AddToCampaignsSheet
+          userId={userId}
+          person={{ firstName: user.firstName, lastName: user.lastName }}
+          campaigns={(campaignsQ.data?.campaigns || []).filter((c) => c.isActive)}
+          onClose={() => setAddCampaignsOpen(false)}
+          onAdded={(answer) => refreshCampaigns((answer?.campaigns || []).filter((c) => c.result === 'joined').map((c) => c.campaignId))}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1316,14 +1408,24 @@ function makeStyles(t) {
   campaignRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  campaignRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
   campaignName: { ...type.bodyStrong, fontSize: 14 },
   campaignMeta: { ...type.caption, marginTop: 1 },
   campaignChevron: { ...type.body, color: colors.textMuted },
-  campaignFooter: { ...type.caption, marginTop: spacing.sm },
+  // Its own tap target beside the row, never inside it: tapping the row opens Users on the campaign.
+  campaignRemove: {
+    marginLeft: spacing.sm,
+    paddingLeft: spacing.md,
+    paddingVertical: spacing.xs,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+  },
+  campaignRemoveText: { ...type.caption, color: colors.dangerFg, fontWeight: '700' },
+  campaignAdd: { paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
+  campaignAddText: { color: colors.brand, fontWeight: '700', fontSize: 14 },
   stateCard: { gap: spacing.sm },
   moreActions: { marginTop: spacing.sm, gap: spacing.sm },
   formLabel: {

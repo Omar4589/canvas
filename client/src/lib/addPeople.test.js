@@ -5,7 +5,6 @@ import {
   historyLine,
   joinLine,
   movedReport,
-  typedAnything,
   typedIgnoredLine,
   waitLine,
   fromOrgSummary,
@@ -66,8 +65,6 @@ test('the after-add report says what moved and from which teams', () => {
 });
 
 test('typed details for someone who already has an account', () => {
-  assert.equal(typedAnything({ firstName: '', lastName: ' ', phone: '', password: '' }), false);
-  assert.equal(typedAnything({ firstName: 'Patricia' }), true);
   assert.equal(typedIgnoredLine('Pat'), 'Pat already has an account, so what you typed wasn’t used.');
 });
 

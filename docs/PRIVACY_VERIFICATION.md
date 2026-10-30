@@ -4408,6 +4408,85 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `keptRows`, not the values. Both code review rounds (the plan's §J.1, §J.2) changed how the file is
       parsed and refused, never what is read, kept, returned or logged: nothing above changed.
 
+46. **[v7 2026-10-30 — Pick campaigns when you add someone from the org view, and add or remove a person's
+    campaigns from their profile or panel. BUILT 2026-10-30, uncommitted; deploy and the phone update
+    pending (stamp the dates here when they ship). Triggers CLAUDE.md's "a route that returns PII": three new
+    routes answer with a named person — `resolve` and `campaign-history` with their door history on each
+    campaign, `by-email` with the person added or found — and `/crews` gains a per-campaign crew count.
+    The new routes' audience is org admins only, who already see these facts; the one new field a team lead
+    can see is a count their campaign's roster already shows. No new data, retention, recipient,
+    subprocessor, export or link; no Privacy Policy, Terms or DPA sentence changes. No customer notice.]**
+    Plan and the owner's four rulings (2026-10-30): [PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)
+    (§H is this item's source); doc of record [USERS.md](USERS.md) → *Campaign roster & assignment gating*.
+    Everything below was read from the code.
+    - **(a) Who can reach it.** `POST /admin/memberships/resolve`, `POST /admin/memberships/by-email`, `GET
+      /admin/memberships/:userId/campaign-history` and `POST /admin/memberships/:userId/campaigns` are all
+      behind `requireAdminRole` (`server/src/routes/admin/memberships.js`): a team lead gets `403 ADMIN_ONLY`
+      before anything is read, so item 41's client-lead boundary is untouched (a lead may be the client —
+      none of these routes reaches them). The one change a lead can see: `GET /admin/memberships/:userId/crews`
+      rows for campaigns they manage now carry `crewSize`, how many people there have that person as
+      coordinator — a count of rows that campaign's roster (`GET …/assignments`) already shows them; rows for
+      other campaigns keep item 40's name-only shape, with no `crewSize`. Doorline staff pass through the same
+      gate and the access log; each route that names a person adds them to the record-level audit subjects.
+    - **(b) What comes back.** `resolve` answers `outside` with one body for every address — no account, an
+      account at another customer, a deleted account's old address: `{ outcome, person: null, campaigns:
+      [], coordinators }`, where `coordinators` is the organization's list of active admins and leads (name
+      and role, no email: the list `GET …/crew` already returns), the same whatever address was typed. A
+      member of this organization comes back named (name, role) with, for each ACTIVE campaign they're on
+      or have knocked, whether they're on it and their deduplicated door count by team — computed by the
+      same history passes whose one-campaign case the Team page's `/crew/resolve` already returns
+      (`historiesByCampaign`; a test pins that the two give a campaign the same numbers). An org admin
+      could already read all of this campaign by campaign, and every member on `GET /admin/memberships`;
+      the new routes gather it, they don't widen who sees it. `by-email` answers with the person it added or
+      found — for an address already in the organization, even when it adds them to nothing — as the user
+      object (`toSafeJSON`) that `POST /admin/memberships` and the Team page's `/crew` already return.
+    - **(c) Limits.** `resolve` is mounted with the same `crewResolveLimiters` instances as `/crew/resolve`
+      (item 42, N.1.21: 60 lookups an hour that find nobody, 30 that name someone), so the two screens
+      share one ceiling per person rather than doubling it. `campaign-history` names nobody new (the
+      admin opened that person from a list that shows them) and is not limited. Nor is `by-email`, which
+      for an address already in the organization answers with the person even when it adds them to nothing:
+      an unthrottled in-org lookup beside `resolve`'s limit. Acceptable because only org admins reach it, and
+      they can list every member anyway.
+    - **(d) Writes.** `by-email` resolves, then branches exactly as `/crew` POST does — creating an account,
+      attaching an account from elsewhere blind (the typed name and password are discarded; who landed is
+      revealed only in the 201, after a real add and an email to the person), claiming a colleague, or
+      switching a member back on. Every campaign join goes through `joinCampaignCrew`, the crew choke point
+      (`coordinatorChokePoint.test.js` unchanged). Remove on a profile or the web panel's campaign list is
+      shown to org admins only and calls the existing `DELETE …/assignments/:userId`, whose rules are
+      unchanged (a team lead may remove canvassers and themselves on campaigns they manage, item 41 —
+      reached from the Team page, not from these screens).
+    - **(e) Email.** Same recipient, same provider (Resend), same templates: ONE email per add naming every
+      campaign joined, instead of one per campaign; emails still never carry a password.
+    - **(f) Unchanged and recorded.** The old `POST /admin/memberships` stays for phones without the update.
+      Its Existing-user path still answers an org admin "No account exists with that email" (404
+      `EMAIL_NOT_FOUND`), which says whether an address has a Doorline account anywhere. Admin-only and
+      older than this item; the new screens no longer call it, and nothing retires it yet (it can go once no
+      released phone sends it).
+    - **(g) Found in the code review (2026-10-30), fixed before shipping.** (1) An add aimed at a deleted
+      member's tombstone address (their switched-off membership still resolves) switched them on and moved
+      their earlier doors to the crew picked before the convergence refused it — a departure moving doors.
+      Both adds by email (`by-email` and the Team page's `/crew`) now refuse a deleted account before any
+      write. (2) `by-email` checked the new-account fields (both names, a usable typed password) only when it
+      created an account, so a request with no name was refused for an address with no account and attached
+      an account at another customer: a free "no account anywhere" answer. It now checks them for every
+      outside address first (`createMember.js` `newAccountProblem`), so both get the same refusal.
+    - **(h) Known gap, older than this item, for the owner.** The Team page's `/crew` add has the same
+      shape as (g)(2): a request with no name is refused only when the address has no Doorline account, and
+      `/crew` is reachable by team leads (who may be the client) — through a hand-built request, or the
+      "link existing" button still in the July store builds and the legacy app, which sends the email
+      alone. Requiring a name for every outside address there would break that button's link for an account
+      at another customer, so it needs the client-version gate (CLAUDE.md) and is left as it was. `/crew` POST
+      has no rate limit. It tells only that an address has no account anywhere; an address that has one is
+      attached, at the cost of a real add and an email to the person.
+    - **Pinned by** `server/test/addToCampaigns.int.test.js` (25): the byte-identical `outside` answer (no
+      account, an account at another customer, an address a deleted account gave up), the same refusal for
+      both kinds of outside address with no name or an unusable password, the shared limit, the admin-only
+      matrix, one email naming both campaigns, the blind attach, the every-pick-checked-first refusals, a
+      deleted member refused before any write with their doors unmoved (both adds), convergence when the
+      deletion lands mid-add, the 402 for a read-only organization, and `crewSize` left off a row hidden from
+      a lead (item 40's pinned shape, `leadUserManagement.int.test.js`); email wording by
+      `mailTemplates.test.js`.
+
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
 > **[v3 — 2026-07-16]** v2 is itself now partially historical. Its gap list: **8 is resolved** (the
@@ -5564,6 +5643,15 @@ One human has **one** `User` row (name, email, phone, password hash) with a **gl
   > somebody writes an `AccessLog` subject line — the same record-level trail as opening a profile.
   > **What is NOT closed, said plainly.** `POST /admin/memberships` (org Users page, `requireAdminRole`)
   > keeps `linkExisting` and all three codes, so the oracle survives for **org admins on the org door**.
+  > *[v7 2026-10-30 — item 46: the web Users page and the phone's org-view add no longer call this route;
+  > they resolve the address first (`POST /admin/memberships/resolve`, then `/by-email`, which refuses both
+  > kinds of outside address the same way). The route stays callable by any org admin, for phones without
+  > the update, with no retirement planned yet; the oracle above is unchanged on it. And the CAMPAIGN door
+  > keeps a narrower one, reachable by team leads (who may be the client) and unthrottled: `POST
+  > …/crew` with no name is refused only when the address has no Doorline account anywhere — item 46(h),
+  > left for the client-version gate because released apps link by email alone. The "pre-commit oracle no
+  > longer answers on this door" above is about the lookup, which still answers every outside address the
+  > same way.]*
   > And the takeover path below survives one step later: once the attached person holds a Membership,
   > `PATCH /admin/memberships/:userId/password` is gated only on "a Membership exists in my active org",
   > and passwords are per-USER. Item 14 stands.

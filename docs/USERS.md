@@ -54,33 +54,54 @@ your other open tabs.
 
 ## Adding someone to your org
 
-On the Users page, "Add member" has two modes:
+On the web Users page, **Add member**, and in the mobile admin app **More → Users → + New** with the
+**All campaigns** pill picked, work the same way (rebuilt 2026-10-30, [PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)):
 
-- **New user** (default) — you provide their name, email, optional phone, a role, and — **optionally**
-  — a temporary password. This creates a brand-new account, and they get an **invitation email with a
-  set-password link** either way. **Leave the password blank (recommended)**: they set their own via
-  the emailed link, and no shared secret ever exists. Type one only when they can't reach their inbox
-  (it can be simple — read it out loud; they're required to replace it with their own strong password
-  the first time they sign in, on web or mobile).
-- **Existing user (by email — link them to this org)** — check the box and enter just an email + role.
-  This finds a person who *already has an account* (e.g. they canvass for another campaign) and adds
-  a membership to your org, without creating a duplicate.
+1. **You type their email first.** Doorline checks who it belongs to in your organization — the same check a
+   campaign's Team page makes, counted toward the same hourly limits.
+2. **Then the step depends on the answer:**
+   - **Nobody in your organization uses it.** You fill in their name, an optional phone and — **optionally** — a
+     temporary password, and pick a **role**:
+     - **Canvasser**: a list of your active campaigns to put them on. **Nothing is checked to start, and it never
+       means "every campaign."** Each campaign you check gets **its own crew** (coordinator), starting at No crew.
+       Checking campaigns is optional: leave them all unchecked and they join your organization only.
+     - **Team lead**: the campaigns they run (see [ROLES.md](ROLES.md)). A lead isn't put on a campaign's team
+       here; taking a book there puts them on it.
+     - **Admin**: no list. Admins already see and run every campaign.
+   - **It's someone already in your organization.** You see their name and the campaign list, with the campaigns
+     they're on checked and marked **on it**. Check more to add them. A campaign where they have doors from before
+     says how many and on which teams, and picks their old crew when that coordinator can still run one — exactly
+     as the Team page's add does. Adding them doesn't change their role.
+   - **Their account is switched off.** An admin gets **Switch on**, or **Switch on & add** with campaigns
+     checked. Switching an account on restores their access to every campaign they were on.
+3. **The result** names who landed and the campaigns they're on, any earlier doors that moved to the crew you
+   picked, and any campaign that couldn't be added (with **Try again**; a campaign archived while the step was
+   open stops the add before anything happens, saying which one to uncheck). **Open {name}** goes to their
+   profile.
 
-You can also add people **from a campaign's Team page** (**Add people** on the web console, **Add a
-canvasser** in the mobile admin app). It creates or links the account and puts them on that campaign, **on
-the crew you pick**, in one step. You type the email first, and Doorline says whether it belongs to a
-colleague in your organization or needs a new account, so a returning canvasser is never duplicated. It is
-available to **team leads** too (a lead owns onboarding). It only *creates* canvassers; use the Users page
-for a new admin or lead. On the Users page, **Add member** with the Canvasser role has an optional
-**Campaign**: picking one hands what you typed to the same Team-page steps, crew choice included. The
-**phone** field is optional and **auto-formats to `(555) 123-4567`** as you type — it won't accept letters.
+Either way they get **one email**: a brand-new account gets the **invitation email with a set-password link**,
+naming every campaign they were added to; someone already in your organization gets one "You've been added to …"
+email listing the campaigns — unless they haven't set their password yet (their invite is still their way in, and
+the app shows their campaigns once they sign in), or nothing was added. **Leave the password blank (recommended)**: they set their own via the emailed link,
+and no shared secret ever exists. Type one only when they can't reach their inbox (it can be simple — read it out
+loud; they're required to replace it with their own strong password the first time they sign in, on web or
+mobile). The **phone** field is optional and **auto-formats to `(555) 123-4567`** as you type — it won't accept
+letters.
 
-If you try to create a **new** user with an email that already exists anywhere, you'll get a clear
-error telling you to use the "Existing user" box instead (and the box auto-checks for you).
+**If the address already has a Doorline account at another organization**, the step looks exactly like the one
+for a new person — Doorline never says whether an address has an account elsewhere. When you finish, that existing
+person is added, what you typed is ignored (their name isn't ours to overwrite, their password isn't ours to set),
+and the result says who landed. The old **Existing user (by email)** checkbox is gone on both clients: the email
+check answers that for you.
 
-When you add someone, **they're told.** The next time they sign in they see an in-app banner: "You've
-been added to *{org}* as *{role}*." They dismiss it and it's gone. (There's no email system yet, so
-the notice is in-app.)
+You can also add people **from a campaign's Team page** (**Add people** on the web console, **+ New** on a
+campaign's pill in the mobile admin app). It creates or links the account and puts them on that campaign, **on the
+crew you pick**, in one step, the same way. It is available to **team leads** too (a lead owns onboarding), and it
+only *creates* canvassers. And a person's **profile** (phone) or **panel** (web, under Everywhere in your
+organization) has **Add to campaigns** and **Remove** — see [The campaign team](#the-campaign-team-who-can-work-a-campaign).
+
+When you add someone, **they're told** — by the email above, and the next time they sign in by an in-app
+banner: "You've been added to *{org}* as *{role}*." They dismiss it and it's gone.
 
 ## Roles: admin, team lead, canvasser
 
@@ -125,12 +146,14 @@ choose **Move to crew…** (on the phone, **Move all shown to a crew…** under 
 totalled for everyone. You can also pick the crew while adding someone (above). Admins can do this on any
 campaign; a team lead can on the campaigns they were granted.
 
-The org **Users** page doesn't *set* a crew — it shows them. Open a member and the **Everywhere in your
+The org **Users** page doesn't *change* a crew — it shows them. Open a member and the **Everywhere in your
 organization** section of their panel lists their crew on **each campaign** they're on, each one linking
-to that campaign's Team tab with them open. There is no crew dropdown there, no Coordinator column or
-filter on the Users list, and no coordinator field on the Users page's own "Add member" form: one value on
-a person's org profile cannot be true for somebody who is on two campaigns. (Add member's optional
-Campaign hands off to the Team page's steps, which ask for the crew on that campaign.)
+to that campaign's Team tab with them open. There is no crew dropdown on that list and no Coordinator
+column or filter on the Users list: one value on a person's org profile cannot be true for somebody who is
+on two campaigns. What the Users page does have is a crew **per campaign** wherever it puts someone ON a
+campaign: Add member, and the panel's **Add to campaigns**, ask for the crew on each campaign checked
+([PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)). Changing the crew of someone already on a
+campaign stays on that campaign's Team tab.
 
 ### A team's numbers follow the crew you have set today
 
@@ -270,9 +293,16 @@ reason and **Retry failed**. A person joins a campaign's team these ways:
    landed; if it is not who you meant, remove them and check the address. A colleague whose account is
    **switched off** cannot be added until an admin switches it back on, because that flag is org-wide; an
    org admin is offered **Switch on** right there.
-2. **The Users page → Add member**, with the Canvasser role and a **Campaign** picked: it hands over to
-   the same steps as 1.
-3. **Taking a book**, for **org admins and team leads only** (taking one, or an admin handing them one):
+2. **The org view's add** — the web Users page's **Add member**, or **+ New** on the phone's **All
+   campaigns** pill (org admins): the same email-first steps, for **several campaigns at once**, each
+   with its own crew, or none (see [Adding someone to your org](#adding-someone-to-your-org)).
+3. **A person's profile (phone) or panel (web, Everywhere in your organization) → Add to campaigns** (org
+   admins): the active campaigns they aren't on yet, a crew for each one checked, and their doors there from
+   before, then one add and one email. Each campaign there also has **Remove**, which asks the Team page's
+   question first (their books there go back to the pool; every door they knocked still counts; if they run a
+   crew there, how many people it leaves with no coordinator). A switched-off account gets no Add until it's
+   switched back on; a deleted one gets neither.
+4. **Taking a book**, for **org admins and team leads only** (taking one, or an admin handing them one):
    they are added to the team at that moment, and like any return their earlier doors on the campaign move
    to "No team" until their crew is set. A canvasser has to be on the team before they can be given a
    book. A walk-list pre-add (Walk Lists → Manage → Pre-add) never puts anyone on the team: a canvasser
@@ -884,10 +914,11 @@ Someone who's already uninstalled the app can request deletion at **doorline.app
   forced-change screen itself is queued off the door flow (`components/SessionGate.jsx`), so it never
   unmounts a half-filled survey.
 - **Set on create** — every account-creation path hashes SOME password + forces a first-login
-  change, but the typed temp password is OPTIONAL on all three: super-admin provisioning
+  change, but the typed temp password is OPTIONAL on all four: super-admin provisioning
   (`POST /super-admin/organizations`, first admin — a typed password is echoed once in the 201,
-  a blank one is generated internally and `tempPassword` comes back null), admin add-member
-  (`POST /admin/memberships`), and the team-lead crew endpoint (`POST /admin/campaigns/:id/crew`).
+  a blank one is generated internally and `tempPassword` comes back null), admin add-member — the org
+  view's `POST /admin/memberships/by-email` and, for phones without the 2026-10-30 update, `POST
+  /admin/memberships` — and the team-lead crew endpoint (`POST /admin/campaigns/:id/crew`).
   Blank/'' → `createOrgMember` hashes `crypto.randomBytes(18)` base64url that is never returned,
   logged, or emailed — the emailed set-password invite (72h, same machinery as reset) is the
   account's way in. All route through
@@ -1094,15 +1125,20 @@ clients).
   orgs) so the UI can disable the email field with an explanation. Enforced in both
   the web person panel's [PersonProfileForm.jsx](../client/src/components/people/PersonProfileForm.jsx) and the mobile
   [users/[id].jsx](../mobile/app/(app)/admin/users/[id].jsx).
-- **Link vs create intent — the ORG door still asks; the CAMPAIGN door resolves.** They diverged on
-  2026-08-08.
+- **Link vs create intent — both doors resolve now; the OLD org door still asks.** They diverged on
+  2026-08-08; the org view's screens moved to resolving on 2026-10-30.
 
-  **`POST /admin/memberships`** (org Users page, `requireAdminRole`) is unchanged: it takes
-  `linkExisting` (shared `memberIdentityShape`), and `false` + existing email → `409 EMAIL_EXISTS_USE_LINK`;
-  `true` + no account → `404 EMAIL_NOT_FOUND`; `true` + already in this org → `409 ALREADY_MEMBER`. Its two
-  surfaces send it and offer the link toggle ([UsersPage.jsx](../client/src/pages/UsersPage.jsx) and the org
-  form in [admin/users.jsx](../mobile/app/(app)/admin/users.jsx)), auto-switching the toggle on when the
-  server returns `EMAIL_EXISTS_USE_LINK`.
+  **`POST /admin/memberships/by-email`** (the web Users page's Add member and the phone hub's **+ New** on All
+  campaigns since 2026-10-30, `requireAdminRole`) resolves the address itself, like the campaign door below,
+  and ignores `linkExisting`. Unlike the campaign door it checks the new-account fields (both names, a usable
+  typed password) for every outside address BEFORE branching (`newAccountProblem`), so a missing name is
+  refused the same way whether or not the address has an account at another customer.
+
+  **`POST /admin/memberships`** (`requireAdminRole`) is unchanged and kept for phones without that update:
+  it takes `linkExisting` (shared `memberIdentityShape`), and `false` + existing email → `409
+  EMAIL_EXISTS_USE_LINK`; `true` + no account → `404 EMAIL_NOT_FOUND`; `true` + already in this org → `409
+  ALREADY_MEMBER`. Only the old phone form (Existing-user toggle, auto-switched on by
+  `EMAIL_EXISTS_USE_LINK`) still calls it; neither current screen does.
 
   **`POST /admin/campaigns/:id/crew`** no longer asks for intent. It **still accepts `linkExisting` and
   ignores it** — already-released mobile binaries send it — and resolves the address itself
@@ -1209,10 +1245,10 @@ leaves the line out ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) §H). The phone's memb
 ([MemberSheet.jsx](../mobile/components/MemberSheet.jsx)) and the Users hub's **Move all shown to a
 crew…** ([users.jsx](<../mobile/app/(app)/admin/users.jsx>)) use the same previews and writes but never
 call it: the phone doesn't load client reports ([ADMIN_APP.md](ADMIN_APP.md)). The Users page shows crews
-read-only, in the shared panel's **Everywhere** section from `/crews` (the old `UserProfileModal.jsx` and
-its **Crews** block were replaced by the panel on 2026-10-27);
-[UsersPage.jsx](../client/src/pages/UsersPage.jsx) has no Coordinator column, coordinator filter or
-add-member coordinator field.
+in the shared panel's **Everywhere** section from `/crews` (the old `UserProfileModal.jsx` and its
+**Crews** block were replaced by the panel on 2026-10-27) — read-only for an existing crew, with Remove
+and **Add to campaigns** since 2026-10-30; [UsersPage.jsx](../client/src/pages/UsersPage.jsx) has no
+Coordinator column or coordinator filter, and its Add member asks for a crew per campaign checked.
 
 **Reports ARE team-scoped — but NOT through `baseFilter`.** `?coordinatorId=<id|none>` on
 `/canvasser-timeline`, plus `GET /admin/reports/team-breakdown` (every team at once, with the
@@ -1330,9 +1366,28 @@ released phones (`fromCoordinator` reads *Several teams* when there was more tha
   created, total, crew: { set, skipped: [{ userId, reason: 'already-on-campaign'|'unfinished'|'error' }],
   doors, activities, surveys } }`; someone already on the roster is skipped untouched (an add never
   re-crews).
+- **The org view's add and a profile's Add to campaigns** ([memberships.js](../server/src/routes/admin/memberships.js),
+  shared service [joinCampaigns.js](../server/src/services/memberships/joinCampaigns.js); 2026-10-30,
+  [PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)). All four routes are **org-admin only**
+  (`requireAdminRole`, 403 `ADMIN_ONLY` for a lead):
+
+  | Route | Does |
+  |---|---|
+  | `POST /admin/memberships/resolve` `{ email }` | Who owns the address in this org. `outside` (one body for every address: `{ outcome, person: null, campaigns: [], coordinators }`), `in-org` or `in-org-inactive` with `person` and `campaigns: [{ campaignId, onCampaign, history }]` — every ACTIVE campaign they're on or have knocked, each through the same `campaignHistory` the Team page's `/crew/resolve` uses. Mounted with **the same `crewResolveLimiters` instances**, so both lookups share one pair of hourly counters per person (60 that find nobody, 30 that name). Names → `addAuditSubjects`. |
+  | `POST /admin/memberships/by-email` | `memberIdentityShape` + `role` + `campaigns: [{ campaignId, coordinatorId }]` + a new lead's `managedCampaignIds`. Resolve-then-branch like `/crew` POST (create, blind attach, claim, switch on); **every pick checked before the first write** (`checkCampaignPicks`: in this org, not mid-delete, not archived → `409 campaign-archived`, coordinator via `resolveCoordinatorId`, never the person themself); joins through `joinCampaignCrew` (`joinCampaigns`, four at a time, roster read once, already-on skipped and never re-crewed); `convergeIfDeleted({ campaignIds })` after the last write; **one** email (`sendJoinedEmail`). `201 { user, outcome: created\|attached\|in-org\|in-org-inactive, attached, role, managedCampaignIds, campaigns: [{ campaignId, campaignName, coordinatorId, result: joined\|already-on\|error, restamp }] }`. `linkExisting` is accepted and ignored. |
+  | `GET /admin/memberships/:userId/campaign-history` | `{ campaigns, coordinators }` for a member of this org, read when a profile's Add to campaigns opens. |
+  | `POST /admin/memberships/:userId/campaigns` `{ campaigns }` (at least one) | A profile's add: `409 MEMBER_DEACTIVATED` for a switched-off account, `409 ACCOUNT_DELETED` for a deleted one, then the same check, joins, convergence and one email. `201 { campaigns }`. |
+
+  `GET /admin/memberships/:userId/crews` also carries **`crewSize`** on each row the reader may see — how
+  many roster rows on that campaign name this person as coordinator (one group over `{ campaignId,
+  coordinatorId }`) — for the Remove question. A row hidden from a lead keeps only its name (item 40), so it
+  has no `crewSize` key at all. The old `POST /admin/memberships` stays as it was for phones without the
+  update; the new screens don't call it.
 - **Mobile visibility gate** — [bootstrap.js](../server/src/routes/mobile/bootstrap.js) filters a
   canvasser's campaigns to their `CampaignAssignment`s (`assertCampaignAccess`); org admins/super-admins
-  bypass and see all.
+  bypass and see all. With no campaigns, the phone's campaign list says "You're not on a campaign yet. Ask
+  your admin to add you to one." to anyone who isn't an org admin or Doorline staff (for whom empty means
+  there are none).
 - **Assignment gate** — `partitionAssignable({campaignId, organizationId, userIds})`
   ([campaignRoster.js](../server/src/services/campaignRoster.js)) returns `{ allowed, notOnTeam }`:
   allowed = already on the roster, **or** an org admin, **or** a team lead holding a `CampaignManager`
@@ -1469,7 +1524,8 @@ normalized; old values format best-effort). Locked by
 **Why we owe this at all.** Both stores trigger on **account *creation***, not on having a login. Google's
 wording: *"If your app allows users to create an account from within your app, then it must also allow
 users to request for their account to be deleted."* Our mobile binary creates accounts — the admin
-`CreateUserForm` in `admin/users.jsx` and the crew endpoint in `admin/campaign-assignments/[campaignId].jsx`
+add in `admin/users.jsx` (`CreateUserForm` until 2026-10-30, now `components/AddPersonSheet.jsx`) and the
+crew endpoint (then `admin/campaign-assignments/[campaignId].jsx`, now `components/CreateCanvasserSheet.jsx`)
 — so the trigger fires. Apple additionally forbids the support-flow substitute: *"Apps not operating in
 highly regulated industries should not require people to make a phone call, send an email, or go through
 other support flows."* Canvassing is not a regulated industry.

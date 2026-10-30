@@ -7,6 +7,7 @@ import { Campaign } from '../../models/Campaign.js';
 import { CampaignAssignment } from '../../models/CampaignAssignment.js';
 import { convergeIfDeleted } from '../users/deleteAccount.js';
 import { phoneSchema, nameSchema, emailSchema, passwordSchema } from '../../utils/validators.js';
+import { isWellFormedText } from '../../utils/passwordText.js';
 
 // Shared member-creation + validation used by the org Users admin (memberships.js)
 // and the team-lead crew router (leadCrew.js). Keeping it in one place means a lead
@@ -82,6 +83,22 @@ export async function resolveEmailInOrg({ orgId, campaignId = null, email }) {
   if (!membership.isActive) return { outcome: 'in-org-inactive', person, user, membership, onCampaign };
   return { outcome: onCampaign ? 'on-campaign' : 'in-org', person, user, membership, onCampaign };
 }
+
+// The fields only a NEW account uses — both names, and a typed password bcrypt can take — for the org view's
+// add by email (memberships.js POST /by-email) to check for EVERY address that resolved `outside`, before it
+// branches on whether the address has an account at another customer. createOrgMember checks them on its
+// create branch only, so a request with no name would be refused when the address had no account and attach
+// its owner when it had one: a free answer to "does this address have a Doorline account anywhere?" whenever
+// the answer was no. Checked first, both kinds of address get the same refusal; the attach still discards
+// what was typed. The campaign Team page's add (leadCrew.js) can't require it yet: released apps link an
+// account with the email alone (docs/PRIVACY_VERIFICATION.md item 46(h)). Returns the 400 body, or null.
+export const newAccountProblem = (data) => {
+  if (!data.firstName || !data.lastName) return { error: 'New user requires firstName and lastName.' };
+  if (data.password && !isWellFormedText(data.password)) {
+    return { error: 'That password has a character that can’t be used. Try another.', code: 'PASSWORD_INVALID' };
+  }
+  return null;
+};
 
 // Find/link/create the user and create their membership in `orgId` with `role`.
 // Throws MemberError on the same conditions the memberships route enforces.
@@ -170,7 +187,9 @@ export async function resolveCoordinatorId({ orgId, raw, memberUserId }) {
   if (raw === undefined) return { ok: true, skip: true };
   if (raw === null || raw === '') return { ok: true, value: null };
   if (!mongoose.isValidObjectId(raw)) return { ok: false, error: 'Invalid coordinatorId.' };
-  if (memberUserId && String(raw) === String(memberUserId)) {
+  // Compared canonically: an id typed in upper case is the same person (Mongo casts it), and comparing the
+  // raw strings let someone be made their own coordinator.
+  if (memberUserId && String(new mongoose.Types.ObjectId(String(raw))) === String(memberUserId).toLowerCase()) {
     return { ok: false, error: "A member can't be their own coordinator." };
   }
   const coord = await Membership.findOne({

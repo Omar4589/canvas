@@ -117,8 +117,12 @@ actions, so the menu isn't in the way of the job:
 
 ## Picking a campaign (and effort)
 
-On **Pick a campaign**, each campaign shows whether it's a Survey or a Lit drop, its name, and its
-state. Most campaigns open straight to the books. A campaign that's split into several **efforts**
+On **Pick a campaign**, a canvasser sees only the campaigns they've been put on (an org admin sees every
+active one). With none, it says **"You're not on a campaign yet. Ask your admin to add you to one."** — an
+admin can add someone to the organization without putting them on a campaign, so that empty list is real. An org admin
+with no campaigns at all still reads "No active campaigns yet. Ask your admin to create one."
+
+Each campaign shows whether it's a Survey or a Lit drop, its name, and its state. Most campaigns open straight to the books. A campaign that's split into several **efforts**
 (say "North" and "South", or "volunteers" and "paid") instead **expands** when tapped to show its
 efforts — pick the one you're working and you land on that effort's books. (Book numbers restart per
 effort, so this keeps two different "Book 6"s from colliding.)

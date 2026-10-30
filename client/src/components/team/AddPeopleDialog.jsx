@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { Button, Input, Modal, PhoneInput, Segmented, Select } from '../ui/index.js';
@@ -16,7 +16,6 @@ import {
   joinMoves,
   movedReport,
   prePick,
-  typedAnything,
   typedIgnoredLine,
   waitLine,
 } from '../../lib/addPeople.js';
@@ -41,8 +40,6 @@ import { teamLabelsLine, useAffectedTeams } from '../../lib/useAffectedTeams.js'
 // pick one crew, see what their earlier doors here will do (one Move to crew… preview, which models
 // joining for people not on the roster), then POST .../assignments 25 at a time. Someone another admin
 // added meanwhile is skipped and never re-crewed.
-//
-// The Users page's Add member hands its typed values here (`initial`), and the lookup runs at once.
 
 const EMPTY = { firstName: '', lastName: '', phone: '', password: '' };
 const PAGE = 25;
@@ -199,7 +196,6 @@ export const byEmailView = (v, on) => {
     };
   }
 
-  const ignoredNote = v.typedHandOver && found.outcome !== 'outside' ? <Note>{typedIgnoredLine(first)}</Note> : null;
   const historyNote = historyLine(first, history) ? <Line tone="fg">{historyLine(first, history)}</Line> : null;
 
   // ── Step 2: confirm what the address turned out to be ──
@@ -212,7 +208,6 @@ export const byEmailView = (v, on) => {
             <span className="font-medium">{name}</span> is already on this campaign.
           </Line>
           <Line>Their crew is changed from their panel, where it shows how many doors move first.</Line>
-          {ignoredNote}
         </div>
       ),
       footer: (
@@ -250,7 +245,6 @@ export const byEmailView = (v, on) => {
               {pickConsequence}
             </>
           )}
-          {ignoredNote}
           {addError}
         </div>
       ),
@@ -283,7 +277,6 @@ export const byEmailView = (v, on) => {
           {historyNote}
           {crewField}
           {pickConsequence || <Line>Their doors from here on count toward {pick ? teamName(pickName) : 'no team'}.</Line>}
-          {ignoredNote}
           {addError}
         </div>
       ),
@@ -355,10 +348,10 @@ export const byEmailView = (v, on) => {
   };
 };
 
-const useByEmail = ({ campaignId, campaignName, isOrgAdmin, coordinators, initial, onOpenPerson, onAdded, onClose }) => {
+const useByEmail = ({ campaignId, campaignName, isOrgAdmin, coordinators, onOpenPerson, onAdded, onClose }) => {
   const baseId = useId();
-  const [email, setEmail] = useState(initial?.email || '');
-  const [form, setForm] = useState(initial ? { ...EMPTY, ...initial } : EMPTY);
+  const [email, setEmail] = useState('');
+  const [form, setForm] = useState(EMPTY);
   const [crew, setCrew] = useState(null);
   const [localError, setLocalError] = useState('');
   const cleanEmail = email.trim().toLowerCase();
@@ -370,16 +363,6 @@ const useByEmail = ({ campaignId, campaignName, isOrgAdmin, coordinators, initia
     mutationFn: (body) => api(`/admin/campaigns/${campaignId}/crew`, { method: 'POST', body }),
     onSuccess: () => onAdded?.(),
   });
-
-  // Handed over from the Users page: look the address up at once.
-  const handedEmail = initial?.email ? initial.email.trim().toLowerCase() : '';
-  const { mutate: resolve } = resolveMut;
-  useEffect(() => {
-    if (!handedEmail) return undefined;
-    const ctrl = new AbortController();
-    resolve({ address: handedEmail, signal: ctrl.signal });
-    return () => ctrl.abort();
-  }, [handedEmail, resolve]);
 
   const found = resolveMut.data;
   const done = addMut.data;
@@ -459,7 +442,6 @@ const useByEmail = ({ campaignId, campaignName, isOrgAdmin, coordinators, initia
       pick,
       pickName,
       reportsLine: teamLabelsLine(affectedQ),
-      typedHandOver: !!initial && typedAnything(form),
       resolving: resolveMut.isPending,
       resolveError: resolveMut.error,
       adding: addMut.isPending,
@@ -469,7 +451,7 @@ const useByEmail = ({ campaignId, campaignName, isOrgAdmin, coordinators, initia
     on
   );
   // Nothing closes while the add is out: the Done step is where it says who actually landed and what moved.
-  return { ...view, closable: !addMut.isPending, started: !!handedEmail || !!found || resolveMut.isPending || !!resolveMut.error };
+  return { ...view, closable: !addMut.isPending, started: !!found || resolveMut.isPending || !!resolveMut.error };
 };
 
 // ── From your organization ───────────────────────────────────────────────────────────────────────
@@ -795,7 +777,7 @@ const useFromOrg = ({ campaignId, campaignName, isOrgAdmin, coordinators, roster
   };
 };
 
-const AddPeopleDialog = ({ campaign, isOrgAdmin, rosterIds, initial = null, startTab = 'email', onOpenPerson, onAdded, onClose }) => {
+const AddPeopleDialog = ({ campaign, isOrgAdmin, rosterIds, startTab = 'email', onOpenPerson, onAdded, onClose }) => {
   const campaignId = String(campaign._id);
   const campaignName = campaign.name || 'this campaign';
   const crewQ = useQuery({
@@ -804,13 +786,13 @@ const AddPeopleDialog = ({ campaign, isOrgAdmin, rosterIds, initial = null, star
   });
   const coordinators = useMemo(() => coordinatorChoices(crewQ.data), [crewQ.data]);
   const roster = rosterIds || new Set();
-  const [tab, setTab] = useState(isOrgAdmin && startTab === 'org' && !initial ? 'org' : 'email');
+  const [tab, setTab] = useState(isOrgAdmin && startTab === 'org' ? 'org' : 'email');
   const shared = { campaignId, campaignName, isOrgAdmin, coordinators, onAdded, onClose };
-  const email = useByEmail({ ...shared, initial, onOpenPerson });
+  const email = useByEmail({ ...shared, onOpenPerson });
   const org = useFromOrg({ ...shared, rosterIds: roster });
   const active = tab === 'org' ? org : email;
   // Hidden once the steps start, and for a team lead (who adds by email only).
-  const showTabs = isOrgAdmin && !initial && !email.started && !org.started;
+  const showTabs = isOrgAdmin && !email.started && !org.started;
   return (
     <Modal size={tab === 'org' ? '2xl' : 'md'} title={active.title} onClose={onClose} closable={active.closable !== false} footer={active.footer}>
       {showTabs && (

@@ -9,10 +9,9 @@ import esbuild from 'esbuild';
 // view of where the add has got to (AddPeopleDialog.jsx byEmailView), so each renders from the
 // server's real answers: the lookup, a 429 with its wait, a returning person with their history and
 // the crew picked for them, a switched-off account (Switch on only, when they're already here; a lead
-// is told to ask), Already here, a new canvasser, typed details for someone who already has an account,
-// and Done with what moved. Plus the dialog itself: an org admin gets both ways in, a team lead By email
-// only, and From your organization lists who isn't on the campaign, 25 to a page. The sentences are
-// lib/addPeople.js (addPeople.test.js).
+// is told to ask), Already here, a new canvasser, and Done with what moved. Plus the dialog itself: an org
+// admin gets both ways in, a team lead By email only, and From your organization lists who isn't on the
+// campaign, 25 to a page. The sentences are lib/addPeople.js (addPeople.test.js).
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const dir = mkdtempSync(join(here, '../../.smoke-add-people-'));
@@ -40,7 +39,7 @@ const ENTRY = `
     const view = byEmailView(
       { baseId: 'add', campaignName: 'Fall Canvass', isOrgAdmin: true, choices: CHOICES, email: 'pat@t.co', cleanEmail: 'pat@t.co', address: 'pat@t.co',
         form: { firstName: '', lastName: '', phone: '', password: '' }, found: null, done: null, pick: '', pickName: null,
-        reportsLine: null, typedHandOver: false, resolving: false, resolveError: null, adding: false, addError: null, localError: '', ...v },
+        reportsLine: null, resolving: false, resolveError: null, adding: false, addError: null, localError: '', ...v },
       ON
     );
     return { title: view.title, html: renderToString(<QueryClientProvider client={qcOf()}>{view.body}{view.footer}</QueryClientProvider>) };
@@ -130,10 +129,9 @@ test('a returning colleague: their doors here and on which teams, their old crew
   assert.match(t, /This also changes the numbers in the Downtown team client report\./);
   assert.deepEqual(buttons(s.html), ['Back', 'Add to campaign']);
 
-  const typed = step({ found: { outcome: 'in-org', person: PAT, history: { doors: 0, sources: [] } }, typedHandOver: true });
-  assert.match(text(typed.html), /Pat already has an account, so what you typed wasn’t used\./);
-  assert.match(text(typed.html), /Their doors from here on count toward no team\./, 'nothing from before: no history line');
-  assert.doesNotMatch(text(typed.html), /from before/);
+  const fresh = step({ found: { outcome: 'in-org', person: PAT, history: { doors: 0, sources: [] } } });
+  assert.match(text(fresh.html), /Their doors from here on count toward no team\./, 'nothing from before: no history line');
+  assert.doesNotMatch(text(fresh.html), /from before/);
 });
 
 test('switched off: an admin gets Switch on only when they’re already here; a lead is told to ask', async () => {

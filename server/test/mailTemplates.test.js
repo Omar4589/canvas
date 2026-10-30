@@ -107,3 +107,29 @@ test('install URLs are env-overridable, and & is escaped in HTML but raw in text
   assert.ok(r.text.includes('id=pkg&hl=en'), 'plain text carries the raw URL');
   assert.ok(!r.text.includes('&amp;'), 'plain text must not be HTML-escaped');
 });
+
+// Several campaigns, one email (docs/PROPOSAL_ADD_TO_CAMPAIGNS.md §C.3): the org view's add and a profile's
+// Add to campaigns pass `campaignNames`. One name must read exactly as `campaignName` always has; none adds
+// no line; several list them, each escaped.
+test('campaignNames: none, one (identical to campaignName) and several, in the invite, the added-to-org note and addedToCampaign', () => {
+  const { campaignName: _drop, ...noCampaign } = BASE;
+  for (const make of [t.inviteSetPassword, t.addedToOrg]) {
+    const none = make({ ...noCampaign, campaignNames: [], role: 'canvasser' });
+    assert.ok(!both(none).includes('also been added to'), `${make.name}: no names, no line`);
+    assert.deepStrictEqual(make({ ...noCampaign, campaignNames: ['Florida - HD54'], role: 'canvasser' }), make({ ...BASE, role: 'canvasser' }), `${make.name}: one name == campaignName`);
+    const several = make({ ...noCampaign, campaignNames: ['Fall Canvass', 'Riverside', 'Lit <Drop>'], role: 'canvasser' });
+    assert.ok(several.text.includes("You've also been added to these campaigns: Fall Canvass, Riverside and Lit <Drop>."), `${make.name}: text lists them`);
+    assert.ok(several.html.includes('<strong>Fall Canvass</strong>, <strong>Riverside</strong> and <strong>Lit &lt;Drop&gt;</strong>'), `${make.name}: html lists them, escaped`);
+    assert.ok(!several.html.includes('Lit <Drop>'), `${make.name}: never unescaped in html`);
+  }
+  assert.deepStrictEqual(
+    t.addedToCampaign({ firstName: 'Stephen', orgName: 'Fox Bryant LLC', campaignNames: ['Florida - HD54'], role: 'canvasser' }),
+    t.addedToCampaign({ firstName: 'Stephen', orgName: 'Fox Bryant LLC', campaignName: 'Florida - HD54', role: 'canvasser' }),
+    'addedToCampaign: one name == campaignName'
+  );
+  const many = t.addedToCampaign({ firstName: 'Stephen', orgName: 'Fox Bryant LLC', campaignNames: ['Fall Canvass', 'Lit <Drop>'], role: 'lead' });
+  assert.strictEqual(many.subject, "You've been added to 2 campaigns");
+  assert.ok(many.text.includes("you've been added to these campaigns in Fox Bryant LLC on Doorline: Fall Canvass and Lit <Drop>."));
+  assert.ok(many.html.includes('<strong>Fall Canvass</strong> and <strong>Lit &lt;Drop&gt;</strong>'));
+  assert.ok(!hasLinks(many), 'a lead still gets no install links');
+});

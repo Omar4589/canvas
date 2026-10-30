@@ -1,13 +1,20 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '../../api/client.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { Badge } from '../ui/index.js';
+import { Badge, Button } from '../ui/index.js';
 import { formatRelative } from '../../lib/dates.js';
+import { removeQuestion } from '../../lib/addToCampaigns.js';
+import AddToCampaignsDialog from './AddToCampaignsDialog.jsx';
 
 // Everywhere in your organization, in the person panel (org admins only): totals across every
 // campaign, miles walked, the FbTime line, and their crew on each campaign. On the Users page it is
 // open; on a Team page it is folded away until opened, and stays open as you step (the panel holds
 // that). The totals (/stats) load only once it is open. Each campaign links to its Team page with this
 // person open, which is where a crew changes — the confirmation there can quote that campaign's doors.
+// Under the list, Add to campaigns puts them on more (a crew for each), and each active campaign has
+// Remove, which asks the Team panel's question first (docs/PROPOSAL_ADD_TO_CAMPAIGNS.md §E.4).
 
 const ago = (d) => formatRelative(d, { cutoffDays: 7 });
 const metersToMiles = (m) => ((m || 0) * 0.000621371).toFixed(1);
@@ -21,11 +28,54 @@ const Stat = ({ label, value }) => (
 
 // `currentCampaignId`: the Team page this panel is on. Its row isn't a link — the person is open here
 // already, and following it would only reload this page under the panel.
-const PersonOrgSection = ({ person, statsQ, crewsQ, folded, open, onToggle, onLink, currentCampaignId = null }) => {
+// `dialogRef`: the panel's, so Escape and the scrim leave the panel alone while Add to campaigns is open.
+const PersonOrgSection = ({ person, statsQ, crewsQ, folded, open, onToggle, onLink, currentCampaignId = null, dialogRef }) => {
   const { isOrgAdmin } = useAuth();
+  const qc = useQueryClient();
   const stats = statsQ.data;
   const crews = crewsQ.data?.crews || [];
   const heading = 'Everywhere in your organization';
+  const userId = String(person.userId);
+  const name = `${person.firstName || ''} ${person.lastName || ''}`.trim() || person.email || 'them';
+
+  // The active campaigns Add to campaigns offers — the same cached list the pages already hold.
+  const campaignsQ = useQuery({
+    queryKey: ['admin', 'campaigns'],
+    queryFn: ({ signal }) => api('/admin/campaigns', { signal }),
+    enabled: !!isOrgAdmin && open,
+  });
+  const activeCampaigns = (campaignsQ.data?.campaigns || []).filter((c) => c.isActive !== false);
+  const onIds = new Set(crews.map((c) => String(c.campaignId)));
+  const [addOpen, setAddOpen] = useState(false);
+  const [confirmingId, setConfirmingId] = useState(null);
+
+  // Everything a campaign change for this person touches: their crews, the member lists, and the
+  // campaigns' rosters, crews and books (Remove hands their books there back to the pool).
+  const refresh = (campaignIds) => {
+    qc.invalidateQueries({ queryKey: ['admin', 'member-crews', userId] });
+    qc.invalidateQueries({ queryKey: ['admin', 'membership-campaign-history', userId] });
+    qc.invalidateQueries({ queryKey: ['memberships'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+    for (const cid of campaignIds) {
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cid] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cid] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-history', cid] });
+      qc.invalidateQueries({ queryKey: ['admin', 'efforts', cid] });
+    }
+    qc.invalidateQueries({ queryKey: ['turf-assignments'] });
+    qc.invalidateQueries({ queryKey: ['turfs'] });
+  };
+  const removeMut = useMutation({
+    mutationKey: ['person', userId, 'remove-campaign-everywhere'],
+    mutationFn: (campaignId) => api(`/admin/campaigns/${campaignId}/assignments/${userId}`, { method: 'DELETE' }),
+    onSuccess: (_res, campaignId) => {
+      setConfirmingId(null);
+      refresh([campaignId]);
+    },
+  });
+  const deleted = person.status === 'deleted';
+  // A switched-off account is switched back on first (an org-wide act with its own question).
+  const mayAdd = isOrgAdmin && !deleted && person.status === 'active' && activeCampaigns.some((c) => !onIds.has(String(c._id)));
 
   return (
     <div className="px-6 py-5">
@@ -117,32 +167,100 @@ const PersonOrgSection = ({ person, statsQ, crewsQ, folded, open, onToggle, onLi
             ) : crewsQ.isError ? (
               <p className="text-xs text-danger-fg">Could not load this person’s crews.</p>
             ) : crews.length === 0 ? (
-              <p className="text-xs text-fg-muted">Not on any campaign yet. Add them to one from that campaign’s Team page.</p>
+              <p className="text-xs text-fg-muted">Not on any campaign yet.</p>
             ) : (
               <ul className="space-y-2">
-                {crews.map((c) => (
-                  <li key={c.campaignId} className="flex items-center justify-between gap-3 text-sm">
-                    {String(c.campaignId) === String(currentCampaignId) ? (
-                      <span className="truncate text-fg">
-                        {c.campaignName} <span className="text-xs text-fg-muted">(this campaign)</span>
-                      </span>
-                    ) : (
-                      <Link
-                        to={`/campaigns/${c.campaignId}/team?person=${person.userId}`}
-                        onClick={onLink}
-                        className="truncate text-brand-accent hover:underline"
-                        title={`Open them on ${c.campaignName}’s Team page`}
-                      >
-                        {c.campaignName}
-                      </Link>
-                    )}
-                    <span className="shrink-0 text-fg">{c.coordinatorName || <span className="text-fg-muted">No crew</span>}</span>
-                  </li>
-                ))}
+                {crews.map((c) => {
+                  const cid = String(c.campaignId);
+                  const here = cid === String(currentCampaignId);
+                  // Remove is for a live campaign other than the Team page this panel is on (that row's Remove
+                  // is the panel's own, under More options). An archived campaign is read-only.
+                  const mayRemove = isOrgAdmin && !deleted && !here && c.campaignIsActive === true;
+                  const q = confirmingId === cid ? removeQuestion({ name, campaignName: c.campaignName, crewSize: c.crewSize || 0 }) : null;
+                  return (
+                    <li key={c.campaignId} className="text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        {here ? (
+                          <span className="truncate text-fg">
+                            {c.campaignName} <span className="text-xs text-fg-muted">(this campaign)</span>
+                          </span>
+                        ) : (
+                          <Link
+                            to={`/campaigns/${c.campaignId}/team?person=${person.userId}`}
+                            onClick={onLink}
+                            className="truncate text-brand-accent hover:underline"
+                            title={`Open them on ${c.campaignName}’s Team page`}
+                          >
+                            {c.campaignName}
+                          </Link>
+                        )}
+                        <span className="flex shrink-0 items-center gap-3">
+                          <span className="text-fg">{c.coordinatorName || <span className="text-fg-muted">No crew</span>}</span>
+                          {mayRemove && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // One Remove at a time: a refusal for another campaign mustn't show under this one.
+                                removeMut.reset();
+                                setConfirmingId(cid);
+                              }}
+                              disabled={removeMut.isPending}
+                              className="text-xs font-medium text-danger-fg hover:underline disabled:opacity-50"
+                              aria-label={`Remove ${name} from ${c.campaignName}`}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                      {q && (
+                        <div className="mt-2 rounded-lg border border-danger/30 bg-danger-tint px-3 py-2 text-sm">
+                          <p className="font-medium text-danger-fg">{q.title}</p>
+                          <div className="mt-1 space-y-1 text-fg-muted">
+                            {q.message.split('\n\n').map((para, i) => (
+                              <p key={i}>{para}</p>
+                            ))}
+                          </div>
+                          {removeMut.error && <p className="mt-1 text-danger-fg">{removeMut.error.message}</p>}
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button size="sm" variant="danger" loading={removeMut.isPending} onClick={() => removeMut.mutate(cid)}>
+                              Yes, remove them
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={removeMut.isPending}
+                              onClick={() => {
+                                removeMut.reset();
+                                setConfirmingId(null);
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
+            )}
+            {mayAdd && (
+              <Button size="sm" variant="secondary" className="mt-3" onClick={() => setAddOpen(true)}>
+                Add to campaigns
+              </Button>
             )}
           </div>
         </div>
+      )}
+      {addOpen && (
+        <AddToCampaignsDialog
+          person={person}
+          campaigns={activeCampaigns}
+          flowRef={dialogRef}
+          onClose={() => setAddOpen(false)}
+          onAdded={(answer) => refresh((answer?.campaigns || []).filter((c) => c.result === 'joined').map((c) => c.campaignId))}
+        />
       )}
     </div>
   );

@@ -22,10 +22,10 @@ disclosed subprocessor — DPA §6 + the privacy policy's service-providers para
 | # | Email | When it goes out | Who gets it |
 | --- | --- | --- | --- |
 | 1 | **Password reset** | Someone taps **Forgot password?** on the sign-in page (real, active account only) | That person |
-| 2 | **Invite + set-password link** | An admin creates a **new** user on the Users page (with no campaign picked; a canvasser added with a **Campaign** goes through the Team-page steps, row 3) | The new user |
+| 2 | **Invite + set-password link** (names every campaign they were put on, if any) | An admin adds an address with **no** account yet from the Users page's **Add member** (web) or **+ New** on the phone's **All campaigns** pill — ONE email whatever the number of campaigns checked; a new team lead's names none | The new user |
 | 3 | **Invite + set-password link** (also names the campaign) | A lead/admin adds an address that has **no** account yet, from a campaign's **Team** page | The new canvasser |
-| 4 | **"You've been added"** (no link, no credentials) | An **existing** account joins another org — the Users page link toggle, or a Team-page add whose address turned out to hold an account elsewhere | That person |
-| 5 | **Added to campaign** | A Team-page add of someone already in the org (**By email**, or **From your organization**, which is the `.../assignments` add) — genuinely-new roster rows only | That member |
+| 4 | **"You've been added"** (no link, no credentials; names the campaigns joined, if any) | An **existing** account joins another org — an org-view add (Users page / phone All campaigns) or a Team-page add whose address turned out to hold an account elsewhere | That person |
+| 5 | **Added to campaign** ("You've been added to 3 campaigns" when several) | Someone already in the org is put on a campaign: a Team-page add (**By email**, or **From your organization**, the `.../assignments` add), an org-view add of a colleague, or a person's **Add to campaigns** — ONE email per add, genuinely-new roster rows only, and none while they still hold their first temporary password (their invite is their way in) | That member |
 | 6 | **Welcome + set-password link** | A super admin provisions a new client org with its first admin | That admin |
 | 7 | **Support-access notice** | Doorline staff opens a **new** support-access grant into an org | **Billing admins only** (see below) |
 | 8 | **Wind-down warning** | The nightly sweep finds a canceled org within ~30 days of data deletion — sent once, and the deletion **cannot proceed without it** | **Billing admins only** |
@@ -143,7 +143,10 @@ already sent cannot be recalled, so the fix has to reach *future* mail immediate
 
 ## Send sites (the complete set)
 
-`routes/auth.js` (passwordReset) · `routes/admin/memberships.js` (invite / addedToOrg) ·
+`routes/auth.js` (passwordReset) · `routes/admin/memberships.js` (invite / addedToOrg; and, for the org
+view's add and a profile's Add to campaigns, ONE email per add through
+`services/memberships/joinCampaigns.js` `sendJoinedEmail`, naming every campaign joined — the invite, the
+addedToOrg note, or addedToCampaign with `campaignNames`, which skips `mustChangePassword` holders) ·
 `routes/admin/leadCrew.js` (ONE combined invite/addedToOrg naming the campaign) ·
 `routes/admin/assignments.js` (addedToCampaign — `upsertedCount`-new rows only, skips
 `mustChangePassword` holders) · `routes/superAdmin/organizations.js` (provisioningWelcome) ·
@@ -163,6 +166,12 @@ whether an account exists; there is no such oracle on a demo form, and a silentl
 lost sale — so it follows `resendInvite.js` instead, where the send *is* the request.
 
 ### Role-aware copy — canvassers are pointed at the app, not the console
+
+**Several campaigns, one email (2026-10-30).** The same three templates take `campaignNames` (an array)
+beside `campaignName`; one name reads exactly as before. With several, the invite and the added-to-org note
+say "You've also been added to these campaigns: A, B and C.", and `addedToCampaign` becomes "You've been
+added to 3 campaigns" with the names in the body. An add that puts someone on several campaigns sends one
+email, never one per campaign.
 
 `inviteSetPassword`, `addedToOrg` and `addedToCampaign` take a **`role`**. When it is
 `'canvasser'` they carry an **install block** (both store links + a one-line store-search fallback);

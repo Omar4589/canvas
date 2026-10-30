@@ -762,9 +762,9 @@ are already committed (`aa01027`). In order:
 
    Run any other session's console steps in their own order.
 4. **Phone, staging first** — the delete sheet rides an over-the-air update. On your machine, in `mobile/`:
-   check `git status --short mobile/` prints nothing (an update bundles whatever is on disk), then
-   `npm run ota:staging`, then the staging check below on a staging build, then `git status --short
-   mobile/` again, then `npm run ota:production` from `main`. Until a phone has the update, admins delete
+   check `git status --short .` prints nothing (an update bundles whatever is on disk), then
+   `npm run ota:staging`, then the staging check below on a staging build, then `git status --short .`
+   again, then `npm run ota:production` from `main`. Until a phone has the update, admins delete
    from the web; released phones keep working with this server.
 
 **The staging check (the delete sheet only).** **Staging builds talk to production**, so this is a real
@@ -906,9 +906,9 @@ try a change with the replay first (step 4): `PACE_DOOR_SEC` (15), `PACE_SURVEY_
    Counts per organization only — never a name — and a count under 3 prints as *fewer than 3*. The
    second line shows how to try other numbers: `--door`, `--survey`, `--travel`, `--window`, `--fails`,
    `--visit`, and `--since=<YYYY-MM-DD>`. Nothing is changed.
-5. **Phone, staging.** On your machine, in `mobile/`: check `git status --short mobile/` prints nothing
+5. **Phone, staging.** On your machine, in `mobile/`: check `git status --short .` prints nothing
    (an update bundles whatever is on disk), `npm run ota:staging`, run the device check below, then
-   `git status --short mobile/` again. The same update carries any other session's phone screens; run
+   `git status --short .` again. The same update carries any other session's phone screens; run
    their staging checks too.
 6. **The device check.** **Staging builds talk to production**, so use a test organization:
    - as a super admin, create one from the web console's **New organization** dialog (a trial org; any
@@ -1166,7 +1166,7 @@ them. Leave it unset.
    before going on** — `--apply` builds every missing index.
 7. **Build it:** `npm run migrate:build-indexes -- --apply`. A `✗ Pass:` line mentioning `E11000` means a
    walk list still has two live passes: re-run step 5 (it reports and fixes it), then this step.
-8. **Phone, staging.** On your machine, in `mobile/`: check `git status --short mobile/` prints nothing (an
+8. **Phone, staging.** On your machine, in `mobile/`: check `git status --short .` prints nothing (an
    update bundles whatever is on disk, another session's screens included), `npm run ota:staging`, then the
    **airplane-mode check**:
    - **Setup.** **Staging builds talk to production**, so use a throwaway test campaign in an internal
@@ -1186,6 +1186,54 @@ them. Leave it unset.
 **If late knocks look wrong:** set `LATE_KNOCK_ATTRIBUTION` = `off` — outside field hours unless knocks
 are failing. Knocks already saved keep their pass, and phones keep sending the book (the server simply
 ignores it).
+
+### Release: pick campaigns when you add someone from All campaigns (October 2026)
+
+**+ New** on the phone's **All campaigns** pill and the web Users page's **Add member** now look the email up
+first and put the person on the campaigns you check, each with its own crew (or none); a person's profile
+(phone) and panel (web) get **Add to campaigns** and **Remove**; one email per add names every campaign
+([USERS.md](USERS.md) → *Adding someone to your org*; plan in
+[PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)). Server, web and an over-the-air phone update.
+No native build, no client-version bump, no index build and no console step: every change is an addition,
+and phones without the update keep today's **+ New**.
+
+**To release it, in this order:**
+
+1. **Before committing, on the combined working tree:** every suite CI runs, and `npm run audit:mobile-api`
+   with no argument. It flags `routes/admin/memberships.js` (four new routes, and `crewSize` on `/crews`),
+   `routes/admin/leadCrew.js` (helpers moved to a shared service, and a deleted account refused before any
+   write: an admin gets the same `409 ACCOUNT_DELETED` as before, now with nothing written; a team lead who
+   typed a deleted member's tombstone address gets `ACCOUNT_DELETED` instead of `MEMBER_DEACTIVATED` — no
+   phone branches on either code). It also lists five services under *Could not resolve a mount — check them
+   by hand*: `templates.js`, `createMember.js`, `restampCoordinator.js`, `deleteAccount.js` and
+   `joinCampaigns.js` — additions, or the same answers computed in one pass. Nothing is removed or renamed.
+2. **Deploy server and web from `main`** (**Deploy → Manual deploy**). The web's Add member, the panel's
+   Add to campaigns and Remove, and the Help Center articles go live. If in doubt about indexes,
+   `npm run migrate:build-indexes` (a dry run) in the Run console should list nothing new.
+3. **Web walkthrough, in an internal (Doorline-owned) organization:** add a new canvasser to two campaigns
+   with different crews (the invite names both); add a colleague who worked one of them before (their old
+   crew is picked, and the doors line is right); from a person's panel, **Add to campaigns**, then **Remove**
+   on a campaign where they run a crew (it names how many people are left with no coordinator).
+4. **Phone, staging.** On your machine, in `mobile/`: check `git status --short .` prints nothing (an update
+   bundles whatever is on disk, another session's screens included — and run from `mobile/`, the path is `.`;
+   `mobile/` there looks for `mobile/mobile/` and always prints nothing). Then **check what else under
+   `mobile/` on `main` hasn't reached production yet**: this update carries all of it. AddPersonSheet builds on
+   the people pages' phone code (50e1082), so if the people pages' production update — or the walk-list
+   archive's (7f64b89), or any other — hasn't gone out, it goes out with this one: run their staging checks
+   too. Then `npm run ota:staging`. On a
+   staging phone — **staging builds talk to production**, so use the internal organization and remove the
+   test people afterwards: **+ New** on All campaigns for a new canvasser on two campaigns (tap First name
+   with the keyboard up: the fields stay on screen — check this on an Android phone as well as an iPhone,
+   since only a device shows how Android sizes the sheet around its keyboard), a colleague, a team lead,
+   and a canvasser with no
+   campaign (sign in as them: *You're not on a campaign yet*); then a profile's **Add to campaigns** and
+   **Remove**.
+5. **Phone, production:** in `mobile/`, `git status --short .` again, then `npm run ota:production` from
+   `main`. It publishes everything under `mobile/` on `main`, including the earlier phone work step 4 named.
+6. **A small server deploy** that removes this feature's "(with an app update)" notes from the Help Center:
+   `faq/add-a-canvasser-account.md`, `faq/assign-canvasser-to-campaign.md`, `faq/add-to-several-campaigns.md`
+   and `guides/assigning-canvassers.md`.
+7. **Stamp the deploy and update dates** in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 46.
 
 ### Build database indexes (after a deploy that added one)
 

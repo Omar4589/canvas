@@ -1,7 +1,9 @@
 import rateLimit, { MemoryStore } from 'express-rate-limit';
 
-// Throttles for the campaign Team page's "who owns this email?" lookup
-// (POST /admin/campaigns/:campaignId/crew/resolve).
+// Throttles for the "who owns this email?" lookups: the campaign Team page's
+// (POST /admin/campaigns/:campaignId/crew/resolve) and the org view's (POST /admin/memberships/resolve,
+// docs/PROPOSAL_ADD_TO_CAMPAIGNS.md). Both mount THESE instances, so they share one pair of hourly
+// counters per person; a route that built its own limiters would double the ceiling.
 //
 // WHY THIS EXISTS. The lookup answers, for addresses inside the caller's own organization, "yes —
 // that's Maria Gomez." That is the right answer for the operator who just typed the address, and it

@@ -849,15 +849,18 @@ export const sweepDeletionLocks = async ({ apply = true, now = new Date() } = {}
 // §C3) call this AFTER their last write. Converge, never restore a snapshot: restoring the pre-write
 // state brought back exactly the active admin and billing flag the deletion had just removed.
 // Returns true when the account was deleted (the caller then answers 409 ACCOUNT_DELETED).
-export const convergeIfDeleted = async ({ userId, organizationId, membershipId = null, campaignId = null }) => {
+// `campaignIds` is for a write that put the person on several campaigns at once
+// (services/memberships/joinCampaigns.js); `campaignId` is the one-campaign form.
+export const convergeIfDeleted = async ({ userId, organizationId, membershipId = null, campaignId = null, campaignIds = null }) => {
   const user = await User.findById(userId).select('deletedAt').lean();
   if (!user?.deletedAt) return false;
+  const rosterIds = campaignIds?.length ? campaignIds : campaignId ? [campaignId] : [];
   await Promise.all([
     membershipId
       ? Membership.updateOne({ _id: membershipId }, { $set: { isActive: false, billingAccess: false } })
       : Membership.updateMany({ userId, organizationId }, { $set: { isActive: false, billingAccess: false } }),
     CampaignManager.deleteMany({ userId, organizationId }),
-    campaignId ? CampaignAssignment.deleteMany({ userId, campaignId }) : null,
+    rosterIds.length ? CampaignAssignment.deleteMany({ userId, campaignId: { $in: rosterIds } }) : null,
   ]);
   return true;
 };

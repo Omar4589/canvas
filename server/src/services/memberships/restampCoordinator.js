@@ -175,13 +175,15 @@ export const restampLedgerCoordinator = async ({
 // Group rows by the team they are stamped with, on BOTH ledgers and every kind of row (knocks,
 // surveys, notes, restricted marks). Each team carries its rows on each ledger, its doors (knocks,
 // deduplicated to (household, pass) within the team — the number a person sees) and its latest row,
-// newest team first. One shape for a person (planSources, historyByTeam) and, keyed by person, for the
-// bulk preview (bulkPlan).
-const activityGroupStages = (byUser) => [
+// newest team first. One shape for a person (planSources, historyByTeam), keyed by person for the bulk
+// preview (bulkPlan), and keyed by campaign for one person's history on every campaign at once
+// (historiesByCampaign).
+const activityGroupStages = (byUser, byCampaign = false) => [
   {
     $group: {
       _id: {
         ...(byUser ? { u: '$userId' } : {}),
+        ...(byCampaign ? { c: '$campaignId' } : {}),
         from: { $ifNull: ['$coordinatorId', null] },
         door: { $cond: [{ $in: ['$actionType', KNOCK_ACTIONS] }, { h: '$householdId', p: '$passId' }, null] },
       },
@@ -191,16 +193,20 @@ const activityGroupStages = (byUser) => [
   },
   {
     $group: {
-      _id: { ...(byUser ? { u: '$_id.u' } : {}), from: '$_id.from' },
+      _id: { ...(byUser ? { u: '$_id.u' } : {}), ...(byCampaign ? { c: '$_id.c' } : {}), from: '$_id.from' },
       activities: { $sum: '$rows' },
       doors: { $sum: { $cond: [{ $eq: ['$_id.door', null] }, 0, 1] } },
       latest: { $max: '$latest' },
     },
   },
 ];
-const surveyGroupStage = (byUser) => ({
+const surveyGroupStage = (byUser, byCampaign = false) => ({
   $group: {
-    _id: { ...(byUser ? { u: '$userId' } : {}), from: { $ifNull: ['$coordinatorId', null] } },
+    _id: {
+      ...(byUser ? { u: '$userId' } : {}),
+      ...(byCampaign ? { c: '$campaignId' } : {}),
+      from: { $ifNull: ['$coordinatorId', null] },
+    },
     surveys: { $sum: 1 },
     latest: { $max: '$submittedAt' },
   },
@@ -233,23 +239,51 @@ export const planSources = async ({ organizationId, userId, campaignId, coordina
   return mergeTeams(acts, srvs);
 };
 
-// Everything a person has on this campaign, by the team it counts for today — the Add people step's
+// Everything a person has on each of these campaigns, by the team it counts for today — the add steps'
 // "Pat has 120 doors here from before: 100 on Dana's team, 20 on No team". Desk marks excluded, as
-// everywhere a person's doors are counted. `doors` is the person's own total, deduplicated across
-// teams: a door re-knocked in the same round after a crew change counts once for them, though it
-// counts in each of the two teams' lines.
-export const historyByTeam = async ({ organizationId, userId, campaignId }) => {
+// everywhere a person's doors are counted. `doors` is the person's own total on that campaign,
+// deduplicated across teams: a door re-knocked in the same round after a crew change counts once for
+// them, though it counts in each of the two teams' lines.
+//
+// ONE pass per ledger for every campaign asked about, grouped by campaign: the person index can narrow
+// only by person, so a pass per campaign read their whole history once per campaign (the org view's add
+// asks about every active campaign at once). Returns Map campaignId → { teams, doors }, one entry per
+// campaign asked about, empty where they have nothing.
+export const historiesByCampaign = async ({ organizationId, userId, campaignIds }) => {
+  const ids = (campaignIds || []).map((c) => new mongoose.Types.ObjectId(String(c)));
+  const out = new Map(ids.map((id) => [String(id), { teams: [], doors: 0 }]));
+  if (!ids.length) return out;
   const match = {
     organizationId: new mongoose.Types.ObjectId(String(organizationId)),
-    campaignId: new mongoose.Types.ObjectId(String(campaignId)),
+    campaignId: { $in: ids },
     userId: new mongoose.Types.ObjectId(String(userId)),
   };
   const [acts, srvs, doorAgg] = await Promise.all([
-    CanvassActivity.aggregate([{ $match: { ...match, ...NOT_BULK } }, ...activityGroupStages(false)]).hint(PERSON_ACTIVITY_HINT),
-    SurveyResponse.aggregate([{ $match: match }, surveyGroupStage(false)]).hint(PERSON_SURVEY_HINT),
-    CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK })).hint(PERSON_ACTIVITY_HINT),
+    CanvassActivity.aggregate([{ $match: { ...match, ...NOT_BULK } }, ...activityGroupStages(false, true)]).hint(PERSON_ACTIVITY_HINT),
+    SurveyResponse.aggregate([{ $match: match }, surveyGroupStage(false, true)]).hint(PERSON_SURVEY_HINT),
+    CanvassActivity.aggregate(knocksPipeline({ ...match, ...NOT_BULK }, { byCampaign: true })).hint(PERSON_ACTIVITY_HINT),
   ]);
-  return { teams: mergeTeams(acts, srvs), doors: doorAgg[0]?.knocks || 0 };
+  const byCampaign = (rows) => {
+    const m = new Map();
+    for (const r of rows) {
+      const k = String(r._id.c);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    return m;
+  };
+  const actsBy = byCampaign(acts);
+  const srvsBy = byCampaign(srvs);
+  for (const id of out.keys()) out.set(id, { teams: mergeTeams(actsBy.get(id) || [], srvsBy.get(id) || []), doors: 0 });
+  for (const d of doorAgg) if (out.has(String(d._id))) out.get(String(d._id)).doors = d.knocks || 0;
+  return out;
+};
+
+// One campaign's history: the same passes, asked about one campaign, so every screen gives a campaign
+// the same numbers.
+export const historyByTeam = async ({ organizationId, userId, campaignId }) => {
+  const id = new mongoose.Types.ObjectId(String(campaignId));
+  return (await historiesByCampaign({ organizationId, userId, campaignIds: [id] })).get(String(id));
 };
 
 // The bulk preview (Move to crew…, up to 500 people): per person, what would move, by source team, on

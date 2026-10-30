@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,9 @@ import {
   clearSelectedBooks,
   clearCurrentEffort,
   saveCurrentEffort,
+  loadCurrentUser,
+  loadMemberships,
+  loadActiveOrgId,
 } from '../../lib/cache';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import EntitlementBanner from '../../components/EntitlementBanner';
@@ -41,6 +44,25 @@ export default function CampaignsScreen() {
   });
 
   const { refreshing, onRefresh } = useRefresh([refetch]);
+
+  // What an empty list means depends on who is looking. An org admin or Doorline staff sees every active
+  // campaign (GET /mobile/campaigns), so empty means there are none; anyone else sees only the campaigns
+  // they've been put on, so empty means they aren't on one yet — which happens now that a person can be
+  // added to the organization with no campaign (docs/PROPOSAL_ADD_TO_CAMPAIGNS.md). null until read.
+  const [seesAll, setSeesAll] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([loadCurrentUser(), loadMemberships(), loadActiveOrgId()])
+      .then(([u, ms, orgId]) => {
+        if (!alive) return;
+        const m = (ms || []).find((x) => String(x.organizationId) === String(orgId));
+        setSeesAll(!!u?.isSuperAdmin || m?.role === 'admin');
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Enter a campaign's book picker. An explicit effort (from an expanded card) is
   // persisted first so the books screen opens already scoped to it — its resolver
@@ -200,7 +222,9 @@ export default function CampaignsScreen() {
         {!isLoading && !error && !(data?.campaigns || []).length && (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              No active campaigns yet. Ask your admin to create one.
+              {seesAll === false
+                ? "You're not on a campaign yet. Ask your admin to add you to one."
+                : 'No active campaigns yet. Ask your admin to create one.'}
             </Text>
           </View>
         )}

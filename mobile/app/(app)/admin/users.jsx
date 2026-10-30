@@ -5,18 +5,14 @@ import {
   Pressable,
   ScrollView,
   TextInput,
-  ActivityIndicator,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   Modal,
   AccessibilityInfo,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import PasswordInput from '../../../components/PasswordInput';
 import SectionHeader from '../../../components/SectionHeader';
 import MemberSheet from '../../../components/MemberSheet';
 import AllShownSheet from '../../../components/AllShownSheet';
@@ -26,11 +22,11 @@ import InsetGroup, {
   InsetNoteRow,
 } from '../../../components/InsetGroup';
 import CreateCanvasserSheet from '../../../components/CreateCanvasserSheet';
+import AddPersonSheet from '../../../components/AddPersonSheet';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import { useCampaignArchived } from '../../../lib/useCampaignArchived';
 import { useOutcomeInUse } from '../../../lib/useOutcomeInUse';
 import { useConsoleRole, useConsoleRoleLabel } from '../../../lib/useConsoleRole';
-import { formatUsPhoneInput, isValidTempPassword, tempPasswordProblem } from '../../../lib/validators';
 import { DELETED_ACCOUNT_LABEL, deletionLine } from '../../../lib/memberDeletion';
 import { takeDeletionNotice } from '../../../lib/deletionNotice';
 import { usePausedList } from '../../../lib/pacePauses';
@@ -245,13 +241,23 @@ export default function AdminUsers() {
     }, [])
   );
 
-  const createUser = useMutation({
-    mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
-      setShowCreate(false);
-    },
-  });
+  // After an add from All campaigns: the member list, the person's own campaign reads (their profile stays
+  // mounted once visited, so Open them would show the old Campaigns card), and the roster and crews of every
+  // campaign it put them on (a campaign picked later must show them without a pull to refresh).
+  const refreshAfterOrgAdd = (result) => {
+    qc.invalidateQueries({ queryKey: ['admin', 'memberships'] });
+    const personId = result?.user?.id ? String(result.user.id) : null;
+    if (personId) {
+      qc.invalidateQueries({ queryKey: ['admin', 'membership-campaigns', personId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'member-crews', personId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'membership-campaign-history', personId] });
+    }
+    for (const c of result?.campaigns || []) {
+      if (c.result !== 'joined') continue;
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', c.campaignId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', c.campaignId] });
+    }
+  };
   // Everything a change to this campaign's people touches: the lists, the roster, the crews, and any
   // crew check a member sheet holds.
   const refreshPeople = () => {
@@ -782,245 +788,24 @@ export default function AdminUsers() {
         </Pressable>
       </Modal>
 
-      {/* Org-level create (no campaign selected — admins only; role picker, no coordinator:
-          a crew is a per-campaign fact, there is no campaign here to be on a crew of). */}
-      <Modal
-        transparent
-        visible={showCreate && !cId}
-        animationType="slide"
-        onRequestClose={() => setShowCreate(false)}
-      >
-        <KeyboardAvoidingView
-          style={{ flex: 1, justifyContent: 'flex-end' }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={() => setShowCreate(false)}
-          >
-            <Pressable
-              style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}
-              onPress={(e) => e.stopPropagation()}
-            >
-              <CreateUserForm
-                onSubmit={(form) => createUser.mutate(form)}
-                onCancel={() => setShowCreate(false)}
-                submitting={createUser.isPending}
-                error={createUser.error}
-              />
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
-  );
-}
-
-function CreateUserForm({ onSubmit, onCancel, submitting, error }) {
-  const { colors, type } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState('canvasser');
-  const [linkExisting, setLinkExisting] = useState(false);
-
-  // The email already has a global account — flip to the link path so the admin can add
-  // them without a duplicate (matches the web console's auto-check on this error).
-  useEffect(() => {
-    if (error?.data?.code === 'EMAIL_EXISTS_USE_LINK') setLinkExisting(true);
-  }, [error]);
-
-  // The temp password is OPTIONAL. Blank → the server generates a throwaway nobody sees and the
-  // new member sets their own via the emailed set-password link; only a TYPED one must pass min-8.
-  const valid = linkExisting
-    ? !!email.trim()
-    : firstName.trim() && lastName.trim() && email.trim() && (password === '' || isValidTempPassword(password));
-
-  return (
-    <ScrollView
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={styles.formTitle}>
-        {linkExisting ? 'Link existing user' : 'New user'}
-      </Text>
-
-      <Pressable
-        onPress={() => setLinkExisting((v) => !v)}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: spacing.sm,
-          marginBottom: spacing.md,
-        }}
-      >
-        <View
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            borderWidth: 1,
-            borderColor: linkExisting ? colors.brand : colors.border,
-            backgroundColor: linkExisting ? colors.brand : 'transparent',
-            alignItems: 'center',
-            justifyContent: 'center',
+      {/* All campaigns (admins only): who the email belongs to first, then a role and the campaigns to put
+          them on, each with its own coordinator — or none, for the organization only
+          (docs/PROPOSAL_ADD_TO_CAMPAIGNS.md). It used to add them to the organization on no campaign. */}
+      {showCreate && !cId ? (
+        <AddPersonSheet
+          campaigns={activeCampaigns}
+          onClose={() => setShowCreate(false)}
+          onAdded={refreshAfterOrgAdd}
+          onOpenPerson={(userId) => {
+            setShowCreate(false);
+            // No second refresh here: the add's own (refreshAfterOrgAdd) is already out, and invalidating again
+            // would cancel and restart it. Let the sheet finish sliding away before the profile opens over it.
+            clearTimeout(openSheetTimer.current);
+            openSheetTimer.current = setTimeout(() => router.push(`/(app)/admin/users/${userId}`), 450);
           }}
-        >
-          {linkExisting && (
-            <Text style={{ color: colors.textInverse, fontWeight: '700', fontSize: 12 }}>
-              ✓
-            </Text>
-          )}
-        </View>
-        <Text style={{ ...type.caption, color: colors.textPrimary, flex: 1 }}>
-          Existing user (by email — link them to this org)
-        </Text>
-      </Pressable>
-
-      {!linkExisting && (
-        <>
-          <Text style={styles.formLabel}>First name</Text>
-          <TextInput
-            value={firstName}
-            onChangeText={setFirstName}
-            autoCapitalize="words"
-            placeholder="Jane"
-            placeholderTextColor={colors.textMuted}
-            style={styles.textInput}
-          />
-
-          <Text style={styles.formLabel}>Last name</Text>
-          <TextInput
-            value={lastName}
-            onChangeText={setLastName}
-            autoCapitalize="words"
-            placeholder="Doe"
-            placeholderTextColor={colors.textMuted}
-            style={styles.textInput}
-          />
-        </>
-      )}
-
-      <Text style={styles.formLabel}>Email</Text>
-      <TextInput
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="email-address"
-        placeholder="jane@example.com"
-        placeholderTextColor={colors.textMuted}
-        style={styles.textInput}
-      />
-
-      {!linkExisting && (
-        <>
-          <Text style={styles.formLabel}>
-            Phone <Text style={{ color: colors.textMuted }}>(optional)</Text>
-          </Text>
-          <TextInput
-            value={phone}
-            onChangeText={(t) => setPhone(formatUsPhoneInput(t))}
-            keyboardType="phone-pad"
-            placeholder="(555) 123-4567"
-            placeholderTextColor={colors.textMuted}
-            style={styles.textInput}
-          />
-
-          <Text style={styles.formLabel}>Temporary password (optional)</Text>
-          <PasswordInput
-            value={password}
-            onChangeText={setPassword}
-            autoComplete="new-password"
-            placeholder="Leave blank to email an invite"
-          />
-          {password.length > 0 && tempPasswordProblem(password) && (
-            <Text style={{ color: colors.danger, fontSize: 12, marginTop: spacing.xs }}>
-              {tempPasswordProblem(password)}
-            </Text>
-          )}
-          <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.xs }}>
-            Leave blank to let them set their own password via the emailed invite (recommended).
-            Type one only if they can’t receive email.
-          </Text>
-        </>
-      )}
-
-      <Text style={styles.formLabel}>Role</Text>
-      <View style={styles.roleRow}>
-        {[
-          { v: 'canvasser', l: 'Canvasser' },
-          { v: 'admin', l: 'Admin' },
-        ].map((opt) => {
-          const active = role === opt.v;
-          return (
-            <Pressable
-              key={opt.v}
-              onPress={() => setRole(opt.v)}
-              style={[styles.roleOption, active && styles.roleOptionActive]}
-            >
-              <Text
-                style={[
-                  styles.roleOptionText,
-                  active && styles.roleOptionTextActive,
-                ]}
-              >
-                {opt.l}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error.message}</Text>
-        </View>
-      )}
-
-      <View style={styles.formButtons}>
-        <Pressable
-          onPress={onCancel}
-          style={[styles.formBtn, styles.formBtnSecondary]}
-        >
-          <Text style={styles.formBtnSecondaryText}>Cancel</Text>
-        </Pressable>
-        <Pressable
-          onPress={() =>
-            onSubmit(
-              linkExisting
-                ? { email: email.trim(), role, linkExisting: true }
-                : {
-                    firstName: firstName.trim(),
-                    lastName: lastName.trim(),
-                    email: email.trim(),
-                    phone: phone.trim() || undefined,
-                    password,
-                    role,
-                    linkExisting: false,
-                  }
-            )
-          }
-          disabled={!valid || submitting}
-          style={[
-            styles.formBtn,
-            styles.formBtnPrimary,
-            { opacity: valid && !submitting ? 1 : 0.5 },
-          ]}
-        >
-          {submitting ? (
-            <ActivityIndicator color={colors.textInverse} />
-          ) : (
-            <Text style={styles.formBtnPrimaryText}>
-              {linkExisting ? 'Link user' : 'Create'}
-            </Text>
-          )}
-        </Pressable>
-      </View>
-    </ScrollView>
+        />
+      ) : null}
+    </SafeAreaView>
   );
 }
 
@@ -1181,83 +966,5 @@ function makeStyles(t) {
     textAlign: 'center',
   },
   actionCancel: { borderBottomWidth: 0, marginTop: spacing.xs },
-
-  formSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
-    maxHeight: '90%',
-  },
-  formTitle: { ...type.h2, fontSize: 18, marginBottom: 4 },
-  formLabel: {
-    ...type.caption,
-    color: colors.textPrimary,
-    fontWeight: '600',
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
-  },
-  textInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    fontSize: 16,
-    color: colors.textPrimary,
-    backgroundColor: colors.card,
-  },
-  roleRow: { flexDirection: 'row', gap: spacing.sm },
-  roleOption: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  roleOptionActive: {
-    borderColor: colors.brand,
-    backgroundColor: colors.brandTint,
-  },
-  roleOptionText: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
-  roleOptionTextActive: { color: colors.brand, fontWeight: '700' },
-
-  errorBox: {
-    marginTop: spacing.md,
-    backgroundColor: colors.dangerBg,
-    padding: spacing.md,
-    borderRadius: radius.md,
-  },
-  errorText: { color: colors.danger, fontSize: 14 },
-
-  formButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-  },
-  formBtn: {
-    flex: 1,
-    paddingVertical: spacing.md + 2,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  formBtnPrimary: { backgroundColor: colors.brand },
-  formBtnPrimaryText: {
-    color: colors.textInverse,
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  formBtnSecondary: {
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  formBtnSecondaryText: {
-    color: colors.textPrimary,
-    fontWeight: '600',
-    fontSize: 15,
-  },
   });
 }

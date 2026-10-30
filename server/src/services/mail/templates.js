@@ -157,6 +157,30 @@ function greeting(firstName) {
   return firstName ? `Hi ${esc(firstName)},` : 'Hi,';
 }
 
+// The campaigns an email names. Most callers pass one `campaignName`; an add that put someone on several
+// campaigns at once passes `campaignNames` (services/memberships/joinCampaigns.js), so they get ONE email
+// naming them all instead of one email per campaign.
+const campaignList = (campaignName, campaignNames) =>
+  (Array.isArray(campaignNames) ? campaignNames : campaignName ? [campaignName] : []).filter(Boolean);
+
+// 'a' · 'a and b' · 'a, b and c'
+const joinAnd = (items) =>
+  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+// The invite's and the added-to-org note's campaign line. One campaign reads exactly as it always has.
+const alsoAddedHtml = (names) =>
+  names.length === 1
+    ? para(`You've also been added to the <strong>${esc(names[0])}</strong> campaign.`)
+    : names.length > 1
+      ? para(`You've also been added to these campaigns: ${joinAnd(names.map((n) => `<strong>${esc(n)}</strong>`))}.`)
+      : '';
+const alsoAddedText = (names) =>
+  names.length === 1
+    ? [`You've also been added to the ${names[0]} campaign.`]
+    : names.length > 1
+      ? [`You've also been added to these campaigns: ${joinAnd(names)}.`]
+      : [];
+
 // ---- templates (exact set) ----
 
 export function passwordReset({ firstName, resetUrl }) {
@@ -183,12 +207,11 @@ export function passwordReset({ firstName, resetUrl }) {
 
 // `role` decides whether the recipient is pointed at the app or the console. Omitting it renders
 // the console version — see isFieldRole().
-export function inviteSetPassword({ firstName, orgName, campaignName, setPasswordUrl, role }) {
+export function inviteSetPassword({ firstName, orgName, campaignName, campaignNames, setPasswordUrl, role }) {
   const subject = `Set your password for ${orgName} on Doorline`;
   const field = isFieldRole(role);
-  const campaignLineHtml = campaignName
-    ? para(`You've also been added to the <strong>${esc(campaignName)}</strong> campaign.`)
-    : '';
+  const names = campaignList(campaignName, campaignNames);
+  const campaignLineHtml = alsoAddedHtml(names);
   const html = layout(
     heading(`You've been added to ${esc(orgName)}`) +
     para(`${greeting(firstName)} you've been added to <strong>${esc(orgName)}</strong> on Doorline.`) +
@@ -202,7 +225,7 @@ export function inviteSetPassword({ firstName, orgName, campaignName, setPasswor
   );
   const text = [
     `${firstName ? `Hi ${firstName},` : 'Hi,'} you've been added to ${orgName} on Doorline.`,
-    ...(campaignName ? [`You've also been added to the ${campaignName} campaign.`] : []),
+    ...alsoAddedText(names),
     '',
     'Set your password to get started (this link is valid for 72 hours):',
     setPasswordUrl,
@@ -215,12 +238,11 @@ export function inviteSetPassword({ firstName, orgName, campaignName, setPasswor
   return { subject, html, text };
 }
 
-export function addedToOrg({ firstName, orgName, campaignName, role }) {
+export function addedToOrg({ firstName, orgName, campaignName, campaignNames, role }) {
   const subject = `You've been added to ${orgName} on Doorline`;
   const field = isFieldRole(role);
-  const campaignLineHtml = campaignName
-    ? para(`You've also been added to the <strong>${esc(campaignName)}</strong> campaign.`)
-    : '';
+  const names = campaignList(campaignName, campaignNames);
+  const campaignLineHtml = alsoAddedHtml(names);
   const html = layout(
     heading(`You've been added to ${esc(orgName)}`) +
     para(`${greeting(firstName)} your Doorline account now has access to <strong>${esc(orgName)}</strong>.`) +
@@ -233,7 +255,7 @@ export function addedToOrg({ firstName, orgName, campaignName, role }) {
   );
   const text = [
     `${firstName ? `Hi ${firstName},` : 'Hi,'} your Doorline account now has access to ${orgName}.`,
-    ...(campaignName ? [`You've also been added to the ${campaignName} campaign.`] : []),
+    ...alsoAddedText(names),
     '',
     field
       ? 'Sign in with your existing email and password — no new credentials needed.'
@@ -245,8 +267,13 @@ export function addedToOrg({ firstName, orgName, campaignName, role }) {
   return { subject, html, text };
 }
 
-export function addedToCampaign({ firstName, orgName, campaignName, role }) {
-  const subject = `You've been added to ${campaignName}`;
+// One campaign reads exactly as it always has. Several (an add that put someone on more than one at
+// once) are one email: "You've been added to 3 campaigns", then the names.
+export function addedToCampaign({ firstName, orgName, campaignName, campaignNames, role }) {
+  const names = campaignList(campaignName, campaignNames);
+  const several = names.length > 1;
+  const title = several ? `You've been added to ${names.length} campaigns` : `You've been added to ${names[0] || ''}`;
+  const subject = title;
   const field = isFieldRole(role);
   // "start canvassing" was the most wrong-footed line in the whole set: it named the action and
   // then pointed nowhere — a canvasser cannot canvass from the web console at all.
@@ -254,13 +281,19 @@ export function addedToCampaign({ firstName, orgName, campaignName, role }) {
     ? 'Sign in with your existing email and password to start canvassing.'
     : 'Sign in to Doorline with your existing email and password.';
   const html = layout(
-    heading(`You've been added to ${esc(campaignName)}`) +
-    para(`${greeting(firstName)} you've been added to the <strong>${esc(campaignName)}</strong> campaign in <strong>${esc(orgName)}</strong> on Doorline.`) +
+    heading(several ? `You've been added to ${names.length} campaigns` : `You've been added to ${esc(names[0] || '')}`) +
+    para(
+      several
+        ? `${greeting(firstName)} you've been added to these campaigns in <strong>${esc(orgName)}</strong> on Doorline: ${joinAnd(names.map((n) => `<strong>${esc(n)}</strong>`))}.`
+        : `${greeting(firstName)} you've been added to the <strong>${esc(names[0] || '')}</strong> campaign in <strong>${esc(orgName)}</strong> on Doorline.`
+    ) +
     para(signIn) +
     (field ? appLinks() : '')
   );
   const text = [
-    `${firstName ? `Hi ${firstName},` : 'Hi,'} you've been added to the ${campaignName} campaign in ${orgName} on Doorline.`,
+    several
+      ? `${firstName ? `Hi ${firstName},` : 'Hi,'} you've been added to these campaigns in ${orgName} on Doorline: ${joinAnd(names)}.`
+      : `${firstName ? `Hi ${firstName},` : 'Hi,'} you've been added to the ${names[0] || ''} campaign in ${orgName} on Doorline.`,
     '',
     signIn,
     ...(field ? appLinksText() : []),

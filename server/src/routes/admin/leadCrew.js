@@ -28,7 +28,8 @@ import {
   finishItOffered,
   CREW_JOB,
 } from '../../services/memberships/setCoordinator.js';
-import { coordinatorPreviewBody, historyByTeam, bulkPlan } from '../../services/memberships/restampCoordinator.js';
+import { coordinatorPreviewBody, bulkPlan } from '../../services/memberships/restampCoordinator.js';
+import { campaignHistory, namedSources, coordinatorChoices } from '../../services/memberships/joinCampaigns.js';
 import { mapWithLimit } from '../../utils/mapWithLimit.js';
 import {
   isLastBillingAdmin,
@@ -132,7 +133,7 @@ router.get('/', async (req, res, next) => {
     const crewByUser = new Map(
       roster.map((r) => [String(r.userId), r.coordinatorId ? String(r.coordinatorId) : null])
     );
-    const [memberships, eligibleCoordinators] = await Promise.all([
+    const [memberships, coordinators] = await Promise.all([
       Membership.find({
         organizationId: campaign.organizationId,
         isActive: true,
@@ -145,14 +146,9 @@ router.get('/', async (req, res, next) => {
       // active admin or lead in the org (services/memberships/createMember.js), and managing a
       // campaign deliberately does not put you on its roster. Derive the picker from the same rule
       // the write enforces, or the crew dropdown collapses to "nobody" on a campaign whose lead
-      // doesn't walk it. Admins and leads only — never the canvasser body of the org.
-      Membership.find({
-        organizationId: campaign.organizationId,
-        isActive: true,
-        role: { $in: ['admin', 'lead'] },
-      })
-        .populate({ path: 'userId', select: 'firstName lastName isActive' })
-        .lean(),
+      // doesn't walk it. Admins and leads only — never the canvasser body of the org. The org view's
+      // add reads the same list (services/memberships/joinCampaigns.js coordinatorChoices).
+      coordinatorChoices(campaign.organizationId),
     ]);
     res.json({
       members: memberships
@@ -172,14 +168,7 @@ router.get('/', async (req, res, next) => {
         })),
       // Name and role only — no email. This is a list of who can be picked as a coordinator, not a
       // directory, and it is the one org-level fact this endpoint still answers.
-      coordinators: eligibleCoordinators
-        .filter((m) => m.userId && m.userId.isActive)
-        .map((m) => ({
-          id: String(m.userId._id),
-          firstName: m.userId.firstName,
-          lastName: m.userId.lastName,
-          role: m.role,
-        })),
+      coordinators,
     });
   } catch (err) {
     next(err);
@@ -200,27 +189,9 @@ router.get('/', async (req, res, next) => {
 // accounts belonging to other customers. The `outside` body is byte-identical for every address.
 const resolveSchema = z.object({ email: memberIdentityShape.email });
 
-// A named person's doors on THIS campaign, by the team they count for today, newest team first, so the
-// add step can say "120 doors here from before: 100 on Dana's team" and pre-pick the newest team when
-// its coordinator can still run a crew (`canLead`, the same rule resolveCoordinatorId enforces).
-const campaignHistory = async ({ orgId, campaignId, userId }) => {
-  const history = await historyByTeam({ organizationId: orgId, userId, campaignId });
-  const teams = history.teams.filter((t) => t.doors > 0);
-  const ids = teams.map((t) => t.coordinatorId).filter(Boolean);
-  const [people, leaders] = await Promise.all([
-    ids.length ? User.find({ _id: { $in: ids } }, 'firstName lastName').lean() : [],
-    ids.length ? Membership.find({ organizationId: orgId, userId: { $in: ids }, isActive: true, role: { $in: ['admin', 'lead'] } }, 'userId').lean() : [],
-  ]);
-  const nameOf = new Map(people.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
-  const canLead = new Set(leaders.map((m) => String(m.userId)));
-  return {
-    doors: history.doors,
-    sources: teams.map((t) => {
-      const id = t.coordinatorId ? String(t.coordinatorId) : null;
-      return { coordinatorId: id, name: id ? nameOf.get(id) || 'Unknown' : null, doors: t.doors, canLead: id ? canLead.has(id) : false };
-    }),
-  };
-};
+// A named person's doors on THIS campaign come from campaignHistory (services/memberships/joinCampaigns.js),
+// the same function the org view's lookup runs for every campaign, so both screens give one campaign the
+// same numbers.
 
 router.post('/resolve', ...crewResolveLimiters, async (req, res, next) => {
   try {
@@ -259,17 +230,7 @@ router.post('/resolve', ...crewResolveLimiters, async (req, res, next) => {
 // has one, we attach the real person and drop what was typed on the floor — overwriting a
 // stranger's name would be a lie, and setting their password would be a takeover (the per-user
 // password reaches every org they belong to; docs/PRIVACY_VERIFICATION.md item 14).
-// Names for the teams a person's earlier doors came from, for an answer's `restamp.sources`.
-const namedSources = async (sources) => {
-  const ids = (sources || []).map((x) => x.coordinatorId).filter(Boolean);
-  const people = ids.length ? await User.find({ _id: { $in: ids } }, 'firstName lastName').lean() : [];
-  const nameOf = new Map(people.map((u) => [String(u._id), `${u.firstName} ${u.lastName}`.trim()]));
-  return (sources || []).map((x) => {
-    const id = x.coordinatorId ? String(x.coordinatorId) : null;
-    return { coordinatorId: id, name: id ? nameOf.get(id) || 'Unknown' : null, doors: x.doors || 0 };
-  });
-};
-
+// The answer's `restamp.sources` are named by namedSources (services/memberships/joinCampaigns.js).
 router.post('/', async (req, res, next) => {
   try {
     const campaign = await loadOwnedCampaign(req);
@@ -281,6 +242,18 @@ router.post('/', async (req, res, next) => {
 
     // 1. Who the address belongs to, here.
     const found = await resolveEmailInOrg({ orgId, campaignId: campaign._id, email: data.email });
+    // A deleted member's switched-off membership still resolves (their tombstone address). Refuse it BEFORE
+    // any write: switching them on and joining would move their earlier doors to the crew picked, and the
+    // convergence after the last write undoes the roster and the membership but never the ledger — a
+    // departure must never move doors (services/memberships/restampCoordinator.js, the 104-door rule).
+    if (found.outcome !== 'outside' && found.user.deletedAt) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
+    // NOT checked here, unlike the org view's add: newAccountProblem (createMember.js). Released apps (the July
+    // store builds, the legacy app) link an existing account with the email alone, no name, so requiring a
+    // name for every outside address would break that link for an account at another customer. Until a
+    // client-version gate retires those builds, a request with no name is still refused only when the
+    // address has no account (docs/PRIVACY_VERIFICATION.md item 46(h)).
 
     // 2. The crew, validated before anything is written. Only a NAMED person gets the
     // can't-be-your-own-coordinator check: for an `outside` address the check would have to use the

@@ -65,9 +65,7 @@ export const movedReport = (first, restamp, toName) => {
   return `${what} moved${from.length ? ` from ${andList(from)}` : ''} to ${to}.`;
 };
 
-// Typed details for someone who already has an account.
-export const typedAnything = (typed) =>
-  !!(typed && (typed.firstName?.trim() || typed.lastName?.trim() || typed.phone?.trim() || typed.password));
+// Typed details for someone who already has an account (the Done step of an add that attached them).
 export const typedIgnoredLine = (first) => `${first} already has an account, so what you typed wasn’t used.`;
 
 // A 429 from the lookup, with the limiter's wait.

@@ -1091,16 +1091,18 @@ bug. Reproduced end to end, then fixed, in
 [test/perCampaignCrews.int.test.js](../server/test/perCampaignCrews.int.test.js) (two campaigns in
 one org — the shape no other suite builds).
 
-**Setting a crew happens in exactly ONE place:** a campaign's **Team tab**
+**Changing someone's crew happens in exactly ONE place:** a campaign's **Team tab**
 ([CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) → `PATCH
 /admin/campaigns/:campaignId/crew/:userId/coordinator`), where the confirmation quotes *that
 campaign's* door count from `previewRestamp` — the same filter the write uses, so the number
 promised is the number that moves. Mobile's campaign **Team** screen reads the crew and adds people
-to the campaign, but does not change a coordinator. The org **Users** page cannot set one — a single
-dropdown cannot be true for somebody on two campaigns — and instead shows a **read-only list, one
-row per campaign**, each linking to that campaign's Team tab
-(`GET /admin/memberships/:userId/crews`). It also lost its Coordinator column, its coordinator
-filter, and the coordinator field on the add-member form. (`PATCH /admin/memberships/:userId` still
+to the campaign, but does not change a coordinator. The org **Users** page cannot change one — a single
+dropdown cannot be true for somebody on two campaigns — and instead lists **one row per campaign**,
+each linking to that campaign's Team tab (`GET /admin/memberships/:userId/crews`); it has no
+Coordinator column or coordinator filter. A crew is also picked whenever someone is put ON a campaign —
+including, since 2026-10-30, from the Users page's Add member and a person's **Add to campaigns**, one
+crew per campaign — through `joinCampaignCrew`, the same choke point, so their earlier doors there move
+with them ([PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)). (`PATCH /admin/memberships/:userId` still
 *accepts* a `coordinatorId` and drops it on the floor, so an older client gets a clean no-op rather
 than writing a field that no longer means anything.)
 

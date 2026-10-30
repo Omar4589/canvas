@@ -612,9 +612,9 @@ changed.
 - **The profile:** the newest 5 doors with **Show more** (10 at a time); *Never signed in* or *No
   sign-in recorded* instead of a blank last login; the buttons for their state near the top; no
   temporary password or resend on your own profile; **Managed by Doorline staff** for a staff account.
-  Its **Campaigns** list is read-only — each row opens Users on that campaign, where assigning and
-  unassigning happen. For a team lead the totals read **On your campaigns** and leave out miles walked
-  (miles join one campaign's doors to the next, which reads wrong once other campaigns are left out).
+  Its **Campaigns** list opens Users on each campaign; since 2026-10-30 it also has **Remove** and **Add
+  to campaigns** (next section). For a team lead the totals read **On your campaigns** and leave out miles
+  walked (miles join one campaign's doors to the next, which reads wrong once other campaigns are left out).
 
 **Part 2 — Technical reference.** The list rules are pure modules, each with a `node:test` file:
 [lib/usersHub.js](../mobile/lib/usersHub.js) (rows from `GET /admin/memberships` and the roster, status
@@ -641,6 +641,47 @@ assign is out — the ×, the backdrop, Back or any of its links — and the lis
 from the mutation itself (`onSettled`), so they would even if it had gone. A change waits about 2 s for
 its second pass. The all-shown sheet aborts its requests when it closes,
 and its reads are TanStack queries with an abort signal.
+
+### Adding someone from All campaigns, and a profile's campaigns (admins, 2026-10-30)
+
+**Part 1 — For everyone.** **+ New** on the **All campaigns** pill used to add the person to your
+organization on no campaign, with nowhere to pick one, and their profile couldn't add them to one either
+([PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)). Now:
+
+- **+ New on All campaigns asks for the email first**, like a campaign's pill. A **new person** gets their
+  name, phone, an optional temporary password and a **role**: Canvasser (a list of your active campaigns,
+  nothing checked to start, each checked one with **its own coordinator**), **Team lead** (the campaigns they
+  run — new on the phone) or Admin (no list). Campaigns are optional: leave them unchecked for the
+  organization only. **Someone already in your organization** sees the same list with their campaigns marked
+  **on it**, and a campaign where they have doors from before says how many and picks their old coordinator
+  when it can still run a crew. A **switched-off** account gets **Switch on**, with or without campaigns. The
+  result says who landed, where, and what moved, with **Open {name}** (their profile).
+- **The profile's Campaigns card:** **Remove** beside each campaign asks the member sheet's question first
+  (their books there go back to the pool; every door they knocked still counts; if they run a crew there,
+  how many people it leaves with no coordinator). **+ Add to campaigns** under the list opens the campaigns
+  they aren't on, a coordinator for each one checked, and their doors there from before; one tap adds them
+  to all of them. No Add for a switched-off account; neither for a deleted one.
+- **One email per add**, naming every campaign: a new person's invite, or one "added to" email for someone
+  already here — none for someone who hasn't set their password yet (their invite is still their way in).
+- **A canvasser on no campaign** reads "You're not on a campaign yet. Ask your admin to add you to one." on
+  the campaign list, instead of being told to ask for a campaign to be created.
+- **+ New on a campaign's pill is unchanged.**
+
+**Part 2 — Technical reference.** [components/AddPersonSheet.jsx](../mobile/components/AddPersonSheet.jsx)
+(`POST /admin/memberships/resolve`, then `POST /admin/memberships/by-email`; it reuses
+[lib/addByEmail.js](../mobile/lib/addByEmail.js)'s reducer, `backAction` and 429 wording) replaces the
+hub's old `CreateUserForm`, which called `POST /admin/memberships` with an Existing-user checkbox.
+[components/AddToCampaignsSheet.jsx](../mobile/components/AddToCampaignsSheet.jsx) reads `GET
+/admin/memberships/:userId/campaign-history` (a TanStack query with an abort signal) and posts `POST
+…/:userId/campaigns`. Both lay out [components/CampaignPicks.jsx](../mobile/components/CampaignPicks.jsx)
+(`picks` = `{ [campaignId]: coordinatorId | '' }`, one coordinator list open at a time, `prePickFor`).
+Their steps, button labels, request body and result sentences are
+[lib/addToCampaigns.js](../mobile/lib/addToCampaigns.js), the SAME file as the web's, pinned by
+`client/src/lib/addToCampaigns.parity.test.js`. The profile's Remove is `DELETE
+/admin/campaigns/:id/assignments/:userId` with `removeQuestion` (the member sheet's words) and the
+`crewSize` the `/crews` read now carries. The campaign list's empty line reads the cached membership role
+(`loadMemberships`), because `useConsoleRole` calls a canvasser `admin`. Server side: [USERS.md](USERS.md)
+→ *Campaign roster & assignment gating*.
 
 ### Deleting a member's account (admins, 2026-10-24)
 

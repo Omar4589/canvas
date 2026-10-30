@@ -57,4 +57,4 @@ Four things soften that:
 
 **If two people change the same person at once**, the second is told instead of silently winning: *"Another change for Sam is still finishing — try again in a minute or two"*, or *"Their crew changed since you looked."*
 
-The org **Users** page no longer sets crews. Open a member's profile there and you'll see a read-only list instead — one row per campaign they're on, the crew they're on there, and a link straight through to that campaign's Team tab. A single dropdown on someone's org profile couldn't be right for a canvasser working two campaigns under two different leads, which is exactly why it's gone.
+The org **Users** page doesn't change anyone's crew. Open a member's profile there and you'll see a list instead — one row per campaign they're on, the crew they're on there, and a link straight through to that campaign's Team tab, where their crew is changed. (An org admin can also add them to more campaigns from there, picking a crew for each, or take them off one.) A single dropdown on someone's org profile couldn't be right for a canvasser working two campaigns under two different leads, which is exactly why it's gone.

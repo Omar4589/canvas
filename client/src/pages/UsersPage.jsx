@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
-import PasswordInput from '../components/PasswordInput.jsx';
 import Pager from '../components/Pager.jsx';
 import PersonPanel from '../components/people/PersonPanel.jsx';
-import AddPeopleDialog from '../components/team/AddPeopleDialog.jsx';
+import AddPersonDialog from '../components/people/AddPersonDialog.jsx';
 import CampaignChips from '../components/integrations/CampaignChips.jsx';
-import { tempPasswordProblem } from '../lib/validators.js';
 import { DELETED_ACCOUNT, deletionLine } from '../lib/memberDeletion.js';
 import { pausedUserIds } from '../lib/pacePause.js';
 import { personFromMember } from '../lib/personAccess.js';
@@ -24,7 +22,6 @@ import {
   EmptyState,
   SkeletonRows,
   Input,
-  PhoneInput,
   Select,
   IconSearch,
   IconChevronRight,
@@ -34,20 +31,9 @@ import {
 // The organization's members (/users; docs/PROPOSAL_PEOPLE_PAGES.md §F). 25 to a page, filtered by role,
 // status and campaign, with the filters, sort, page and the open person in the address (replace, so Back
 // leaves the page; lib/listParams.js). Clicking a person opens the person panel — the same one every
-// campaign's Team page uses. Add member adds someone to the organization; for a canvasser it can also
-// take a Campaign, which hands what was typed to that campaign's add-by-email steps (with the Crew choice
-// and their confirmations). ?return= (from a campaign's setup) keeps its "‹ Back to setup".
-
-const EMPTY_FORM = {
-  firstName: '',
-  lastName: '',
-  email: '',
-  phone: '',
-  password: '',
-  role: 'canvasser',
-  managedCampaignIds: [],
-  campaignId: '',
-};
+// campaign's Team page uses. Add member asks for the email first, then a role and, for a canvasser, the
+// campaigns to put them on with a crew for each — or none (components/people/AddPersonDialog.jsx,
+// docs/PROPOSAL_ADD_TO_CAMPAIGNS.md). ?return= (from a campaign's setup) keeps its "‹ Back to setup".
 
 const ROLE_LABEL = { admin: 'Admin', lead: 'Team lead', canvasser: 'Canvasser' };
 
@@ -130,14 +116,13 @@ function BillingToggle({ on, pending, onToggle, label }) {
 
 const UsersPage = () => {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const { canViewBilling } = useAuth();
   const orgTz = useOrgTimeZone();
   const [params, setParams] = useListParams(DEFAULTS);
   const returnTo = params.return || null; // set when arriving from a campaign's setup flow
   const personId = params.person || null;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ['memberships'],
     queryFn: ({ signal }) => api('/admin/memberships', { signal }),
   });
@@ -153,15 +138,8 @@ const UsersPage = () => {
   const pausedIds = useMemo(() => pausedUserIds(pausedQ.data), [pausedQ.data]);
   const campaigns = campaignsQ.data?.campaigns || [];
 
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [emailLookup, setEmailLookup] = useState(false);
-  const [formError, setFormError] = useState('');
-  // Add member with a Campaign hands over to that campaign's add-by-email steps.
-  const [handover, setHandover] = useState(null);
-  // Set only when adding a member actually moved existing ledger rows onto a team (a returning
-  // canvasser whose knocks outlived their old membership).
-  const [restampNotice, setRestampNotice] = useState('');
+  // Add member: the email-first window (components/people/AddPersonDialog.jsx).
+  const [showAdd, setShowAdd] = useState(false);
   // Set by the panel after Delete account ("Sam Rivera's account was deleted.").
   const [deleteNotice, setDeleteNotice] = useState('');
 
@@ -177,31 +155,6 @@ const UsersPage = () => {
     }, 150);
     return () => clearTimeout(t);
   }, [search, params.q, setParams]);
-
-  const addMember = useMutation({
-    mutationFn: (body) => api('/admin/memberships', { method: 'POST', body }),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['memberships'] });
-      // Linking a RETURNING canvasser can bring ledger history back with them: removing someone
-      // from the org deletes their Membership but keeps their knocks, so re-adding them re-stamps
-      // those rows onto their new coordinator. This flash is the only signal the admin gets that
-      // the person they just added arrived with work attached.
-      const moved = res?.restamp?.activities || 0;
-      if (moved) {
-        qc.invalidateQueries({ queryKey: ['team-breakdown'] });
-        setRestampNotice(
-          `Moved ${moved.toLocaleString()} existing door record${moved === 1 ? '' : 's'} onto their team.`
-        );
-      }
-      setShowForm(false);
-      setForm(EMPTY_FORM);
-      setEmailLookup(false);
-    },
-    onError: (err) => {
-      // The email already exists globally — nudge the admin toward the link path.
-      if (err.data?.code === 'EMAIL_EXISTS_USE_LINK') setEmailLookup(true);
-    },
-  });
 
   // Grant/revoke an admin's access to the org's Billing page. Server enforces that
   // the caller is themselves a billing admin (or super); we only surface the control
@@ -266,65 +219,11 @@ const UsersPage = () => {
   }, [personId]);
   const scope = useMemo(() => ({ kind: 'org', pausedIds, rosterLines: [] }), [pausedIds]);
 
-  function onSubmit(e) {
-    e.preventDefault();
-    // A canvasser with a campaign: the campaign's add-by-email steps take it from here, and look the
-    // address up at once.
-    if (form.role === 'canvasser' && form.campaignId) {
-      const campaign = campaigns.find((c) => String(c._id) === form.campaignId);
-      if (campaign) {
-        setFormError('');
-        setHandover({
-          campaign,
-          initial: emailLookup
-            ? { email: form.email.trim() }
-            : { email: form.email.trim(), firstName: form.firstName, lastName: form.lastName, phone: form.phone, password: form.password },
-        });
-        return;
-      }
-    }
-    const body = {
-      email: form.email.trim(),
-      role: form.role,
-      linkExisting: emailLookup,
-    };
-    if (form.role === 'lead') body.managedCampaignIds = form.managedCampaignIds;
-    if (!emailLookup) {
-      // A new account: the temp password is OPTIONAL. Blank → the server generates a throwaway
-      // nobody sees and the invitee's way in is the emailed set-password link. Only a TYPED one
-      // gets the min-8 check; the empty case is intentionally allowed here (validators unchanged).
-      if (form.password !== '') {
-        const problem = tempPasswordProblem(form.password);
-        if (problem) {
-          setFormError(problem);
-          return;
-        }
-      }
-      body.firstName = form.firstName;
-      body.lastName = form.lastName;
-      body.phone = form.phone;
-      body.password = form.password;
-    }
-    setFormError('');
-    addMember.mutate(body);
-  }
-
-  function toggleFormCampaign(id, checked) {
-    setForm((s) => ({
-      ...s,
-      managedCampaignIds: checked
-        ? [...new Set([...s.managedCampaignIds, id])]
-        : s.managedCampaignIds.filter((x) => x !== id),
-    }));
-  }
-
-  const labelCls = 'block text-xs font-medium text-fg';
   // Table column count — the optional Billing-access column shifts the empty-state colSpans.
   // The Hours column only exists where the org actually has an FbTime connection,
   // which the server signals by sending `fbtime` on a member at all (admin-only).
   const showHours = members.some((m) => m.fbtime);
   const colCount = 5 + (canViewBilling ? 1 : 0) + (showHours ? 1 : 0);
-  const activeCampaigns = campaigns.filter((c) => c.isActive !== false);
 
   return (
     <div>
@@ -340,164 +239,11 @@ const UsersPage = () => {
             Members of this organization — the canvassers you assign books to. (Voter records live under Voters.)
           </p>
         </div>
-        <Button onClick={() => setShowForm((s) => !s)}>
-          {!showForm && <span className="text-base leading-none">+</span>}
-          {showForm ? 'Cancel' : 'Add member'}
+        <Button onClick={() => setShowAdd(true)}>
+          <span className="text-base leading-none">+</span>
+          Add member
         </Button>
       </div>
-
-      {showForm && (
-        <Card as="form" onSubmit={onSubmit} className="mb-6 grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
-          <div className="md:col-span-3 flex items-center gap-2 text-xs">
-            <label className="inline-flex cursor-pointer items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={emailLookup}
-                onChange={(e) => {
-                  setEmailLookup(e.target.checked);
-                  setFormError('');
-                }}
-              />
-              <span className="text-fg-muted">Existing user (by email — link them to this org)</span>
-            </label>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className={labelCls}>Email</label>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))}
-              required
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Role</label>
-            <Select
-              value={form.role}
-              onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))}
-              className="mt-1 w-full"
-            >
-              <option value="canvasser">Canvasser</option>
-              <option value="lead">Team lead</option>
-              <option value="admin">Admin</option>
-            </Select>
-          </div>
-          {form.role === 'lead' && (
-            <div className="md:col-span-3 rounded-md border border-border bg-sunken p-3">
-              <label className={labelCls}>Campaigns this lead manages</label>
-              <p className="mt-0.5 text-xs text-fg-muted">
-                A team lead fully runs the campaigns you check here — and only those.
-              </p>
-              <div className="mt-2 max-h-44 space-y-1 overflow-auto rounded border border-border-strong bg-card p-2">
-                {campaigns.length === 0 && (
-                  <p className="px-1 py-2 text-xs text-fg-muted">No campaigns yet — create one first.</p>
-                )}
-                {campaigns.map((c) => {
-                  const id = String(c._id);
-                  return (
-                    <label key={id} className="flex cursor-pointer items-center gap-2 px-1 py-0.5 text-sm text-fg">
-                      <input
-                        type="checkbox"
-                        checked={form.managedCampaignIds.includes(id)}
-                        onChange={(e) => toggleFormCampaign(id, e.target.checked)}
-                      />
-                      <span className="truncate">
-                        {c.name}
-                        {c.isActive === false ? ' · Archived' : ''}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {/* A crew only means something inside a campaign, so a canvasser's Campaign hands what was
-              typed to that campaign's add steps, which pick the crew and show how many doors it moves.
-              An admin or team lead is added to the organization only, as before. */}
-          {form.role === 'canvasser' && (
-            <div className="md:col-span-3">
-              <label className={labelCls}>
-                Campaign <span className="text-fg-subtle">(optional)</span>
-              </label>
-              <Select
-                value={form.campaignId}
-                onChange={(e) => setForm((s) => ({ ...s, campaignId: e.target.value }))}
-                className="mt-1 w-full md:w-80"
-              >
-                <option value="">Just the organization</option>
-                {activeCampaigns.map((c) => (
-                  <option key={c._id} value={String(c._id)}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-              {form.campaignId && (
-                <p className="mt-1 text-xs text-fg-muted">
-                  Next you’ll confirm who the address belongs to and pick their crew on that campaign.
-                </p>
-              )}
-            </div>
-          )}
-
-          {!emailLookup && (
-            <>
-              <div>
-                <label className={labelCls}>First name</label>
-                <Input
-                  value={form.firstName}
-                  onChange={(e) => setForm((s) => ({ ...s, firstName: e.target.value }))}
-                  required={!(form.role === 'canvasser' && form.campaignId)}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Last name</label>
-                <Input
-                  value={form.lastName}
-                  onChange={(e) => setForm((s) => ({ ...s, lastName: e.target.value }))}
-                  required={!(form.role === 'canvasser' && form.campaignId)}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  Phone <span className="text-fg-subtle">(optional)</span>
-                </label>
-                <PhoneInput
-                  value={form.phone}
-                  onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))}
-                  className="mt-1"
-                />
-              </div>
-              <div className="md:col-span-3">
-                <label className={labelCls}>Temporary password <span className="text-fg-subtle">(optional)</span></label>
-                <div className="mt-1">
-                  <PasswordInput
-                    value={form.password}
-                    onChange={(e) => setForm((s) => ({ ...s, password: e.target.value }))}
-                    autoComplete="new-password"
-                  />
-                </div>
-                <p className="mt-1 text-xs text-fg-subtle">
-                  Leave blank to let them set their own password via the emailed invite (recommended).
-                  Type one only if they can’t receive email.
-                </p>
-              </div>
-            </>
-          )}
-
-          <div className="md:col-span-3">
-            <Button type="submit" loading={addMember.isPending}>
-              {form.role === 'canvasser' && form.campaignId ? 'Continue' : emailLookup ? 'Link existing user' : 'Create + add'}
-            </Button>
-            {(formError || addMember.error) && (
-              <span className="ml-3 text-sm text-danger">{formError || addMember.error.message}</span>
-            )}
-          </div>
-        </Card>
-      )}
 
       <Card className="mb-4 flex flex-wrap items-center gap-2.5 p-2.5">
         <div className="min-w-[220px] flex-1">
@@ -543,25 +289,6 @@ const UsersPage = () => {
           {visibleMembers.length} of {members.length}
         </span>
       </Card>
-
-      {/* Adding a RETURNING canvasser can pull ledger history back onto a team — say so, because
-          a team total will have changed for a reason the admin never explicitly asked for. */}
-      {restampNotice && (
-        <div
-          role="status"
-          className="mb-4 flex items-start gap-3 rounded-md border border-brand-600 bg-brand-tint px-3 py-2 text-sm text-fg"
-        >
-          <span className="flex-1">{restampNotice}</span>
-          <button
-            type="button"
-            onClick={() => setRestampNotice('')}
-            className="shrink-0 font-semibold hover:opacity-70"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
 
       {/* After Delete account in the panel. A used account's row turns into "Deleted account"; an
           unused one's leaves the list, and then this is the only sign the delete landed. */}
@@ -773,24 +500,24 @@ const UsersPage = () => {
         </>
       )}
 
-      {handover && (
-        <AddPeopleDialog
-          campaign={handover.campaign}
-          isOrgAdmin
-          initial={handover.initial}
-          onAdded={() => {
-            const cid = String(handover.campaign._id);
+      {showAdd && (
+        <AddPersonDialog
+          campaigns={campaigns.filter((c) => c.isActive !== false)}
+          onAdded={(result) => {
             qc.invalidateQueries({ queryKey: ['memberships'] });
-            // So "Open them" lands on that campaign's Team page with them in it.
-            qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', cid] });
-            qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', cid] });
-            qc.invalidateQueries({ queryKey: ['admin', 'campaign-history', cid] });
-            setShowForm(false);
-            setForm(EMPTY_FORM);
-            setEmailLookup(false);
+            // So each campaign it put them on shows them on its Team page straight away.
+            for (const c of result?.campaigns || []) {
+              if (c.result !== 'joined') continue;
+              qc.invalidateQueries({ queryKey: ['admin', 'campaign-assignments', c.campaignId] });
+              qc.invalidateQueries({ queryKey: ['admin', 'campaign-crew', c.campaignId] });
+              qc.invalidateQueries({ queryKey: ['admin', 'campaign-history', c.campaignId] });
+            }
           }}
-          onOpenPerson={(id) => navigate(`/campaigns/${handover.campaign._id}/team?person=${id}`)}
-          onClose={() => setHandover(null)}
+          onOpenPerson={(id) => {
+            setShowAdd(false);
+            openPerson(id);
+          }}
+          onClose={() => setShowAdd(false)}
         />
       )}
 
@@ -800,7 +527,9 @@ const UsersPage = () => {
           ids={liveIds}
           place={place}
           lookup={lookup}
-          loaded={!!data && !pausedQ.isLoading}
+          // Someone just added (Add member → Open them) can be opened a moment before the refreshed list lands:
+          // not loaded yet, rather than "Not in your organization" for a person who is.
+          loaded={!!data && !pausedQ.isLoading && !(isFetching && personId && !peopleById.has(String(personId)))}
           scope={scope}
           onStep={(id) => setParams({ person: id, page: pageFor(liveIds, id, PAGE, page) })}
           onClose={closePanel}

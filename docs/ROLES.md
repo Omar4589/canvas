@@ -159,9 +159,16 @@ door, which would otherwise pause them.
 ## Granting a team lead
 
 On the **Users** page (admins only): add or edit a member, set their role to **Team lead**, and check
-the campaigns they should manage. You can change the checked campaigns anytime; unchecking one revokes
-it immediately. Creating, then granting, are two separate admin acts — a brand-new campaign has no lead
-until an admin grants one.
+the campaigns they should manage — **Add member** offers Team lead with its campaign list on the web and,
+since 2026-10-30, on the phone's **+ New** (All campaigns). You can change the checked campaigns anytime;
+unchecking one revokes it immediately. Creating, then granting, are two separate admin acts — a brand-new
+campaign has no lead until an admin grants one.
+
+The org view's add and a person's **Add to campaigns** / **Remove** (PROPOSAL_ADD_TO_CAMPAIGNS.md) are **org
+admin** acts: `POST /admin/memberships/resolve`, `POST /admin/memberships/by-email`, `GET
+/admin/memberships/:userId/campaign-history` and `POST /admin/memberships/:userId/campaigns` all answer a
+lead `403 ADMIN_ONLY`. A lead still adds people to their own campaigns through the Team page's add by email
+(`/crew`), which these routes don't touch.
 
 ## Where a team lead works
 
@@ -490,7 +497,13 @@ cliff, live).
 - `POST /`, `PATCH /:userId` (role/grants/billing), `DELETE /:userId` — walled by
   `requireAdminRole` → `403 { code: 'ADMIN_ONLY' }`. So are the two account-deletion routes added
   2026-10-24, `GET /:userId/deletion-check` and `DELETE /:userId/account` ([USERS.md](USERS.md) → *The org
-  door*).
+  door*), and the four added 2026-10-30 for the org view's add and a person's campaigns
+  ([PROPOSAL_ADD_TO_CAMPAIGNS.md](PROPOSAL_ADD_TO_CAMPAIGNS.md)): `POST /resolve` (who owns an address, with
+  their standing and doors on each active campaign; it shares `/crew/resolve`'s hourly counters), `POST
+  /by-email` (add and put on campaigns, a crew each), `GET /:userId/campaign-history` and `POST
+  /:userId/campaigns` (a profile's Add to campaigns). A lead never reaches them — they add people through
+  a campaign's Team page — while `GET /:userId/crews` (above) now also carries `crewSize` on the rows a
+  lead may see, which that campaign's roster already tells them.
 - **The Remove rule.** `DELETE /:userId` (Remove from org) of a membership with `billingAccess` also needs
   the caller's own billing access: an org admin without it gets `403 BILLING_ACCESS_REQUIRED`, the same
   protection `BILLING_TARGET` gives against deletion — otherwise Remove followed by re-adding the email
@@ -626,8 +639,9 @@ reports, which the `RETIRE_ALL_REPORTS_LINKS` switch turns off for every organiz
   path in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 14. Switched-off colleague →
   `409 MEMBER_DEACTIVATED` for a lead (reactivating is org-wide), reactivate-and-roster for an admin.
   The old `EMAIL_EXISTS_USE_LINK` / `ALREADY_MEMBER` round trip is gone **from this route** — both were the
-  server asking the client to retry with different intent. `POST /admin/memberships` (org Users page,
-  admin-only) is unchanged and still uses them.
+  server asking the client to retry with different intent. `POST /admin/memberships` (admin-only) is
+  unchanged and still uses them — for phones without the 2026-10-30 update; the web Users page and the
+  phone hub now add through `POST /admin/memberships/by-email`, which resolves like this route.
 - **`PATCH /:userId/coordinator`** + **`GET /:userId/coordinator-preview`** — both scoped to this
   campaign's roster. The PATCH takes `fromCoordinatorId` (the crew the client previewed) and answers
   `409 changed-meanwhile` or `409 busy` instead of moving anyone twice; only a new pick is validated, so
@@ -807,7 +821,8 @@ plain `/login`, so the sign-in page never sends the next person back to the page
   with the server's `canManageSurvey` as the per-survey authority;
   [CampaignTeamPage.jsx](../client/src/pages/CampaignTeamPage.jsx) adds people **by email address** for
   both roles, crew picked before the add, and is where a crew is set on the web — one person in their
-  panel, several with **Move to crew…** (the org Users page shows crews read-only).
+  panel, several with **Move to crew…** (the org Users page shows existing crews read-only; its Add member
+  and a panel's Add to campaigns set a crew only for a campaign they put someone on).
   Login/select-org land a lead on `/campaigns` (they have no `/admin` Overview), or inside their one
   active campaign when they have exactly one (`homeCampaignId`, above).
 - **The `/admin/memberships` fork** — that route is admin-only, so any *campaign* page that reads it for

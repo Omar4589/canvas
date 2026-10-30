@@ -20,8 +20,19 @@ import {
   MemberError,
   memberIdentityShape,
   resolveManagedCampaigns,
+  resolveEmailInOrg,
+  newAccountProblem,
 } from '../../services/memberships/createMember.js';
 import { restampSummary } from '../../services/memberships/setCoordinator.js';
+import {
+  campaignPicksSchema,
+  checkCampaignPicks,
+  joinCampaigns,
+  campaignHistories,
+  coordinatorChoices,
+  sendJoinedEmail,
+} from '../../services/memberships/joinCampaigns.js';
+import { crewResolveLimiters } from '../../middleware/crewResolveLimit.js';
 import {
   isLastBillingAdmin,
   strandsBilling,
@@ -131,6 +142,20 @@ const addSchema = z.object({
   // For role: 'lead' — the campaigns this lead may manage (CampaignManager grants).
   managedCampaignIds: z.array(z.string()).optional(),
 });
+
+// The org view's add by email (POST /by-email): who, the role a NEW member gets, the campaigns to put
+// them on with a crew for each, and a new lead's grants. `linkExisting` rides in memberIdentityShape and
+// is ignored here: what the address resolves to decides, as on the campaign Team page's add.
+const byEmailSchema = z.object({
+  ...memberIdentityShape,
+  role: z.enum(['admin', 'lead', 'canvasser']).default('canvasser'),
+  campaigns: campaignPicksSchema.optional().default([]),
+  managedCampaignIds: z.array(z.string()).optional(),
+});
+
+const resolveSchema = z.object({ email: memberIdentityShape.email });
+
+const addCampaignsSchema = z.object({ campaigns: campaignPicksSchema.refine((p) => p.length > 0, { message: 'Pick at least one campaign.' }) });
 
 const updateMembershipSchema = z.object({
   role: z.enum(['admin', 'lead', 'canvasser']).optional(),
@@ -455,6 +480,222 @@ router.post('/', requireAdminRole, async (req, res, next) => {
   }
 });
 
+// ── The org view's add by email, and a profile's Add to campaigns ──────────────────────────────────
+// docs/PROPOSAL_ADD_TO_CAMPAIGNS.md. The phone's Users hub on All campaigns and the web Users page used
+// to add someone to the organization on NO campaign (POST / above, still there for phones without the
+// update); these put them on the campaigns picked, each with its own crew, in one step. Org admins only:
+// a team lead adds through a campaign's Team page (leadCrew.js), and none of this reaches them.
+
+// "Who owns this address, here?" — the org view's version of the Team page's lookup (leadCrew.js POST
+// /resolve), and drawing on THE SAME two hourly counters per person (the same limiter instances), so
+// adding from either screen can't double the ceiling. `outside` is one answer for every address — no
+// account, an account at another customer, a deleted account's old address — carrying nothing about
+// the address (`coordinators` is the organization's, the same for any address). A named person comes
+// back with their standing and doors on each active campaign (`campaigns`), which is what lets the add
+// step mark the campaigns they're on and pre-pick an old crew where one can still lead.
+router.post('/resolve', requireAdminRole, ...crewResolveLimiters, async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const { email } = resolveSchema.parse(req.body);
+    const orgId = activeOrgId(req);
+    const found = await resolveEmailInOrg({ orgId, email });
+    // Which limiter keeps this lookup (crewResolveLimit.js): one that finds nobody, or one that names.
+    res.locals.lookup = found.outcome === 'outside' ? 'outside' : 'named';
+    const coordinators = await coordinatorChoices(orgId);
+    if (!found.person) return res.json({ outcome: found.outcome, person: null, campaigns: [], coordinators });
+    addAuditSubjects(res, 'user', found.person.userId);
+    res.json({
+      outcome: found.outcome,
+      person: found.person,
+      campaigns: await campaignHistories({ orgId, userId: found.user._id }),
+      coordinators,
+    });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// Add someone keyed on their EMAIL ADDRESS, and put them on the campaigns picked. One door for every
+// case, resolved first and then branched exactly as the Team page's add (leadCrew.js POST /):
+//   outside           create the account — or, when the address has one elsewhere, attach that real person
+//                     and drop what was typed (a stranger's name isn't ours to overwrite, their password not
+//                     ours to set) — with the role picked, and a new lead's grants
+//   in-org            already a member: no membership write, so their role never changes here
+//   in-org-inactive   switched off: switched back on (this route is admin-only, so always allowed)
+// Then every pick is joined (services/memberships/joinCampaigns.js), and ONE email goes out. Every pick is
+// checked BEFORE the first write, so a bad one refuses the whole add instead of leaving someone on half of
+// what was asked. Sent twice, the second answer changes nothing: the address now resolves in-org, every
+// pick is already-on, and no email goes out.
+router.post('/by-email', requireAdminRole, async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    const orgId = activeOrgId(req);
+    const data = byEmailSchema.parse(req.body);
+    if (await refuseVendorStaffTarget(req, res, { email: data.email })) return;
+
+    // 1. Who the address belongs to, here.
+    const found = await resolveEmailInOrg({ orgId, email: data.email });
+    const named = found.outcome !== 'outside';
+    // A deleted member's switched-off membership still resolves (their tombstone address). Refuse it BEFORE
+    // any write: switching them on and joining would move their earlier doors to the crew picked, and the
+    // convergence after the last write undoes the roster and the membership but never the ledger — a
+    // departure must never move doors (services/memberships/restampCoordinator.js, the 104-door rule).
+    if (named && found.user.deletedAt) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    // Every outside address gets the same checks, whether or not it has an account elsewhere — or the
+    // refusal would say which (createMember.js newAccountProblem).
+    if (!named) {
+      const problem = newAccountProblem(data);
+      if (problem) return res.status(400).json(problem);
+    }
+
+    // 2. Everything checked before anything is written: the picks, and a new lead's grants.
+    const picks = await checkCampaignPicks({ orgId, picks: data.campaigns, memberUserId: named ? found.user._id : null });
+    if (!picks.ok) return res.status(picks.status).json({ error: picks.error, ...(picks.code ? { code: picks.code } : {}) });
+    let managed = [];
+    if (!named && data.role === 'lead') {
+      const mres = await resolveManagedCampaigns({ orgId, raw: data.managedCampaignIds ?? [] });
+      if (!mres.ok) return res.status(400).json({ error: mres.error });
+      managed = mres.value;
+    }
+
+    // 3. The membership.
+    if (found.outcome === 'in-org-inactive') {
+      await Membership.updateOne({ _id: found.membership._id }, { $set: { isActive: true } });
+    }
+    let user = found.user;
+    let membership = found.membership || null;
+    // 'attach' — the address has an account, but not one of ours. The operator learns whose only once
+    // this succeeds: the answer costs a real add and an email to the person, not a free probe.
+    const attaching = !named && !!found.user;
+    if (!named) {
+      try {
+        ({ user, membership } = await createOrgMember({
+          orgId,
+          addedBy: req.user._id,
+          data: { ...data, linkExisting: attaching },
+          role: data.role,
+          // New accounts get a temp password + forced change on first login; a linked account keeps its
+          // own password (createOrgMember applies the flag on the create branch only).
+          mustChangePassword: true,
+        }));
+      } catch (err) {
+        // Another add for the same address landed between this lookup and this create (two admins at once):
+        // the account or its membership now exists. These codes are only reachable that way here, and their
+        // own messages point at the old form's Existing-user checkbox, so say what happened instead. Looking
+        // the address up again finds the person as a colleague.
+        if (err?.code === 11000 || (err instanceof MemberError && ['EMAIL_EXISTS_USE_LINK', 'ALREADY_MEMBER'].includes(err.code))) {
+          return res.status(409).json({ error: 'Someone else just added this address. Go back and look it up again.', code: 'ADDED_MEANWHILE' });
+        }
+        if (err instanceof MemberError) return res.status(err.status).json({ error: err.message, code: err.code });
+        throw err;
+      }
+      if (data.role === 'lead' && managed.length) {
+        await reconcileManagedCampaigns({ orgId, userId: user._id, grantedBy: req.user._id, campaignIds: managed });
+      }
+    }
+    addAuditSubjects(res, 'user', user._id);
+
+    // 4. The campaigns, each with its crew; a returning person's earlier doors on each move to it.
+    const campaigns = await joinCampaigns({ orgId, userId: user._id, picks: picks.value, actorUserId: req.user._id });
+    const joined = campaigns.filter((c) => c.result === 'joined');
+
+    // An account deleted while this add ran is put back the way the deletion left it. After the LAST write.
+    if (
+      await convergeIfDeleted({
+        userId: user._id,
+        organizationId: orgId,
+        membershipId: membership?._id || null,
+        campaignIds: joined.map((c) => c.campaignId),
+      })
+    ) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
+
+    const role = named ? found.membership.role : data.role;
+    await sendJoinedEmail({
+      kind: attaching ? 'attached' : named ? 'joined' : 'created',
+      user,
+      role,
+      campaignNames: joined.map((c) => c.campaignName),
+      org: req.activeOrg,
+    });
+
+    // `outcome` tells the client which sentence to say; `attached` means the typed name was discarded in
+    // favour of a real person the operator hadn't met, so the result must name who actually landed.
+    res.status(201).json({
+      user: user.toSafeJSON(),
+      outcome: attaching ? 'attached' : named ? found.outcome : 'created',
+      attached: attaching,
+      role,
+      managedCampaignIds: managed.map(String),
+      campaigns,
+    });
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'Conflict' });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
+// A person's standing and doors on each active campaign, and who can run a crew — what a profile's Add to
+// campaigns needs to mark where they are and pre-pick an old crew. Read only when that sheet opens. Not
+// rate-limited: it names nobody new (the admin opened this person from a list that already shows them).
+router.get('/:userId/campaign-history', requireAdminRole, async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const orgId = activeOrgId(req);
+    if (!(await Membership.exists({ userId: req.params.userId, organizationId: orgId }))) {
+      return res.status(404).json({ error: 'Not a member of this organization' });
+    }
+    addAuditSubjects(res, 'user', req.params.userId);
+    const [campaigns, coordinators] = await Promise.all([
+      campaignHistories({ orgId, userId: req.params.userId }),
+      coordinatorChoices(orgId),
+    ]);
+    res.json({ campaigns, coordinators });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A profile's Add to campaigns: put this member on the campaigns picked, each with its crew, and send ONE
+// email naming them. It used to be read-only there (an add with no crew choice would have moved a
+// returning person's doors unseen); the picks carry the crew now, and the screen shows the doors line.
+// A switched-off account is switched on first — that is an org-wide act with its own question.
+router.post('/:userId/campaigns', requireAdminRole, async (req, res, next) => {
+  try {
+    if (!ensureOrgScoped(req, res)) return;
+    if (!mongoose.isValidObjectId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const orgId = activeOrgId(req);
+    const { campaigns: raw } = addCampaignsSchema.parse(req.body);
+    const [membership, user] = await Promise.all([
+      Membership.findOne({ userId: req.params.userId, organizationId: orgId }, 'role isActive').lean(),
+      User.findById(req.params.userId, 'firstName email mustChangePassword deletedAt'),
+    ]);
+    if (!membership || !user) return res.status(404).json({ error: 'Not a member of this organization' });
+    if (user.deletedAt) return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    if (!membership.isActive) {
+      return res.status(409).json({ error: 'This account is switched off. Switch it back on first.', code: 'MEMBER_DEACTIVATED' });
+    }
+    const picks = await checkCampaignPicks({ orgId, picks: raw, memberUserId: user._id });
+    if (!picks.ok) return res.status(picks.status).json({ error: picks.error, ...(picks.code ? { code: picks.code } : {}) });
+    addAuditSubjects(res, 'user', user._id);
+
+    const campaigns = await joinCampaigns({ orgId, userId: user._id, picks: picks.value, actorUserId: req.user._id });
+    const joined = campaigns.filter((c) => c.result === 'joined');
+    if (await convergeIfDeleted({ userId: user._id, organizationId: orgId, campaignIds: joined.map((c) => c.campaignId) })) {
+      return res.status(409).json({ error: 'This account was deleted.', code: 'ACCOUNT_DELETED' });
+    }
+    await sendJoinedEmail({ kind: 'joined', user, role: membership.role, campaignNames: joined.map((c) => c.campaignName), org: req.activeOrg });
+    res.status(201).json({ campaigns });
+  } catch (err) {
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    next(err);
+  }
+});
+
 // Which crew this person is on, IN EACH CAMPAIGN they are rostered to. Read-only.
 //
 // The org Users page used to set one coordinator here, because a coordinator was one org-level
@@ -489,14 +730,24 @@ router.get('/:userId/crews', async (req, res, next) => {
     const coordIds = [
       ...new Set(rows.filter((r) => shown(r.campaignId)).map((r) => r.coordinatorId).filter(Boolean).map(String)),
     ];
-    const [campaigns, coords] = await Promise.all([
+    const shownIds = rows.filter((r) => shown(r.campaignId)).map((r) => r.campaignId);
+    const [campaigns, coords, crewCounts] = await Promise.all([
       campaignIds.length ? Campaign.find({ _id: { $in: campaignIds } }, 'name isActive').lean() : [],
       coordIds.length ? User.find({ _id: { $in: coordIds } }, 'firstName lastName').lean() : [],
+      // `crewSize`: how many people on each campaign have THIS person as their coordinator — what taking
+      // them off a campaign leaves with no coordinator, for the profile's Remove question.
+      shownIds.length
+        ? CampaignAssignment.aggregate([
+            { $match: { campaignId: { $in: shownIds }, coordinatorId: new mongoose.Types.ObjectId(req.params.userId) } },
+            { $group: { _id: '$campaignId', n: { $sum: 1 } } },
+          ])
+        : [],
     ]);
     const campaignById = new Map(campaigns.map((c) => [String(c._id), c]));
     const nameById = new Map(
       coords.map((u) => [String(u._id), `${u.firstName || ''} ${u.lastName || ''}`.trim()])
     );
+    const crewSizeOf = new Map(crewCounts.map((g) => [String(g._id), g.n]));
 
     res.json({
       crews: rows.map((r) => {
@@ -518,6 +769,7 @@ router.get('/:userId/crews', async (req, res, next) => {
           coordinatorId,
           // null = the "No crew" bucket for that campaign, which is a real answer.
           coordinatorName: coordinatorId ? nameById.get(coordinatorId) || 'Unknown' : null,
+          crewSize: crewSizeOf.get(String(r.campaignId)) || 0,
         };
       }),
     });

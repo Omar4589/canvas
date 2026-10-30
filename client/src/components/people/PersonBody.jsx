@@ -257,6 +257,7 @@ const PersonBody = ({
           onToggle={() => onEverywhere(!everywhereOpen)}
           onLink={onLink}
           currentCampaignId={onTeam ? String(scope.campaignId) : null}
+          dialogRef={dialogRef}
         />
       )}
     </>
