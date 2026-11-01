@@ -4492,7 +4492,7 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `mailTemplates.test.js`.
 47. **[v7 2026-10-31 — "Filtered voters" of a list uploaded from a file, or made by an import, now exports
     that list instead of the whole campaign; and Turf Cutting's "Visited in the last N days". BUILT
-    2026-10-31, uncommitted; deploy pending (stamp the date here when it ships). Triggers CLAUDE.md's "What
+    2026-10-31, committed in `95a532e`; the server deployed 2026-10-31. Triggers CLAUDE.md's "What
     we expose — exports": an export's contents change, narrowed to the list it is named after. The visit
     line triggers nothing: no new data, retention, access, recipient, subprocessor, export or link. No
     Privacy Policy, Terms or DPA sentence changes; no customer notice.]**
@@ -4517,7 +4517,7 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       deleted.* Filter-built searches stay live, unchanged. Pinned by
       `server/test/filteredVotersFrozen.int.test.js` (4).
     - **(c) Owner action, not code.** Any Filtered voters file of an uploaded or "New voters" list made
-      before this ships held every voter in its campaign. The owner checks whether such a file left the
+      before the 2026-10-31 deploy held every voter in its campaign. The owner checks whether such a file left the
       organization.
     - **(d) The visit line, same build.** Turf Cutting's Exclude doors gains *Visited in the last N days*,
       which reads visit times already stored to decide which doors a cut includes.
@@ -4529,8 +4529,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       personal data. Saved searches refuse the line, so no export carries it. Not privacy-affecting.
 
 48. **[v7 2026-10-31 — The CSV reader of the three Voter-ID list uploads reads in pieces, and a memory
-    tripwire on the web dyno. BUILT 2026-10-31, uncommitted; deploy pending (stamp the date here when it
-    ships). Recorded because it changes how an uploaded voter file is read (item 45's test) and adds log
+    tripwire on the web dyno. BUILT 2026-10-31, committed in `95a532e`; the server deployed 2026-10-31.
+    Recorded because it changes how an uploaded voter file is read (item 45's test) and adds log
     lines, the newest 300 of which are also kept in Redis for 30 days; but nothing new is kept about a
     person (the lines name no person, voter, organization, record or link), no retention or deletion change
     for customer data, no new access, no new third party, nothing newly exposed, and no published Privacy
@@ -4542,7 +4542,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       for a moment (Papa builds the row), but only the Voter ID column — and with *Count only rows where*,
       the counting column — is kept; before, every row's every column was held until the read finished.
       Reading stops at the header when no Voter ID column is found. Same rows as the whole-file read
-      (`test/idListCsvPieces.test.js`). Still multer `memoryStorage`: item 45(b)'s *held in memory, never
+      (`test/idListCsvPieces.test.js`). *[2026-10-31, later the same day: except a row that never ends — a
+      quote mark never closed, or no line breaks — which is now refused (`row-too-long`, `unclosed-quote`)
+      where the whole-file read silently dropped every row after it; nothing new is read or kept.]* Still multer `memoryStorage`: item 45(b)'s *held in memory, never
       written to disk* stays true — which is why [PROPOSAL_PARKED_IDS.md](PROPOSAL_PARKED_IDS.md) §G's disk
       storage was not adopted.
     - **(b) Two kinds of log line, nothing personal in either.** `[id-list] csv …` per CSV read (item
@@ -4570,6 +4572,71 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       pattern and a time are less than that — and says that information is used to troubleshoot the
       Services, which is all the Redis copy is for. The retention paragraphs (`:118`–`:122`) are about
       customer records, which these lines are not. No customer notice.
+49. **[v7 2026-10-31 — A campaign's Early Voting history sent each uploader's email address to the
+    campaign's team leads. FIXED 2026-10-31, uncommitted; deploy pending (stamp the date here when it
+    ships).]**
+    - **Found** by round 1 of the review of [PROPOSAL_ORG_EARLY_VOTING.md](PROPOSAL_ORG_EARLY_VOTING.md)
+      (privacy lens), and confirmed by a test that failed on the old code.
+    - **What it was.** `GET /admin/campaigns/:id/voted` is behind `requireCampaignManager`: org admins, and
+      the team leads of that campaign. It populated each upload's `uploadedBy` with `firstName lastName
+      email` and returned it (`routes/admin/voted.js`, the history route). Whoever uploaded to the campaign
+      was exposed: an org admin, whose email a lead is otherwise never shown (item 41's rule: *name and
+      role only — no email*), or a Doorline staff member working under a support grant. The page
+      (`EarlyVotingPage.jsx`) never shows `uploadedBy`, so it was reachable only through the API, as in
+      item 35. A team lead may be the campaign's client (the owner's ruling of 2026-09-23), so this
+      audience includes external customers.
+    - **Fix.** Name only (`firstName lastName`), as the do-not-contact history already sends
+      (`routes/admin/dnc.js`, an admin-only route). Pinned by `test/votedUpload.int.test.js`: the history
+      names the uploader and carries no `@` anywhere.
+    - **Assessment:** no published Privacy Policy, Terms or DPA sentence changes; it narrows what a lead
+      receives. **Owner decision needed:** a DPA §5 notice or none. The precedents, items 35 (reachable
+      only through the API) and 40 (on screen), were both decided as no notice.
+
+50. **[v7 2026-10-31 — A read-only console check for phones with a wrong clock (`npm run audit:phone-clocks`).
+    BUILT 2026-10-31, uncommitted; deploy pending (stamp the date here when it ships). A staff-facing console
+    output that reads every customer organization's visit rows outside any support grant and prints totals
+    only. No new data, retention, recipient, subprocessor, export or link; no published sentence changes; no
+    customer notice.]**
+    Plan: [PROPOSAL_PHONE_CLOCKS.md](PROPOSAL_PHONE_CLOCKS.md) (gap G5 of item 47's plan; its §H). Read from
+    the code:
+    - **(a) What it reads.** `CanvassActivity` rows (`via` not `'bulk'`), the fields `organizationId
+      campaignId userId actionType timestamp createdAt wasOfflineSubmission`; organizations as `_id
+      isInternal timeZone deletion.requestedAt`; campaigns as `_id organizationId timeZone
+      deletion.requestedAt` (`migrations/auditPhoneClocks.js`). No `User` document and no name field of any
+      collection is read, so no name can reach the output. It connects with `autoIndex` and `autoCreate` off,
+      and writes and keeps nothing.
+    - **(b) What it prints.** Totals across customer organizations: visits and canvassers checked,
+      canvasser-days judged, phones off by 5 minutes or more by size and direction, which latest-day states
+      occur (yes or no, never counts), and, only when 3 or more canvassers are found, visits, surveys, day
+      shifts and the date range. A count of people under 3 prints *fewer than 3* (39(e)'s rule; staff screens
+      show each member's visit count and first and last visit, so a lone canvasser's exact figures could be
+      matched to them). No organization, campaign, person or id. Internal organizations and organizations or
+      campaigns being deleted are skipped. Pinned by `test/auditPhoneClocks.int.test.js`: every fixture's
+      organization, campaign and person name, every email and any 24-hex id are searched for in the output,
+      and collections, documents and indexes are hashed before and after a run.
+    - **(c) Claims checked.**
+      - privacy.html `:88` and `:90` (canvassing activity and the time it occurred, used to provide, secure
+        and support the Services): hold; this checks that stored times are right.
+      - `:105` (customer data not visible to other customer organizations): holds; nothing reaches a
+        customer.
+      - `:112` (staff open voter or canvassing data **in the product** only under a grant): holds; this is
+        the console, not the product, and it opens no record.
+      - `:122` (deletion removes canvassing records): the check counts rows whose organization or campaign
+        no longer exists and prints the count as a finding; a non-zero count is recorded here.
+      - terms.html, the personnel sentence ("Doorline personnel access Customer Data only to provide,
+        secure, and support the Service, under time-limited, reason-logged access controls") and the
+        aggregate sentence ("aggregate usage statistics … that do not identify the Customer, its users, or
+        any individual in Customer Data"): the output is such an aggregate. Whether computing one by
+        machine is "access" under the personnel sentence is the reading item 43(g) left to the owner; this
+        check does not change it. It reads the same rows as the GPS stamp audit (27(c)) and prints less
+        than 43(g) or 44(g), which name organizations.
+      - DPA §3(a) (process only to provide the Service): data accuracy is part of providing it. §3(d) (no
+        combining one customer's personal information with another's): each canvasser-day is judged from
+        its own rows only; the totals add counts. §4's safeguards sentence ("time-limited and reason-logged
+        controls on Doorline staff access", which item 43(g) cites as §3): the same reading as above. §6: no
+        subprocessor. §9: nothing is kept.
+    - **(d) The first run.** Stamp its totals here when the owner runs it: totals only, as item 27's stamp
+      did.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 

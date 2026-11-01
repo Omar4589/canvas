@@ -27,6 +27,7 @@ Both produce the same thing: a frozen door set. You can build one the moment you
 ## Uploading a list
 
 - **Excel files:** only the first tab you can see is read, and the preview names it when the workbook has other tabs. A workbook with rows hidden in Excel (by a filter, say) is refused with how many, because hidden rows are still in the file; clear the filter or delete those rows, save, and upload again. Old-format, password-protected and damaged workbooks are refused with the fix, and an Excel file's first tab must unpack to 320 MB or less (about 184,000 rows of a 35-column file).
+- **A CSV is read whole or not at all:** if a quote mark in it never closes, the page says after which row and asks you to open the file in Excel, save it again as CSV, and upload that, instead of quietly reading only the rows before it.
 - **If the Voter ID column isn't found,** pick it from the list and press **Match column**. Column names need to be in row 1 of the first tab; when a title sits above them, the box says which row they seem to be in. If your newest uploaded saved search used a column this file also has, it's already chosen; check it and press **Match column**.
 - **Fixed the file? Pick it again** and the preview re-runs. If you edit a file after picking it, pick it again before saving.
 - **If a save errors after a long wait, check the list before trying again.** A very large list can take longer to save than the page waits, and the save can still finish on its own. Look for your saved search in the list first; saving again would make a second one.

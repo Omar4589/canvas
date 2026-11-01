@@ -419,6 +419,39 @@ so in one line. **STOP** marks the same digits in campaigns in two different sta
 merge), **CHECK** marks a name or birth date that differs. What each finding means and what to do
 about it: [PROPOSAL_VOTER_ID_KEYS.md](PROPOSAL_VOTER_ID_KEYS.md).
 
+### Check for phones with a wrong clock (read-only, safe any time)
+
+A phone whose clock is wrong puts the wrong time on every visit it records, and reports, FbTime's daily
+door counts and Turf Cutting's **Visited in the last N days** read it as recorded. This tells you whether
+any phone was off by 5 minutes or more, by how much and which way. It changes nothing, and it prints
+totals only: never an organization, a campaign or a person.
+
+```
+npm run audit:phone-clocks                                     # every visit
+npm run audit:phone-clocks -- --since=2026-11-02T00:00-06:00   # only visits received since then
+```
+
+**When:** the full run reads every visit once, so run it in the evening when no crew is out, and not at
+9:47 or 10:07 pm Central, when two nightly jobs read every visit. Central is −06:00 from Nov 1 (−05:00
+in summer). A bare date (`--since=2026-11-02`) means midnight UTC, which is 6 pm Central the evening
+before.
+
+**Reading it:** *Checked …* is how many visits and canvassers it looked at, and how many canvasser-days it
+could judge. A day with nothing close enough to its time to tell (usually everything sent hours later
+from the phone's queue) is *not judged*, never counted as right. **Phones off by 5 minutes or more** is
+the answer: *none* (with how many canvassers it judged), or how many canvassers, by size and direction;
+*looks like a time zone set by hand* means a whole number of hours; *on their latest day* says whether
+any phone was still wrong in the last 2 days. With fewer than 3 canvassers found, visits and dates are
+withheld, because they could point at a person. *Most phones judged on … read off by about the same
+amount* points at the server's clock or the data, not phones: stop and check before acting. *Found: …
+visits whose organization or campaign no longer exists* is a finding (deletion should have removed
+them). *Nothing could be judged* is not a clean result; run it again after a day of live canvassing.
+
+**When phones are found:** message your crews to turn on automatic date and time. On an iPhone that's
+Settings → General → Date & Time → Set Automatically; on Android, Settings → System → Date & time → Set
+time automatically. The check can't say which organization, so whether to tell other customers' admins
+is your call. The whole design: [PROPOSAL_PHONE_CLOCKS.md](PROPOSAL_PHONE_CLOCKS.md).
+
 ### Release "Not a target voter" — and the switch that withdraws it (October 2026)
 
 **Not a target voter** is a door button for when a canvasser talks to someone who isn't one of the
@@ -1552,6 +1585,7 @@ fraud audit).
 | `npm run audit:voted-doors` | **Read-only.** Doors marked fully-voted, and whether they still reconcile |
 | `npm run audit:voter-id-spellings` | **Read-only.** Per campaign: share of voter IDs starting with 0, ID widths (mixed widths = rows already lost zeros); per organization: one person stored under two spellings, the same person twice in one campaign, Person-directory keys that would collide once zeros are ignored, parked early-vote / do-not-contact IDs matching a voter only after ignoring zeros. `--org <slug>`, `--json`, `--samples N`. Rule in [`utils/voterIdKey.js`](../server/src/utils/voterIdKey.js); test `auditVoterIdSpellings.int.test.js` runs it as a child process over the real script |
 | `npm run audit:gps-stamps` | **Read-only.** Stored GPS stamps the stamp rules in [PROPOSAL_GPS_UPGRADES.md](PROPOSAL_GPS_UPGRADES.md) §I refuse, store as unknown or judge differently for new stamps (its first production run, 2026-10-05, found none on any ledger): per ledger, negative, zero (by month and mock-location flag) and non-finite accuracies, non-finite, off-Earth and (0, 0) coordinates, each against the rows scanned; and what the read-side clamp changes (audit far reasons removed, severities that drop, the per-canvasser Far count and forgiven), measured by running the far rule with the old arithmetic and with the current one. Counts only, never a coordinate, name or id. One collection scan per ledger, so run it late in the evening. `-- --since=<time>` limits it to rows created at or after a full time with its UTC offset (`2026-10-13T23:45-05:00`) or a date read as 00:00 UTC; a time without an offset, an impossible date and a future time are refused. Test `auditGpsStamps.int.test.js` runs it as a child process over the real script |
+| `npm run audit:phone-clocks` | **Read-only.** Phones with a wrong clock ([PROPOSAL_PHONE_CLOCKS.md](PROPOSAL_PHONE_CLOCKS.md)): each visit's phone time (`timestamp`) against the moment the server wrote it (`createdAt`), judged one canvasser-day at a time by the rule in [phoneClock.js](../server/src/services/audit/phoneClock.js). Totals across customer organizations only: it reads no name, prints no organization, campaign, person or id, prints a count of people under 3 as *fewer than 3*, and withholds visits and dates when fewer than 3 canvassers are found. Internal organizations and organizations or campaigns being deleted are skipped. One pass over the visit rows, so run it outside field hours. `-- --since=<time>` (the same parser as `audit:gps-stamps`) limits it to visits received at or after that instant, on `_id`, which is indexed. Exits **1** when nothing could be judged. Test `auditPhoneClocks.int.test.js` runs it as a child process and once from the repo root |
 | `npm run migrate:campaign-stats` | **Read-only.** Recomputes every campaign's `Campaign.stats` from the ledgers and lists the ones that differ (`DRIFTED`) or were never seeded (`UNSEEDED`) — [see below](#contactknockcount-and-the-required-recompute-migratecampaign-stats) |
 | `npm run migrate:campaign-stats -- --apply` | **Once, straight after the Not-a-target release deploy** (seeds `contactKnockCount`); otherwise any time counter drift is suspected. Recomputes and stamps **every** campaign — the same code as the nightly `reconcile-campaign-stats` job |
 | `npm run replay:pace-pause` | **Read-only, counts only.** Automatic pause's season replay across every customer organization: per org, canvassers and days scanned, the days and people it would have paused, pauses in total, the pattern mix (vehicle / one spot / walking), fails on long hops, and how often a visit began Not home and ended surveyed. Counts under 3 print as *fewer than 3*; no name, id, address or coordinate. Skips internal and deleting orgs. Flags: `--since=<YYYY-MM-DD>` and the rule's numbers (`--door --survey --travel --window --fails --visit`); an unknown flag exits 2. A full ledger scan — run it late ([replayPacePause.js](../server/src/migrations/replayPacePause.js)) |
@@ -1985,6 +2019,24 @@ the import completes, `pinPassError` carries the generic sentence and `pinPassCa
 (super-admin Imports page only). The recovery is always the same import again — idempotent by design. The
 new partial index `{ campaignId: 1, pinSuspect: 1 }` makes `migrate:build-indexes -- --apply` a gate:
 without it the Pin Fixes list and the `pinsToFix` badge scan. Full rules: [IMPORTS.md](IMPORTS.md) §H.
+
+### The phone-clock check (`audit:phone-clocks`)
+
+[`auditPhoneClocks.js`](../server/src/migrations/auditPhoneClocks.js) streams `CanvassActivity` rows
+(`via` not `'bulk'`), groups them by user × organization × campaign × the day of `createdAt` in the
+campaign's zone (campaign, else organization, else New York; a zone Intl rejects falls through), and judges
+each group with [`judgeDay`](../server/src/services/audit/phoneClock.js). Lag = `createdAt` − `timestamp`.
+Delivery delay only adds lag, so a group is **ahead** when 3 or more saves arrived 5 minutes or more
+early, **behind** when no save arrived within 5 minutes and 3 or more live saves fall in 3 or more
+10-minute windows (a slow server releases its late rows together, in one window), **right** when a save
+arrived within 5 minutes and none early, and otherwise **not judged**. A live save can arrive minutes late
+on a right phone (the phone's 20 s abort is a JS timer that pauses in the background), which is why there
+is no median. It reads organizations and campaigns by `_id`, `timeZone`, `isInternal` and
+`deletion.requestedAt` only, and never a user, so no name can reach the output; connects with `autoIndex`
+and `autoCreate` off; checks its arguments before connecting. `--since` is
+`_id >= ObjectId.createFromTime(seconds)` (a Date there wraps to a random year); a day that began before
+`--since` in its zone is skipped as partial. Memory: about 70–85 bytes per visit held. Privacy record:
+the item for this check in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md).
 
 ## Why `autoIndex` is off in production
 

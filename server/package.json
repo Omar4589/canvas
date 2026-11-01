@@ -48,6 +48,7 @@
     "audit:stale-overwrites": "node src/migrations/auditStaleOverwrites.js",
     "audit:voter-id-spellings": "node src/migrations/auditVoterIdSpellings.js",
     "audit:gps-stamps": "node src/migrations/auditGpsStamps.js",
+    "audit:phone-clocks": "node src/migrations/auditPhoneClocks.js",
     "replay:pace-pause": "node src/migrations/replayPacePause.js",
     "pace:resolve-open": "node src/migrations/resolveOpenPacePauses.js",
     "report:tab-weeks": "node src/migrations/reportTabWeeks.js",

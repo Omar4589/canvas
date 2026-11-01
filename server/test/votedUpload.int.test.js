@@ -392,6 +392,11 @@ test('Count only rows where: values before filtering; apply marks and parks only
   assert.ok(!JSON.stringify(upl).includes('ACCE'), 'the ticked values are not stored');
   const hist = await fetch(`${base}/api${vx('')}`, { headers: { Authorization: `Bearer ${ctx.tok}`, 'X-Org-Id': String(ctx.org._id) } }).then((r) => r.json());
   assert.strictEqual(hist.uploads[0].keepColumn, 'Ballot_Status');
+  // The campaign's team leads read this history too, and a lead may be the campaign's client: the
+  // uploader's name, never their email address.
+  assert.ok(hist.uploads[0].uploadedBy?.firstName, 'the uploader is named');
+  assert.ok(!('email' in hist.uploads[0].uploadedBy), 'no uploader email');
+  assert.ok(!JSON.stringify(hist).includes('@'), 'no email address anywhere in the history');
 
   const bad = await uploadXlsx(vx('/preview'), await returnsXlsx(), { keepColumn: 'Ballot_Status', keepSelected: 'ACCE' });
   assert.strictEqual(bad.status, 400);

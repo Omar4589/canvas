@@ -154,11 +154,27 @@ const readExcel = async (fileBuffer, idColumn, keep) => {
 // the pieces give exactly the rows the whole file gave (test/idListCsvPieces.test.js).
 const CSV_PIECE_BYTES = 64 * 1024;
 // Papa guesses a text's line ending from its first 1M characters and its delimiter from its first 10
-// rows. The reader decodes at least that much before parsing and hands it over as the first piece, so
-// the guesses are made from the same text as a whole-file read — and passes them in as well, so a later
-// change to how the first piece is cut can't change them either.
+// rows. The reader decodes that much before parsing, refuses a file whose first 10 rows don't fit in it,
+// and hands it over as the first piece, so the guesses are made from the same text as a whole-file read
+// — and passes them in as well, so a later change to how the first piece is cut can't change them either.
 const GUESS_CHARS = 1024 * 1024;
 const CSV_OPTIONS = { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() };
+// A real list's rows run under 2 KB, a statewide file's 85 columns included. Text that stops making rows
+// — a quote mark that never closes, which swallows the rest of the file into one cell, or a file with no
+// line breaks — is refused, never read: Papa re-reads a row that hasn't ended with every piece, so a 39 MB
+// file with one stray quote took 590 MB and 2.5 s, and one with no line breaks froze the dyno for 41 s at
+// 1.3 GB (measured 2026-10-31). The whole-file read before it kept the rows ahead of the quote and
+// silently dropped the rest.
+const LONGEST_ROW_BYTES = 1024 * 1024;
+const ROW_TOO_LONG = {
+  message:
+    "We couldn't read this file: one of its rows never ends, usually because a quote mark in it isn't closed. Open it in Excel, save it again as CSV, and upload that.",
+  code: 'row-too-long',
+};
+const unclosedQuote = (rows) => ({
+  message: `We couldn't read this file past its first ${rows.toLocaleString('en-US')} ${rows === 1 ? 'row' : 'rows'}: a quote mark there isn't closed, so everything after it would be read as one cell. Open it in Excel, save it again as CSV, and upload that.`,
+  code: 'unclosed-quote',
+});
 
 // The file as text, a piece at a time: what toString('utf8') gives in one go, with a character split
 // across two pieces joined and invalid bytes replaced the same way.
@@ -178,10 +194,11 @@ const guessFormat = (text) => {
 };
 
 /**
- * The CSV half of readIdList, without its refusals: { columns, col, raw, keepRaw, totalRows, head }.
- * `head` is the start of the text, holding at least the first 10 rows. When no Voter ID column is found
- * (col null), or the keep column is missing, reading stops at the header. Between pieces it steps aside
- * for one turn of the event loop, so the dyno keeps answering everyone else. `pieceBytes` is for tests.
+ * The CSV half of readIdList: { columns, col, raw, keepRaw, totalRows, head, refused }. `head` is the
+ * start of the text, holding at least the first 10 rows. When no Voter ID column is found (col null), or
+ * the keep column is missing, reading stops at the header; when a row never ends, it stops there and
+ * `refused` holds the refusal ({ message, code }; null otherwise). Between pieces it steps aside for one
+ * turn of the event loop, so the dyno keeps answering everyone else. `pieceBytes` is for tests.
  */
 export const readCsvColumns = async (fileBuffer, { idColumn = null, keepColumn = null, pieceBytes = CSV_PIECE_BYTES } = {}) => {
   const pieces = decodePieces(fileBuffer, pieceBytes);
@@ -197,11 +214,10 @@ export const readCsvColumns = async (fileBuffer, { idColumn = null, keepColumn =
   extend(GUESS_CHARS);
   // Papa drops a byte-order mark from a string it's handed whole; text arriving in pieces is ours to drop.
   if (head.charCodeAt(0) === 0xfeff) head = head.slice(1);
-  let format = guessFormat(head);
-  // Rows over ~100 KB: decode on until the first 10 rows are all in, then guess again.
-  while (!ended && Papa.parse(head, { ...format, preview: EARLY_ROWS + 1 }).data.length <= EARLY_ROWS) {
-    extend(head.length * 2);
-    format = guessFormat(head);
+  const format = guessFormat(head);
+  // Ten rows averaging over 100 KB are one row that never ends, not a list.
+  if (!ended && Papa.parse(head, { ...format, preview: EARLY_ROWS + 1 }).data.length <= EARLY_ROWS) {
+    return { columns: [], col: null, raw: [], keepRaw: null, totalRows: 0, head, refused: ROW_TOO_LONG };
   }
 
   return new Promise((resolve, reject) => {
@@ -215,6 +231,8 @@ export const readCsvColumns = async (fileBuffer, { idColumn = null, keepColumn =
     let col = null;
     const raw = [];
     let keepRaw = null;
+    let refused = null;
+    let rowless = 0; // pieces in a row that ended no row
     // Both wait: pausing only the parser would let the stream decode the rest of the file into the
     // parser's queue in the meantime.
     const stepAside = (parser) => {
@@ -240,6 +258,15 @@ export const readCsvColumns = async (fileBuffer, { idColumn = null, keepColumn =
           }
           if (keepColumn != null) keepRaw = [];
         }
+        // Papa flags a quote that never closed only on the last piece, as the last row; a row that hasn't
+        // ended by LONGEST_ROW_BYTES is refused at once, before Papa re-reads it any further.
+        rowless = results.data.length ? 0 : rowless + 1;
+        if (results.errors.some((e) => e.code === 'MissingQuotes')) refused = unclosedQuote(raw.length + results.data.length - 1);
+        else if (rowless * pieceBytes >= LONGEST_ROW_BYTES) refused = ROW_TOO_LONG;
+        if (refused) {
+          stream.destroy();
+          return parser.abort();
+        }
         // Copies: a kept value of 13+ characters would otherwise hold its whole piece alive (own()).
         for (const row of results.data) {
           raw.push(own(row[col]));
@@ -247,7 +274,7 @@ export const readCsvColumns = async (fileBuffer, { idColumn = null, keepColumn =
         }
         stepAside(parser);
       },
-      complete: () => resolve({ columns: columns ?? [], col, raw, keepRaw, totalRows: raw.length, head }),
+      complete: () => resolve({ columns: columns ?? [], col, raw, keepRaw, totalRows: raw.length, head, refused }),
       error: reject,
     });
   });
@@ -257,6 +284,10 @@ const readCsv = async (fileBuffer, idColumn, keep) => {
   const startedAt = Date.now();
   const r = await readCsvColumns(fileBuffer, { idColumn, keepColumn: keep?.column ?? null });
   const tab = { sheetName: null, otherSheets: [] };
+  if (r.refused) {
+    logRead('csv', fileBuffer, startedAt, `refused ${r.refused.code}`);
+    return refusal(r.refused);
+  }
   if (!r.col) {
     logRead('csv', fileBuffer, startedAt, 'no Voter ID column');
     // The title-row line counts physical lines (blank ones included), so the row it names is the

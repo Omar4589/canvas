@@ -1,6 +1,7 @@
 # Proposal: Leave out doors visited recently — "Visited in the last N days" on Exclude doors
 
-> **Status: BUILT 2026-10-31 (uncommitted), to plan v5 and the owner's decisions; deploy pending. Where
+> **Status: DEPLOYED 2026-10-31 (`95a532e`), built to plan v5 and the owner's decisions; the owner tested it
+> on the live site the same day. Where
 > the build differs from the plan is in [§O, "As built"](#o-as-built-2026-10-31) at the end, with what was
 > verified and what was not.** The owner's decisions are in *The owner's decisions* (end of Part 1); the
 > short check of the two pieces added after round 3 (the **Use them again** line and the question Generate
@@ -206,13 +207,15 @@ Each one exists today, separate from this feature. Pick which to fix:
   "New voters" list to a client or a vendor, that file held every voter in the campaign.
 - **G2. Drawn-area and attribute-group counts ignore Target doors, Exclude doors and the restricted /
   no-soliciting boxes**, so an area's or group's count can be higher than the books it becomes. Fixing it
-  makes those counts roughly twice as slow on big walk lists. **Reviewed after this build.**
+  makes those counts roughly twice as slow on big walk lists. **Reviewed after this build.** *[2026-10-31: the
+  owner reviewed it: after Election Day.]*
 - **G3. Two cut refusals retry three times** (about 15 seconds) before the page shows them: a broken
   Exclude condition, and "no doors inside the drawn areas". **In this build** (two lines).
 - **G4. The saved-search builder says door statuses use each door's "current status".** Since the
   October 13 rule they read the door's whole history, like Target doors. **In this build** (the words).
 - **G5. A phone with a wrong clock records wrong visit times**, which then read wrong here and in every
-  report. **Reviewed after this build.**
+  report. **Reviewed after this build.** *[2026-10-31: the owner reviewed it: a read-only check first,
+  [PROPOSAL_PHONE_CLOCKS.md](PROPOSAL_PHONE_CLOCKS.md).]*
 - **G6. Switching campaigns on Turf Cutting keeps the previous campaign's round selected**, so the page
   shows an empty map until you pick a round. **In this build** (small).
 
@@ -748,8 +751,8 @@ The design the rounds converged on, kept for if it is ever wanted.
 
 Built to v5 and the owner's decisions: the visit line, the "last cut with" line and Generate's question,
 the stored conditions following the books, and gaps G1, G3, G4 and G6. Not built, by the owner's
-decision: the Activate check (§N), and G2 and G5 (reviewed after everything). Uncommitted; the owner
-commits.
+decision: the Activate check (§N), and G2 and G5 (reviewed after everything). Committed by the owner as
+`95a532e` and deployed 2026-10-31.
 
 **Where the build differs from the plan, or adds to it**
 - **The date check** is `civilDaySchema` beside `isoDateSchema` in `utils/validators.js`. Exercising it
@@ -793,8 +796,11 @@ commits.
 - `npm run audit:mobile-api`: turfs.js is mobile-facing; its changes add one field to `GET /turfs` and an
   opt-in field to the house route, so no `CLIENT_API_VERSION` bump.
 
-**Not verified:** a live browser session of Turf Cutting with real data — ticking the line, a real cut and
+**Not verified before the deploy:** a live browser session of Turf Cutting with real data — ticking the line, a real cut and
 Add as new book through the queue, the question's buttons, the house and building pop-ups, and the
 campaign switch. No local stack was run against the repo's own `.env`, which may reach live services. Do
 these on staging or production right after deploy (§J).
+
+**Verified after the deploy (2026-10-31):** the owner tested Turf Cutting on the live site and reported no
+problems.
 

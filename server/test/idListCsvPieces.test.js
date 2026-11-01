@@ -4,7 +4,8 @@
 // file gives exactly what the whole-file read gave, wherever its pieces happen to end — the line ending
 // and delimiter guesses, quoted line breaks, a byte-order mark, invalid UTF-8, a header longer than a
 // piece — the read steps aside between pieces instead of holding the event loop, and long kept IDs hold
-// no piece of the file alive.
+// no piece of the file alive. One exception, on purpose: a row that never ends (a quote mark never closed,
+// or no line breaks) is refused, where the whole-file read kept the rows before it and dropped the rest.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -70,8 +71,6 @@ const BIG_FILES = {
   'a 200 KB row': [B('Voter ID,Blob\n1,' + 'y'.repeat(200000) + '\n2,short\n'), null, null],
   'a header longer than a piece': [B(Array.from({ length: 3000 }, (_, i) => `Column number ${i}`).join(',') + ',Voter ID\n' + Array.from({ length: 3001 }, (_, i) => i).join(',') + '\n'), null, 'Column number 7'],
   'a tab header longer than a piece': [B(Array.from({ length: 3000 }, (_, i) => `Column number ${i}`).join('\t') + '\tVoter ID\n' + Array.from({ length: 3001 }, (_, i) => i).join('\t') + '\n'), null, null],
-  // The first 10 rows run past the 1M characters the guesses start from: the reader decodes on.
-  'first rows of 300 KB each': [B('Voter ID,Blob\n' + rows(12, (i) => `${i},${'w'.repeat(300000)}`) + '\n99,end\n'), null, null],
 };
 // The first 1M characters reach the parser as one piece, so only files past that put piece edges
 // inside rows: in a quoted line break, between a \r and its \n, inside an emoji or a bad byte.
@@ -137,6 +136,39 @@ test('the read steps aside between pieces, so other requests are answered meanwh
   const pieces = Math.floor((buf.length - 1024 * 1024) / (64 * 1024));
   assert.ok(pieces >= 20, `the file is too small to show it: ${pieces} pieces`);
   assert.ok(turns >= pieces, `only ${turns} turns of the event loop for ${pieces} pieces`);
+});
+
+test('a row that never ends is refused, never read short: a stray quote, or no line breaks', async () => {
+  const header = 'Voter ID,Name,Status';
+  const rowsOf = (from, n) => Array.from({ length: n }, (_, i) => `${from + i},Name ${from + i},ACCE`).join('\n');
+  // Under a megabyte after the stray quote: Papa only finds out at the end, and says so.
+  const late = B(`${header}\n${rowsOf(1, 2000)}\n2001,"Smith,ACCE\n${rowsOf(2002, 2000)}\n`);
+  // Megabytes after it, at row 2, and with no line breaks at all: stopped without reading on.
+  const early = B(`${header}\n${rowsOf(1, 100)}\n101,"Smith,ACCE\n${rowsOf(102, 130000)}\n`);
+  const second = B(`${header}\n1,Name 1,ACCE\n2,"Smith,ACCE\n${rowsOf(3, 60000)}\n`);
+  const oneLine = B(`${header};${rowsOf(1, 60000).replaceAll('\n', ';')}`);
+  // The first 10 rows must fit in the 1M characters the guesses are made from; rows averaging 100 KB
+  // are no list (before this, the reader decoded on to find them, which is how a row that never ends
+  // grew the start of the text to the whole file).
+  const wide = B('Voter ID,Blob\n' + rows(12, (i) => `${i},${'w'.repeat(300000)}`) + '\n99,end\n');
+  for (const pieceBytes of [4093, 65536]) {
+    for (const [name, buf, code] of [
+      ['late', late, 'unclosed-quote'],
+      ['early', early, 'row-too-long'],
+      ['second', second, 'row-too-long'],
+      ['one line', oneLine, 'row-too-long'],
+      ['first rows of 300 KB each', wide, 'row-too-long'],
+    ]) {
+      const r = await readCsvColumns(buf, { pieceBytes });
+      assert.equal(r.refused?.code, code, `${name}, pieceBytes ${pieceBytes}`);
+    }
+  }
+  // The whole-file read kept the rows ahead of the quote and swallowed the rest into one, without a word.
+  assert.equal(wholeFile(late).totalRows, 2001);
+  const refused = await readIdList(late);
+  assert.equal(refused.code, 'unclosed-quote');
+  assert.match(refused.error, /past its first 2,000 rows/);
+  assert.deepEqual(refused.columns, []);
 });
 
 test('long kept IDs keep no piece of the file alive: 150,000 twenty-character IDs', { timeout: 120000 }, () => {

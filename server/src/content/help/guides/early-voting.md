@@ -29,6 +29,8 @@ Open the campaign you're working in and pick **Early Voting** from its sidebar. 
 
 An Excel file has one more limit, on what's inside it: its first tab, unpacked, can be up to 320 MB. That's about 184,000 rows of a 35-column file, fewer for wider files; a county's or a district's returns file is far below it. A bigger workbook is refused as soon as it arrives: *This Excel file is too big for us to read. Only the Voter ID column is used, so save a copy with just that column, keeping only the voters who have already voted, and upload it.*
 
+**A CSV is read whole or not at all, too.** If a quote mark in it opens a cell and never closes, everything after it would run together into that one cell, so the page says after which row it stopped and asks you to open the file in Excel, save it again as CSV, and upload that, instead of quietly reading only the rows before it.
+
 ## Excel files
 
 - **Only the first tab is read**: the leftmost tab you can see (hidden tabs are skipped). When the workbook has other tabs, the preview names the tab it read, for example: *These IDs come from the Returns tab — the first tab in the file, and the only one read. The Summary tab is ignored. If your list is on a different tab, move it to the front of the workbook and upload again.*

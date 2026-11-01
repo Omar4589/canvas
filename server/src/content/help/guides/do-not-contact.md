@@ -44,7 +44,9 @@ upload:
    differently — zeros added or dropped — upload the list again afterwards; it will match then.)
 
 A list can be up to 50 MB, CSV or Excel. Only the Voter ID column is used, so if yours is bigger, save a
-copy with just that column and upload that. Every row of the file counts.
+copy with just that column and upload that. Every row of the file counts. A CSV is read whole or not at
+all: if a quote mark in it never closes, the page says after which row and asks you to open the file in
+Excel, save it again as CSV, and upload that, rather than leave off the people after it.
 
 **Excel files.** Only the first tab you can see is read; when the workbook has other tabs, the preview
 names the one it read, so check it's your list. A workbook with **rows hidden in Excel** (by a filter,

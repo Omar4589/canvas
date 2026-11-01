@@ -109,6 +109,16 @@ uploading to (shown as a read-only label, no dropdown to pick).
     Voter ID) in row 1, then upload again.*
   - Hidden rows, and a workbook too big inside: the two messages above.
 
+### A CSV that can't be read whole
+
+A CSV is read whole or refused too. A quote mark that opens a cell and never closes would swallow every
+row after it into that cell, so the file is turned away with how far it got, never read for the rows
+before it: *We couldn't read this file past its first 2,000 rows: a quote mark there isn't closed, so
+everything after it would be read as one cell. Open it in Excel, save it again as CSV, and upload that.* A
+row that never ends at all (a file with no line breaks, say) gets *We couldn't read this file: one of its
+rows never ends, usually because a quote mark in it isn't closed. …* Until 2026-10-31 the rows after such a
+quote were dropped without a word. The same goes for the do-not-contact list and a saved search from a list.
+
 ### When the Voter ID column isn't found
 
 The *Couldn't find a Voter ID column* box lists the file's columns to pick from, as before, and adds
@@ -298,7 +308,11 @@ Notes:
      headers), reading the text in 64 KB pieces and keeping only the ID column — and, with `keep`, the
      counting column — since 2026-10-31 (`readCsvColumns`; why and how: §F, and
      [PERFORMANCE.md](PERFORMANCE.md) → *Voter-ID list uploads*). Same rows as the whole-file read
-     (`test/idListCsvPieces.test.js`). A `[id-list] csv …` log line gives the size, row count and time.
+     (`test/idListCsvPieces.test.js`), except a row that never ends, refused since 2026-10-31 where the
+     whole-file read silently dropped every row after it: the first 10 rows must fit in the first 1M
+     characters, and a row still open after about 1 MB of pieces stops the read (both `row-too-long`); a
+     quote Papa reports never closed at the end (`MissingQuotes`) is `unclosed-quote`, naming how many rows
+     came before it. A `[id-list] csv …` log line gives the size, row count and time, or the refusal's code.
    - **The ID column, both formats: `pickIdColumn(columns, idColumn)`.** The admin's `idColumn` when the
      file has it; else, over column names of 255 characters or fewer (a longer name is listed for the
      picker but never auto-matched), `suggestMapping().stateVoterId` → the first name matching
@@ -452,7 +466,8 @@ headerRowHint }` (since 2026-10-28 this route sends the `code` the do-not-contac
 idColumn.*, the one refusal a page answers with the column picker, and only it carries a
 `headerRowHint`; every coded refusal sends `columns: []`, so its sentence is never hidden behind the
 picker. Codes: `legacy-xls` (old-format or password-protected Excel; now sent by these three uploads
-too), `damaged`, `chart-tab`, `no-header-row`, `hidden-rows`, `xlsx-too-big`, `keep-column` (*That
+too), `damaged`, `chart-tab`, `no-header-row`, `hidden-rows`, `xlsx-too-big`, `row-too-long` and
+`unclosed-quote` (a CSV row that never ends, §B), `keep-column` (*That
 column isn't in this file.*), `id-column` (an `idColumn` sent more than once, which arrives as an array:
 *Pick one Voter ID column.* — never a quiet fall-back to the detected column). A malformed counting request is a 400 `keep-selected` before the file is
 read, never taken as "count every row": a `keepSelected` that isn't a JSON array of strings (*keepSelected
@@ -653,7 +668,10 @@ Still true:
   froze it for over a second per read, and the owner asked for the reader fix: the CSV is now read in
   pieces, keeping one or two columns ([PERFORMANCE.md](PERFORMANCE.md) → *Voter-ID list uploads*). End
   to end on the preview route, a 45 MB file went from ~610 MB above the idle server to ~100 MB, and the
-  longest wait for any other request from 1.35 s to 40 ms. **The cap stays 50 MB:** multer still holds
+  longest wait for any other request from 1.35 s to 40 ms. A row that never ends (a stray quote, or no line
+  breaks) defeated the pieces until the guards added the same day: Papa re-reads an unfinished row with
+  every piece, so a 39 MB file with one stray quote took 590 MB and one with no line breaks held the server
+  41 s; both are now refused in milliseconds (§B). **The cap stays 50 MB:** multer still holds
   the whole upload in memory, briefly twice while it joins the pieces, so a 150 MB cap would cost about
   300 MB per upload at that moment; statewide files wait for the org-wide upload plan. An `.xlsx` is
   read differently — one or two columns, kept compactly, about 186–272 MB peak for the whole process at

@@ -25,6 +25,7 @@
     "audit:stale-overwrites": "npm --prefix server run audit:stale-overwrites --",
     "audit:voter-id-spellings": "npm --prefix server run audit:voter-id-spellings --",
     "audit:gps-stamps": "npm --prefix server run audit:gps-stamps --",
+    "audit:phone-clocks": "npm --prefix server run audit:phone-clocks --",
     "replay:pace-pause": "npm --prefix server run replay:pace-pause --",
     "pace:resolve-open": "npm --prefix server run pace:resolve-open --",
     "report:tab-weeks": "npm --prefix server run report:tab-weeks --",

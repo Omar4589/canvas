@@ -253,10 +253,12 @@ router.post('/import', uploadIdList, async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const [uploads, totalVoted, fullyVotedDoors] = await Promise.all([
+      // Name only, as the do-not-contact history: the campaign's team leads read this too, and a lead may
+      // be the campaign's client, who is never sent an admin's or a staff member's email address.
       VotedUpload.find({ campaignId: req.campaign._id })
         .sort({ createdAt: -1 })
         .limit(50)
-        .populate('uploadedBy', 'firstName lastName email')
+        .populate('uploadedBy', 'firstName lastName')
         .lean(),
       VotedVoter.countDocuments({ campaignId: req.campaign._id }),
       Household.countDocuments({ campaignId: req.campaign._id, fullyVoted: true }),

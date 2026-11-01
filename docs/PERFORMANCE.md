@@ -389,15 +389,19 @@ All of it synchronous, so the event loop was held for the whole parse.
 **The reader now** (`readCsvColumns`, [parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)):
 1. Decodes the buffer in 64 KB slices with a `StringDecoder`: exactly `toString('utf8')`'s text, with a
    character split across slices joined and invalid bytes replaced the same way.
-2. Decodes at least 1M characters and the first 10 rows up front (Papa guesses the line ending from a
-   text's first 1M characters and the delimiter from its first 10 rows), drops a byte-order mark (Papa
-   drops one only from a string handed to it whole), and passes both guesses in.
+2. Decodes the first 1M characters up front (Papa guesses the line ending from a text's first 1M
+   characters and the delimiter from its first 10 rows), refuses the file if they don't hold the first 10
+   rows (`row-too-long`), drops a byte-order mark (Papa drops one only from a string handed to it whole),
+   and passes both guesses in.
 3. Feeds Papa a `Readable` of the pieces, with a `chunk` callback and the same `header` /
    `skipEmptyLines` / trimmed-header options; keeps `row[col]` and, with `keep`, `row[keepColumn]`. With
    no ID column, or the keep column missing, it stops at the header (`stream.destroy()`, `parser.abort()`).
 4. Between pieces: `parser.pause(); stream.pause(); setImmediate(() => { stream.resume(); parser.resume(); })`.
    Both, because pausing Papa's handle doesn't pause its input stream: `ReadableStreamStreamer` keeps
    queueing `data` events, so the rest of the file would be decoded into its queue anyway.
+5. Stops on a row that never ends. A row still open after about 1 MB of pieces is `row-too-long`; a quote
+   Papa reports never closed at the end (`MissingQuotes`, only ever on the last piece) is `unclosed-quote`,
+   naming how many rows came before it.
 
 > **Traps found on the way.** Papa's `chunkSize` on a string (the first design) still needs the whole file
 > as one string. Chunks of 1 MB peaked at 441 MB against 64 KB's 187 MB: each chunk's ~2,000 row objects
@@ -408,12 +412,28 @@ All of it synchronous, so the event loop was held for the whole parse.
 > 35 MB with copies). Kept values go through `own()` from
 > [readIdColumn.js](../server/src/services/import/readIdColumn.js), the same fix the Excel reader needed.
 > The test measures it in a child process ([support/idListCsvResources.child.js](../server/test/support/idListCsvResources.child.js)).
+>
+> **Found after it shipped (review of the org-wide upload plan, 2026-10-31): a row that never ends.** A
+> quote mark that opens a cell and never closes swallows the rest of the file into that cell, and Papa
+> re-reads an unfinished row with every piece; the reader also decoded on, doubling, until it held 10 rows.
+> On 39 MB files (80,000 rows × 40 columns), the shipped reader against the whole-file read before it:
+>
+> | File | Whole-file read | Shipped 2026-10-31 | With the guards (step 5) |
+> |---|---|---|---|
+> | A clean file | 438 MB, held 0.7 s | 154 MB | 160 MB, longest wait 16 ms |
+> | A quote never closed at row 1,000 | 178 MB; 1,001 rows read, the rest dropped silently | 590 MB, 2.5 s; same rows dropped | `row-too-long` in 24 ms, 150 MB |
+> | No line breaks at all | 889 MB, held 5.2 s | 1.3 GB, held 41 s | `row-too-long` in 12 ms, 136 MB |
+>
+> Rows that long never come in a real list (a statewide file's rows run under 2 KB), so these files are
+> refused rather than read; before, the rows after the quote were lost without a word, by both readers.
 
 **Same rows.** [test/idListCsvPieces.test.js](../server/test/idListCsvPieces.test.js) compares against the
 old reader verbatim: small files at piece sizes from 1 byte up (the decoding edges), large ones, and files
 past the first 1M characters, so piece edges land inside rows (a quoted `\r\n`, between `\r` and `\n`, in
 an emoji or an invalid byte). Planted breaks fail it: no byte-order-mark drop, or decoding each piece on
-its own.
+its own. The one difference on purpose, tested on its own: a row that never ends is refused (a stray
+quote near the end, megabytes before it, at row 2, no line breaks, first rows of 300 KB), and each of the
+three checks, removed, fails that test.
 
 **Measured** on the owner's Mac. End to end: the real Early Voting preview route, a 60,000-voter campaign
 on a throwaway `mongod`, a synthetic 45 MB file of 80,323 rows × 85 columns, `/api/health` polled every
