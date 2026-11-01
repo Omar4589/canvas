@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAutoSaver, diffSettings, settingsOf, saveLabel, hasLocalChanges, fieldsText, changedFields, mergeList, mergeSettings, conflictWords } from '../components/clientReports/autoSave.js';
+import { createAutoSaver, diffSettings, settingsOf, saveLabel, hasLocalChanges, fieldsText, changedFields, mergeList, mergeSettings, conflictWords, withHouseLevelConfirm } from '../components/clientReports/autoSave.js';
 
 // The builder's auto-save (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §G3, §C5), with the clock in the
 // test's hands: nothing leaves before 800 ms of quiet, then ONE targeted PATCH of only what changed;
@@ -532,4 +532,23 @@ test('changedFields names fields as diffSettings sees them, sections as typed (A
   assert.deepEqual(changedFields(base, { ...base, observations: [...base.observations, { heading: '', body: 'x' }] }), ['observations']);
   // Different fields on each side: the merge asks nothing.
   assert.deepEqual(mergeSettings(base, theirs, { ...base, observations: [{ heading: 'Mine', body: '' }] }).conflicts, []);
+});
+
+// Privacy record item 52: areas are the default view, and a house-level map is opt-in per report.
+test('a missing map view reads as areas on a draft and as house-level on a report published before the field', () => {
+  const v = { visibleQuestionKeys: [], mapAnswerKeys: [], showMap: true };
+  assert.equal(settingsOf({ status: 'draft', visibility: v }).visibility.mapMode, 'area', 'what its next build makes');
+  assert.equal(settingsOf({ status: 'published', visibility: v }).visibility.mapMode, 'pins', 'what one frozen then is');
+  assert.equal(settingsOf({ status: 'draft', visibility: { ...v, mapMode: 'pins' } }).visibility.mapMode, 'pins', 'a chosen view is kept');
+  assert.equal(settingsOf({ status: 'published', visibility: { ...v, mapMode: 'area' } }).visibility.mapMode, 'area');
+});
+
+test('a save that sets a house-level map carries the confirmation only when the operator confirmed it here', () => {
+  const body = { visibility: { mapMode: 'pins' }, ifStatus: 'draft' };
+  assert.deepEqual(withHouseLevelConfirm(body, true), { ...body, confirmHouseLevel: true });
+  assert.equal(withHouseLevelConfirm(body, false), body, 'never inferred from the body alone');
+  const areas = { visibility: { mapMode: 'area' } };
+  assert.equal(withHouseLevelConfirm(areas, true), areas, 'areas need no confirmation');
+  assert.equal(withHouseLevelConfirm({ title: 'x' }, true).confirmHouseLevel, undefined);
+  assert.equal(conflictWords([{ field: 'mapMode' }], { theirs: { visibility: { mapMode: 'pins' } } }).replaces, 'their map view (a house-level map)');
 });

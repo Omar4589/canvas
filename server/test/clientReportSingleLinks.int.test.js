@@ -99,9 +99,16 @@ const runBuild = async (reportId) => {
   assert.ok(out?.committed, `the build committed: ${JSON.stringify(out)}`);
   return ClientReport.findById(reportId).lean();
 };
+// Each report here is one whose operator opted into a house-level map (a new report is areas, privacy
+// record item 52), written as the confirmed PATCH leaves it, on the claimed build's inputs too: these
+// tests read its pins and doors.
 const create = async (camp, body) => {
   const res = await call('POST', '/admin/client-reports', { body: { campaignId: String(camp._id), ...body } });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
+  await ClientReport.updateOne(
+    { _id: res.json.report._id },
+    { $set: { 'visibility.mapMode': 'pins', 'build.inputs.mapMode': 'pins', 'visibility.houseLevelConfirmedAt': new Date() } }
+  );
   return res.json.report;
 };
 const publish = async (r) => {

@@ -3,8 +3,12 @@ import { sessionEndDecision, webAction, isPublicPath } from '../lib/sessionEnd.j
 export const TOKEN_KEY = 'canvass.token';
 const ACTIVE_ORG_KEY = 'canvass.activeOrgId';
 
+// The build prerenders the public marketing pages in Node (client/scripts/prerender.js), where there is
+// no localStorage — and no token or org either. The two reads below say so instead of throwing.
+const hasStorage = () => typeof localStorage !== 'undefined';
+
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return hasStorage() ? localStorage.getItem(TOKEN_KEY) : null;
 }
 
 export function setToken(token) {
@@ -20,7 +24,7 @@ export function setToken(token) {
 // password reset or a sign-in in another tab clears or resets the stored org).
 let tabOrgId;
 export function getActiveOrgId() {
-  if (tabOrgId === undefined) tabOrgId = localStorage.getItem(ACTIVE_ORG_KEY);
+  if (tabOrgId === undefined) tabOrgId = hasStorage() ? localStorage.getItem(ACTIVE_ORG_KEY) : null;
   return tabOrgId;
 }
 

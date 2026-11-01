@@ -129,6 +129,29 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* The public marketing pages are always light (`theme-light` re-pins their tokens), but <html> and
+   <body> sit outside that subtree — on a dark-mode device the overscroll showed the console's dark
+   surface. LandingPage puts `marketing` on <html> while it is mounted. */
+html.marketing,
+html.marketing body {
+  @apply bg-white;
+  color-scheme: light;
+}
+
+/* The AAPC banner (marketing/AapcBanner.jsx) carries both of its texts; <html data-aapc>, stamped
+   before first paint by an inline script (marketing/aapc.js), picks one — or hides the bar. */
+.aapc-banner {
+  display: none;
+}
+html[data-aapc='before'] .aapc-banner,
+html[data-aapc='after'] .aapc-banner {
+  display: block;
+}
+html[data-aapc='before'] .aapc-after,
+html[data-aapc='after'] .aapc-before {
+  display: none;
+}
+
 /* Respect reduced-motion globally: neutralize token animations + transitions. */
 @media (prefers-reduced-motion: reduce) {
   *,

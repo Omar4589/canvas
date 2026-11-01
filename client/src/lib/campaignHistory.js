@@ -222,6 +222,11 @@ const REPORT_ROW = {
   'clientReport.unarchived': 'Unarchived',
   'clientReport.deleted': 'Deleted',
   'clientReport.remapped': 'Switched to areas',
+  // A house-level map (addresses and map answers on the link) is opt-in per report, behind its
+  // warning; Doorline's own switch to areas has no author (it reads "Doorline") and never told the
+  // client "Edited" (privacy record item 52).
+  'clientReport.houseLevelConfirmed': 'House-level map confirmed',
+  'clientReport.areasPrivacyUpdate': 'Map switched to areas by Doorline (privacy update)',
 };
 const SERIES_ROW = {
   'clientReportSeries.created': 'Team created',
@@ -316,6 +321,11 @@ export const clientReportHistoryLine = (item, { seriesLabels = null } = {}) => {
       detail = refreshDetail(item.fromValue, item.toValue);
     } else if (f === 'clientReport.remapped') {
       detail = item.toValue?.areaSize === 'large' ? 'Large areas' : 'Small areas';
+    } else if (f === 'clientReport.houseLevelConfirmed') {
+      detail = item.toValue?.via === 'refresh' ? 'With Refresh numbers — addresses and map answers on the link' : 'Addresses and map answers on the link';
+    } else if (f === 'clientReport.areasPrivacyUpdate') {
+      const size = item.toValue?.areaSize === 'large' ? 'Large areas' : 'Small areas';
+      detail = item.toValue?.kind === 'remap' ? `${size} — the numbers didn’t change, and your client wasn’t shown “Edited”` : `${size}, from the next build`;
     }
     return { headline: REPORT_ROW[f], subject, detail };
   }

@@ -58,6 +58,7 @@
     "migrate:geocode-lastused": "npm --prefix server run migrate:geocode-lastused --",
     "migrate:scrub-map-points": "npm --prefix server run migrate:scrub-map-points --",
     "migrate:client-report-visibility": "npm --prefix server run migrate:client-report-visibility --",
+    "migrate:client-report-areas": "npm --prefix server run migrate:client-report-areas --",
     "migrate:deletion-snapshots": "npm --prefix server run migrate:deletion-snapshots --",
     "migrate:scrub-deleted-email-log": "npm --prefix server run migrate:scrub-deleted-email-log --",
     "migrate:fbtime-deletion-gaps": "npm --prefix server run migrate:fbtime-deletion-gaps --",

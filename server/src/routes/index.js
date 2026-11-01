@@ -40,6 +40,7 @@ import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
 import superAdminAccessRouter from './superAdmin/access.js';
 import superAdminEmailsRouter from './superAdmin/emails.js';
+import superAdminWebsiteRouter from './superAdmin/website.js';
 import superAdminImportsRouter from './superAdmin/imports.js';
 import superAdminStatementsRouter from './superAdmin/statements.js';
 import superAdminPlatformRouter from './superAdmin/platform.js';
@@ -107,6 +108,8 @@ router.use('/super-admin/persons', superAdminPersonsRouter);
 // Support access grants + the vendor-access audit log + retention health.
 router.use('/super-admin/access', superAdminAccessRouter);
 router.use('/super-admin/emails', superAdminEmailsRouter);
+// The public website: saved demo requests + daily visit counts (routes/superAdmin/website.js).
+router.use('/super-admin/website', superAdminWebsiteRouter);
 router.use('/super-admin/imports', superAdminImportsRouter);
 // Must stay ABOVE the '/super-admin' catch-all below, or that mount swallows the path.
 router.use('/super-admin/billing', superAdminStatementsRouter);

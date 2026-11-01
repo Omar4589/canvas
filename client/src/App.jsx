@@ -70,6 +70,7 @@ const SuperAdminPeoplePage = lazy(() => import('./pages/SuperAdminPeoplePage.jsx
 const SuperAdminImportsPage = lazy(() => import('./pages/SuperAdminImportsPage.jsx'));
 const SupportAccessPage = lazy(() => import('./pages/SupportAccessPage.jsx'));
 const SuperAdminEmailsPage = lazy(() => import('./pages/SuperAdminEmailsPage.jsx'));
+const SuperAdminWebsitePage = lazy(() => import('./pages/SuperAdminWebsitePage.jsx'));
 const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage.jsx'));
 const SuperAdminUserDetailPage = lazy(() => import('./pages/SuperAdminUserDetailPage.jsx'));
 const OrgDetailPage = lazy(() => import('./pages/OrgDetailPage.jsx'));
@@ -100,14 +101,18 @@ function LegacyPassesRedirect() {
   );
 }
 
-export default function App() {
+// `pages` carries already-loaded components for the routes that were prerendered to static HTML
+// (AppTree.jsx: main.jsx loads the page module before hydrating, entry-prerender.jsx renders it at build
+// time). Every other route — and these, when the page wasn't prerendered — stays lazy.
+export default function App({ pages = {} }) {
+  const Landing = pages.landing || LandingPage;
   return (
     <Suspense fallback={<PageFallback />}>
       {/* The password, in place, over any page (select-org and change-password included) when a
           sign-in runs out. See components/ReauthModal.jsx. */}
       <ReauthModal />
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<LoginPage />} />
         {/* Public password-reset flow — beside /login, OUTSIDE any ProtectedRoute. The reset
             page also serves first-time invite / set-password links. */}
@@ -275,6 +280,7 @@ export default function App() {
             <Route path="/super-admin/access" element={<SupportAccessPage />} />
             {/* The transactional-email log — platform-scoped, metadata only (content lives in Resend). */}
             <Route path="/super-admin/emails" element={<SuperAdminEmailsPage />} />
+            <Route path="/super-admin/website" element={<SuperAdminWebsitePage />} />
             <Route path="/super-admin/billing" element={<MonthClosePage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
             <Route path="/organizations/:orgId" element={<OrgDetailPage />} />

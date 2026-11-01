@@ -24,6 +24,12 @@
 export const VISIBILITY_KEYS = ['visibleQuestionKeys', 'mapAnswerKeys', 'showMap', 'visibleTags', 'showGoal', 'mapMode', 'areaSize'];
 const SET_KEYS = new Set(['visibleQuestionKeys', 'mapAnswerKeys', 'visibleTags']);
 
+// A missing map view (a document from before the field): a draft's reads as areas, the default for
+// every report (privacy record item 52) and what its next build makes (inputsFromSettings); a published
+// report's as house-level ('pins'), which is what one frozen then is — and its view moves only with
+// its live snapshot.
+const mapModeOf = (report, v) => (v.mapMode === 'area' || v.mapMode === 'pins' ? v.mapMode : report?.status === 'draft' ? 'area' : 'pins');
+
 /** A report's editable settings, with explicit fallbacks (old documents lack fields — never trust a default). */
 export const settingsOf = (report) => {
   const v = report?.visibility || {};
@@ -38,11 +44,20 @@ export const settingsOf = (report) => {
       showMap: v.showMap !== false,
       visibleTags: [...(v.visibleTags || [])],
       showGoal: !!v.showGoal,
-      mapMode: v.mapMode === 'area' ? 'area' : 'pins',
+      mapMode: mapModeOf(report, v),
       areaSize: v.areaSize === 'large' ? 'large' : 'small',
     },
   };
 };
+
+/**
+ * A save body with the house-level confirmation the server asks for (privacy record item 52): a body
+ * that sets the map to house-level ('pins') carries confirmHouseLevel: true — but only when `confirmed`
+ * says the operator confirmed it in this page's dialog, never inferred from the body alone (an unsent
+ * change kept from before the dialog existed is refused by the server until it is confirmed there).
+ */
+export const withHouseLevelConfirm = (body, confirmed = false) =>
+  body?.visibility?.mapMode === 'pins' && confirmed ? { ...body, confirmHouseLevel: true } : body;
 
 // A section with no heading isn't sent (the server requires one); it stays on screen until it has one.
 export const sendableObservations = (obs) =>
@@ -283,7 +298,7 @@ export const mergeSettings = (base, theirs, mine, { prefer = 'mine' } = {}) => {
 
 const quoted = (s) => `“${s}”`;
 const listText = (words) => (words.length <= 1 ? words[0] || '' : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
-const viewText = (mode, size) => (mode === 'area' ? `${size === 'large' ? 'large' : 'small'} areas` : 'exact doors');
+const viewText = (mode, size) => (mode === 'area' ? `${size === 'large' ? 'large' : 'small'} areas` : 'a house-level map');
 
 /**
  * The words for a conflict banner: `what` names only what both sides changed ("the title and the

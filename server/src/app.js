@@ -18,6 +18,7 @@ import {
 } from './middleware/loginRateLimit.js';
 import { requireBullBoardAuth, createBullBoardRouter } from './queues/bullBoard.js';
 import { WEB_SEGMENTS } from './webRoutes.js';
+import { countVisit } from './services/site/siteVisits.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolves to <repo>/client/dist when running from server/src/. Overridable so the static +
@@ -41,6 +42,16 @@ const STATIC_PAGES = [
   // OG copy. See the comment block in client/public/app.html.
   ['/app', 'app.html'],
 ];
+// The public marketing pages, prerendered to real HTML by the client build (client/scripts/prerender.js)
+// so the first paint — a QR scan on conference Wi-Fi — never waits on ~300 KB of JavaScript; the page
+// then hydrates in place. They live in dist/.prerendered/, a dot-directory express.static refuses to
+// serve (dotfiles: 'ignore' below), so each is reachable only at its clean URL. dist/index.html stays
+// the EMPTY shell: the SPA fallback hands it to every console route. A missing file (a dist built
+// before prerendering) falls through to that shell, exactly as before. /aapc joins this list with its
+// page (docs/MARKETING_SITE.md).
+const PRERENDERED_DIR = path.join(CLIENT_DIST, '.prerendered');
+const PRERENDERED_PAGES = [['/', 'index.html']];
+
 // The zero-JS 404 document. If a stale dist lacks it, serve the SPA shell WITH a 404 status —
 // App.jsx's catch-all renders its NotFoundPage, so the status code stays honest either way.
 const NOT_FOUND_DOC = fs.existsSync(path.join(CLIENT_DIST, '404.html'))
@@ -131,7 +142,27 @@ export function createApp() {
       res.redirect(301, req.path.replace(/\.html$/i, ''));
     });
 
-    app.use(express.static(CLIENT_DIST));
+    // Every serve of a public marketing page bumps that day's first-party visit count — counted here
+    // so the prerendered document, or the shell standing in for it, counts the same. No cookie, no
+    // stored IP: services/site/siteVisits.js.
+    for (const [route, file] of PRERENDERED_PAGES) {
+      const abs = path.join(PRERENDERED_DIR, file);
+      const exists = fs.existsSync(abs); // dist is immutable for the life of a dyno
+      app.get(route, (req, res, next) => {
+        countVisit(req, route);
+        if (!exists) return next();
+        res.sendFile(abs, { maxAge: 0, dotfiles: 'allow' }, (err) => (err ? next(err) : undefined));
+      });
+    }
+
+    // Hashed build output never changes under its name, so browsers may keep it for a year — a
+    // repeat visit (or a second scan of the QR code) then loads only the HTML. Everything else in
+    // dist keeps max-age 0 + ETag, so a deploy is visible on the next request.
+    app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { immutable: true, maxAge: '1y', index: false }));
+    // index: false — "/" is the prerendered page above (or the fallback's shell), never a directory
+    // index. dotfiles: 'ignore' hides dist/.prerendered/: the default only skips a dot-NAMED file,
+    // and would serve /.prerendered/index.html as a duplicate of the homepage.
+    app.use(express.static(CLIENT_DIST, { index: false, dotfiles: 'ignore' }));
 
     // The static legal pages at their clean URLs: real text, zero JS, self-canonical. Express's
     // default routing (non-strict, case-insensitive) makes one route cover /privacy, /privacy/

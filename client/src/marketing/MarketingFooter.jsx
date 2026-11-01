@@ -132,7 +132,7 @@ export default function MarketingFooter() {
             text inside their clear space. */}
         <div className="mt-8 space-y-1.5">
           <p className="text-xs text-stone-500">© 2026 Doorline LLC</p>
-          <p className="text-[11px] leading-relaxed text-stone-400">
+          <p className="text-xs leading-relaxed text-stone-500">
             Apple and the Apple logo are trademarks of Apple Inc., registered in the U.S. and other
             countries. App Store is a service mark of Apple Inc. Google Play and the Google Play
             logo are trademarks of Google LLC.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getToken, getActiveOrgId } from '../../api/client.js';
-import { createAutoSaver } from './autoSave.js';
+import { createAutoSaver, withHouseLevelConfirm } from './autoSave.js';
 import { buildPollInterval, freshestBuild, isLiveBuild } from './buildState.js';
 
 // The Client Reports pages' small hooks. Every effect here that starts something stops it: media
@@ -281,17 +281,18 @@ export const writeUnsent = (id, value) => {
  * save, so it carries ifStatus: 'draft' like the rest (contract C5) — if the report was published
  * meanwhile it is refused, never written onto the client's page — and the version the screen was
  * built on (C8), so it never writes over a change made elsewhere. The page kept a copy first.
+ * `houseLevelOk`: the operator confirmed a house-level map in this page (withHouseLevelConfirm).
  * Resolves true when the server took it (2xx), false otherwise — a refusal, a failure, or nobody left
  * to hear the answer (the tab closed: the copy then waits for the next visit's check).
  */
-export const keepalivePatch = (reportId, body, version = null) => {
+export const keepalivePatch = (reportId, body, version = null, houseLevelOk = false) => {
   if (typeof fetch === 'undefined') return Promise.resolve(false);
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
   const orgId = getActiveOrgId();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (orgId) headers['X-Org-Id'] = orgId;
-  const sent = { ...body, ifStatus: 'draft', ...(Number.isInteger(version) ? { ifEditVersion: version } : {}) };
+  const sent = withHouseLevelConfirm({ ...body, ifStatus: 'draft', ...(Number.isInteger(version) ? { ifEditVersion: version } : {}) }, houseLevelOk);
   return fetch(`/api/admin/client-reports/${reportId}`, { method: 'PATCH', headers, body: JSON.stringify(sent), keepalive: true }).then(
     (res) => !!res?.ok,
     () => false
@@ -301,8 +302,10 @@ export const keepalivePatch = (reportId, body, version = null) => {
 /**
  * Auto-save for a draft's settings (§G3), mounted once per report. Returns the saver and its state.
  * `onSaved(report, body, version)` gets the server's fresh report, what was sent and the version it
- * was pinned to after each save; `onAdopt` the settings the server normalized. On unmount anything
- * still unsaved is kept on this device, then leaves with keepalive.
+ * was pinned to after each save; `onAdopt` the settings the server normalized; `houseLevelOk()` says
+ * whether the operator confirmed a house-level map in this page's dialog (a save that sets one carries
+ * the confirmation only then — withHouseLevelConfirm). On unmount anything still unsaved is kept on
+ * this device, then leaves with keepalive.
  *
  * Every save says it is a DRAFT save (ifStatus: 'draft', contract C5): a report someone published
  * while this page was open refuses it 409 STATUS_CHANGED, so half-written text never goes live without
@@ -311,10 +314,10 @@ export const keepalivePatch = (reportId, body, version = null) => {
  * hands the report that came back to `onChangedElsewhere(report)` and parks the saver until the page
  * has merged.
  */
-export const useAutoSave = ({ reportId, versionOf, onSaved, onAdopt, onChangedElsewhere }) => {
+export const useAutoSave = ({ reportId, versionOf, onSaved, onAdopt, onChangedElsewhere, houseLevelOk }) => {
   const [state, setState] = useState({ status: 'idle', error: null, savedAt: null, dirty: false, held: false, parked: false });
-  const cbs = useRef({ versionOf, onSaved, onAdopt, onChangedElsewhere });
-  cbs.current = { versionOf, onSaved, onAdopt, onChangedElsewhere };
+  const cbs = useRef({ versionOf, onSaved, onAdopt, onChangedElsewhere, houseLevelOk });
+  cbs.current = { versionOf, onSaved, onAdopt, onChangedElsewhere, houseLevelOk };
   const saverRef = useRef(null);
   if (!saverRef.current || saverRef.current.reportId !== reportId) {
     const versionNow = () => {
@@ -329,7 +332,7 @@ export const useAutoSave = ({ reportId, versionOf, onSaved, onAdopt, onChangedEl
           const version = versionNow();
           return api(`/admin/client-reports/${reportId}`, {
             method: 'PATCH',
-            body: { ...body, ifStatus: 'draft', ...(version != null ? { ifEditVersion: version } : {}) },
+            body: withHouseLevelConfirm({ ...body, ifStatus: 'draft', ...(version != null ? { ifEditVersion: version } : {}) }, !!cbs.current.houseLevelOk?.()),
           }).then(
             (res) => {
               cbs.current.onSaved?.(res.report, body, version);
@@ -350,7 +353,7 @@ export const useAutoSave = ({ reportId, versionOf, onSaved, onAdopt, onChangedEl
         // (its `at`): never a newer one. Refused or failed, it stays and is offered next time.
         sendKeepalive: (body) => {
           const at = keptAt;
-          keepalivePatch(reportId, body, versionNow()).then((ok) => {
+          keepalivePatch(reportId, body, versionNow(), !!cbs.current.houseLevelOk?.()).then((ok) => {
             if (ok && at != null && readUnsent(reportId)?.at === at) writeUnsent(reportId, null);
           });
         },

@@ -682,6 +682,15 @@ test('History: every client-report row reads in words, naming the period, never 
     'Doors 3,412 → 3,420'
   );
   assert.equal(line('clientReport.remapped', { toValue: { mapMode: 'area', areaSize: 'large' } }).detail, 'Large areas');
+  // Privacy record item 52: a confirmed house-level map, and Doorline's own switch to areas.
+  assert.equal(line('clientReport.houseLevelConfirmed', { toValue: { mapMode: 'pins', via: 'settings' } }).headline, 'House-level map confirmed');
+  assert.equal(line('clientReport.houseLevelConfirmed', { toValue: { mapMode: 'pins', via: 'refresh' } }).detail, 'With Refresh numbers — addresses and map answers on the link');
+  assert.equal(line('clientReport.houseLevelConfirmed', { toValue: { mapMode: 'pins', via: 'settings' } }).detail, 'Addresses and map answers on the link');
+  const privacy = line('clientReport.areasPrivacyUpdate', { toValue: { kind: 'remap', mapMode: 'area', areaSize: 'small' } });
+  assert.equal(privacy.headline, 'Map switched to areas by Doorline (privacy update)');
+  assert.equal(privacy.detail, 'Small areas — the numbers didn’t change, and your client wasn’t shown “Edited”');
+  assert.equal(line('clientReport.areasPrivacyUpdate', { toValue: { kind: 'setting', mapMode: 'area', areaSize: 'large' } }).detail, 'Large areas, from the next build');
+  assert.ok(isClientReportField('clientReport.houseLevelConfirmed') && isClientReportField('clientReport.areasPrivacyUpdate'));
   assert.deepEqual(clientReportHistoryLine({ field: 'clientReportSeries.renamed', fromValue: 'Team A', toValue: 'Paid team' }), {
     headline: 'Renamed',
     subject: 'Paid team',

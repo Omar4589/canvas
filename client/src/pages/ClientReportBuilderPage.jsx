@@ -11,7 +11,7 @@ import { Badge, Button, Card, Segmented, Skeleton } from '../components/ui/index
 import NextStepBanner from '../components/NextStepBanner.jsx';
 import ClientReportView, { ClientReportHeading } from '../components/ClientReportView.jsx';
 import ClientReportMap from '../components/ClientReportMap.jsx';
-import ReportSettings from '../components/clientReports/ReportSettings.jsx';
+import ReportSettings, { HOUSE_LEVEL_WARNING } from '../components/clientReports/ReportSettings.jsx';
 import BeforePublish, { PublishedChecks } from '../components/clientReports/BeforePublish.jsx';
 import PublishDialog from '../components/clientReports/PublishDialog.jsx';
 import RefreshDialog from '../components/clientReports/RefreshDialog.jsx';
@@ -31,6 +31,7 @@ import {
   saveLabel,
   sendableObservations,
   settingsOf,
+  withHouseLevelConfirm,
 } from '../components/clientReports/autoSave.js';
 import {
   closeUnderDeps,
@@ -289,10 +290,15 @@ const ClientReportBuilderPage = () => {
   // seeded as (a draft turning published under it is "published elsewhere" — unless this page
   // published it).
   const screen = useRef({ id: null, version: 0, mode: null });
+  // A house-level map is opt-in per report, behind its warning (privacy record item 52): true once the
+  // operator confirmed one in this page's dialog, and only then does a save that sets it say so
+  // (withHouseLevelConfirm) — the server refuses one that doesn't.
+  const houseLevelOk = useRef(false);
 
   const { saver, state: saveState } = useAutoSave({
     reportId: id,
     versionOf: () => screen.current.version,
+    houseLevelOk: () => houseLevelOk.current,
     onSaved: (saved, body, version) => {
       // A save pinned to the screen's version that landed moved it by exactly one: the screen now
       // reflects that version, whatever the answer carries — a newer copy (someone wrote right after)
@@ -746,7 +752,8 @@ const ClientReportBuilderPage = () => {
   const updateM = useMutation({
     // ifStatus (contract C5): an Update only ever lands on a report that is still published; and only
     // on the version the edit was built on (C8), so it never writes over a change made elsewhere.
-    mutationFn: (body) => api(`/admin/client-reports/${id}`, { method: 'PATCH', body: { ...body, ifStatus: 'published', ifEditVersion: editVer.current } }),
+    mutationFn: (body) =>
+      api(`/admin/client-reports/${id}`, { method: 'PATCH', body: withHouseLevelConfirm({ ...body, ifStatus: 'published', ifEditVersion: editVer.current }, houseLevelOk.current) }),
     onSuccess: (res) => {
       const first = mergedFirst.current;
       mergedFirst.current = null;
@@ -799,6 +806,7 @@ const ClientReportBuilderPage = () => {
   });
   const [confirmMapOff, setConfirmMapOff] = useState(false);
   const [confirmAreas, setConfirmAreas] = useState(null); // the area size picked
+  const [confirmHouseLevel, setConfirmHouseLevel] = useState(false);
   const [confirmTakeDown, setConfirmTakeDown] = useState(false);
   const takeDownM = useMutation({
     mutationFn: () => api(`/admin/client-reports/${id}/take-down`, { method: 'POST' }),
@@ -1123,6 +1131,7 @@ const ClientReportBuilderPage = () => {
           if (settings.visibility.mapMode === 'area') change({ ...settings, visibility: { ...settings.visibility, areaSize: size } });
           else setConfirmAreas(size);
         }}
+        onHouseLevel={() => setConfirmHouseLevel(true)}
       />
       {editing && (
         <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-border bg-card py-3">
@@ -1557,7 +1566,7 @@ const ClientReportBuilderPage = () => {
           {(unsentDiff.title !== undefined || unsentDiff.observations !== undefined) && <p>Team leads on this campaign can see the earlier text in History.</p>}
           {unsentDiff.visibility?.showMap === false && <p className="text-warning-fg">This deletes the frozen map; turning it back on rebuilds every number.</p>}
           {unsentDiff.visibility?.mapMode === 'area' && (
-            <p>Your client keeps seeing exact doors until the areas are ready. Going back to exact doors later means refreshing the numbers.</p>
+            <p>Your client keeps seeing the house-level map until the areas are ready. Going back to a house-level map later means refreshing the numbers.</p>
           )}
         </ConfirmDialog>
       )}
@@ -1585,7 +1594,7 @@ const ClientReportBuilderPage = () => {
             setConfirmAreas(null);
           }}
         >
-          <p>Your client keeps seeing exact doors until the areas are ready. Going back to exact doors later means refreshing the numbers.</p>
+          <p>Your client keeps seeing the house-level map until the areas are ready. Going back to a house-level map later means refreshing the numbers.</p>
           {/* WALK-7: a single-choice map question may show no answers by area — say so before the switch. */}
           {areaCandidates.length > 0 && (
             <p>
@@ -1595,6 +1604,24 @@ const ClientReportBuilderPage = () => {
             </p>
           )}
           <p className="text-xs">It starts when you press Update report, and builds in the background.</p>
+        </ConfirmDialog>
+      )}
+      {confirmHouseLevel && (
+        // The "Switch to areas?" pattern, the other way (privacy record item 52): a house-level map is
+        // opt-in per report, and the save that sets it carries this confirmation.
+        <ConfirmDialog
+          title="Use a house-level map?"
+          confirmLabel="Use a house-level map"
+          onClose={() => setConfirmHouseLevel(false)}
+          onConfirm={() => {
+            houseLevelOk.current = true;
+            change({ ...settings, visibility: { ...settings.visibility, mapMode: 'pins' } });
+            setConfirmHouseLevel(false);
+          }}
+        >
+          <p>{HOUSE_LEVEL_WARNING}</p>
+          <p>You can switch back to Areas any time{draftMode ? ' before you publish' : ''}.</p>
+          {draftMode && <p className="text-xs">It takes effect at your next Recompute.</p>}
         </ConfirmDialog>
       )}
       {confirmCancel && (

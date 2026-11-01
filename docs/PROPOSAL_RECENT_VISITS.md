@@ -204,7 +204,8 @@ Each one exists today, separate from this feature. Pick which to fix:
   same people as the list's own **Download CSV** on the Saved Searches page, minus do-not-contact. **In
   this build.** This is about an export, so it also corrects our privacy record, which says exports hold
   "saved-search subsets". **Worth checking now:** if anyone sent a Filtered voters file of an uploaded or
-  "New voters" list to a client or a vendor, that file held every voter in the campaign.
+  "New voters" list to a client or a vendor, that file held every voter in the campaign. *[2026-11-01, the
+  owner: none went out.]*
 - **G2. Drawn-area and attribute-group counts ignore Target doors, Exclude doors and the restricted /
   no-soliciting boxes**, so an area's or group's count can be higher than the books it becomes. Fixing it
   makes those counts roughly twice as slow on big walk lists. **Reviewed after this build.** *[2026-10-31: the
@@ -215,7 +216,8 @@ Each one exists today, separate from this feature. Pick which to fix:
   October 13 rule they read the door's whole history, like Target doors. **In this build** (the words).
 - **G5. A phone with a wrong clock records wrong visit times**, which then read wrong here and in every
   report. **Reviewed after this build.** *[2026-10-31: the owner reviewed it: a read-only check first,
-  [PROPOSAL_PHONE_CLOCKS.md](PROPOSAL_PHONE_CLOCKS.md).]*
+  [PROPOSAL_PHONE_CLOCKS.md](PROPOSAL_PHONE_CLOCKS.md). Its first run, 2026-11-01, found no phone off by 5
+  minutes or more among 143 canvassers: closed through Oct 31.]*
 - **G6. Switching campaigns on Turf Cutting keeps the previous campaign's round selected**, so the page
   shows an empty map until you pick a round. **In this build** (small).
 
@@ -627,7 +629,7 @@ turfCutDeterminism, exportBuilders, exports, notTarget), plus targetingStatus.
 - **G1 is privacy-affecting by the repo's own list (an export's contents).** It narrows Filtered voters to
   the list it is named after and makes the privacy record's "saved-search subsets" (479) true; update that
   entry when it is built. No policy text changes. The owner should check whether any earlier Filtered voters
-  file of an uploaded or "New voters" list went to a client or vendor.
+  file of an uploaded or "New voters" list went to a client or vendor. *[2026-11-01, the owner: none did.]*
 - **Phones:** nothing to ship. The phone's routes gain nothing it reads (`GET /turfs` gains
   `targetFilter`; the household route is unchanged without `withVisit`), so no `CLIENT_API_VERSION` bump. The
   phone's admin Books screen does trigger the stored filter's re-resolution, now with the visit step (*run*:

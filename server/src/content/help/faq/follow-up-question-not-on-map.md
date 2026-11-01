@@ -19,7 +19,7 @@ So in the report builder, a follow-up question's **Map** box works only when the
 
 - **Leave it off the map.** Usually the best choice. Its **chart** is still yours to show, and the builder warns you before you publish if that chart hints at a hidden question.
 - **Put both on the map**, if you're happy for your client to see the first question's answers door by door too.
-- **Use areas instead of exact doors** if the worry is showing answers at street addresses. See [Should my client report show exact doors or areas?](exact-doors-or-areas)
+- **Keep the map in areas**, the default, if the worry is showing answers at street addresses: only a house-level map shows a home's answers. See [Should my client report show areas or a house-level map?](exact-doors-or-areas)
 
 ## Other reasons the Map box won't tick
 

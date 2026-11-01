@@ -26,6 +26,12 @@ export const REPORT_FIELDS = Object.freeze({
   putBackUp: 'clientReport.putBackUp',
   deleted: 'clientReport.deleted',
   remapped: 'clientReport.remapped',
+  // A house-level map is opt-in per report, behind a warning (privacy record item 52): who confirmed it,
+  // from the builder's map setting or a Refresh that asks for it.
+  houseLevelConfirmed: 'clientReport.houseLevelConfirmed',
+  // Doorline's own switch to areas (npm run migrate:client-report-areas): no author, and no "Edited" for
+  // the client, since the numbers don't change. toValue says which: { kind: 'remap' | 'setting', … }.
+  areasPrivacyUpdate: 'clientReport.areasPrivacyUpdate',
   // Archive tidies the operator's list only (docs/PROPOSAL_CLIENT_REPORT_LINKS.md §C4): one row per
   // change, never a second for a repeat.
   archived: 'clientReport.archived',

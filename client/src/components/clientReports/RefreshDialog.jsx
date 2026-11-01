@@ -6,13 +6,16 @@ import { BuildStatus, errorText } from './parts.jsx';
 import { buildStateOf, displayStatusOf } from './buildState.js';
 import { formatPeriod } from './reportDates.js';
 import { closeUnderDeps } from './questionRules.js';
+import { HOUSE_LEVEL_WARNING } from './ReportSettings.jsx';
 
 // Refresh numbers (docs/PROPOSAL_CLIENT_REPORTS_UPGRADE.md §F3, §G4, §O1, §O9). A published report's
 // numbers rebuilt from today's records, shown before and after, changing nothing until Apply. It is
 // also how the map GROWS on a published report — turn it on, add map questions, change the area size,
-// or go back from areas to exact doors — because anything that adds to what a sent report shows
-// needs new numbers. Choices that conflict are one radio group. Exact doors (or the map turned on in
-// exact doors) put street addresses back in front of the client, and the dialog says so.
+// or go from areas to a house-level map — because anything that adds to what a sent report shows
+// needs new numbers. Choices that conflict are one radio group. A map turned back on starts in areas;
+// a house-level map (each home's street address, result and map answers, in front of the client)
+// shows its warning and a tick that must be ticked, and the request carries that confirmation
+// (privacy record item 52) — the server refuses one without it.
 //
 // Turning the map on offers the map questions the report kept while its map was off, ticked, and
 // sends the FINAL list (VERIFY-2): what goes on the client's map is exactly what is ticked here, and
@@ -106,6 +109,23 @@ export const refreshMapBody = ({ served, live, mapOn, mode, picked, deps }) => {
   return Object.keys(map).length ? { map } : {};
 };
 
+/**
+ * What the Refresh numbers button sends: refreshMapBody, with the house-level confirmation when it asks
+ * for a house-level map (privacy record item 52). The dialog enables the button for that only once its
+ * tick is ticked.
+ */
+export const refreshRequest = (args) => {
+  const body = refreshMapBody(args);
+  return body.map?.mapMode === 'pins' ? { ...body, confirmHouseLevel: true } : body;
+};
+
+/**
+ * The view the dialog starts on: a served map keeps its own; a map turned back on starts in areas, in
+ * the size the report has — never house-level, whatever it was before (a house-level map is chosen,
+ * never carried: privacy record item 52).
+ */
+export const initialRefreshMode = ({ served, report }) => (served ? 'keep' : report?.visibility?.areaSize === 'large' ? 'large' : 'small');
+
 const RefreshDialog = ({
   report,
   build,
@@ -131,7 +151,8 @@ const RefreshDialog = ({
   const failed = (status === 'failed' || status === 'stalled') && build?.kind === 'refresh';
   const { questions, onMap } = choicesOf({ live, served, breakdowns, visibleKeys, deps });
   const [mapOn, setMapOn] = useState(false);
-  const [mode, setMode] = useState(served ? 'keep' : report.visibility?.mapMode === 'area' ? (report.visibility?.areaSize === 'large' ? 'large' : 'small') : 'pins');
+  const [mode, setMode] = useState(() => initialRefreshMode({ served, report }));
+  const [houseLevelOk, setHouseLevelOk] = useState(false);
   // While the map is off, the picks the report kept for it start ticked, and can be unticked (VERIFY-2).
   const [picked, setPicked] = useState(() => new Set(initialMapPicks({ report, live, served, breakdowns, visibleKeys, deps })));
   const [keptPicks] = useState(() => picked.size);
@@ -140,8 +161,8 @@ const RefreshDialog = ({
   // A follow-up can be added only with every question it depends on — already on the map, or picked.
   const allowed = (q) => !q.textParent && q.parents.every((p) => onMap.has(p) || picked.has(p));
   const mapWillShow = served || mapOn;
-  const mapBody = () => refreshMapBody({ served, live, mapOn, mode, picked, deps });
-  const exactDoors = (!served && mapOn && mode === 'pins') || (served && live.mapMode === 'area' && mode === 'pins');
+  const houseLevel = (!served && mapOn && mode === 'pins') || (served && live.mapMode === 'area' && mode === 'pins');
+  const mapBody = () => refreshRequest({ served, live, mapOn, mode, picked, deps });
 
   const result = build?.result || null;
   const rawResult = report.build?.result || null; // the full numbers (GET /:id's document)
@@ -191,7 +212,7 @@ const RefreshDialog = ({
             <Button variant="secondary" disabled={busy} onClick={onClose}>
               Cancel
             </Button>
-            <Button loading={busy} onClick={() => onStart(mapBody())}>
+            <Button loading={busy} disabled={houseLevel && !houseLevelOk} onClick={() => onStart(mapBody())}>
               {failed ? 'Try again' : 'Refresh numbers'}
             </Button>
           </>
@@ -238,7 +259,7 @@ const RefreshDialog = ({
                   )}
                   <label className="flex items-center gap-1.5 text-fg">
                     <input type="radio" className="h-4 w-4 accent-brand-accent" checked={mode === 'pins'} onChange={() => setMode('pins')} />
-                    {served ? 'Back to exact doors' : 'Exact doors'}
+                    House-level map
                   </label>
                 </div>
               )}
@@ -281,10 +302,14 @@ const RefreshDialog = ({
                 </div>
               )}
               {!served && !mapOn && <p className="mt-1 text-xs text-fg-muted">The map is off on this report.</p>}
-              {exactDoors && (
-                <p className="mt-2 rounded-md border border-warning/30 bg-warning-tint px-2.5 py-1.5 text-xs text-warning-fg">
-                  Exact doors put street addresses back in front of your client: each home’s address and result.
-                </p>
+              {houseLevel && (
+                <div className="mt-2 rounded-md border border-warning/30 bg-warning-tint px-2.5 py-1.5 text-xs text-warning-fg">
+                  <p>{HOUSE_LEVEL_WARNING}</p>
+                  <label className="mt-1.5 flex items-start gap-2 font-medium">
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-accent" checked={houseLevelOk} onChange={(e) => setHouseLevelOk(e.target.checked)} />
+                    Use a house-level map on this report
+                  </label>
+                </div>
               )}
             </fieldset>
           </div>

@@ -408,17 +408,23 @@ export function dormancyWarning({ orgName, deleteOnDate }) {
 //
 // `organization` is the only field guaranteed present besides name/email — teamSize and message
 // are optional and simply drop out of both halves when absent.
-export function demoRequest({ name, email, organization, teamSize, message }) {
+export function demoRequest({ name, email, organization, role, teamSize, heardAbout, when, message, source, page }) {
   const subject = `Demo request — ${organization}`;
   const row = (label, value) => para(`<strong>${esc(label)}:</strong> ${esc(value)}`);
+  // Where it came from, in one line: the page, plus its ?src= tag when the link carried one.
+  const from = page ? `${page}${source ? ` (src=${source})` : ''}` : source ? `src=${source}` : null;
   const html = layout(
     heading('New demo request') +
     row('Name', name) +
     row('Email', email) +
     row('Organization', organization) +
+    (role ? row('They are', role) : '') +
     (teamSize ? row('Approx. team size', teamSize) : '') +
+    (heardAbout ? row('Heard about us', heardAbout) : '') +
+    (when ? row('When', when) : '') +
     (message ? para(`<strong>Message:</strong><br />${esc(message).replace(/\n/g, '<br />')}`) : '') +
-    muted('Submitted from the demo form on doorline.app. Reply to this email to answer them directly.'),
+    (from ? row('Sent from', from) : '') +
+    muted('Submitted from the demo form on doorline.app — also saved on the Website page in the super-admin console. Reply to this email to answer them directly.'),
     'Doorline — sent by the demo request form on doorline.app.'
   );
   const text = [
@@ -427,10 +433,14 @@ export function demoRequest({ name, email, organization, teamSize, message }) {
     `Name:         ${name}`,
     `Email:        ${email}`,
     `Organization: ${organization}`,
+    ...(role ? [`They are:     ${role}`] : []),
     ...(teamSize ? [`Team size:    ${teamSize}`] : []),
+    ...(heardAbout ? [`Heard about:  ${heardAbout}`] : []),
+    ...(when ? [`When:         ${when}`] : []),
     ...(message ? ['', 'Message:', message] : []),
+    ...(from ? ['', `Sent from:    ${from}`] : []),
     '',
-    'Submitted from the demo form on doorline.app. Reply to this email to answer them directly.',
+    'Submitted from the demo form on doorline.app — also saved on the Website page in the super-admin console. Reply to this email to answer them directly.',
   ].join('\n');
   return { subject, html, text };
 }

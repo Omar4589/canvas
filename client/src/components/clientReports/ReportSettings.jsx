@@ -8,7 +8,9 @@ import { formatPeriod } from './reportDates.js';
 // `onChange(nextSettings)`; the page decides whether it auto-saves (a draft) or waits for Update
 // report (an edit of a published report). On a published report the map only shrinks in place —
 // additions read "Add this with Refresh numbers" — and turning the map off or switching to areas asks
-// first (the page's confirm dialogs, through onMapOff / onAreas).
+// first (the page's confirm dialogs, through onMapOff / onAreas). Areas come first and are the default;
+// a house-level map is opt-in per report and always asks first, with its warning (onHouseLevel; privacy
+// record item 52).
 
 const field = 'w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-brand-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 const box = 'h-4 w-4 accent-brand-accent disabled:cursor-not-allowed disabled:opacity-40';
@@ -16,6 +18,10 @@ const box = 'h-4 w-4 accent-brand-accent disabled:cursor-not-allowed disabled:op
 // Area view, in the words §F5/§O5 settled on.
 export const AREA_WORDING =
   'Area view never shows an address. A single-choice question shows its answers area by area only when every area has at least five answers to it. How each door went shows for every area, even one with a single home, and other reports on the same link can still narrow things down.';
+
+// A house-level map, in the words its confirm uses (privacy record item 52): what a link holder sees.
+export const HOUSE_LEVEL_WARNING =
+  'Anyone with this report’s link and password will see every knocked house on the map — its address, its door status, and the survey answers you put on the map. Turn this on only for someone who should see that, like the candidate or the campaign manager.';
 
 const ReportSettings = ({
   report,
@@ -39,6 +45,7 @@ const ReportSettings = ({
   onShowNone,
   onMapOff,
   onAreas,
+  onHouseLevel,
   onRecompute,
   onRefreshFor,
   recomputeBusy,
@@ -234,16 +241,6 @@ const ReportSettings = ({
         {vis.showMap && (
           <div className="mt-2 space-y-2 pl-6">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" role="radiogroup" aria-label="Map view">
-              <label className={`flex items-center gap-1.5 text-sm ${toPinsBlocked ? 'text-fg-subtle' : 'text-fg'}`}>
-                <input
-                  type="radio"
-                  className={box}
-                  disabled={!editable || toPinsBlocked}
-                  checked={vis.mapMode !== 'area'}
-                  onChange={() => setVis({ mapMode: 'pins' })}
-                />
-                Exact doors
-              </label>
               <label className="flex items-center gap-1.5 text-sm text-fg">
                 <input
                   type="radio"
@@ -264,10 +261,21 @@ const ReportSettings = ({
                 <option value="small">Small areas (about 1,100–1,400 ft across)</option>
                 <option value="large">Large areas (about 0.55–0.7 mi across)</option>
               </select>
+              <label className={`flex items-center gap-1.5 text-sm ${toPinsBlocked ? 'text-fg-subtle' : 'text-fg'}`}>
+                <input
+                  type="radio"
+                  className={box}
+                  disabled={!editable || toPinsBlocked}
+                  checked={vis.mapMode !== 'area'}
+                  // Never straight to house-level: the page asks first, with the warning.
+                  onChange={() => onHouseLevel()}
+                />
+                House-level
+              </label>
             </div>
             {published && editable && served && live.mapMode === 'area' && (
               <p className="text-xs text-fg-muted">
-                Going back to exact doors or changing the area size adds to the map: use{' '}
+                A house-level map or another area size adds to the map: use{' '}
                 {onRefreshFor ? (
                   <button type="button" className="font-semibold text-brand-accent hover:underline" onClick={onRefreshFor}>
                     Refresh numbers
@@ -282,7 +290,7 @@ const ReportSettings = ({
               <p className="text-xs text-fg-muted">{AREA_WORDING}</p>
             ) : (
               <p className="rounded-md border border-warning/30 bg-warning-tint px-2.5 py-1.5 text-xs text-warning-fg">
-                Exact doors show your client each home’s street address and result. Areas never show an address.
+                House-level: {HOUSE_LEVEL_WARNING}
               </p>
             )}
           </div>

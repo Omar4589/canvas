@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { sendMail } from '../../services/mail/mailer.js';
 import { demoRequest as demoRequestTemplate } from '../../services/mail/templates.js';
 import { nameSchema, emailSchema } from '../../utils/validators.js';
+import { DemoRequest, DEMO_REQUEST_RETENTION_DAYS } from '../../models/DemoRequest.js';
+import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN, SOURCE_PATTERN } from '../../services/site/demoOptions.js';
 
 // The demo request form on the public marketing site — the ONLY conversion action on doorline.app.
 //
@@ -11,21 +13,23 @@ import { nameSchema, emailSchema } from '../../utils/validators.js';
 // anyone whose OS has no mail handler (webmail on a desktop browser — a large share of the buyers
 // this page is written for), so the single entrance to a sales-led funnel failed invisibly.
 //
-// WHAT THIS COLLECTS, and why it is bounded the way it is: a name, work email, organization, and
-// optional free text, volunteered by a member of the public who is not a user, not a voter, and
-// not a customer. That is a data-subject class the rest of the system never sees. Two deliberate
-// limits keep it from becoming one:
+// WHAT THIS COLLECTS, and why it is bounded the way it is: a name, work email, organization, a few
+// optional selects (role, team size, how they heard of us, and on /aapc when they'd like to meet) and
+// optional free text, volunteered by a member of the public who is not a user, not a voter, and not a
+// customer — plus which page and ?src= tag the form was opened from. That is a data-subject class the
+// rest of the system never sees, so:
 //
-//   · NOTHING IS STORED. There is no Lead/DemoRequest model and there must not be one without a
-//     privacy review — the submission becomes an email and nothing else. The only persistent
-//     trace is the metadata-only EmailLog row, whose `to` is our own address, so it holds no
-//     prospect PII (see the subject-line note in templates.js → demoRequest).
+//   · IT IS STORED, AND THE POLICY SAYS SO. Each request is saved (models/DemoRequest.js) BEFORE the
+//     notice email goes out — a failed send used to lose the lead outright. The published Privacy
+//     Policy names the category ("Demo requests"), its use (reply and arrange a demo) and its
+//     retention (up to 24 months: a TTL on expiresAt). Super-admins read, handle and delete them on
+//     /super-admin/website. docs/PRIVACY_VERIFICATION.md records it.
 //   · NO THIRD PARTY. Mail goes through Resend, already a disclosed subprocessor (docs/DPA.md §6).
 //     Bot protection is a honeypot plus a timing check, NOT a hosted captcha — Turnstile,
 //     hCaptcha and reCAPTCHA would each be a new subprocessor, which under the signed DPA is a
 //     customer-notice event, not a code decision. Keep it that way.
 //
-// See docs/PRIVACY_VERIFICATION.md (watchlist) and docs/MARKETING_SITE.md.
+// See docs/MARKETING_SITE.md.
 
 // Where the notice lands. Env-overridable so a staging deploy can point somewhere harmless
 // without a code change; read per-request, per the house convention in middleware/loginRateLimit.js.
@@ -54,15 +58,27 @@ const limiter = rateLimit({
 // into client/ and mobile/, and a demo-form-only schema there would create drift pressure for no
 // reason. The caps are generous for a human and hostile to a payload.
 const orgSchema = z.string().trim().min(1).max(120);
-const teamSizeSchema = z.string().trim().max(40).optional();
 const messageSchema = z.string().trim().max(2000).optional();
+// An optional select: one of its listed labels, or nothing (an empty string means "not picked").
+const pick = (options) =>
+  z.union([z.enum(options), z.literal('')]).optional().transform((v) => v || null);
 
 const bodySchema = z.object({
   name: nameSchema,
   email: emailSchema,
   organization: orgSchema,
-  teamSize: teamSizeSchema,
+  role: pick(ROLES),
+  teamSize: pick(TEAM_SIZES),
+  heardAbout: pick(HEARD_ABOUT),
+  when: pick(WHEN),
   message: messageSchema,
+  // Where the form was opened: the page's ?src= tag and its path. Unrecognised values are dropped,
+  // never rejected — attribution is a nicety, and a stray tag must not cost a lead.
+  source: z.string().max(200).optional().transform((v) => {
+    const s = (v || '').trim().toLowerCase();
+    return SOURCE_PATTERN.test(s) ? s : null;
+  }),
+  page: z.string().max(200).optional().transform((v) => (typeof v === 'string' && v.startsWith('/') ? v : null)),
   // The honeypot. A real form leaves it empty because it is hidden; a bot fills every input it
   // finds. Named plausibly on purpose — `company` next to a real `organization` field reads like
   // something worth filling in.
@@ -82,34 +98,52 @@ router.post('/', limiter, async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid input', issues: parsed.error.issues });
     }
-    const { name, email, organization, teamSize, message, company, elapsedMs } = parsed.data;
+    const { company, elapsedMs, ...request } = parsed.data;
+    const message = request.message || null;
 
     // Both bot checks answer EXACTLY what a real success answers. A bot that fills the honeypot
     // gets the same 200 as a human and learns nothing about why nothing happened; probing for the
-    // difference costs it the rate limit.
+    // difference costs it the rate limit. Nothing is stored for it either.
     const looksAutomated = !!company || (elapsedMs !== undefined && elapsedMs < MIN_ELAPSED_MS);
     if (looksAutomated) {
-      console.warn(`[demo-request] discarded automated submission (org: ${String(organization).slice(0, 40)})`);
+      console.warn(`[demo-request] discarded automated submission (org: ${String(request.organization).slice(0, 40)})`);
       return res.json({ ok: true });
     }
 
+    // Saved FIRST, so the lead survives a failed send. A failed save (no database, a hiccup) is
+    // logged and the email still goes — either one is enough to answer the prospect.
+    let stored = null;
+    try {
+      stored = await DemoRequest.create({
+        ...request,
+        message,
+        expiresAt: new Date(Date.now() + DEMO_REQUEST_RETENTION_DAYS * 86_400_000),
+      });
+    } catch (err) {
+      console.error(`[demo-request] could not save (org: ${String(request.organization).slice(0, 40)}): ${err.message}`);
+    }
+
     // AWAITED, unlike the detached send in POST /auth/forgot-password. That route answers before
-    // doing any work to close an account-existence oracle; there is no oracle here, and if the
-    // send fails the lead is simply LOST. So this mirrors services/memberships/resendInvite.js —
-    // the send IS the request — and reports the failure so the form can offer the direct address
-    // instead of showing a false success.
+    // doing any work to close an account-existence oracle; there is no oracle here, and the send's
+    // outcome decides what the prospect is told when the save failed too. Mirrors
+    // services/memberships/resendInvite.js — the send is part of the request.
     const result = await sendMail({
       to: notifyAddress(),
-      ...demoRequestTemplate({ name, email, organization, teamSize, message }),
+      ...demoRequestTemplate({ ...request, message }),
       kind: 'demoRequest',
       // Reply in the inbox answers the prospect, not MAIL_FROM.
-      replyTo: email,
+      replyTo: request.email,
     });
-
     // `disabled` is the dormant mailer (no RESEND_API_KEY / MAIL_FROM) — every test and local dev.
-    // Treated as success so the form is exercisable without a live mail account; the intended send
-    // is on the outbox either way.
-    if (!result.sent && !result.disabled) {
+    const emailOutcome = result.sent ? 'sent' : result.disabled ? 'dormant' : 'failed';
+    if (stored) {
+      await DemoRequest.updateOne({ _id: stored._id }, { $set: { emailOutcome } }).catch(() => {});
+    }
+
+    // Only when BOTH failed is the lead lost — then say so, so the dialog can offer the direct
+    // address instead of a false success. A saved request whose email failed is still a success:
+    // it waits on the Website page.
+    if (!stored && emailOutcome === 'failed') {
       return res.status(502).json({
         error: "We couldn't send that. Please email hello@doorline.app directly.",
         code: 'send-failed',

@@ -58,9 +58,17 @@
           "audienceType": "Political campaigns, advocacy and issue organizations, and field teams"
         },
         "offers": {
-          "@type": "AggregateOffer",
-          "lowPrice": "300",
-          "priceCurrency": "USD"
+          "@type": "Offer",
+          "price": "300",
+          "priceCurrency": "USD",
+          "description": "Local races from $300 per campaign, per month. Every canvasser and feature included.",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "300",
+            "priceCurrency": "USD",
+            "unitText": "per campaign, per month",
+            "billingDuration": "P1M"
+          }
         }
       }
     </script>

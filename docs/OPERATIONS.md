@@ -1303,6 +1303,39 @@ and phones without the update keep today's **+ New**.
    and `guides/assigning-canvassers.md`.
 7. **Stamp the deploy and update dates** in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 46.
 
+### Release: client reports open in areas — the house-level map by opt-in (November 2026)
+
+Every new client report's map shows **areas**, which never show an address or a household's answers; a
+**house-level map** (each knocked house, its street address and map answers, to anyone with the link) is
+something an operator turns on for one report, after a warning, and Doorline records who and when
+([CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Areas or a house-level map*; privacy record item 52). Then one
+console command moves every **existing** report to areas, since none of them ever opted in. Server and web
+only: the phone shows no client report, so no OTA, no native build and no client-version bump; no index
+build.
+
+**To release it, in this order:**
+
+1. **Before committing, on the combined working tree:** every suite CI runs, and `npm run audit:mobile-api`
+   with no argument (it flags `routes/admin/clientReports.js`; the phone calls no client-report route).
+2. **Deploy server and web from `main`** (**Deploy → Manual deploy**). From here every new report starts in
+   areas and the house-level map asks first; a report already published keeps its map until step 3.
+3. **Heroku dashboard → More → Run console**, from the repo root as always:
+   ```
+   npm run migrate:client-report-areas
+   ```
+   The dry run prints the plan: the published house-level maps it will switch to small areas (shown and taken
+   down, and how many date from before snapshots), any it leaves house-level because someone confirmed one
+   since the deploy, the ones it **SKIPS** because new numbers are waiting for review or a build is running,
+   and how many drafts and map-off reports get the setting. Then:
+   ```
+   npm run migrate:client-report-areas -- --apply
+   ```
+   Clients don't see "Edited" (the numbers don't change); each report's History reads "Map switched to areas
+   by Doorline (privacy update)". Run it again any time — it changes nothing twice — once the skipped
+   reports' reviews are applied or discarded and their builds are done; it lists them each time.
+4. **Stamp the deploy and the run** in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 52 (and tell the
+   owner whether any report was skipped).
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -1561,6 +1594,8 @@ fraud audit).
 | `npm run migrate:scrub-deleted-email-log -- --apply` | **Once, after the admin account-deletion release.** Rewrites those rows' recipient to the account's tombstone address and clears their error and bounce text — the same `scrubAccountEmailLog` a deletion now runs itself. Deletion-warning and support-grant notice rows carry no `userId` and keep their recipients. Idempotent |
 | `npm run migrate:client-report-visibility` | **Read-only.** What the client-reports migration would do, step by step ([clientReportVisibility.js](../server/src/migrations/clientReportVisibility.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*): surveys whose follow-up record (and the version it starts at) it would seed, surveys with answers older than that version, legacy reports whose operator unticked every question, reports to put in a series (and walk-list names matching a canvasser's), backfills, the two steps marked as discarding information, the links' new fields, and open drafts that need a rebuild |
 | `npm run migrate:client-report-visibility -- --apply` | **Once, after the client reports upgrade deploy** (add `--keep-legacy-all` to keep the charts of legacy reports whose operator unticked every question). Writes only what is still missing, so a second run, or one over documents the new code wrote, changes nothing |
+| `npm run migrate:client-report-areas` | **Read-only.** What the switch of existing client reports to areas would do ([clientReportAreas.js](../server/src/migrations/clientReportAreas.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*): the published house-level maps it would switch to small areas, the ones it leaves (confirmed since the deploy) or skips (new numbers waiting for review, a build running), and the drafts and map-off reports whose setting it would change. Report and campaign ids and periods only |
+| `npm run migrate:client-report-areas -- --apply` | **Once, after the November 2026 areas-by-default deploy** (*Release: client reports open in areas*, above), and again whenever it listed skipped reports. Switches each listed map the way Switch to areas does, without the client's "Edited", and writes a History row; touches no frozen map row otherwise. Idempotent. Run from the repo root against a throwaway database on 2026-11-01 |
 | `npm run report:tab-weeks` | **Read-only, optional.** Per organization, how many open client-report tabs' latest report runs whole weeks on another weekday than the organization's report week — the tabs whose New report shows the week nudge ([reportTabWeeks.js](../server/src/migrations/reportTabWeeks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Report weeks and the next period*). Counts and organization names only; refuses any extra argument; ends "Nothing was changed." |
 | `npm run report:all-reports-links` | **Read-only.** After the one-link-per-report deploy and before `RETIRE_ALL_REPORTS_LINKS` is set: per organization (names only, internal and being-deleted ones marked), how many old links to all your reports still work, are off because of billing, are turned off or have expired, on how many campaigns, when one was last opened, and how many of its reports have more than one link; then totals, and a count of links whose organization no longer exists ([reportAllReportsLinks.js](../server/src/migrations/reportAllReportsLinks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*). No campaign, label, token or person; refuses any argument (exit 2); ends "Nothing was changed." Run from the repo root against a throwaway database on 2026-10-28 |
 | `npm run report:memory-watch` | **Read-only, any time.** After Metrics shows a memory spike (R14) or timeouts (H27): prints the memory tripwire's lines the website's server kept in Redis, oldest first, in Central time, with the dyno that wrote each. The newest 300, none 30 days after the last ([reportMemoryWatch.js](../server/src/migrations/reportMemoryWatch.js); [The memory tripwire](#the-memory-tripwire-what-was-running-when-metrics-showed-a-spike)). Route patterns, times and sizes only; refuses any argument (exit 2); gives up after 10 seconds if Redis doesn't answer (exit 1); ends "Nothing was changed." Run from the repo root against a throwaway Redis on 2026-10-31 |

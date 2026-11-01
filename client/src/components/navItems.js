@@ -15,6 +15,8 @@ export const SUPER_NAV = [
   { to: '/super-admin/imports', label: 'Imports' },
   { to: '/super-admin/access', label: 'Support access' },
   { to: '/super-admin/emails', label: 'Emails' },
+  // The public site's own inbox: saved demo requests + daily homepage visits.
+  { to: '/super-admin/website', label: 'Website' },
   { to: '/organizations', label: 'Organizations' },
   // The cross-org monthly ritual. It existed for months reachable only by one text link on the
   // Organizations page, which is how a month gets missed.

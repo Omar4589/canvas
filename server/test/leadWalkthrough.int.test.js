@@ -382,7 +382,8 @@ test('11. client report: create, shape, publish, preview, share, tear down', { s
   const rep = await asLead('POST', '/admin/client-reports', { campaignId: String(ctx.A._id), weekStart: monday, weekEnd: sunday, title: 'Week' });
   expectOk(rep, 'create client report');
   const rid = rep.json.report._id;
-  expectOk(await asLead('PATCH', `/admin/client-reports/${rid}`, { visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: ['support'], showMap: true } }), 'set visibility');
+  // A new report is areas; the lead turns on its house-level map, confirming it (privacy record item 52).
+  expectOk(await asLead('PATCH', `/admin/client-reports/${rid}`, { visibility: { visibleQuestionKeys: ['support'], mapAnswerKeys: ['support'], showMap: true, mapMode: 'pins' }, confirmHouseLevel: true }), 'set visibility');
   expectOk(await asLead('GET', `/admin/client-reports/${rid}`), 'read report');
   // The numbers build on the worker: the lead claims a recompute (no worker here, so it parks), and
   // the real processor runs it with a fresh job id, as a Retry that reached the queue would.

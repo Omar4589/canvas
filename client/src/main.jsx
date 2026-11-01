@@ -1,11 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 import { retryUnless401 } from './lib/sessionEnd.js';
 import { BrowserRouter } from 'react-router-dom';
-import App from './App.jsx';
-import { AuthProvider } from './auth/AuthContext.jsx';
-import ErrorBoundary, { reloadOnceForStaleChunk } from './components/ErrorBoundary.jsx';
+import AppTree from './AppTree.jsx';
+import { reloadOnceForStaleChunk } from './components/ErrorBoundary.jsx';
 // Self-hosted Inter (variable weight) — the app-wide typeface, no external font requests.
 import '@fontsource-variable/inter';
 import './index.css';
@@ -26,20 +25,26 @@ const queryClient = new QueryClient({
   },
 });
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+// No `future` flags on BrowserRouter on purpose for now: useSignOut (auth/AuthContext.jsx) relies on
+// logout() and navigate('/login') landing in ONE render, so ProtectedRoute never stashes the
+// signed-out page for the next person. Turning on v7_startTransition (or moving to v7) defers the
+// navigate; re-check Sign out when that happens.
+const tree = (pages) => (
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      {/* No `future` flags on purpose for now: useSignOut (auth/AuthContext.jsx) relies on logout()
-          and navigate('/login') landing in ONE render, so ProtectedRoute never stashes the signed-out
-          page for the next person. Turning on v7_startTransition (or moving to v7) defers the navigate;
-          re-check Sign out when that happens. */}
-      <BrowserRouter>
-        <AuthProvider>
-          <ErrorBoundary>
-            <App />
-          </ErrorBoundary>
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <AppTree queryClient={queryClient} Router={BrowserRouter} pages={pages} />
   </React.StrictMode>
 );
+
+const rootEl = document.getElementById('root');
+
+// A prerendered marketing page (client/scripts/prerender.js marks #root with its name) hydrates in
+// place — but only once its own module has loaded. Hydrating while the lazy route's chunk was still
+// in flight let AuthProvider's first state change throw the server HTML away (React #421) and flash
+// "Loading…" over the page. If the page's chunk can't load at all, render from scratch as before.
+if (rootEl.dataset.prerendered === 'landing') {
+  import('./pages/LandingPage.jsx')
+    .then(({ default: LandingPage }) => ReactDOM.hydrateRoot(rootEl, tree({ landing: LandingPage })))
+    .catch(() => ReactDOM.createRoot(rootEl).render(tree()));
+} else {
+  ReactDOM.createRoot(rootEl).render(tree());
+}

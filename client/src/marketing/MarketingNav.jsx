@@ -6,8 +6,9 @@ import { useDemoRequest } from './DemoRequest.jsx';
 
 // Sticky top nav for the public marketing site. Anchor links scroll to the
 // in-page sections; the auth control adapts to whether someone is signed in.
-// Below md the section links collapse into a disclosure menu so mobile users
-// can still jump to sections.
+// Below lg the section links collapse into a disclosure menu so phone and tablet users
+// can still jump to sections — at 768px the five links beside the two buttons wrapped
+// onto two lines.
 const SECTIONS = [
   { href: '#turf', label: 'Turf' },
   { href: '#field', label: 'Field app' },
@@ -22,7 +23,7 @@ export default function MarketingNav() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/95 backdrop-blur">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between gap-2">
           <Link
@@ -35,13 +36,13 @@ export default function MarketingNav() {
 
           <nav
             aria-label="Primary"
-            className="hidden items-center gap-8 md:flex"
+            className="hidden items-center gap-8 lg:flex"
           >
             {SECTIONS.map(({ href, label }) => (
               <a
                 key={href}
                 href={href}
-                className="rounded text-sm text-gray-600 transition-colors hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                className="rounded text-sm text-stone-600 transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
               >
                 {label}
               </a>
@@ -49,8 +50,10 @@ export default function MarketingNav() {
           </nav>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            {/* Auth control. Hidden until auth resolves so logged-in visitors don't see a
-                "Sign in" flash that swaps to "Go to dashboard".
+            {/* Auth control. Invisible until auth resolves so logged-in visitors don't see a
+                "Sign in" flash that swaps to "Go to dashboard" — invisible, not absent, so it holds
+                its place: the prerendered page paints before JavaScript runs, and a button that
+                appeared later would shove the header sideways.
 
                 ONE treatment in both states — an outline button. It used to be a bare text link
                 when signed out and a button when signed in, so the nav gained and lost a button
@@ -58,21 +61,23 @@ export default function MarketingNav() {
                 only way back in behind the hamburger on a phone: for a product whose users are
                 provisioned-only returning traffic, hiding sign-in is the wrong trade. It is
                 ~90px wide and there is room. */}
-            {!cta.loading && (
-              <Link
-                to={cta.to}
-                className="inline-flex items-center justify-center rounded-md border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-900 shadow-sm transition-colors hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
-              >
-                {cta.authed ? (
-                  <>
-                    <span className="sm:hidden">Dashboard</span>
-                    <span className="hidden sm:inline">Go to dashboard</span>
-                  </>
-                ) : (
-                  'Sign in'
-                )}
-              </Link>
-            )}
+            <Link
+              to={cta.to}
+              aria-hidden={cta.loading || undefined}
+              tabIndex={cta.loading ? -1 : undefined}
+              className={`inline-flex items-center justify-center rounded-md border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-900 shadow-sm transition-colors hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4 ${
+                cta.loading ? 'invisible' : ''
+              }`}
+            >
+              {cta.authed ? (
+                <>
+                  <span className="sm:hidden">Dashboard</span>
+                  <span className="hidden sm:inline">Go to dashboard</span>
+                </>
+              ) : (
+                'Sign in'
+              )}
+            </Link>
             <button
               type="button"
               onClick={demo.open}
@@ -89,7 +94,7 @@ export default function MarketingNav() {
               aria-expanded={open}
               aria-controls="marketing-mobile-menu"
               onClick={() => setOpen((v) => !v)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 md:hidden"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-stone-300 bg-white text-stone-900 shadow-sm transition-colors hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 lg:hidden"
             >
               <svg
                 width="20"
@@ -117,7 +122,7 @@ export default function MarketingNav() {
         <nav
           id="marketing-mobile-menu"
           aria-label="Sections"
-          className="border-t border-gray-200 bg-white md:hidden"
+          className="border-t border-stone-200 bg-white lg:hidden"
         >
           <div className="mx-auto w-full max-w-6xl px-4 py-2 sm:px-6 lg:px-8">
             <ul className="flex flex-col">
@@ -126,7 +131,7 @@ export default function MarketingNav() {
                   <a
                     href={href}
                     onClick={() => setOpen(false)}
-                    className="block rounded-md px-2 py-3 text-sm text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    className="block rounded-md px-2 py-3 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                   >
                     {label}
                   </a>

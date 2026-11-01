@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { DemoRequestProvider } from '../marketing/DemoRequest.jsx';
+import AapcBanner from '../marketing/AapcBanner.jsx';
+import { AAPC, aapcPhase } from '../marketing/aapc.js';
 import MarketingNav from '../marketing/MarketingNav.jsx';
 import Hero from '../marketing/Hero.jsx';
 import CredibilityStrip from '../marketing/CredibilityStrip.jsx';
@@ -26,6 +28,22 @@ export default function LandingPage() {
     document.title = 'Doorline — Door-to-door canvassing software for campaigns and causes';
   }, []);
 
+  // `html.marketing` paints <html> and <body> white (index.css). The theme script in index.html adds
+  // `dark` to <html> on a dark-mode device, so without this the dark console background showed as a
+  // band on Mac and iPhone overscroll behind this light page. Removed on the way out, so the console
+  // keeps its own background.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.add('marketing');
+    // Which AAPC banner text shows (marketing/aapc.js). The prerendered page already has it from an
+    // inline <head> script; this covers the page rendered in the browser (a client-side visit, dev).
+    root.setAttribute('data-aapc', aapcPhase());
+    return () => {
+      root.classList.remove('marketing');
+      root.removeAttribute('data-aapc');
+    };
+  }, []);
+
   return (
     // `theme-light` re-pins light tokens so the public site stays light even when
     // the app's dark theme is saved globally; bg-white masks the dark body.
@@ -33,6 +51,8 @@ export default function LandingPage() {
       {/* Wraps the whole page because the "Request a demo" controls that open the dialog sit in
           three different sections (nav, hero, cta band) at three different scroll depths. */}
       <DemoRequestProvider>
+        {/* Above the header, part of the page flow — it pushes the page down, never covers it. */}
+        {AAPC.pageLive && <AapcBanner />}
         <MarketingNav />
         <main>
           <Hero />

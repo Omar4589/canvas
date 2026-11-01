@@ -25,7 +25,7 @@ const cardChange = ({ card, delta, sent, now }) =>
   sent != null && now != null
     ? `sent ${Number(sent).toLocaleString()} ${wordFor(card, sent)}, now ${Number(now).toLocaleString()}`
     : `${signed(delta)} ${wordFor(card, delta)}`;
-const HOW = { doors: 'exact doors', areas: 'areas', chart: 'its chart' };
+const HOW = { doors: 'house-level map', areas: 'areas', chart: 'its chart' };
 
 // One team's line in the team block: its name and its door visits.
 const Figure = ({ label, value, strong = false }) => (
@@ -136,6 +136,14 @@ const BeforePublish = ({ checks, report, labelOf, tz, onRecompute, onReviewMocks
     items.push(
       <Item key={`aw:${a.key}`} tone="warn">
         {areaText(a, false, largeAreasOf(report))}
+      </Item>
+    );
+  }
+  // A house-level map, said once more before it goes out (privacy record item 52): what its link shows.
+  if (report.snapshotInputs?.showMap && report.snapshotInputs?.mapMode === 'pins' && report.visibility?.showMap !== false) {
+    items.push(
+      <Item key="house-level" tone="info">
+        This report’s map is house-level: anyone with its link and password will see every knocked house — its address, its door status and the survey answers on the map.
       </Item>
     );
   }

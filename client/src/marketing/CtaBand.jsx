@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useDemoRequest } from './DemoRequest.jsx';
 import { useAuthCta } from './useAuthCta.js';
-import { Reveal } from './useReveal.jsx';
 
 // CtaBand — brand-wash conversion band at the foot of the page.
 export default function CtaBand() {
@@ -10,8 +9,8 @@ export default function CtaBand() {
   return (
     <section className="border-t border-brand-100 bg-brand-50">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <Reveal className="py-20 text-center sm:py-24">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">Get started</p>
+        <div className="py-20 text-center sm:py-24">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-700 lg:text-sm">Get started</p>
           <h2 className="mx-auto mt-3 max-w-2xl text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-[2.6rem] sm:leading-tight">
             See Doorline run your next canvass
           </h2>
@@ -37,7 +36,7 @@ export default function CtaBand() {
               {cta.label}
             </Link>
           </div>
-        </Reveal>
+        </div>
       </div>
     </section>
   );

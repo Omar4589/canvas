@@ -1,6 +1,5 @@
 import {
-  IconPin,
-  IconScissors,
+  IconGauge,
   IconRouteCheck,
   IconUser,
   IconClipboard,
@@ -8,23 +7,24 @@ import {
   IconBallot,
   IconLayers,
   IconAlertShield,
+  IconVoters,
 } from '../components/navIcons.jsx';
-import { Reveal } from './useReveal.jsx';
 
 // Secondary feature grid — the rest of the operation, written for consulting
-// firms. Every blurb maps to a shipped feature.
+// firms. Every blurb maps to a shipped feature, and each icon is the one the console's own nav
+// uses for that thing where one exists (a gauge for performance, the voters card for profiles).
 const FEATURES = [
   {
     Icon: IconUpload,
     title: 'Voter file import',
     blurb:
-      'CSV or Excel from any vendor — map the columns once, save the profile, preview the diff before anything writes.',
+      'CSV or Excel from i360, L2, Data Trust or any vendor — map the columns once, save the profile, preview the diff before anything writes.',
   },
   {
     Icon: IconRouteCheck,
     title: 'Passes & re-knocks',
     blurb:
-      'Each pass through the turf keeps its own status — re-knock not-homes without corrupting your coverage.',
+      'Each pass keeps its own status, so re-knocking not-homes never muddies your counts.',
   },
   {
     Icon: IconBallot,
@@ -51,22 +51,22 @@ const FEATURES = [
       'Give a lead full control of their campaign and nothing else. Canvassers only ever see their own books.',
   },
   {
-    Icon: IconPin,
+    Icon: IconVoters,
     title: 'Voter profiles',
     blurb:
       "Every voter's history in one place: household, party, contact record, survey answers, and notes that follow them.",
   },
   {
-    Icon: IconScissors,
+    Icon: IconGauge,
     title: 'Canvasser insights',
     blurb:
-      'Leaderboards, hour-by-hour output, and side-by-side comparisons of every canvasser.',
+      'Leaderboards, hour-by-hour output, and one table that ranks every canvasser.',
   },
   {
     Icon: IconAlertShield,
     title: 'Flagged entries',
     blurb:
-      'Doors marked far from the house, logged too fast to have walked, or all from one spot get flagged for you to review — with a warning at publish time if mock-GPS flags are still open.',
+      'Doors recorded far from the house, seconds after the last door, or several houses from one spot get flagged for review — and Doorline warns you before you publish a client report while fake-GPS flags are open.',
   },
 ];
 
@@ -77,25 +77,23 @@ export default function FeatureGrid() {
   return (
     <section className="bg-stone-100">
       <div className="mx-auto w-full max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
-        <Reveal className="max-w-2xl">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">
+        <div className="max-w-2xl">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-700 lg:text-sm">
             And the rest of the operation
           </p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
             Built to run many campaigns at once
           </h2>
-        </Reveal>
+        </div>
         <div className="mt-10 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map(({ Icon, title, blurb }, i) => (
-            <Reveal key={title} delay={(i % 3) * 70}>
-              <div className="h-full rounded-lg border border-stone-200 bg-white p-5">
-                <div className="mb-3.5 flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                  <Icon size={20} />
-                </div>
-                <h3 className="text-[15px] font-bold text-stone-900">{title}</h3>
-                <p className="mt-1.5 text-[13px] text-stone-500">{blurb}</p>
+          {FEATURES.map(({ Icon, title, blurb }) => (
+            <div key={title} className="h-full rounded-lg border border-stone-200 bg-white p-5">
+              <div className="mb-3.5 flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                <Icon size={20} />
               </div>
-            </Reveal>
+              <h3 className="text-[15px] font-bold text-stone-900">{title}</h3>
+              <p className="mt-1.5 text-sm text-stone-500">{blurb}</p>
+            </div>
           ))}
         </div>
       </div>

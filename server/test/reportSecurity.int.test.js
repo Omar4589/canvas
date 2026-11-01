@@ -672,10 +672,10 @@ async function bReport(visibility = null) {
   });
   assert.strictEqual(created.status, 201, JSON.stringify(created.json));
   const id = created.json.report._id;
-  if (visibility) {
-    const p = await call('PATCH', `/admin/client-reports/${id}`, { ...ctx.admin, body: { visibility } });
-    assert.strictEqual(p.status, 200, JSON.stringify(p.json));
-  }
+  // A house-level map, opted in and confirmed (a new report is areas, privacy record item 52): the
+  // B-series reads pins and doors.
+  const p = await call('PATCH', `/admin/client-reports/${id}`, { ...ctx.admin, body: { visibility: { ...(visibility || {}), mapMode: 'pins' }, confirmHouseLevel: true } });
+  assert.strictEqual(p.status, 200, JSON.stringify(p.json));
   await buildNow(id);
   return id;
 }

@@ -42,7 +42,7 @@ const REASON_WORDS = {
   no_snapshot: 'it has no numbers yet',
   map_on: 'the map is now on',
   map_questions: 'there are new map questions',
-  map_mode: 'you switched between exact doors and areas',
+  map_mode: 'you switched between areas and a house-level map',
   area_size: 'you changed the area size',
   crews: 'the team’s crews changed',
 };

@@ -175,12 +175,25 @@ const clientReportSchema = new mongoose.Schema(
       // outside mapKeysFor: a key that leaves that set leaves this list too.
       mapAnswerKeys: { type: [String], default: [] },
       showMap: { type: Boolean, default: true },
-      // Exact door pins (missing reads as pins) or shaded areas (H3 hexagons, services/reports/
-      // areaCells.js). On a published report these change only through a build: Switch to areas
-      // is a remap, anything else a Refresh. The map a client sees follows the LIVE snapshot's
-      // mode (liveInputs), never this setting.
+      // Shaded areas (H3 hexagons, services/reports/areaCells.js) or a house-level map ('pins'): each
+      // knocked house as a pin, its street address and map answers a tap away. AREAS ARE THE DEFAULT
+      // for every new report and, after migrate:client-report-areas, every existing one (privacy
+      // record item 52); every path that makes a report writes its mode explicitly. A house-level map
+      // is opt-in per report, confirmed against a warning (houseLevelConfirmedAt below).
+      // The schema default stays 'pins' ON PURPOSE: it is what a MISSING field means on a report from
+      // before area view existed — those really are pins reports (liveInputs reads them so) — and a
+      // default of 'area' would make a hydrated read of one say areas while a lean read says pins.
+      // On a published report these change only through a build: Switch to areas is a remap,
+      // anything else a Refresh. The map a client sees follows the LIVE snapshot's mode
+      // (liveInputs), never this setting.
       mapMode: { type: String, enum: ['pins', 'area'], default: 'pins' },
       areaSize: { type: String, enum: ['small', 'large'], default: 'small' },
+      // Who last confirmed a house-level map for this report, and when — the builder's confirm, or a
+      // Refresh that asks for one; each confirm also writes a History row. Never carried to Next's
+      // report, never shaped into the client's payload. migrate:client-report-areas leaves a
+      // house-level report alone only when this is set. Missing on every report from before it.
+      houseLevelConfirmedAt: { type: Date, default: null },
+      houseLevelConfirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       // Tags the client may see. EMPTY = SHOW NONE — the OPPOSITE default of
       // visibleQuestionKeys' empty=all, on purpose: tag names are operator-authored strings
       // rendered on an unauthenticated share page, so each one is an explicit opt-in tick,
@@ -277,7 +290,8 @@ const clientReportSchema = new mongoose.Schema(
     // it too). Written only by POST /admin/client-reports/:id/archive and /unarchive, each a CAS.
     archivedAt: { type: Date, default: null },
     archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    // An accepted edit (or a switch to areas) on a published report — the client sees "Edited".
+    // An accepted edit (or a switch to areas) on a published report — the client sees "Edited". Not
+    // Doorline's own switch to areas (migrate:client-report-areas): the numbers don't change.
     contentEditedAt: { type: Date, default: null },
     contentEditedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     // An applied Refresh — the client sees "Numbers refreshed".

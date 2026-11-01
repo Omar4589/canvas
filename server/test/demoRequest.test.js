@@ -2,9 +2,11 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert';
 
 // The public demo form — the site's only conversion action. Deliberately NOT an .int test: it
-// needs no database (EmailLog's writer no-ops when mongoose isn't connected), so it runs on plain
-// `npm test` and can never silently skip. The properties below are the ones that would regress
-// quietly and expensively:
+// needs no database (EmailLog's writer no-ops when mongoose isn't connected, and the DemoRequest save
+// fails at once without a connection — the route treats that as "not stored" and still emails), so it
+// runs on plain `npm test` and can never silently skip. Saving is covered by
+// demoRequestStore.int.test.js. The properties below are the ones that would regress quietly and
+// expensively:
 //
 //   · the two bot checks must be INDISTINGUISHABLE from success, or the form becomes an oracle
 //     that tells a bot which of its submissions got through;
@@ -63,7 +65,7 @@ after(async () => {
 });
 
 // The endpoint allows 20 requests/hour per IP and every test here shares 127.0.0.1, so this file
-// must stay well under that. It currently spends 6.
+// must stay well under that. It currently spends 9.
 const post = async (body) => {
   const res = await fetch(base, {
     method: 'POST',
@@ -133,4 +135,39 @@ test('CRLF in a typed organization name cannot inject a mail header', async () =
   const res = await post({ ...VALID, organization: 'Acme\r\nBcc: evil@example.com' });
   assert.strictEqual(res.status, 200);
   assert.ok(!/[\r\n]/.test(outbox[0].subject), 'subject carries no bare CR/LF');
+});
+
+test('the optional selects and where the form was opened reach the notice', async () => {
+  clearOutbox();
+  const res = await post({
+    ...VALID,
+    role: 'Canvassing firm',
+    heardAbout: 'AAPC event',
+    when: 'After the event',
+    source: 'home-banner',
+    page: '/aapc',
+  });
+  assert.strictEqual(res.status, 200);
+  for (const half of ['html', 'text']) {
+    const content = outbox[0][half];
+    for (const v of ['Canvassing firm', 'AAPC event', 'After the event', '/aapc', 'src=home-banner']) {
+      assert.ok(content.includes(v), `${v} in ${half}`);
+    }
+  }
+  assert.strictEqual(outbox[0].subject, 'Demo request — Bryant & Fox Strategies', 'the subject still carries the organization only');
+});
+
+test('a malformed ?src= tag or page is dropped, never a reason to lose the lead', async () => {
+  clearOutbox();
+  const res = await post({ ...VALID, source: '<script>alert(1)</script>', page: 'https://evil.example/x' });
+  assert.strictEqual(res.status, 200);
+  assert.ok(!outbox[0].text.includes('Sent from'), 'nothing recorded for where it came from');
+  assert.ok(!outbox[0].text.includes('evil.example'));
+});
+
+test('a select value the form never offers is rejected', async () => {
+  clearOutbox();
+  const res = await post({ ...VALID, role: 'Mayor' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(outbox.length, 0);
 });

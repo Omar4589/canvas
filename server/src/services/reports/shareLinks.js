@@ -30,8 +30,9 @@ export const newShareToken = () => randomBytes(24).toString('base64url'); // ~32
 
 // A readable, high-entropy password for the operator to hand the client. Generated when they don't
 // supply one, because "optional password" in practice meant "no password" — and the report behind
-// the link carries street addresses with survey answers attached. 12 characters, ~56^12 ≈ 1e21; the
-// ambiguous glyphs are dropped so it survives being read aloud.
+// the link can carry street addresses with survey answers attached (a house-level map, opt-in per
+// report). 12 characters, ~56^12 ≈ 1e21; the ambiguous glyphs are dropped so it survives being read
+// aloud.
 export const generateSharePassword = () => {
   const alphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = randomBytes(SHARE_PASSWORD_MIN);

@@ -52,9 +52,10 @@ const reportShareLinkSchema = new mongoose.Schema(
     //
     // This is NO LONGER OPTIONAL for new links (routes/admin/clientReports.js generates one when the
     // operator doesn't supply it). It used to default to null, and share.js waved through any link
-    // without one — so a published report was an OPEN, UNAUTHENTICATED URL. And what a report carries
-    // is not aggregate: every map point is a household's exact street address and coordinates plus
-    // that household's survey answers ("412 Elm St → Opposed"). A name is a public voter-file lookup
+    // without one — so a published report was an OPEN, UNAUTHENTICATED URL. And what a house-level
+    // report carries (an opt-in per report since privacy record item 52; areas are the default) is not
+    // aggregate: every map point is a household's exact street address and coordinates plus that
+    // household's survey answers ("412 Elm St → Opposed"). A name is a public voter-file lookup
     // away. The token being unguessable is not access control; it is obscurity, and it survives being
     // forwarded, pasted into a group chat, or sitting in a mail archive forever.
     //

@@ -105,7 +105,7 @@ export const rowsFor = ({ breakdowns = [], settings, deps = new Map(), published
       mapBlocked: map ? null : mapBlocked,
       headlineDisabled: !chart,
       // In area view only a single-choice question shows answers area by area (§F5).
-      areaNote: areaMode && mapOn && map && b.type !== 'single_choice' ? 'Multiple choice: a map filter for exact doors only — areas show it as a chart.' : null,
+      areaNote: areaMode && mapOn && map && b.type !== 'single_choice' ? 'Multiple choice: a map filter on a house-level map only — areas show it as a chart.' : null,
     };
   });
 };

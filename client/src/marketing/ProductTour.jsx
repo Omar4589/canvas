@@ -1,5 +1,4 @@
 import ConsoleShot from './frames/ConsoleShot.jsx';
-import { Reveal } from './useReveal.jsx';
 import shotTurfs from '../assets/marketing/shot-turfs.webp';
 import shotTimeline from '../assets/marketing/shot-timeline.webp';
 import shotPhoneBooks from '../assets/marketing/shot-phone-books.webp';
@@ -16,6 +15,10 @@ import shotPhoneSurvey from '../assets/marketing/shot-phone-survey.webp';
 // `footer` is an optional node under the bullets. Only the Field app row uses one: it is the
 // single tour row the nav links to directly (#field), and until that link existed the section a
 // visitor deliberately navigated to was a dead end with nothing clickable in it.
+//
+// Copy is left-aligned on purpose: justified text in a ~52ch column opened rivers of uneven word
+// gaps, worst on a phone. Every claim here is checked against the code — "Words to avoid" in
+// docs/MARKETING_SITE.md lists the phrasings that overstate it.
 function TourRow({ id, tag, title, children, bullets, visual, footer, side = 'right', bleed = false }) {
   const left = side === 'left';
   const bleedClass = bleed ? (left ? 'lg:ml-[calc(544px-50vw)]' : 'lg:mr-[calc(544px-50vw)]') : '';
@@ -26,25 +29,23 @@ function TourRow({ id, tag, title, children, bullets, visual, footer, side = 'ri
         left ? 'lg:grid-cols-[7fr_5fr]' : 'lg:grid-cols-[5fr_7fr]'
       }`}
     >
-      <Reveal className={left ? 'lg:order-2' : ''}>
-        <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-stone-400 lg:text-xs">{tag}</p>
+      <div className={left ? 'lg:order-2' : ''}>
+        <p className="text-xs font-bold uppercase tracking-[0.1em] text-stone-500">{tag}</p>
         <h3 className="mt-2.5 text-[26px] font-bold tracking-tight text-stone-900 [text-wrap:balance] lg:text-[30px]">
           {title}
         </h3>
-        <p className="mt-3 max-w-[52ch] text-base text-stone-500 lg:text-[17px] text-justify">{children}</p>
+        <p className="mt-3 max-w-[52ch] text-base text-stone-500 lg:text-[17px]">{children}</p>
         <ul className="mt-5 grid gap-2.5">
           {bullets.map((b) => (
-            <li key={b} className="flex gap-2.5 text-[14.5px] text-stone-900 lg:text-base text-justify">
+            <li key={b} className="flex gap-2.5 text-[14.5px] text-stone-900 lg:text-base">
               <span className="mt-[7px] h-[7px] w-[7px] shrink-0 rounded-full bg-brand-600" aria-hidden="true" />
               {b}
             </li>
           ))}
         </ul>
         {footer}
-      </Reveal>
-      <Reveal delay={120} className={`${left ? 'lg:order-1' : ''} ${bleedClass}`}>
-        {visual}
-      </Reveal>
+      </div>
+      <div className={`${left ? 'lg:order-1' : ''} ${bleedClass}`}>{visual}</div>
     </div>
   );
 }
@@ -92,7 +93,7 @@ export default function ProductTour() {
   return (
     <section id="turf" className="scroll-mt-16 overflow-x-clip bg-white">
       <div className="mx-auto w-full max-w-6xl px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
-        <Reveal className="max-w-2xl pt-2">
+        <div className="max-w-2xl pt-2">
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">The product</p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
             From voter file to field day, one pipeline
@@ -101,16 +102,16 @@ export default function ProductTour() {
             Everything between &ldquo;the client sent us the universe&rdquo; and &ldquo;here&apos;s
             what we knocked this week&rdquo; lives in one place.
           </p>
-        </Reveal>
+        </div>
 
         <TourRow
           bleed
           tag="§ Turf"
-          title="Cut a universe into walkable books in minutes"
+          title="Cut a universe into walkable books"
           bullets={[
             'Balanced geometric cuts with a target doors-per-book',
             'Attribute cuts by precinct, district, city, or zip',
-            'Walk order optimized inside every book',
+            'Every book comes with a walk order',
           ]}
           visual={
             <ConsoleShot
@@ -123,9 +124,10 @@ export default function ProductTour() {
             />
           }
         >
-          Import the voter file and every door lands on the map, geocoded and deduped. Cut books
+          Import the voter file from i360, L2, Data Trust or any vendor, and every address Doorline
+          can match lands on the map; the rest wait for you to place by hand. Cut books
           geometrically with balanced door counts, by precinct or district, or draw them by hand —
-          then re-cut between passes without losing a single knock of history.
+          then re-cut between passes without losing knock history.
         </TourRow>
 
         <TourRow
@@ -134,9 +136,9 @@ export default function ProductTour() {
           tag="§ Field app"
           title="A field app your canvassers can't break"
           bullets={[
-            'Offline-first: dead zones never cost you data',
+            "No signal? Doors and surveys save on the phone and send once there's signal",
             'Door scripts and surveys with conditional follow-ups',
-            'Doors that already voted drop off the book automatically',
+            'Fully-voted households drop off once you upload the voted list',
           ]}
           visual={<FieldAppShots />}
           footer={
@@ -153,9 +155,10 @@ export default function ProductTour() {
             </a>
           }
         >
-          Canvassers open their assigned book and walk. Pins recolor the instant an outcome is
-          recorded — survey, not home, refused, wrong address, no soliciting, restricted access — and every action carries a GPS
-          stamp with distance to the door. No signal? Everything queues and syncs itself.
+          Canvassers get an invite email, set a password and sign in — no separate app account. They
+          open their assigned book and walk: pins change color as they go — survey, not home,
+          refused, wrong address, no soliciting, restricted access — and every door recorded carries
+          a GPS stamp with its distance to the house.
         </TourRow>
 
         <TourRow
@@ -165,27 +168,25 @@ export default function ProductTour() {
           tag="§ Oversight"
           title="Watch the day unfold, door by door"
           bullets={[
-            'Live map with canvasser locations and ping trails',
-            'Hour-by-hour knock grid per canvasser, per day',
-            'Flagged entries you review: doors marked far from the house, in rapid succession, or all from one spot',
+            'Live map that shows where each result was recorded from, with a line to its house',
+            'Hour-by-hour knocks per canvasser, with overlapping knocks counted once',
+            'Flags doors recorded far from the house, seconds after the last door, or several houses from one spot',
           ]}
           visual={
             <ConsoleShot
               url="doorline.app/campaigns/alvarez/timeline"
               src={shotTimeline}
-              alt="The daily timeline in Doorline: knocks per canvasser by hour, with overlap door-passes reconciled against real coverage"
+              alt="The daily timeline in Doorline: knocks per canvasser by hour, with overlapping door visits reconciled"
               bleed="left"
               width="1600"
               height="1000"
             />
           }
         >
-          The live map shows every pin and every canvasser ping as it happens. The daily timeline
-          lays out knocks per canvasser, hour by hour — and when two walkers hit the same door,
-          the overlap is caught so your coverage numbers stay honest. And Doorline flags the knocks
-          that don't add up — far from the house, logged too fast to have walked, a whole block
-          entered from one spot — for you to review, with a warning at publish time if mock-GPS
-          flags are still open.
+          The live map fills in as results come in. The daily timeline lays out knocks per
+          canvasser, hour by hour — and when two walkers hit the same door, it counts once, so your
+          totals stay honest. Doorline flags the knocks that don&apos;t add up for you to review, and
+          warns you before you publish a client report while fake-GPS flags are still open.
         </TourRow>
       </div>
     </section>

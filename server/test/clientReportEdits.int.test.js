@@ -86,8 +86,13 @@ const draft = async (extra = {}) => {
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
   return res.json.report;
 };
-const builtAndPublished = async (patch = null) => {
+// `houseLevel`: a report whose operator opted into a house-level map (privacy record item 52 — a new
+// report is areas), written as the confirmed PATCH leaves it, on the claimed build's inputs too.
+const builtAndPublished = async (patch = null, { houseLevel = false } = {}) => {
   const r = await draft();
+  if (houseLevel) {
+    await ClientReport.updateOne({ _id: r._id }, { $set: { 'visibility.mapMode': 'pins', 'build.inputs.mapMode': 'pins', 'visibility.houseLevelConfirmedAt': new Date(), 'visibility.houseLevelConfirmedBy': ctx.admin._id } });
+  }
   assert.ok((await runBuild(r._id)).committed);
   if (patch) assert.strictEqual((await call('PATCH', `/admin/client-reports/${r._id}`, patch)).status, 200);
   const doc = await ClientReport.findById(r._id).lean();
@@ -355,7 +360,7 @@ test('C8: a save is pinned to the version its screen was built on — a stale on
 });
 
 test('C8: a stale switch to areas claims nothing that could start, and Apply moves the version', { skip }, async () => {
-  const p = await builtAndPublished({ visibility: { mapAnswerKeys: ['plan'] } });
+  const p = await builtAndPublished({ visibility: { mapAnswerKeys: ['plan'] } }, { houseLevel: true });
   const v = p.editVersion ?? 0;
   // Read at the right version; changed elsewhere before the write: the remap it claimed is parked.
   const res = await racePatch(
@@ -435,7 +440,7 @@ test('VERIFY-1 / VERIFY-2: a map-off report keeps its map picks; turning the map
   assert.strictEqual(res.status, 200, JSON.stringify(res.json));
   assert.deepStrictEqual([res.json.report.visibility.showMap, res.json.report.visibility.mapAnswerKeys], [false, ['sign', 'plan']]);
   // Turning the map on: exactly the questions the Refresh sends — never every stored pick (VERIFY-2).
-  assert.strictEqual((await call('POST', `/admin/client-reports/${p._id}/refresh`, { map: { showMap: true, mapKeys: ['plan'], mapMode: 'pins' } })).status, 202);
+  assert.strictEqual((await call('POST', `/admin/client-reports/${p._id}/refresh`, { map: { showMap: true, mapKeys: ['plan'], mapMode: 'pins' }, confirmHouseLevel: true })).status, 202);
   assert.ok((await runBuild(p._id)).committed);
   doc = await ClientReport.findById(p._id).lean();
   assert.deepStrictEqual(doc.build.inputs.mapKeys, ['plan']);
@@ -474,8 +479,8 @@ test('C6 / NUM-5: the goal refusal says what is true', { skip }, async () => {
 });
 
 test('STATE-2: a pending Refresh’s map additions survive unrelated edits; hiding their chart removes them', { skip }, async () => {
-  // Published with only Voting plan? on the map; a Refresh adds Yard sign?.
-  const p = await builtAndPublished({ visibility: { mapAnswerKeys: ['plan'] } });
+  // Published with only Voting plan? on its house-level map; a Refresh adds Yard sign?.
+  const p = await builtAndPublished({ visibility: { mapAnswerKeys: ['plan'] } }, { houseLevel: true });
   const claim = await call('POST', `/admin/client-reports/${p._id}/refresh`, { map: { mapKeys: ['sign'] } });
   assert.strictEqual(claim.status, 202, JSON.stringify(claim.json));
   assert.ok((await runBuild(p._id)).committed);

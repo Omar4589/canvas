@@ -29,7 +29,7 @@ On the campaign's **Client Reports** tab, press **New report**, choose **A team*
 - **So team reports don't add up to the whole campaign.** The whole-campaign report counts that home once.
 - **Doors marked at the office don't count toward any team.**
 - **Team reports never show a door goal.** Goals are for the whole campaign.
-- **The team's map** shows the doors that team knocked, with that team's own results and answers.
+- **The team's map** shows the doors that team knocked, with that team's own results and answers — in areas, unless you turn on that report's house-level map.
 
 If only one canvasser knocked for a team in the period, the builder warns you before you publish: the report then shows one person's work.
 

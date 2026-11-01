@@ -154,10 +154,15 @@ const rebuild = async (reportId) => {
   assert.strictEqual(res.status, 202, JSON.stringify(res.json));
   return runBuild(reportId);
 };
+// A report whose operator opted into a house-level map (a new report is areas, privacy record item 52),
+// written as the confirmed PATCH leaves it, on the claimed build's inputs too: these tests read pins.
+const houseLevel = (id) =>
+  ClientReport.updateOne({ _id: id }, { $set: { 'visibility.mapMode': 'pins', 'build.inputs.mapMode': 'pins', 'visibility.houseLevelConfirmedAt': new Date() } });
 const teamReport = async (seriesId, extra = {}) => {
   // allowDuplicate: one week built several times on purpose (the duplicate guard has its own suite).
   const res = await call('POST', '/admin/client-reports', { campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', seriesId: String(seriesId), allowDuplicate: true, ...extra });
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
+  await houseLevel(res.json.report._id);
   return res.json.report;
 };
 const builtTeam = async (seriesId) => {
@@ -526,6 +531,7 @@ test('STATE-3: ending a team deletes only what is still a draft — a report pub
   };
   // P: built and PUBLISHED; D: its open draft, which P's nextReportId points at.
   const p0 = await create('2026-07-06', '2026-07-12');
+  await houseLevel(p0._id);
   assert.ok((await runBuild(p0._id)).committed);
   const built = await ClientReport.findById(p0._id).lean();
   assert.strictEqual((await call('POST', `/admin/client-reports/${built._id}/publish`, { snapshotId: String(built.snapshotId), editVersion: built.editVersion })).status, 200);

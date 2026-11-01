@@ -77,7 +77,8 @@ async function loadShare(req, res, next) {
     // Nothing is written to the link: unsetting the switch brings it back. (`share` is hydrated, so a
     // link from before the field reads reportId null.)
     if (isAllReportsLink(share) && allReportsRetired()) return res.status(410).json(SHARE_RETIRED);
-    // Expiry. A published report pins survey answers to street addresses, so a link that lives
+    // Expiry. A published report can pin survey answers to street addresses (a house-level map, an
+    // opt-in per report; areas are the default — privacy record item 52), so a link that lives
     // forever is a forever-liability: it outlives the campaign, the staffer who sent it, and the
     // client relationship, and it keeps working from any inbox it was ever forwarded to.
     // Legacy rows have expiresAt: null and are treated as unexpired. Every one of them is a link to all

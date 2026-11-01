@@ -1,10 +1,10 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import { Router } from 'express';
 import multer from 'multer';
 import mongoose from 'mongoose';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { tempUploadStorage } from '../../middleware/tempUpload.js';
 import { isOrgAdmin, managedCampaignIds, canManageCampaign } from '../../services/authz/campaignManagement.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { ImportProfile } from '../../models/ImportProfile.js';
@@ -41,9 +41,10 @@ async function manages(req, res, campaignId) {
 
 // Disk storage, not memoryStorage: a 50 MB upload used to sit in the web dyno's
 // RSS for the whole request. Files land in the OS temp dir (ephemeral on Heroku)
-// and every route deletes its file in a finally — see dropUpload.
+// and every route deletes its file in a finally — see dropUpload. A file whose upload
+// is cut off partway is deleted by the storage itself (middleware/tempUpload.js).
 const upload = multer({
-  storage: multer.diskStorage({ destination: os.tmpdir() }),
+  storage: tempUploadStorage,
   limits: { fileSize: 50 * 1024 * 1024 },
 });
 
@@ -59,9 +60,10 @@ function uploadCsv(req, res, next) {
     }
     if (err) return next(err);
     // The uploaded temp file holds voter PII — its lifetime is the request,
-    // success, failure, or client abort ('close' fires for all three). Routes
-    // must therefore finish reading it before responding (they do — every
-    // consumer is awaited). Best-effort: the dyno filesystem is ephemeral anyway.
+    // success, failure, or client abort once the file has arrived ('close' fires
+    // for all three; a file cut off while it was arriving never gets here, and
+    // tempUploadStorage deletes it). Routes must therefore finish reading it before
+    // responding (they do — every consumer is awaited).
     res.on('close', () => {
       if (req.file?.path) fs.unlink(req.file.path, () => {});
     });

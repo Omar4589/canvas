@@ -422,7 +422,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   Guard test: `server/test/demoRequest.test.js` (subject carries no prospect identifier; bot
   rejections send nothing). Reference: `docs/MARKETING_SITE.md`.
   **Assessment: NO published-policy sentence becomes FALSE. One published-policy sentence becomes
-  INCOMPLETE — flagged above for the owner.**
+  INCOMPLETE — flagged above for the owner.** *[2026-11-01: SUPERSEDED by item 51 — requests are now saved (24 months,
+  TTL, super-admin only) and the owner approved a "Demo requests" paragraph for privacy.html.]*
 
 - *(v4 2026-07-29)* **Recorded as a NEGATIVE, plus the trap that would turn it positive: the mobile
   Users list is now campaign-PARTITIONED, and that is NOT privacy-affecting.** Picking a campaign on
@@ -660,7 +661,12 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   import pipeline now deliberately uses **disk instead of heap** in four places, each holding voter
   PII briefly: **(i)** web-dyno uploads land via multer **`diskStorage`** in the OS temp dir (never
   in the web dyno's RSS) and are unlinked on the response `'close'` event — success, failure, or
-  client abort; **(ii)** the worker's apply path spills valid rows to
+  client abort *[2026-11-01: not so for a file cut off while it was still arriving. Multer removes only
+  files it finished receiving, so diskStorage's half-written file stayed in the temp dir, its write stream
+  open, until the dyno restarted (at most about a day, with daily cycling). Found by round 3 of the
+  org-wide early-voting plan's review and fixed the same day: the import routes' storage
+  (`middleware/tempUpload.js`) closes and deletes that file when busboy fails the file stream, pinned by
+  `test/tempUpload.test.js`; uncommitted, deploy pending. No published sentence described it.]*; **(ii)** the worker's apply path spills valid rows to
   `import-spill-<jobId>.ndjson` (+ a `-linked` twin) in the OS temp dir, both removed in a
   `finally` — success OR failure; **(iii)** ExcelJS's streaming reader spools decompressed sheet XML
   to `tmp-*` files with its own cleanup callback; **(iv)** an xlsx whose zip entry order would
@@ -1148,7 +1154,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     leaves it without a live billing admin;
   - nothing writes to a deleted account: the eleven writers refuse or converge.
 - *(v6 2026-10-24)* **Client reports (items 34 and 38).** Lines in privacy.html `:101` the code now keeps
-  true, each with its owner:
+  true, each with its owner *[v7 2026-11-01: "shown at the address level" is superseded by item 52 — areas
+  by default, address level only on an opted-in house-level map; the lines below hold for both]*:
   - "door statuses and, where the customer chooses, responses to selected survey questions": a map off
     serves nothing and a hidden question never reaches the map (`mapServed`, `servedMapKeys` in
     `services/reports/reportVisibility.js`; `reportSecurity.int.test.js`);
@@ -3160,7 +3167,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     the transient id is internal bookkeeping of the deletion itself. Flagged for the owner all the same,
     since it touches what a deletion leaves while it runs.
 34. **[v6 2026-10-23 — Client report visibility switches are not enforced on the wire. Audit finding;
-    NOT fixed yet.]** Verified by driving the real admin and share endpoints against a throwaway
+    NOT fixed yet.]** *[v7 2026-11-01: narrowed by item 52 — maps default to areas; the address-level map
+    described here is an opt-in per report.]* Verified by driving the real admin and share endpoints against a throwaway
     database. (a) With **Show the coverage map** off, publish still freezes every reached door's street
     line, coordinates, status and selected answers (`clientReports.js:697-704`), and
     `GET /share/:token/reports/:id/map` (`share.js:166-173`) serves them to anyone holding the link and
@@ -3470,7 +3478,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
 38. **[v6 2026-10-24 — The client reports upgrade: what it stores, shows and keeps. BUILT 2026-10-24,
     uncommitted; deploy pending (stamp the deploy date here when it ships). Privacy-affecting (new stored
     records, new retention, a new reader of History), but no new subprocessor, and no published Privacy
-    Policy, Terms or DPA sentence becomes false.]** Plan, rulings and *As built*:
+    Policy, Terms or DPA sentence becomes false.]** *[v7 2026-11-01: its maps narrowed by item 52 — areas by
+    default, the house-level map an opt-in recorded per report.]* Plan, rulings and *As built*:
     [PROPOSAL_CLIENT_REPORTS_UPGRADE.md](PROPOSAL_CLIENT_REPORTS_UPGRADE.md); doc of record
     [CLIENT_PORTAL.md](CLIENT_PORTAL.md). It closes item 34 (stamped there) and changes D11 (stamped
     there). Everything below was read from the code.
@@ -4169,7 +4178,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `--apply` changes them (it ends the listed passes) without a support grant; its trail is the History
       row it writes per pass in each campaign it changes, plus the owner's notice to those customers
       beforehand. Whether a one-time platform repair like this sits inside that sentence is the owner's
-      reading to make; no published sentence changes either way.
+      reading to make; no published sentence changes either way. *[2026-11-01: the owner ruled, for item 50,
+      that a program reading customer data from the Heroku console does not count as staff access. This
+      repair also writes, which that ruling did not address.]*
     - **(h) Claims checked:** privacy.html `:105` (available according to role; never other customer
       organizations) — true: every new route sits on the efforts, passes or campaigns routers behind
       `requireCampaignManager` and the campaign's organization. `:118` and `:122` (retention while active;
@@ -4189,8 +4200,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     on a day the owner picks, links that stop working in every organization, with two published sentences
     changing the same day — but no new collection, no new recipient and no new subprocessor (DPA §6
     unchanged, no subprocessor notice). PENDING THE OWNER: the DPA §4 decision, (e), before the deploy; the
-    switch's date, the customer email and the legal sentences, (f), before the switch.]** Plan, the
-    owner's answers and picks, three review rounds and *As built*:
+    switch's date, the customer email and the legal sentences, (f), before the switch.]** *[v7 2026-11-01:
+    what a link's map shows is narrowed by item 52 — areas unless the report's house-level map was turned
+    on.]* Plan, the owner's answers and picks, three review rounds and *As built*:
     [PROPOSAL_CLIENT_REPORT_LINKS.md](PROPOSAL_CLIENT_REPORT_LINKS.md) (§G is this item's source); doc of
     record [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Sharing a report*, §K. Numbered 44 because the walk-list
     archive record, written the same day, is 43. Everything below was read from the code.
@@ -4518,7 +4530,7 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `server/test/filteredVotersFrozen.int.test.js` (4).
     - **(c) Owner action, not code.** Any Filtered voters file of an uploaded or "New voters" list made
       before the 2026-10-31 deploy held every voter in its campaign. The owner checks whether such a file left the
-      organization.
+      organization. *[2026-11-01, the owner: none did.]*
     - **(d) The visit line, same build.** Turf Cutting's Exclude doors gains *Visited in the last N days*,
       which reads visit times already stored to decide which doors a cut includes.
       `GET /turfs/household/:id?withVisit=1` adds `lastVisitAt` (the door's newest field visit) for the
@@ -4544,7 +4556,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       Reading stops at the header when no Voter ID column is found. Same rows as the whole-file read
       (`test/idListCsvPieces.test.js`). *[2026-10-31, later the same day: except a row that never ends — a
       quote mark never closed, or no line breaks — which is now refused (`row-too-long`, `unclosed-quote`)
-      where the whole-file read silently dropped every row after it; nothing new is read or kept.]* Still multer `memoryStorage`: item 45(b)'s *held in memory, never
+      where the whole-file read silently dropped every row after it; nothing new is read or kept. Committed
+      in `4453997`; the server deployed 2026-11-01.]* Still multer `memoryStorage`: item 45(b)'s *held in memory, never
       written to disk* stays true — which is why [PROPOSAL_PARKED_IDS.md](PROPOSAL_PARKED_IDS.md) §G's disk
       storage was not adopted.
     - **(b) Two kinds of log line, nothing personal in either.** `[id-list] csv …` per CSV read (item
@@ -4573,8 +4586,7 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       Services, which is all the Redis copy is for. The retention paragraphs (`:118`–`:122`) are about
       customer records, which these lines are not. No customer notice.
 49. **[v7 2026-10-31 — A campaign's Early Voting history sent each uploader's email address to the
-    campaign's team leads. FIXED 2026-10-31, uncommitted; deploy pending (stamp the date here when it
-    ships).]**
+    campaign's team leads. FIXED 2026-10-31, committed in `4453997`; the server deployed 2026-11-01.]**
     - **Found** by round 1 of the review of [PROPOSAL_ORG_EARLY_VOTING.md](PROPOSAL_ORG_EARLY_VOTING.md)
       (privacy lens), and confirmed by a test that failed on the old code.
     - **What it was.** `GET /admin/campaigns/:id/voted` is behind `requireCampaignManager`: org admins, and
@@ -4593,7 +4605,7 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       only through the API) and 40 (on screen), were both decided as no notice.
 
 50. **[v7 2026-10-31 — A read-only console check for phones with a wrong clock (`npm run audit:phone-clocks`).
-    BUILT 2026-10-31, uncommitted; deploy pending (stamp the date here when it ships). A staff-facing console
+    BUILT 2026-10-31, committed in `4453997`; the server deployed 2026-11-01. A staff-facing console
     output that reads every customer organization's visit rows outside any support grant and prints totals
     only. No new data, retention, recipient, subprocessor, export or link; no published sentence changes; no
     customer notice.]**
@@ -4629,14 +4641,157 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
         any individual in Customer Data"): the output is such an aggregate. Whether computing one by
         machine is "access" under the personnel sentence is the reading item 43(g) left to the owner; this
         check does not change it. It reads the same rows as the GPS stamp audit (27(c)) and prints less
-        than 43(g) or 44(g), which name organizations.
+        than 43(g) or 44(g), which name organizations. *[2026-11-01, the owner's ruling: a program reading
+        customer data from the Heroku console does not count as staff access under the personnel sentence.]*
       - DPA §3(a) (process only to provide the Service): data accuracy is part of providing it. §3(d) (no
         combining one customer's personal information with another's): each canvasser-day is judged from
         its own rows only; the totals add counts. §4's safeguards sentence ("time-limited and reason-logged
         controls on Doorline staff access", which item 43(g) cites as §3): the same reading as above. §6: no
         subprocessor. §9: nothing is kept.
-    - **(d) The first run.** Stamp its totals here when the owner runs it: totals only, as item 27's stamp
-      did.
+    - **(d) The first run** *[2026-11-01, production, every visit; totals only, as item 27's stamp did]*:
+      126,576 visits by 143 canvassers checked, received Apr 29 to Oct 31 (124,064 sent live, 2,512 from the
+      phone's queue); 1,257 canvasser-days, 1,256 judged; **phones off by 5 minutes or more: none.** Skipped:
+      959 visits in Doorline's own organizations, 0 in organizations or campaigns being deleted, 0 missing a
+      time. **Found: 0 visits whose organization or campaign no longer exists**, so privacy.html `:122` holds
+      for visit rows.
+
+51. **[v7 2026-11-01 — Demo requests are SAVED, not only emailed; and a first-party daily count of
+    homepage visits. BUILT 2026-11-01, uncommitted. A new STORED data-subject class (prospects), a
+    24-month retention promise kept by a TTL, super-admin-only access; the visit count holds no personal
+    information. Published-policy change: a new "Demo requests" paragraph in privacy.html (owner-approved
+    wording, 2026-11-01). No new subprocessor; no customer notice.]**
+    Plan: the owner's AAPC landing brief (2026-11-01) §5 ("Store every request in the database as well as
+    emailing it; today a failed email loses the lead") and its addendum 2 §5 (the visit count).
+    **Supersedes invariant (a) "Nothing is stored" of the v4 2026-07-29 prospects entry** in the watchlist.
+    Read from the code:
+    - **(a) What is stored.** `models/DemoRequest.js`: name, email, organization, the optional role / team
+      size / how they heard about us / when, the free-text message, the `?src=` tag and path of the page
+      the form was opened on, the notice email's outcome, handled-at/by. Written by
+      `routes/public/demoRequest.js` BEFORE the email, so a failed send no longer loses the lead; bot
+      submissions (honeypot, under 2 seconds) are never saved. No IP address, user agent or cookie.
+    - **(b) Retention.** `expiresAt` = submission + 730 days (`DEMO_REQUEST_RETENTION_DAYS`), TTL index
+      `{expiresAt: 1}, expireAfterSeconds: 0` — a TTL, not a cron. **Needs
+      `npm run migrate:build-indexes -- --apply` after the deploy** (prod autoIndex is off): until it runs
+      nothing expires, and the policy's "up to 24 months" is not enforced.
+    - **(c) Who sees it.** Super-admins only — `routes/superAdmin/website.js` (`requireAuth,
+      requireSuperAdmin`), page `/super-admin/website`. No customer, lead or canvasser can reach it; it
+      belongs to no organization, so org deletion does not touch it. Delete is permanent (a person's
+      deletion request). The notice email still goes to `DEMO_REQUEST_TO`, and its EmailLog subject still
+      carries the organization only.
+    - **(d) The visit count.** `models/SiteVisitDay.js` + `services/site/siteVisits.js`: `{day, path,
+      source, count}` — the owner's (Central) day, the path, a source label (a valid `?src=` tag, else the
+      referring site's HOST only, else "direct") and a number. No IP, cookie, user agent or full URL is
+      stored; bots and prefetches are not counted. Bumped as `app.js` serves the prerendered homepage. Not
+      personal information, so no retention limit.
+    - **(e) Claims checked.**
+      - privacy.html, the new **Demo requests** paragraph (what is collected, why, "up to 24 months unless
+        you ask us to delete it sooner"): true once this deploys and build-indexes runs. It must ship in
+        the SAME deploy as this code — before it, nothing is saved. Closes the v4 entry's "INCOMPLETE"
+        finding (the policy had no category for website-volunteered data).
+      - `:97` (technical information — IP, pages requested — to operate, secure and troubleshoot): the
+        counter keeps a daily count and no IP; holds. `:98` (no advertising cookies or third-party
+        tracking): holds — no cookie, no script, no third party. `:109` (no sale): holds.
+      - DPA: a prospect's data is not Customer Data. §6: no subprocessor (MongoDB Atlas and Resend are
+        already listed).
+    - **(f) Tests.** `test/demoRequestStore.int.test.js` (saved fields and the 730-day expiry; a failed
+      email still saved and answered 200; bots never saved; super-admin-only read, handle and delete;
+      visits per day with split rows summed), `test/demoRequest.test.js` (9 cases, no DB),
+      `test/siteVisits.test.js`, `test/demoOptionsMirror.test.js`.
+
+52. **[v7 2026-11-01 — Client report maps open in AREAS by default; the house-level map (each knocked
+    house with its street address, door status and the map's survey answers) becomes an explicit,
+    recorded opt-in per report; existing reports move to areas once (`npm run
+    migrate:client-report-areas`). BUILT 2026-11-01, uncommitted; deploy pending (stamp the deploy and the
+    console run here). NARROWS the default: what a link holder sees unless the operator opts in is area
+    counts, never an address or a household's answers; an opted-in house-level map still shows addresses
+    and answers exactly as before. No new collected data, recipient or subprocessor; one new stored fact
+    (who confirmed a house-level map for a report, and when). One published sentence must change:
+    privacy.html `:101` — the main session is editing it.]**
+    Owner decisions, 2026-11-01: areas the default for new and existing reports, a house-level map kept as
+    an opt-in per report behind a warning; then, the same day, that an opted-in house-level map keeps
+    addresses and answers ("lets say the candidate himself or the campaign manager asks for a report and
+    says 'i wanna see what homes we've been to' i can send them a report link which will show them a map
+    with all homes and they can filter by survey answer(s) etc."). Doc of record:
+    [CLIENT_PORTAL.md](CLIENT_PORTAL.md) (*Areas or a house-level map*; Part 2 §C, §G, §J, §R). Read from
+    the code:
+    - **(a) Areas by default.** A new report's visibility is `mapMode: 'area'`, small
+      (`defaultVisibility`, `routes/admin/clientReports.js:550`); Next writes `'area'` and copies no
+      confirmation (`:1729`); a map turned back on by Refresh numbers builds areas unless the request asks
+      for pins (`:1322`); a draft's missing mode builds areas (`inputsFromSettings`,
+      `services/reports/clientReportBuilds.js:153`; the builder's `settingsOf`,
+      `client/src/components/clientReports/autoSave.js:31`); the demo seed too
+      (`services/platform/seedDemoOrg.js:615`). The schema default stays `'pins'`
+      (`models/ClientReport.js:189`): it is what a MISSING field means on a report from before area view
+      (they are pins reports, and the readers say so), and every create path writes the mode explicitly.
+    - **(b) What an area map serves** — unchanged code, now the default: `areasPayload`
+      (`services/reports/clientReportMap.js:262`) returns cell outlines, door counts, statuses, and answer
+      counts only where every answering area has at least five (`MIN_AREA_ANSWERS`); the pins routes
+      answer an area report `409 MAP_UPDATED` with no data. Pinned by
+      `test/clientReportShareNoHousehold.int.test.js`: with a real unlocked token, the meta, both hubs,
+      the report, `/areas`, `/map`, `/map/doors`, `/mapbox-token` and every preview equivalent carry no
+      `addressLine1`, `addressLine2`, `city`, `state`, `zipCode`, `householdId`, `voterId`, `unit` or
+      `normalizedAddress` key, no `answers` key except an area cell's counts (each `n ≥ 5`), and none of
+      the seeded street, city or ZIP text.
+    - **(c) The opt-in, enforced on the server.** A PATCH setting `visibility.mapMode: 'pins'`, and a
+      Refresh asking `map.mapMode: 'pins'`, without `confirmHouseLevel: true` are refused `400
+      HOUSE_LEVEL_CONFIRM_REQUIRED` before anything is read or claimed (`clientReports.js:979`, `:1293`).
+      A confirmed one records `visibility.houseLevelConfirmedAt/By` (`:1164`; a Refresh's once its build
+      is claimed) and a `clientReport.houseLevelConfirmed` History row naming the confirmer (`:1244`,
+      `:1345`; fields `models/ClientReport.js:195-196`). The builder sends the flag only after its own
+      dialog (`client/src/pages/ClientReportBuilderPage.jsx:1613`, `:1617`; `withHouseLevelConfirm`,
+      `autoSave.js:59`), which says `HOUSE_LEVEL_WARNING`
+      (`client/src/components/clientReports/ReportSettings.jsx:23`): "Anyone with this report's link and
+      password will see every knocked house on the map — its address, its door status, and the survey
+      answers you put on the map. Turn this on only for someone who should see that, like the candidate
+      or the campaign manager." Refresh numbers shows the same words with a tick that must be ticked
+      (`RefreshDialog.jsx:215`); Before you publish repeats it on a house-level snapshot
+      (`BeforePublish.jsx:145`).
+    - **(d) What an opted-in house-level map serves** — exactly what every report served before this item
+      (unchanged code: `routes/public/share.js:325`, `clientReportMap.js:162`, `:231`,
+      `services/reports/reportVisibility.js:255`): each reached door's coordinates and status, the map
+      questions' answers, and on tap its street line, city, state and answers. D11 and items 34, 38 and
+      44 describe it as it still is, for an opted-in report.
+    - **(e) Existing reports** (`migrations/clientReportAreas.js`; console, dry run unless `-- --apply`,
+      after the deploy). Every published report, shown or taken down, whose live map is house-level —
+      pre-snapshot ones included — goes to small areas through the remap Switch to areas uses, claimed
+      `via: 'privacy'` (`:101`) so its commit stamps no client "Edited" (`clientReportBuilds.js:685`) and
+      writes an authorless `clientReport.areasPrivacyUpdate` History row (`:710`); its old pins, addresses
+      included, go with its old snapshot. Drafts and map-off reports get `mapMode: 'area'` (`:131`). Left
+      as they are, and listed: a report whose house-level map was confirmed since the deploy; and SKIPPED,
+      a report with a Refresh waiting for review or a build in flight (re-run later). No other frozen row
+      is touched — a house-level map left in place still needs its addresses. Idempotent. Pinned by
+      `test/clientReportAreasMigration.int.test.js`.
+    - **(f) Who reads the new History rows.** The Client Reports History only (`clientReportHistory`,
+      `routes/admin/campaigns.js`: org admins and the campaign's team leads), never the share page, the
+      PDF or the phone. A team lead can be the client; the rows carry the period, the tab, the confirmer's
+      name and "Addresses and map answers on the link", or "Map switched to areas by Doorline (privacy
+      update)" with no author.
+    - **(g) Claims checked.**
+      - privacy.html `:101` ("A published report presents campaign progress on a map: door statuses and,
+        where the customer chooses, responses to selected survey questions, shown at the address level"):
+        too broad once this deploys — a report's map shows areas (door statuses and answer counts by area,
+        no address) unless the customer turns on a house-level map for that report, which shows door
+        statuses, addresses and selected responses at the address level. **Must change; the main session
+        is editing privacy.html to say exactly that.** It must be true on deploy day: new reports flip at
+        the deploy, existing ones when the console command runs (minutes later) — so "by default", never
+        "never". The rest of `:101` (predefined answer choices only, "Other" for a write-in, no voter
+        names, canvasser identities or timestamps, passwords and expiry) still holds.
+        *[2026-11-01, edited in the SAME change (owner-approved): `:101` now says a report's map "groups
+        doors into areas of a few blocks … counted by area", and "A customer may instead turn on a
+        house-level map for a report, which shows each knocked home's address, its door status and, where
+        the customer chooses, its responses to selected survey questions; the customer is warned before
+        turning it on." Its last sentence (links created before July 15, 2026 "remain accessible until the
+        customer revokes them") is removed, and terms.html §6's twin with it: the owner confirmed
+        `RETIRE_ALL_REPORTS_LINKS` is set in production, so no such link still opens, and "Every report
+        link is protected by a password and expires automatically" is true. Both pages read "Last updated:
+        November 1, 2026" — move it to the deploy date if that differs.]*
+      - terms.html §6 (report links, passwords, the customer controls distribution): holds.
+      - DPA ([DPA.md](DPA.md)): no subprocessor (§6) or recipient change; no sentence about report maps.
+      - The 2026-10-24 watchlist bullet's `:101` lines still hold, for both views.
+    - **(h) Tests.** `test/clientReportShareNoHousehold.int.test.js` (7) and
+      `test/clientReportAreasMigration.int.test.js` (3); the existing client-report suites with their
+      fixtures opted in through the same confirmation; client `clientReportAutoSave`,
+      `clientReportRefreshDialog`, `clientReportsRender` and `clientReportsLogic` tests.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -5343,6 +5498,10 @@ Access gate on all of these: `requireOrgRole('admin', 'lead')` (`reports.js:37`)
 # D — PUBLISHED / SHARED REPORTS
 
 ## D11. What does a published report link expose, and how is it secured?
+
+*[v7 2026-11-01: narrowed by item 52 — a report's map shows areas (no address, no household's answers)
+unless the customer turns on its house-level map, an opt-in recorded per report; what follows describes
+that house-level map.]*
 
 **VERIFIED — and this is where the currently-published privacy policy is already false.**
 

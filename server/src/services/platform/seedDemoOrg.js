@@ -598,7 +598,8 @@ async function publishClientReport({ campaign, template, adminId }) {
   const weekEnd = dayStr(-1);
   const range = zonedDayRange(weekStart, weekEnd, CAMPAIGN_TZ);
   // Explicit keys (empty means none): every choice question's chart, and on the map every one
-  // whose follow-up conditions the others meet — what a new report gets from the builder.
+  // whose follow-up conditions the others meet, in small areas — what a new report gets from the
+  // builder (a house-level map is opt-in per report: privacy record item 52).
   const keys = choiceKeysOf(template);
   const supportQuestionKey = 'candidate_support';
   const series = await ensureSeries({
@@ -611,7 +612,7 @@ async function publishClientReport({ campaign, template, adminId }) {
     visibleQuestionKeys: keys,
     mapAnswerKeys: closeUnderDeps(keys, depsMap(questionDepsOf(template))),
     showMap: true,
-    mapMode: 'pins',
+    mapMode: 'area',
     areaSize: 'small',
   };
 
@@ -1467,7 +1468,7 @@ export async function seedDemoOrg({
     // 10. Client report -----------------------------------------------------------
     const report = await publishClientReport({ campaign, template: template.toObject(), adminId: admin._id });
     publishedReport = report;
-    log(`10. published client report '${report.title}' (${report.weekStart} → ${report.weekEnd}, ${report.mapPointCount} map points)`);
+    log(`10. published client report '${report.title}' (${report.weekStart} → ${report.weekEnd}, ${report.areaCellCount} map areas)`);
 
     stagedSummary = {
       activities: staged.activities,
@@ -1483,6 +1484,7 @@ export async function seedDemoOrg({
       weekStart: report.weekStart,
       weekEnd: report.weekEnd,
       mapPointCount: report.mapPointCount,
+      areaCellCount: report.areaCellCount,
     };
   }
   // 11. The demo's client link — the demo report's own link, pointed at the report just published

@@ -154,6 +154,22 @@ test('question rows: published, an addition reads "Add this with Refresh numbers
   assert.ok(off.includes('Turn on the map below to use questions as map filters.'));
 });
 
+// Privacy record item 52: a pick-several question on an area map says what a house-level map does with
+// it, in the builder's words for the two views.
+test('question rows: on an area map, a pick-several question is a map filter on a house-level map only', async () => {
+  const m = await load();
+  const areas = text(m.questions({ breakdowns, settings: { visibility: vis({ mapMode: 'area', mapAnswerKeys: ['support', 'sign'] }) }, deps: [] }));
+  assert.ok(areas.includes('Multiple choice: a map filter on a house-level map only — areas show it as a chart.'), areas);
+  assert.ok(!/exact doors/i.test(areas));
+});
+
+test('Before you publish names a house-level map once more: what its link shows', async () => {
+  const m = await load();
+  const t = text(m.before({}, { snapshotInputs: { showMap: true, mapMode: 'pins' }, visibility: { showMap: true } }));
+  assert.ok(t.includes('This report’s map is house-level: anyone with its link and password will see every knocked house — its address, its door status and the survey answers on the map.'), t);
+  assert.ok(!text(m.before({}, { snapshotInputs: { showMap: true, mapMode: 'area' }, visibility: { showMap: true } })).includes('house-level'));
+});
+
 test('team-changed card: who left, live counts, keep (default) or remove with what it takes out, change crews, end — never Retry', async () => {
   const m = await load();
   const t = text(
@@ -440,10 +456,11 @@ test('Refresh numbers: the before/after with +N and the period, "Areas on the ma
   assert.ok(t.includes('Contact breakdown, support split, voter groups, door goal'));
   assert.ok(t.includes('Your client sees the new numbers as soon as you apply them'));
   for (const s of ['Apply', 'Discard', 'Rebuild']) assert.ok(t.includes(s), s);
-  // The options: on an area report, keep / the other size / back to exact doors — one choice.
+  // The options: on an area report, keep / the other size / a house-level map — one choice.
   const opts = text(m.refresh({ report: reportDoc({ status: 'published' }), build: { status: 'idle' }, live: { showMap: true, mapMode: 'area', areaSize: 'small', mapKeys: [] }, served: true }));
-  assert.ok(opts.includes('Keep small areas') && opts.includes('Large areas') && opts.includes('Back to exact doors'));
+  assert.ok(opts.includes('Keep small areas') && opts.includes('Large areas') && opts.includes('House-level map'));
   assert.ok(!opts.includes('Small areas'), 'not the size it already has');
+  assert.ok(!/exact doors/i.test(opts), 'the house-level map by its name');
 });
 
 test('History drawer: rows in words, the earlier text with Restore and Erase (both kinds), and an erased row says so', async () => {
@@ -579,7 +596,7 @@ test('Before you publish says nothing about links (a draft never has one), and t
     )
   );
   assert.ok(
-    narrowed.includes('“Support Smith?”: other reports your client can open could narrow down the answers its areas keep hidden — Paid team, Oct 13 – Oct 19 (exact doors); Oct 6 – Oct 12 (its chart).'),
+    narrowed.includes('“Support Smith?”: other reports your client can open could narrow down the answers its areas keep hidden — Paid team, Oct 13 – Oct 19 (house-level map); Oct 6 – Oct 12 (its chart).'),
     narrowed
   );
   assert.ok(!narrowed.includes('on the same link'));

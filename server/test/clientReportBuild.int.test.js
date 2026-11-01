@@ -384,14 +384,24 @@ const runBuild = async (reportId, extra = {}) => {
   );
 };
 
-const createReport = async (body = {}) => {
+// Every report this suite makes is HOUSE-LEVEL (pins) unless a test says otherwise: the suite was written
+// for pins, and since privacy record item 52 a new report is areas until an operator opts in with
+// confirmHouseLevel (that path is pinned in clientReportShareNoHousehold.int.test.js). The opt-in is
+// written as the confirmed PATCH leaves it — on the claimed build's inputs too — without moving editVersion.
+const createReport = async (body = {}, { houseLevel = true } = {}) => {
   // allowDuplicate: these suites make many reports for one tab and week on purpose; the duplicate guard
   // (PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E) has its own suite, clientReportDuplicates.int.test.js.
   const res = await call('POST', '/admin/client-reports', asAdmin({
     campaignId: String(ctx.camp._id), weekStart: '2026-07-06', weekEnd: '2026-07-12', allowDuplicate: true, ...body,
   }));
   assert.strictEqual(res.status, 201, JSON.stringify(res.json));
-  return res.json.report;
+  assert.strictEqual(res.json.report.visibility.mapMode, 'area', 'a new report is areas');
+  if (!houseLevel) return res.json.report;
+  await ClientReport.updateOne(
+    { _id: res.json.report._id },
+    { $set: { 'visibility.mapMode': 'pins', 'build.inputs.mapMode': 'pins', 'visibility.houseLevelConfirmedAt': new Date(), 'visibility.houseLevelConfirmedBy': ctx.adminUser._id } }
+  );
+  return JSON.parse(JSON.stringify(await ClientReport.findById(res.json.report._id).lean()));
 };
 const built = async (body = {}) => {
   const report = await createReport(body);
@@ -478,7 +488,7 @@ test('publish freezes the previewed snapshot; refusals say why; a published repo
   assert.strictEqual(res.status, 409);
   assert.strictEqual(res.json.code, 'RECOMPUTE_NEEDED');
   assert.deepStrictEqual(res.json.reasons, ['map_mode']);
-  await call('PATCH', `/admin/client-reports/${report._id}`, asAdmin({ visibility: { mapMode: 'pins' } }));
+  await call('PATCH', `/admin/client-reports/${report._id}`, asAdmin({ visibility: { mapMode: 'pins' }, confirmHouseLevel: true }));
 
   // A stale preview: SNAPSHOT_CHANGED; a stale edit version: SAVING.
   const cur = await ClientReport.findById(report._id).lean();
@@ -1041,7 +1051,8 @@ const publishedReport = async (body = {}) => {
   return ClientReport.findById(r._id).lean();
 };
 const refreshTo = async (id, map) => {
-  const res = await call('POST', `/admin/client-reports/${id}/refresh`, asAdmin(map ? { map } : {}));
+  // A house-level map is asked for with its confirmation (privacy record item 52).
+  const res = await call('POST', `/admin/client-reports/${id}/refresh`, asAdmin(map ? { map, ...(map.mapMode === 'pins' ? { confirmHouseLevel: true } : {}) } : {}));
   assert.strictEqual(res.status, 202, JSON.stringify(res.json));
   const out = await runBuild(id);
   assert.ok(out.committed, JSON.stringify(out));
@@ -1069,7 +1080,8 @@ test('map off on a published report deletes the map; turning it back on is a Ref
   assert.strictEqual(res.status, 400);
   assert.strictEqual(res.json.code, 'NEEDS_REFRESH');
 
-  const ready = await refreshTo(p._id, { showMap: true });
+  // A map turned back on is areas unless the Refresh asks for a house-level map (privacy record item 52).
+  const ready = await refreshTo(p._id, { showMap: true, mapMode: 'pins' });
   assert.strictEqual((await shared(`/reports/${p._id}/map`)).json.code, 'MAP_NOT_SHARED', 'an unapplied refresh serves nothing');
   const busy = await call('POST', `/admin/client-reports/${p._id}/refresh`, asAdmin());
   assert.strictEqual(busy.json.code, 'REVIEW_PENDING', 'never a silent discard of a ready review');
@@ -1186,7 +1198,7 @@ test('Switch to areas: the client keeps exact doors until the remap commits; a c
   assert.strictEqual((await shared(`/reports/${p._id}/areas`)).status, 200);
   assert.ok(await CampaignChange.exists({ clientReportId: p._id, field: 'clientReport.remapped' }));
   // Back to pins is a Refresh, never an edit.
-  res = await call('PATCH', `/admin/client-reports/${p._id}`, asAdmin({ visibility: { mapMode: 'pins' } }));
+  res = await call('PATCH', `/admin/client-reports/${p._id}`, asAdmin({ visibility: { mapMode: 'pins' }, confirmHouseLevel: true }));
   assert.deepStrictEqual(res.json.reasons, ['back_to_exact_doors']);
 
   const q = await publishedReport();

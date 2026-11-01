@@ -1,7 +1,8 @@
 # Proposal: Find phones with a wrong clock — a read-only check (gap G5)
 
-> **Status: BUILT 2026-10-31 (uncommitted) to plan v2, after one review round (three reviewers); the owner said
-> to build once the round came back clean. Where the build differs is in §L, As built.** Gap G5 of [PROPOSAL_RECENT_VISITS.md](PROPOSAL_RECENT_VISITS.md): a phone with a
+> **Status: DEPLOYED 2026-11-01 (`4453997`), built to plan v2 after one review round (three reviewers). The
+> first production run (2026-11-01) found no phone off by 5 minutes or more among 143 canvassers judged on
+> 1,256 canvasser-days. Where the build differs is in §L, As built.** Gap G5 of [PROPOSAL_RECENT_VISITS.md](PROPOSAL_RECENT_VISITS.md): a phone with a
 > wrong clock records wrong visit times. The owner chose (2026-10-31) to find out first whether it happens
 > at all, with a read-only check, and to decide the rest from what it finds. One server deploy; nothing for
 > phones; no migration, no new index, no config var; the check writes nothing and prints totals only. What
@@ -104,7 +105,9 @@ After Election Day, if phones were found, two follow-ups are yours to choose:
 
 Nothing to decide before the build. A phone counts as wrong at **5 minutes or more**. The check prints
 totals only; naming organizations would need your reading of the Terms' staff-access sentence (the
-question item 43(g) left open on Oct 28), so it doesn't.
+question item 43(g) left open on Oct 28), so it doesn't. *[2026-11-01, the owner's ruling: a program
+reading customer data from the Heroku console does not count as staff access under the Terms. The output
+stays totals only.]*
 
 # Part 2 — Technical reference
 
@@ -437,5 +440,7 @@ Part 2 note in [OPERATIONS.md](OPERATIONS.md)) and privacy-record item 50.
   test fails (no visits read) while the full run still passes, so the test guards the review's bug.
 - The fixture run's output was read against the rule; both §D layouts print as designed.
 
-**Not verified:** production data. The owner's first run, Sunday evening, is the real result.
+**The first production run** (2026-11-01, every visit): 126,576 visits by 143 canvassers, received Apr 29 to Oct 31 (124,064 sent live, 2,512 from the phone's queue); 1,256 of 1,257 canvasser-days judged; phones off by 5 minutes or more: none. Skipped 959 visits
+in Doorline's own organizations; 0 in organizations or campaigns being deleted, 0 missing a time, 0 whose
+organization or campaign no longer exists. G5 is closed through Oct 31. The Monday re-run is optional.
 

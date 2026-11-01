@@ -24,9 +24,9 @@ const load = async () => {
     `import React from 'react';
      import { renderToString } from 'react-dom/server';
      import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-     import RefreshDialog, { Breakdowns, initialMapPicks, refreshMapBody } from '${join(here, '../components/clientReports/RefreshDialog.jsx')}';
+     import RefreshDialog, { Breakdowns, initialMapPicks, initialRefreshMode, refreshMapBody, refreshRequest } from '${join(here, '../components/clientReports/RefreshDialog.jsx')}';
      import { depsMapOf } from '${join(here, '../components/clientReports/questionRules.js')}';
-     export { initialMapPicks, refreshMapBody, depsMapOf };
+     export { initialMapPicks, initialRefreshMode, refreshMapBody, refreshRequest, depsMapOf };
      export const breakdownRows = (props) => renderToString(<Breakdowns {...props} />);
      globalThis.window = globalThis.window || { location: { origin: 'https://doorline.app' } };
      globalThis.document = globalThis.document || { body: { style: {} }, activeElement: null, addEventListener() {}, removeEventListener() {} };
@@ -110,6 +110,28 @@ test('VERIFY-2: turning the map back on starts from the picks the report kept, t
   assert.deepEqual(m.refreshMapBody({ served: true, live, mapOn: false, mode: 'keep', picked: new Set(['sign']), deps }), { map: { mapKeys: ['sign'] } });
   // The dialog says which ones it ticked, once the map is turned on (the list shows then).
   assert.ok(text(m.refresh({ report, build: { status: 'idle' }, live: off, served: false, breakdowns, visibleKeys: ['support', 'sign', 'issues'], deps: [['sign', ['support']]] })).includes('Turn the map on'));
+});
+
+// Privacy record item 52: a map turned back on starts in areas, and a house-level map is asked for
+// only with its confirmation — the server refuses one without it.
+test('a map turned back on starts in areas; asking for a house-level map carries its confirmation, and only then', async () => {
+  const m = await load();
+  const deps = m.depsMapOf([]);
+  assert.equal(m.initialRefreshMode({ served: false, report: reportDoc() }), 'small', 'a house-level setting is never carried into a Refresh');
+  assert.equal(m.initialRefreshMode({ served: false, report: reportDoc({ visibility: { ...reportDoc().visibility, areaSize: 'large' } }) }), 'large');
+  assert.equal(m.initialRefreshMode({ served: true, report: reportDoc() }), 'keep');
+  assert.deepEqual(m.refreshRequest({ served: false, live: off, mapOn: true, mode: 'pins', picked: new Set(), deps }), {
+    map: { showMap: true, mapKeys: [], mapMode: 'pins' },
+    confirmHouseLevel: true,
+  });
+  const area = { showMap: true, mapMode: 'area', areaSize: 'small', mapKeys: [], questionDeps: [] };
+  assert.deepEqual(m.refreshRequest({ served: true, live: area, mapOn: false, mode: 'pins', picked: new Set(), deps }), { map: { mapMode: 'pins' }, confirmHouseLevel: true });
+  assert.deepEqual(m.refreshRequest({ served: true, live: area, mapOn: false, mode: 'large', picked: new Set(), deps }), { map: { areaSize: 'large' } }, 'areas need no confirmation');
+  assert.deepEqual(m.refreshRequest({ served: false, live: off, mapOn: true, mode: 'small', picked: new Set(), deps }), { map: { showMap: true, mapKeys: [], mapMode: 'area', areaSize: 'small' } });
+  // The choice reads "House-level map" — never "exact doors".
+  const t = text(m.refresh({ report: reportDoc({ visibility: { ...reportDoc().visibility, showMap: true, mapMode: 'area' } }), build: { status: 'idle' }, live: area, served: true, breakdowns, visibleKeys: [], deps: [] }));
+  assert.ok(t.includes('House-level map'), t);
+  assert.ok(!/exact doors/i.test(t), t);
 });
 
 test('VERIFY-2: the ready review names the map questions it will carry, and any that show no answers by area (WALK-7)', async () => {

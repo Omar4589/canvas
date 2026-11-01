@@ -142,13 +142,15 @@ const sortIds = (ids) => [...new Set((ids || []).map(String))].sort().map((id) =
 /**
  * What a build of these settings produces — build.inputs, frozen at claim: { showMap, mapMode,
  * areaSize, mapKeys, questionDeps, coordinatorIds }. The map keys are closed under the dependencies
- * the build freezes, so a follow-up never reaches the map without its parents.
+ * the build freezes, so a follow-up never reaches the map without its parents. Only an explicit
+ * 'pins' builds a house-level map: a missing mode builds areas, the default (privacy record item 52)
+ * — every caller hands it a draft's settings or a mode it chose.
  */
 export const inputsFromSettings = ({ visibility, template, coordinatorIds = [] }) => {
   const questionDeps = questionDepsOf(template);
   return {
     showMap: visibility?.showMap !== false,
-    mapMode: visibility?.mapMode === 'area' ? 'area' : 'pins',
+    mapMode: visibility?.mapMode === 'pins' ? 'pins' : 'area',
     areaSize: visibility?.areaSize === 'large' ? 'large' : 'small',
     mapKeys: buildMapKeysFor(visibility, template, questionDeps),
     questionDeps,
@@ -181,9 +183,11 @@ const busyError = (build) =>
  * Claim a build (web, one request). Refused with 409 REVIEW_PENDING over a ready result — apply or
  * discard it first, never a silent discard (§O1) — and 409 REPORT_BUSY over a live build. A dead
  * build is replaced in the claim's own CAS, which pins the job id observed dead, and its rows go
- * through the discard helper. Returns the claimed build.
+ * through the discard helper. Returns the claimed build. `via` marks a build Doorline started rather
+ * than an operator — 'privacy' for migrate:client-report-areas' switch to areas, whose commit stamps
+ * no "Edited" (commitBuild).
  */
-export const claimBuild = async ({ report, kind, inputs, by, expectStatus }) => {
+export const claimBuild = async ({ report, kind, inputs, by, expectStatus, via = null }) => {
   const observed = report.build || null;
   if (observed?.status === 'ready') {
     throw new BuildError(409, 'REVIEW_PENDING', 'New numbers are waiting for your review — apply or discard them first.', {
@@ -202,6 +206,7 @@ export const claimBuild = async ({ report, kind, inputs, by, expectStatus }) => 
     rebuilds: 0,
     progress: 0,
     requestedBy: by || null,
+    ...(via ? { via } : {}),
   };
   const pre = await ClientReport.findOneAndUpdate(
     {
@@ -672,9 +677,12 @@ const commitBuild = async ({ ctx, kind, result, fenceAt, arrived }) => {
         },
       ];
     } else {
-      // remap: the numbers don't change; the map becomes the cells, the client sees "Edited". The
-      // map view is a setting the builder edits, so its version moves (contract C8): an edit opened
+      // remap: the numbers don't change; the map becomes the cells, the client sees "Edited" — unless
+      // Doorline made the switch (via 'privacy', migrate:client-report-areas): nothing the client reads
+      // changed but the map's view, so no "Edited" is claimed (privacy record item 52). The map view
+      // is a setting the builder edits, so its version moves either way (contract C8): an edit opened
       // before the switch merges onto it instead of writing over it.
+      const edited = cur.build.via === 'privacy' ? {} : { contentEditedAt: { $literal: now }, contentEditedBy: { $literal: cur.build.requestedBy || null } };
       update = [
         {
           $set: {
@@ -686,8 +694,7 @@ const commitBuild = async ({ ctx, kind, result, fenceAt, arrived }) => {
             areaCellCount: { $literal: numbers.areaCellCount },
             mapPointCount: 0,
             extent: { $literal: numbers.extent },
-            contentEditedAt: { $literal: now },
-            contentEditedBy: { $literal: cur.build.requestedBy || null },
+            ...edited,
             editVersion: { $add: [{ $ifNull: ['$editVersion', 0] }, 1] },
             build: { $literal: { kind: 'remap', status: 'idle', finishedAt: now, areaWithoutAnswers } },
           },
@@ -700,7 +707,11 @@ const commitBuild = async ({ ctx, kind, result, fenceAt, arrived }) => {
       // The previous live snapshot's rows — exactly those ({ snapshotId: null } = legacy rows).
       await deleteSnapshotRows(report._id, pre.snapshotId ?? null);
     }
-    if (kind === 'remap') {
+    if (kind === 'remap' && cur.build.via === 'privacy') {
+      await writeReportHistory(pre, REPORT_FIELDS.areasPrivacyUpdate, {
+        toValue: { kind: 'remap', mapMode: 'area', areaSize: inputs.areaSize || 'small' },
+      }).catch(() => {});
+    } else if (kind === 'remap') {
       await writeReportHistory(pre, REPORT_FIELDS.remapped, {
         by: cur.build.requestedBy || null,
         toValue: { mapMode: 'area', areaSize: inputs.areaSize || 'small' },

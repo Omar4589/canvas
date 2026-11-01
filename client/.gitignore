@@ -1,3 +1,5 @@
 shots-raw
 .smoke-*/
 .probe*/
+# The SSR build of src/entry-prerender.jsx — a build-time intermediate (scripts/prerender.js).
+.ssr/

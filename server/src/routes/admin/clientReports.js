@@ -169,6 +169,9 @@ const updateSchema = z.object({
   // filter, so a save from a page that hasn't seen a change made elsewhere is refused 409
   // CHANGED_ELSEWHERE instead of undoing it (PRIV-1, CONCUR-1). Optional for other callers.
   ifEditVersion: z.number().int().min(0).optional(),
+  // A house-level map is opt-in per report, behind a warning (privacy record item 52): a save that
+  // sets visibility.mapMode 'pins' carries this, true, once the operator confirmed it.
+  confirmHouseLevel: z.boolean().optional(),
   visibility: z
     .object({
       // Explicit lists; EMPTY MEANS NONE for both (§F1).
@@ -180,14 +183,15 @@ const updateSchema = z.object({
       visibleTags: z.array(z.string().max(120)).optional(),
       // Opt-in door-goal progress. Same reason as visibleTags: unauthenticated share page.
       showGoal: z.boolean().optional(),
-      // Exact doors or areas. On a draft, ordinary settings that take effect at the next
-      // Recompute; on a published report, areas → a remap, anything else → Refresh numbers.
+      // Areas or a house-level map ('pins'). On a draft, ordinary settings that take effect at the
+      // next Recompute; on a published report, areas → a remap, anything else → Refresh numbers.
       mapMode: z.enum(['pins', 'area']).optional(),
       areaSize: z.enum(['small', 'large']).optional(),
     })
     .optional(),
 });
-// What a Refresh may ADD to the map (§F3): the map on, map questions, exact doors or areas, a size.
+// What a Refresh may ADD to the map (§F3): the map on, map questions, a house-level map or areas, a
+// size. Asking for a house-level map takes confirmHouseLevel: true (privacy record item 52).
 const refreshSchema = z.object({
   map: z
     .object({
@@ -197,7 +201,19 @@ const refreshSchema = z.object({
       areaSize: z.enum(['small', 'large']).optional(),
     })
     .optional(),
+  confirmHouseLevel: z.boolean().optional(),
 });
+
+// A house-level map ('pins') shows anyone with the report's link and password every knocked house — its
+// street address, its door status and the survey answers put on the map. It is opt-in per report
+// (privacy record item 52): a save or a Refresh that asks for one without confirmHouseLevel: true is
+// refused, and one that carries it is recorded on the report (visibility.houseLevelConfirmedAt/By) and
+// in its History.
+const HOUSE_LEVEL_CONFIRM_REQUIRED = {
+  error:
+    'A house-level map shows anyone with this report’s link and password every knocked house — its address, its door status and the survey answers on the map. Confirm it to use one.',
+  code: 'HOUSE_LEVEL_CONFIRM_REQUIRED',
+};
 
 async function loadCampaignInOrg(orgId, campaignId) {
   if (!mongoose.isValidObjectId(campaignId)) return null;
@@ -523,14 +539,15 @@ router.get('/series/:seriesId/team-changed', async (req, res, next) => {
 
 // What a new draft shows, written out explicitly (§F1: empty means none, so nothing is left to a
 // default): every choice question's chart, and on the map every one whose follow-up conditions
-// are met by the others — a follow-up of a text question never is.
+// are met by the others — a follow-up of a text question never is. The map is small AREAS: a
+// house-level map is opt-in per report, behind a warning (privacy record item 52).
 const defaultVisibility = (template) => {
   const keys = choiceKeysOf(template);
   return {
     visibleQuestionKeys: keys,
     mapAnswerKeys: closeUnderDeps(keys, depsMap(questionDepsOf(template))),
     showMap: true,
-    mapMode: 'pins',
+    mapMode: 'area',
     areaSize: 'small',
     visibleTags: [],
     showGoal: false,
@@ -944,9 +961,10 @@ const unitedDeps = (...lists) => {
 // On a PUBLISHED report (shown or taken down) it accepts the words, the headline, the visible
 // questions and tags, the goal tick, and two REMOVALS (map off; dropping map questions); Switch to
 // areas claims a remap; anything that would ADD to the map is 400 NEEDS_REFRESH (the builder sends
-// those through Refresh numbers). Every removal — on a draft or a published report — goes through
-// the ONE removal path (§O1): it prunes the live snapshot's inputs, any live or ready build's
-// inputs, and the stored rows, in the same request, so nothing removed can come back.
+// those through Refresh numbers). Setting a house-level map ('pins') takes confirmHouseLevel: true,
+// on any report (HOUSE_LEVEL_CONFIRM_REQUIRED). Every removal — on a draft or a published report —
+// goes through the ONE removal path (§O1): it prunes the live snapshot's inputs, any live or ready
+// build's inputs, and the stored rows, in the same request, so nothing removed can come back.
 router.patch('/:id', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -955,9 +973,12 @@ router.patch('/:id', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const data = updateSchema.parse(req.body);
     const published = report.status === 'published';
+    const v = data.visibility || null;
+    // A house-level map only with its warning confirmed (privacy record item 52) — before anything is
+    // read or claimed, so a refusal changes nothing.
+    if (v?.mapMode === 'pins' && data.confirmHouseLevel !== true) return res.status(400).json(HOUSE_LEVEL_CONFIRM_REQUIRED);
     const campaign = await Campaign.findById(report.campaignId).lean();
     const template = await resolveTemplate(orgId, campaign);
-    const v = data.visibility || null;
 
     // An edit made against one status never lands on another (C5): a draft's auto-save arriving after
     // someone published it would put half-written text in front of the client with no confirm
@@ -987,13 +1008,13 @@ router.patch('/:id', async (req, res, next) => {
     const oldMapKeys = (old.mapAnswerKeys || []).filter((k) => !stale.has(k));
     const sentMapKeys = v?.mapAnswerKeys === undefined ? undefined : v.mapAnswerKeys.filter((k) => !stale.has(k));
 
-    // mapAnswerKeys pins an answer to a household's STREET ADDRESS on a link holder's page. A
-    // free-text answer there publishes whatever a canvasser typed, verbatim, next to somebody's
-    // home — so the map may only ever carry CHOICE answers, whose value set the operator picked in
-    // advance. Enforced on the write path. A published report's live map questions pass as they are
-    // (a build froze them as choice answers, perhaps from a survey the campaign no longer uses), and
-    // so do the picks a map-off report keeps: they reach no map until Refresh numbers turns it on,
-    // which checks every question it puts there.
+    // mapAnswerKeys pins an answer to a household's STREET ADDRESS on a link holder's page (on a
+    // house-level map; an area map counts them area by area). A free-text answer there publishes
+    // whatever a canvasser typed, verbatim, next to somebody's home — so the map may only ever carry
+    // CHOICE answers, whose value set the operator picked in advance. Enforced on the write path. A
+    // published report's live map questions pass as they are (a build froze them as choice answers,
+    // perhaps from a survey the campaign no longer uses), and so do the picks a map-off report keeps:
+    // they reach no map until Refresh numbers turns it on, which checks every question it puts there.
     if (sentMapKeys !== undefined) {
       const allowed = new Set([...choiceKeysOf(template), ...(published ? live.mapKeys : []), ...(published && !served ? oldMapKeys : [])]);
       const rejected = sentMapKeys.filter((k) => !allowed.has(k));
@@ -1068,6 +1089,8 @@ router.patch('/:id', async (req, res, next) => {
       next.mapMode = live.mapMode;
       next.areaSize = live.areaSize;
     }
+    // A confirmed house-level map, recorded with who and when (privacy record item 52).
+    const houseLevel = v?.mapMode === 'pins' && next.mapMode === 'pins';
 
     // STATE-2: a pending Refresh's additions are not removals. They stay on its build and in its
     // snapshot's rows unless this edit hides their chart or drops a question they depend on.
@@ -1136,6 +1159,11 @@ router.patch('/:id', async (req, res, next) => {
         };
       }
     }
+    const now = new Date();
+    if (houseLevel) {
+      set['visibility.houseLevelConfirmedAt'] = lit(now);
+      set['visibility.houseLevelConfirmedBy'] = lit(req.user._id);
+    }
     set.editVersion = { $add: [{ $ifNull: ['$editVersion', 0] }, 1] };
     const visibleLit = lit([...visibleSet]);
     const droppedLit = lit([...dropped]);
@@ -1168,7 +1196,6 @@ router.patch('/:id', async (req, res, next) => {
         ],
       };
     }
-    const now = new Date();
     if (published) {
       set.contentEditedAt = lit(now);
       set.contentEditedBy = lit(req.user._id);
@@ -1213,6 +1240,9 @@ router.patch('/:id', async (req, res, next) => {
       // The earlier text, from the write's own pre-image, so overlapping edits keep one copy each.
       await writeReportHistory(pre, REPORT_FIELDS.edited, { by: req.user._id, fromValue: earlierTextOf(pre, data) }).catch(() => {});
     }
+    if (houseLevel) {
+      await writeReportHistory(pre, REPORT_FIELDS.houseLevelConfirmed, { by: req.user._id, toValue: { mapMode: 'pins', via: 'settings' } }).catch(() => {});
+    }
     const fresh = await ClientReport.findById(report._id).lean();
     res.json({ report: fresh, build: buildView(fresh.build) });
   } catch (err) {
@@ -1245,9 +1275,10 @@ router.post('/:id/recompute', async (req, res, next) => {
 
 // Refresh numbers on a published report (§F3): rebuild from today's records, show what moved, and
 // change nothing until Apply. Its base is the report's current settings; `map` carries what it adds
-// (the map on, map questions — choice, visible, with their parents — exact doors or areas, a size).
-// A team report rebuilds with the crews it was built with, so a report already sent never quietly
-// starts covering another crew.
+// (the map on, map questions — choice, visible, with their parents — a house-level map or areas, a
+// size). A map turned back on is areas unless it asks for a house-level map, which takes
+// confirmHouseLevel: true (privacy record item 52). A team report rebuilds with the crews it was built
+// with, so a report already sent never quietly starts covering another crew.
 router.post('/:id/refresh', async (req, res, next) => {
   try {
     if (!ensureOrgScoped(req, res)) return;
@@ -1259,6 +1290,7 @@ router.post('/:id/refresh', async (req, res, next) => {
     const orgId = activeOrgId(req);
     const data = refreshSchema.parse(req.body || {});
     const add = data.map || {};
+    if (add.mapMode === 'pins' && data.confirmHouseLevel !== true) return res.status(400).json(HOUSE_LEVEL_CONFIRM_REQUIRED);
     const campaign = await loadCampaignInOrg(orgId, report.campaignId);
     if (!campaign) return res.status(400).json({ error: 'Campaign no longer exists' });
     const template = await resolveTemplate(orgId, campaign);
@@ -1275,7 +1307,8 @@ router.post('/:id/refresh', async (req, res, next) => {
     // the picks the report kept while its map was off, ticked, and sends what is still ticked; they
     // used to go on the client's map unseen). A refresh that leaves the map off keeps the picks for
     // later: it builds no map, and Apply leaves them as they are.
-    const mapAnswerKeys = mapServed(report, live)
+    const served = mapServed(report, live);
+    const mapAnswerKeys = served
       ? [...new Set([...servedMapKeys(report, live), ...(add.mapKeys || [])])]
       : add.showMap === true
         ? [...new Set(add.mapKeys || [])]
@@ -1284,7 +1317,9 @@ router.post('/:id/refresh', async (req, res, next) => {
       ...(report.visibility || {}),
       showMap: add.showMap === true ? true : report.visibility?.showMap !== false,
       mapAnswerKeys,
-      mapMode: add.mapMode ?? live.mapMode,
+      // A served map keeps its view unless the request changes it; a map coming back on (or left off)
+      // is areas unless the request asks for a house-level map.
+      mapMode: add.mapMode ?? (served ? live.mapMode : 'area'),
       areaSize: add.areaSize ?? live.areaSize,
     };
     const inputs = inputsFromSettings({ visibility, template, coordinatorIds: live.coordinatorIds });
@@ -1299,6 +1334,16 @@ router.post('/:id/refresh', async (req, res, next) => {
       });
     }
     const build = await startBuild({ report, kind: 'refresh', inputs, by: req.user._id, expectStatus: 'published' });
+    // The house-level map it asked for, confirmed: who and when, on the report and in its History —
+    // once the build is claimed, so a refused claim records nothing.
+    if (add.mapMode === 'pins' && inputs.showMap) {
+      const by = req.user._id;
+      await ClientReport.updateOne(
+        { _id: report._id, organizationId: orgId },
+        { $set: { 'visibility.houseLevelConfirmedAt': new Date(), 'visibility.houseLevelConfirmedBy': by } }
+      );
+      await writeReportHistory(report, REPORT_FIELDS.houseLevelConfirmed, { by, toValue: { mapMode: 'pins', via: 'refresh' } }).catch(() => {});
+    }
     res.status(202).json({ build: buildView(build) });
   } catch (err) {
     fail(res, next)(err);
@@ -1679,7 +1724,9 @@ router.post('/:id/next', async (req, res, next) => {
             visibleQuestionKeys: sv.visibleQuestionKeys || [],
             mapAnswerKeys: sv.mapAnswerKeys || [],
             showMap: sv.showMap !== false,
-            mapMode: sv.mapMode === 'area' ? 'area' : 'pins',
+            // Always areas: a house-level map is opt-in PER REPORT, behind its warning, and never
+            // carried forward — nor is its confirmation (privacy record item 52).
+            mapMode: 'area',
             areaSize: sv.areaSize === 'large' ? 'large' : 'small',
             visibleTags: sv.visibleTags || [],
             showGoal: !!sv.showGoal,

@@ -40,6 +40,15 @@ for (const f of ['privacy.html', 'terms.html', 'delete-account.html', '404.html'
   fs.copyFileSync(path.join(PUBLIC_DIR, f), path.join(fixture, f));
 }
 fs.writeFileSync(path.join(fixture, 'assets', 'index-abc.js'), 'console.log(1);');
+// The prerendered homepage (client/scripts/prerender.js) and the build manifest — both inside
+// dot-directories that must only ever be reachable the intended way.
+fs.mkdirSync(path.join(fixture, '.prerendered'));
+fs.writeFileSync(
+  path.join(fixture, '.prerendered', 'index.html'),
+  '<!doctype html><html lang="en" class="marketing"><body><div id="root" class="h-full" data-prerendered="landing"><h1>PRERENDERED-HOME</h1></div></body></html>'
+);
+fs.mkdirSync(path.join(fixture, '.vite'));
+fs.writeFileSync(path.join(fixture, '.vite', 'manifest.json'), '{}');
 
 process.env.NODE_ENV = 'production';
 process.env.CLIENT_DIST = fixture;
@@ -232,4 +241,35 @@ test('every static page carries the brand chrome — logo, header nav, footer cr
       if (!isSelf) assert.ok(html.includes(`href="${target}"`), `${f}: links ${target}`);
     }
   }
+});
+
+
+// The homepage is prerendered to real HTML (docs/MARKETING_SITE.md → Prerendered pages): it must be
+// what "/" serves, never cached past a deploy; every console route must keep the EMPTY shell; and
+// neither the prerender folder nor the build manifest may be fetchable as files of their own.
+test('"/" serves the prerendered homepage; console routes keep the empty shell; dot-dirs stay hidden', { skip }, async () => {
+  const home = await get('/');
+  assert.strictEqual(home.status, 200);
+  assert.match(home.headers.get('cache-control') || '', /max-age=0/);
+  assert.match(await home.text(), /PRERENDERED-HOME/);
+
+  for (const p of ['/login', '/campaigns', '/r/tok3n']) {
+    const res = await get(p);
+    const text = await res.text();
+    assert.ok(!text.includes('PRERENDERED-HOME'), `${p} gets the shell, not the homepage`);
+    assert.match(text, /<div id="root"><\/div>/, p);
+  }
+
+  for (const p of ['/.prerendered/index.html', '/.vite/manifest.json']) {
+    assert.strictEqual((await get(p)).status, 404, p);
+  }
+});
+
+test('hashed build assets are cached for a year; the HTML is not', { skip }, async () => {
+  const asset = await get('/assets/index-abc.js');
+  assert.strictEqual(asset.status, 200);
+  assert.match(asset.headers.get('cache-control') || '', /max-age=31536000/);
+  assert.match(asset.headers.get('cache-control') || '', /immutable/);
+  const privacy = await get('/privacy');
+  assert.match(privacy.headers.get('cache-control') || '', /max-age=0/);
 });

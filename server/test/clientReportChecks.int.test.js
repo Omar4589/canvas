@@ -159,8 +159,11 @@ test('no link check: a draft can never have a link of its own, so checks.links i
 });
 
 test('an area report names the other reports on the link that could narrow down its hidden answers', { skip }, async () => {
-  // Week 1, exact doors, the support question on the map — published.
-  const pins = await publish(await runBuild((await create(ctx.area, { weekStart: '2026-06-29', weekEnd: '2026-07-05' }))._id));
+  // Week 1, a house-level map (opted in: a new report is areas, privacy record item 52), the support
+  // question on the map — published.
+  const week1 = await create(ctx.area, { weekStart: '2026-06-29', weekEnd: '2026-07-05' });
+  await patch(week1._id, { visibility: { mapMode: 'pins' }, confirmHouseLevel: true });
+  const pins = await publish(await rebuild(week1._id));
   // Week 1 again, one walk list, its chart shown and no map — published.
   const walk = await create(ctx.area, { weekStart: '2026-06-29', weekEnd: '2026-07-05', effortId: String(ctx.north._id) });
   await patch(walk._id, { visibility: { showMap: false } });

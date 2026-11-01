@@ -9,9 +9,9 @@ same password. **A published report is frozen: its numbers change only when you 
 numbers, and the report then says so.**
 
 - **Part 1 — For everyone** is plain language: what your client sees, building and publishing a
-  report, changing one after it's published, your reports list and Archive, team reports, the area
-  view, sharing a report (its link and its password), old links to all your reports, branding and
-  History.
+  report, changing one after it's published, your reports list and Archive, team reports, the map
+  (areas by default, or a house-level map you turn on for one report), sharing a report (its link and
+  its password), old links to all your reports, branding and History.
 - **Part 2 — Technical reference** is for developers (and Claude): the models, the snapshot build on
   the worker and its state machine, the visibility rules, series and team reports, the share-link
   security model (one link per report, passwords kept sealed so they can be shown again, the switch
@@ -31,7 +31,8 @@ follow-up questions, tags), [MAPS.md](MAPS.md) (the shared map rendering), [EFFO
 [TIMEZONES.md](TIMEZONES.md) (how a report's days are anchored), [OPERATIONS.md](OPERATIONS.md) (the
 build queue, the nightly sweep, the migration), [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)
 (D11; item 34, the audit's findings, closed in code; item 38, what this upgrade stores, shows and
-keeps; item 44, one link per report and the passwords Doorline now keeps sealed),
+keeps; item 44, one link per report and the passwords Doorline now keeps sealed; item 52, areas by
+default and the house-level map as a recorded opt-in),
 [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md)
 (the breakdown's conditional Not a target voter row).
 
@@ -138,8 +139,14 @@ order; two reports that end the same day each point to the other.)
 
 ### The map
 
-Pins colored by how each door went, showing only the doors we reached (an unknocked door never
-appears) and **no canvasser names or locations**. Your client can filter by status and by the survey
+**A report's map shows areas** (see *Area view* below): shaded hexagons with how many doors were
+reached in each and how they went, never an address. That's every new report, and since November
+2026 every report made before it too. **A house-level map** is something you turn on for one report,
+after a warning (see *Areas or a house-level map*): then your client sees pins colored by how each
+door went, a tapped door's street address, and the answers to the survey questions you put on the map.
+
+Either way the map shows only the doors we reached (an unknocked door never appears) and **no
+canvasser names or locations**. On a house-level map your client can filter by status and by the survey
 questions you put on the map, and "N of M doors" counts exactly. On a phone the map runs full width,
 pans with two fingers so the page still scrolls, keeps its filters in a drawer, and shows a tapped
 door's details below it, with the questions in their real wording. A door's street address is fetched
@@ -173,8 +180,8 @@ without the filter.
 
 ### Area view
 
-You can give any report an **area view** instead of exact doors (see *Exact doors or areas* below).
-Your client then sees shaded hexagons, fixed in size, each with how many doors were reached there and
+**Area view** is every report's map unless you turn on its house-level map (see *Areas or a
+house-level map* below). Your client sees shaded hexagons, fixed in size, each with how many doors were reached there and
 how they went. The hexagons are see-through, so the streets show under them, and each legend swatch is
 the colour exactly as it looks on the map, over that map style's ground. **Area view never shows an
 address.** A single-choice question shows its answers area
@@ -182,7 +189,7 @@ by area only when every area has at least five answers to it; otherwise that rep
 question's overall chart, and its areas read "No answers to show". How each door went shows for every
 area, even one with a single home. Two things are worth knowing: where every home that answered in an
 area gave the same answer, that tells you how each of them answered; and other reports your client can
-open (other weeks, teams or walk lists, or an exact-doors report) can narrow things down. Each report
+open (other weeks, teams or walk lists, or a report with a house-level map) can narrow things down. Each report
 has its own link, but one person can hold several links (and an old link to all your reports, while it
 works, opens them all), so *Before you publish* names every shown report that could.
 
@@ -362,12 +369,18 @@ screen always matches what's saved, including a change you made just before leav
   part of the campaign against the whole target would undersell you badly. If you set the campaign's
   goal after this report's numbers were built, the builder says so: "Your door goal was set after
   these numbers were built. Recompute them to show it" (on a published report, **Refresh numbers**).
-- **Map**: **Show the map**, then **Exact doors** or **Areas** (**Small**, about 1,100–1,400 ft
-  across, or **Large**, about 0.55–0.7 mi across). Exact doors show your client each home's street
-  address and result; areas never show an address.
+- **Map**: **Show the map**, then **Areas**, the default (**Small**, about 1,100–1,400 ft across, or
+  **Large**, about 0.55–0.7 mi across), or **House-level**. Areas never show an address. A house-level
+  map shows your client each knocked house: its street address, how the door went and the answers to
+  the questions you put on the map. It's for someone who should see that, like the candidate or the
+  campaign manager, so choosing it asks first: "Use a house-level map? Anyone with this report's link
+  and password will see every knocked house on the map — its address, its door status, and the survey
+  answers you put on the map. Turn this on only for someone who should see that, like the candidate or
+  the campaign manager." Doorline records who turned it on and when, in the report's History. It's
+  turned on report by report: Next report always starts in areas.
 
 A map change after the numbers were built (the map turned on, a new map question, switching between
-exact doors and areas, a new area size) needs a **Recompute** before you can publish; the builder says
+areas and a house-level map, a new area size) needs a **Recompute** before you can publish; the builder says
 "Map preview is from 9:14 AM, before your map changes — Recompute". Taking something *off* the map
 never needs one.
 
@@ -380,6 +393,9 @@ publishing:
 - a period that isn't over yet;
 - a shown follow-up chart whose parent question is hidden ("its total shows how many took that
   path"), or a shown voter group that counts answers to a hidden question;
+- on a house-level report, a reminder of what its link shows: "This report's map is house-level:
+  anyone with its link and password will see every knocked house — its address, its door status and
+  the survey answers on the map.";
 - on an area report, a question that shows no answers by area ("Large areas usually fix it" — said
   only when the numbers were built in small areas), and other reports your client can open that could
   narrow down what its areas keep hidden ("“Support Smith?”: other reports your client can open could
@@ -474,7 +490,7 @@ yours. It does the same each time it reads the report again (coming back to the 
   back.")
 
 What counts as "the same thing": the title, the headline question, the door goal tick, the map turned
-on or off, the map view (exact doors, small or large areas), the copied-notes tick, and an observation
+on or off, the map view (small or large areas, or a house-level map), the copied-notes tick, and an observation
 section. **Lists of choices never clash**: which charts, map questions and voter groups show are merged
 one by one, so a chart someone else hid stays hidden unless you tick that very chart again, and a
 question you ticked is added to theirs. **Observation sections** are matched by their content (a section
@@ -534,9 +550,9 @@ own confirm:
   this device. Update report sends it; Cancel edit throws it away." Cancel edit with changes asks first:
   "Throw away your edit? Nothing you changed reaches your client, and the copy kept on this device is
   deleted." Only your own changes go back on top of whatever the report holds by then.
-- **Switch to areas** (inside Edit): the areas build in the background, your client keeps seeing exact
-  doors until they're ready, and then sees "Edited". Going back to exact doors, or changing the area
-  size, means refreshing the numbers. The confirm names any single-choice map question that may show no
+- **Switch to areas** (inside Edit): the areas build in the background, your client keeps seeing the
+  house-level map until they're ready, and then sees "Edited". Going back to a house-level map, or
+  changing the area size, means refreshing the numbers. The confirm names any single-choice map question that may show no
   answers by area: "“Support Smith?” and “Yard sign?” show answers area by area only when every area
   has at least five answers to them — otherwise your client sees just their charts. Once the areas are
   ready, this page says which ones don't." An Update that only switches to areas doesn't claim your
@@ -547,8 +563,10 @@ own confirm:
   headline card, what moved **In the period**, the doors (or areas) on the map, and, folded away, the
   contact breakdown, support split, voter groups and door goal. **Discard** throws the new numbers
   away; **Rebuild** builds them again. It's also how you **add** to the map: turn it on, add map
-  questions, go back to exact doors, or change the area size. Choosing exact doors warns that "Exact
-  doors put street addresses back in front of your client". **Turning the map back on** offers the map
+  questions, turn on a house-level map, or change the area size. A map turned back on starts in areas.
+  Choosing **House-level map** shows the same warning as the builder, with a tick, "Use a house-level
+  map on this report", that must be ticked before **Refresh numbers** starts; Doorline records who
+  ticked it and when. **Turning the map back on** offers the map
   questions the report had picked before its map went off, already ticked: "Map questions — the ones
   this report had picked are ticked; untick any you don't want on the map:". Exactly what is ticked
   goes on your client's map, and the review names it before you apply: "The map comes back on with
@@ -641,7 +659,9 @@ report it works differently: see *Latest progress* below): whole weeks are follo
 the same number of weeks on the same weekday, whole months by the same number of months, and any other
 length by the catch-up to the end of last week (or of this week), so the report after it is a normal
 week. It copies the observations, marked "Copied from Oct 6 – Oct 12" until you tick **I've reviewed
-the copied notes**, and the questions, map settings, voter groups, goal tick and headline. The title
+the copied notes**, and the questions, map settings, voter groups, goal tick and headline — except the
+map view: the next report always starts in areas, since a house-level map is turned on report by
+report and never copied. The title
 starts blank, and the numbers start building at once. If the new period hasn't started yet, the
 builder says so.
 
@@ -748,17 +768,30 @@ offers to make her crew current in the team or remove her past doors. **Reports 
 published stay as they were sent**, and a Refresh rebuilds a published team report with the crews it
 was built with, so a report already sent never quietly starts covering another crew.
 
-## Exact doors or areas
+## Areas or a house-level map
 
-**Exact doors** is the default: pins at each home, with its street address when tapped. **Areas** is
-for a client who shouldn't see addresses, or a campaign where door-level answers feel too exact: the
-report shows hexagons instead (see *Area view* above). Only single-choice questions can show answers
-by area; a pick-several question stays a pins-only filter and shows as a chart. If a question shows no
-answers by area because one area has fewer than five, **Large areas** usually fixes it. The builder
-says which questions that is: *Before you publish* on a draft; on a published report, the switch's
-confirm warns ahead, the Refresh review names them before you apply, and **Worth a look** names them
-once the areas are up. On a draft, the choice takes effect at the next Recompute. On a published
-report, **Switch to areas** is an edit, and going back is a Refresh.
+**Areas are the default** for every report: shaded hexagons (see *Area view* above), never an address.
+Only single-choice questions can show answers by area; a pick-several question shows as a chart (it's
+a map filter on a house-level map only). If a question shows no answers by area because one area has
+fewer than five, **Large areas** usually fixes it. The builder says which questions that is: *Before
+you publish* on a draft; on a published report, the switch's confirm warns ahead, the Refresh review
+names them before you apply, and **Worth a look** names them once the areas are up.
+
+**A house-level map** is for when someone should see exactly which homes the team reached: say the
+candidate or the campaign manager asks "what homes have we been to?". It shows pins at each home your
+team reached, a tapped door's street address and answers, and filters by result and by the questions
+you put on the map — to **anyone with the report's link and password**. So it's off unless you turn it
+on, report by report, and turning it on always asks first (the warning under *Building a report*);
+Doorline records who turned it on and when, in the report's History. It never carries to the next
+report: Next report starts in areas.
+
+On a draft, the choice takes effect at the next Recompute. On a published report, **Switch to areas**
+is an edit, and a house-level map comes through **Refresh numbers**, after the same warning.
+
+**Reports made before November 2026** used to default to exact doors. Doorline switched every one of
+them to small areas, once, with the numbers unchanged and without marking them "Edited" for your
+client; each report's History reads "Map switched to areas by Doorline (privacy update)". To show one
+house by house again, turn its house-level map on (a published report through **Refresh numbers**).
 
 ## Sharing a report
 
@@ -970,7 +1003,11 @@ deleted"; a link row from before links were named by their report reads by the l
 client link". Team rows name the team: "Volunteer team · Team ended", "Volunteer team · Team
 continued" (with how many crews it continues with), "Paid team · Crews changed" ("1 crew → 2
 crews"). A row carries the name the team had at the time; an older "Team ended" or "Crews changed" row
-uses the team's current name, or "A team". It shows the latest 200. These rows never appear in the
+uses the team's current name, or "A team". Turning on a house-level map writes "House-level map
+confirmed" with who did it ("Addresses and map answers on the link", or "With Refresh numbers — …"),
+and Doorline's November 2026 switch of older reports to areas reads "Map switched to areas by Doorline
+(privacy update)" ("Small areas — the numbers didn't change, and your client wasn't shown “Edited”",
+or for a draft "…, from the next build"). It shows the latest 200. These rows never appear in the
 campaign's general History or in the phone app, and a link row never holds the link's address or
 password. Showing a link's password isn't written here.
 
@@ -1048,7 +1085,7 @@ reportVisibility.js).
 | `observations` | `[{ heading, body }]`. |
 | `stats.cumulative`, `stats.period` | Each `{ totals, contactBreakdown, coverage, surveyBreakdowns, tagBreakdowns, provenance }` (§D). `coverage` is `{}` on everything built since October 2026. |
 | `supportQuestionKey`, `goalSnapshot` | The headline question; frozen goal progress (§D). |
-| `visibility` | `{ visibleQuestionKeys, mapAnswerKeys, showMap, mapMode: pins \| area, areaSize: small \| large, visibleTags, showGoal }`: the operator's current settings (§C). |
+| `visibility` | `{ visibleQuestionKeys, mapAnswerKeys, showMap, mapMode: pins \| area, areaSize: small \| large, visibleTags, showGoal, houseLevelConfirmedAt, houseLevelConfirmedBy }`: the operator's current settings (§C). Every path that makes a report writes `mapMode` explicitly, `'area'` since privacy record item 52; the schema default stays `'pins'` on purpose, because it is what a **missing** field means on a report from before area view (those are pins reports, and `liveInputs` reads them so) — a default of `'area'` would make a hydrated read of one say areas while a lean read says pins. `houseLevelConfirmedAt/By`: who last confirmed a house-level map for this report, and when (§C); never copied by Next, never shaped. |
 | `mapPointCount`, `areaCellCount`, `extent` | The live snapshot's row counts, and its bounding box `{ minLng, minLat, maxLng, maxLat }`. |
 | `snapshotId`, `snapshotKey` | The live snapshot (§E). `null` on a report built before snapshots, whose rows carry no `snapshotId`; `snapshotKey` is its opaque random twin, the only version the client sees (`'legacy'` when null). |
 | `snapshotInputs` | What the live snapshot was built with: `{ showMap, mapMode, areaSize, mapKeys, questionDeps, coordinatorIds }`. No default on purpose: a missing one must stay missing. |
@@ -1057,7 +1094,7 @@ reportVisibility.js).
 | `earlierTotals`, `comparedReportId`, `comparedSnapshotId`, `arrivedDuringBuild` | §I (the compared report and its live snapshot when this build recounted it); knocks that arrived after the fence. |
 | `build` | The build in flight or its result (§E). Mixed, and always replaced whole by a claim, cancel or reset. |
 | `seriesId`, `scope` | The series and the frozen `{ kind: campaign \| walk_list \| team \| team_walk_list, label }`. |
-| `takenDownAt/By`, `contentEditedAt/By`, `numbersRefreshedAt/By` | Take down; an accepted edit or a remap ("Edited"); an applied refresh ("Numbers refreshed"). |
+| `takenDownAt/By`, `contentEditedAt/By`, `numbersRefreshedAt/By` | Take down; an accepted edit or a remap ("Edited") — not Doorline's own remap (`build.via: 'privacy'`, §G, §R); an applied refresh ("Numbers refreshed"). |
 | `copiedFrom`, `copiedNotesReviewed`, `nextReportId` | Next report: `{ reportId, weekStart, weekEnd }` of the copied notes, the review tick (`null` when nothing was copied), and the draft Next made from this report. |
 | `allTimeGuard` | `true` on every all-time report New report or Next made without "Make a second one" (§N; an all-time report from a development build before this guard carried `dupGuard`, which `ensureAllTimeGuard` removes every time it runs): it puts the report inside `report_all_time_guard`, unique on `{ seriesId, weekEnd }` (an all-time report is the same report by its last day; its first day is worked out and may move), partial on this flag, built at boot by `ensureAllTimeGuard` exactly as `report_period_guard` is (and healed the same way). An all-time report never carries `dupGuard`, so a dated report and an all-time one with the same dates never stand for each other. Declared, no default. |
 | `dupGuard` | `true` on every report New report or Next made without "Make a second one" (2026-10-25, PROPOSAL_CLIENT_REPORTS_SIMPLIFY.md §E): it puts the report inside the unique partial index `report_period_guard` (below), one guarded report per tab and period. **Declared with no default** on purpose: absent means outside the guard (every report from before the field, and every deliberate second one); undeclared, strict mode would drop it on create and `strictQuery` from filters, and the guard would hold nothing. Dates never change after creation, so a report's key never moves; deleting it frees the key. |
@@ -1218,7 +1255,20 @@ writer and reader goes through it.
 - **Empty means none**, for `visibleQuestionKeys` and `mapAnswerKeys`, on every report. Create, Next
   and the builder always write explicit keys. A new draft gets every choice question's chart and, on
   the map, every choice question whose dependencies are also on it (`defaultVisibility`), the map on,
-  pins, small areas, no tags and no goal.
+  **small areas** (since privacy record item 52; pins before), no tags and no goal. Next always writes
+  `mapMode: 'area'`, keeping the source's area size.
+- **A house-level map is opt-in per report** (privacy record item 52). A `PATCH` whose
+  `visibility.mapMode` is `'pins'`, and a Refresh whose `map.mapMode` is `'pins'`, must carry
+  `confirmHouseLevel: true`, or the server answers `400 HOUSE_LEVEL_CONFIRM_REQUIRED` before reading or
+  claiming anything. One that carries it records `visibility.houseLevelConfirmedAt/By` (the PATCH in its
+  own write, when the setting it leaves is `'pins'`; the Refresh once its build is claimed) and a
+  `houseLevelConfirmed` History row (`toValue: { mapMode: 'pins', via: 'settings' | 'refresh' }`). The
+  builder sends the flag only after its own confirm (`withHouseLevelConfirm`, §Q). What a house-level map
+  serves is unchanged: pins, their map answers, and a tapped door's street address and answers (§J).
+  A missing `visibility.mapMode` on a **draft** reads as areas wherever settings become a build
+  (`inputsFromSettings`: only an explicit `'pins'` builds pins; the builder's `settingsOf` alike); a
+  published report's missing mode, and every reading of a live snapshot (`liveInputs`, its legacy
+  fallback below, `nothingLive`), stay as they were — those reports are pins reports.
 - **`visibleKeysFor(report)`** = `visibleQuestionKeys` ∩ the frozen breakdown keys.
 - **`mapKeysFor(report, questionDeps)`** = `mapAnswerKeys` ∩ `visibleKeysFor`, closed under the
   dependencies (`closeUnderDeps`, to a fixpoint, so a follow-up of a follow-up drops with its middle
@@ -1585,7 +1635,9 @@ targeted pipeline `$set` and `editVersion + 1`; a build never blocks it. Every r
 or taken down) it accepts the title, observations, headline, visible questions and tags, the goal
 tick, `copiedNotesReviewed`, and the removals; it stamps `contentEditedAt/By` and writes an `edited`
 History row from the write's own pre-image. Anything that adds to the map is `400 NEEDS_REFRESH` with
-`reasons` (`map_on`, `map_questions`, `back_to_exact_doors`, `area_size`). On a published report the
+`reasons` (`map_on`, `map_questions`, `back_to_exact_doors` — a house-level map, by its old name —
+`area_size`). Setting `visibility.mapMode: 'pins'`, on any report, takes `confirmHouseLevel: true` (§C).
+On a published report the
 on-screen `mapMode` and `areaSize` always follow the live snapshot; areas on a pins report claims a
 `remap` **before** the write, so a refusal (another build live, a review pending) refuses the whole
 edit. On a draft, mode and size are ordinary settings that take effect at the next Recompute.
@@ -1614,8 +1666,11 @@ sends is the one its screen reflects (the seed's, then each of its own saves tha
 one learned from a later re-read, so Publish can't freeze text or settings the operator never saw (code
 review ADMINUX-1, §Q).
 
-**Refresh** (`POST /:id/refresh { map? }`, published only, else `400 NOT_PUBLISHED`): the base is the
-report's current settings, plus the additions (`showMap: true`, `mapKeys`, `mapMode`, `areaSize`). A
+**Refresh** (`POST /:id/refresh { map?, confirmHouseLevel? }`, published only, else `400 NOT_PUBLISHED`):
+the base is the report's current settings, plus the additions (`showMap: true`, `mapKeys`, `mapMode`,
+`areaSize`). `map.mapMode: 'pins'` takes `confirmHouseLevel: true` (§C). A served map keeps its live
+view unless the request changes it; a map turned back on (or left off) builds **areas** unless the
+request asks for a house-level map (since privacy record item 52 — it used to take the live mode). A
 map key that isn't a choice question whose chart is shown is `400 MAP_KEYS_NOT_ALLOWED`; one whose
 dependencies aren't all on the map is `400 MAP_KEYS_NEED_PARENTS` (with each key's parents). The map
 questions it builds are the **final list** (code review VERIFY-2): on a served map, what the live
@@ -1851,7 +1906,11 @@ every zoom: not clustering.
   opened before the switch merges onto it instead of writing over it, contract C8), leaving `build` as
   `{ kind: 'remap', status: 'idle', finishedAt, areaWithoutAnswers }`; then it deletes the pins and
   writes a `remapped` History row. The numbers don't change. Until it commits the client keeps seeing
-  pins; if it fails or is cancelled, nothing changed.
+  pins; if it fails or is cancelled, nothing changed. **Doorline's own remap** (`migrate:client-report-
+  areas`, §R) is claimed with `via: 'privacy'` on the build (`claimBuild`'s optional `via`): its commit
+  sets everything above **except `contentEditedAt/By`** (the client is not told "Edited": nothing it
+  reads changed but the map's view) and writes an `areasPrivacyUpdate` History row with no author
+  (`toValue: { kind: 'remap', mapMode: 'area', areaSize }`) instead of `remapped`.
 - **Which questions show no answers by area** (`areaWithoutAnswers`): *Before you publish* lists them
   on a draft, and since code review round 2 (WALK-7) a published report learns them too. A refresh's
   ready result and a finished remap carry them (`areaWithoutAnswersOf` at the commit: on the map the
@@ -2054,6 +2113,13 @@ public routes and the admin preview alike, so the preview is what the client get
   410 first, §K). It stays in code, tested, until the switch has been on a while
   (PROPOSAL_CLIENT_REPORT_LINKS.md §J).
 - `mapFilterSurvey`: the served map questions with their options and counts (the filter legend).
+
+**Areas by default, house-level by opt-in** (privacy record item 52): an area report's map is its
+cells alone — `…/areas` returns outlines, door counts, statuses and area answer counts under the
+all-or-nothing rule, never an address, a household id or a household's answer — and the pins routes
+(`…/map`, `…/map/doors`) answer an area report `409 MAP_UPDATED` with no data. A house-level report,
+which an operator turned on for that report after a warning (§C), is served exactly as below: pins with
+their map answers, and a tapped door's street address and answers.
 
 **The map readers** ([clientReportMap.js](../server/src/services/reports/clientReportMap.js)) read the
 live snapshot only, `{ clientReportId, snapshotId: report.snapshotId ?? null }`, so an unapplied
@@ -2444,7 +2510,7 @@ Rows ride `CampaignChange` with `source: 'client_report'`
 ([clientReportHistory.js](../server/src/services/reports/clientReportHistory.js)):
 
 - `clientReport.created | published | edited | numbersRefreshed | refreshDiscarded | takenDown |
-  putBackUp | deleted | remapped | archived | unarchived` (with `clientReportId`, `seriesId` and
+  putBackUp | deleted | remapped | archived | unarchived | houseLevelConfirmed | areasPrivacyUpdate` (with `clientReportId`, `seriesId` and
   `periodLabel`: other rows name the report's period, never its title; `archived` and `unarchived` since
   2026-10-28, one per CAS that changed something, §F);
 - `clientReportSeries.created | renamed | crewsChanged | ended | continued` (`continued` since code
@@ -2558,8 +2624,8 @@ for any campaign id (§H):
 | `POST /` | Create a draft `{ campaignId, weekStart, weekEnd, title?, seriesId?, effortId?, teamSeriesId?, seriesLabel?, confirmLabel?, allowDuplicate?, allTime? }` (with `allTime: true`, `weekEnd` alone: the server sets `weekStart`, §F) and claim its first build: `201 { report, build, warnings }` (`['STARTS_AFTER_TODAY']` when it starts after today in the campaign's zone, else `[]`); `409 REPORT_EXISTS` when the tab has a report for those dates (unless `allowDuplicate`), `200 { report, build, existing: true, createdByName }` when a simultaneous create got in first (§F) |
 | `GET /?campaignId=&seriesId=` | The list (no breakdowns, no build result), with each row's series key, current series label, `campaignType` (null on a report from before the field), build view, views and dates, and `archivedAt` (`null` when not archived, a report from before the field included) |
 | `GET /:id` | The report, campaign and org names, current series label, scoped `openMockFlags`, the build (with `live` and `queuePosition`), `checks` (*Before you publish*) and `liveInputs: { showMap, mapMode, areaSize, mapKeys, questionDeps }`, what the live snapshot was built with as the server reads it (`mapContextFor`, so a legacy published report's comes through every survey its answers can have come from; code review contract C4). The builder's question table, map ticks, Refresh dialog and preview map follow it instead of guessing from the stored settings |
-| `PATCH /:id` | Edit (§F), with optional `ifStatus` (`409 STATUS_CHANGED` on a mismatch) and `ifEditVersion` (`409 CHANGED_ELSEWHERE` with `{ editVersion, report }` on a mismatch; contract C8) |
-| `POST /:id/recompute` · `POST /:id/refresh` | Claim a build: `202 { build }` |
+| `PATCH /:id` | Edit (§F), with optional `ifStatus` (`409 STATUS_CHANGED` on a mismatch) and `ifEditVersion` (`409 CHANGED_ELSEWHERE` with `{ editVersion, report }` on a mismatch; contract C8); `visibility.mapMode: 'pins'` only with `confirmHouseLevel: true` (`400 HOUSE_LEVEL_CONFIRM_REQUIRED`; §C) |
+| `POST /:id/recompute` · `POST /:id/refresh` | Claim a build: `202 { build }`. Refresh: `{ map?, confirmHouseLevel? }`, `map.mapMode: 'pins'` only with `confirmHouseLevel: true` |
 | `GET /:id/build` | Status, progress, why it waits, its error, its place in the queue; a ready refresh's `result` (with `mapKeys`, what the map will carry once applied) and a top-level `areaWithoutAnswers` (a ready refresh's, or a switch to areas that just finished) |
 | `POST /:id/refresh/apply` · `/refresh/discard` | `{ snapshotId }` of the reviewed result |
 | `POST /:id/build/cancel` | Cancel a live build |
@@ -2642,6 +2708,7 @@ pass), and report routes `loadReport` (the link's campaign, published, not taken
 | `SERIES_ENDED`, `SERIES_NAME_ENDED`, `TEAM_LABEL_TAKEN`, `CREW_IN_OTHER_TEAM`, `SERIES_CHANGED` | 409 | Series |
 | `SERIES_NOT_FOUND` | 404 / 400 | A series id not in the org / not on the campaign |
 | `MAP_ANSWER_KEYS_NOT_CHOICE`, `NO_GOAL_SNAPSHOT`, `GOAL_AFTER_BUILD`, `NEEDS_REFRESH`, `NOT_DRAFT`, `NOT_PUBLISHED`, `MAP_KEYS_NOT_ALLOWED`, `MAP_KEYS_NEED_PARENTS` | 400 | Edit, Recompute, Refresh |
+| `HOUSE_LEVEL_CONFIRM_REQUIRED` | 400 | Edit setting `visibility.mapMode: 'pins'`, or Refresh asking `map.mapMode: 'pins'`, without `confirmHouseLevel: true` — refused before anything is read or claimed (§C) |
 | `STATUS_CHANGED` | 409 | Edit sent with an `ifStatus` the report no longer has, or a report whose status moved while the edit ran (`{ status, takenDown }`) |
 | `CHANGED_ELSEWHERE` | 409 | Edit sent with an `ifEditVersion` the report no longer has, checked before the write and pinned in it (`{ editVersion, report }`; nothing written) |
 | `REVIEW_PENDING`, `REPORT_BUSY`, `STATUS_CHANGED`, `NOTHING_TO_CANCEL` | 409 | Claims and Cancel |
@@ -2779,6 +2846,23 @@ Build failures carry their own codes on `build.error` (§E).
   re-reads the picker. `TeamChangedCard` sends `?reportId=`. Share offers an
   expired link only Renew (ADMINUX-8), and the History drawer's Restore confirm branches on
   `takenDownAt` (ADMINUX-9).
+- **Areas first, house-level by opt-in** (privacy record item 52). `ReportSettings` offers **Areas**
+  (with the size) first and **House-level** second; picking House-level never sets it directly: it calls
+  `onHouseLevel`, and the builder's `ConfirmDialog` "Use a house-level map?" (the "Switch to areas?"
+  pattern) says `HOUSE_LEVEL_WARNING` — "Anyone with this report's link and password will see every
+  knocked house on the map — its address, its door status, and the survey answers you put on the map.
+  Turn this on only for someone who should see that, like the candidate or the campaign manager." — and
+  only its confirm sets `mapMode: 'pins'` and the page's `houseLevelOk` ref. Every save that sets
+  `'pins'` (the auto-save, the unmount keepalive, Update) goes through `withHouseLevelConfirm(body,
+  houseLevelOk)` in autoSave.js, which adds `confirmHouseLevel: true` only after that confirm, never
+  inferred from the body alone. The house-level radio's warning box repeats the sentence; Before you
+  publish adds an "i" line on a house-level snapshot. `RefreshDialog` starts a map turned back on in
+  areas (`initialRefreshMode`), names the choice **House-level map**, shows the warning with a "Use a
+  house-level map on this report" tick that must be ticked before **Refresh numbers** enables, and
+  sends `refreshRequest` (`refreshMapBody` plus `confirmHouseLevel: true` when it asks for pins).
+  `settingsOf` reads a draft's missing `mapMode` as areas and a published report's as pins (§C); the
+  History drawer names `houseLevelConfirmed` and `areasPrivacyUpdate` rows (campaignHistory.js). A
+  house-level map itself renders exactly as before (`ClientReportMap`, §J).
 - **Builder:** [ClientReportBuilderPage.jsx](../client/src/pages/ClientReportBuilderPage.jsx)
   (`/campaigns/:campaignId/reports/:id`) with `ReportSettings`, `QuestionTable` (+ `questionRules.js`,
   the server's map rules on screen), `BeforePublish`, `PublishDialog`, `RefreshDialog`, and
@@ -3173,6 +3257,40 @@ All organizations: 2 organizations with links to all your reports · 5 links: 3 
 Nothing was changed.
 ```
 
+**`npm run migrate:client-report-areas`** (2026-11-01, privacy record item 52;
+[clientReportAreas.js](../server/src/migrations/clientReportAreas.js); dry run unless `-- --apply`;
+proxied in the root `package.json` with the trailing `--`, so it runs from Heroku dashboard → **More →
+Run console**). Areas became the default for new reports and the house-level map an opt-in recorded
+per report; no existing report ever opted in, so this moves every one of them to areas. **Deploy
+first** (the opt-in guard and the area default are the deployed code's), then the dry run, then `--
+--apply`. No index to build, no OTA, no client-version gate. Steps:
+
+1. Published reports, shown or taken down, whose live snapshot serves a house-level map (`mapServed`
+   and `liveInputs(…).mapMode === 'pins'`): the same remap Switch to areas makes, claimed with
+   `claimBuild({ kind: 'remap', via: 'privacy', by: null, inputs: { …live, mapKeys: servedMapKeys,
+   mapMode: 'area', areaSize: 'small' } })` and built inline (`processClientReportJob` with a stand-in
+   job; nothing is enqueued, so the worker never sees it). Its commit stamps no `contentEditedAt/By` and
+   writes an `areasPrivacyUpdate` History row (§G). A report published before snapshots takes the same
+   path: the remap reads its legacy rows (`snapshotId: null`), and the commit gives it a snapshot of its
+   own and deletes them. **Left as they are, and listed:** a report whose house-level map someone
+   confirmed since the deploy (`visibility.mapMode: 'pins'` with `houseLevelConfirmedAt`), and —
+   SKIPPED, run it again later — one with new numbers waiting for review (`build.status: 'ready'`) or a
+   build in flight (`buildIsLive`). A claim refused, or a build that doesn't commit, is listed too
+   (`reconcileFailedClientReportJob` marks a thrown one failed).
+2. Drafts, and published reports whose map is off: `visibility.mapMode: 'area'` (`areaSize` large
+   kept, else small) and `editVersion + 1` in one pipeline update filtered on what is still to do
+   (`{ 'visibility.mapMode': { $ne: 'area' }, 'visibility.houseLevelConfirmedAt': null }`), each with an
+   `areasPrivacyUpdate` History row (`kind: 'setting'`). A confirmed house-level draft is left.
+
+Frozen map rows are not touched, addresses included: a switched report's pins go with its old snapshot
+(the remap's commit deletes them), and a house-level map left in place still needs them. Every write
+selects only what is still to do, so a second run changes nothing; the skipped and kept reports are
+listed again. The script closes the queue connection (`closeQueues`) a liveness check opens, or the
+console would hang. Pinned by
+[clientReportAreasMigration.int.test.js](../server/test/clientReportAreasMigration.int.test.js); run
+from the repo root against a throwaway local database on 2026-11-01 (the dry run, `-- --apply`, and a
+second `-- --apply` that changed nothing).
+
 **Config** (all optional; none is needed to deploy): `CLIENT_REPORT_JOB_CONCURRENCY` (2),
 `CLIENT_REPORT_BATCH` (2,000), `CLIENT_REPORT_SWEEP_CRON` (`31 5 * * *`),
 `CLIENT_REPORT_QUEUE_TIMEOUT_MS`, `CLIENT_REPORT_MAP_CACHE_MB` (64; the web process's map payload
@@ -3223,7 +3341,17 @@ only for a shown report, every public route refusing another report's id, the hu
 `gone`, `nav` and the earlier-totals form, the delete cascade and its History rows, the demo reset)
 and [clientReportDuplicates.int.test.js](../server/test/clientReportDuplicates.int.test.js) (the guard
 index's name and filter, `REPORT_EXISTS` and `allowDuplicate`, concurrent creates making exactly one
-report with no orphan job or History row).
+report with no orphan job or History row). For privacy record item 52:
+[clientReportShareNoHousehold.int.test.js](../server/test/clientReportShareNoHousehold.int.test.js) (a
+new report is areas; every share and preview endpoint of an area report, read with a real unlocked
+token, carries no address field, household id or household answer and none of the seeded street or city
+text — only area answer counts over five or more homes; an opted-in house-level report still serves its
+pins, answers and a tapped door's address; the `confirmHouseLevel` guard on PATCH and Refresh and its
+record; a map turned back on in areas; Next resetting to areas) and
+[clientReportAreasMigration.int.test.js](../server/test/clientReportAreasMigration.int.test.js) (the
+dry run writes nothing; apply switches shown, taken-down and pre-snapshot house-level maps to areas
+without "Edited", sets drafts and map-off reports, keeps a confirmed one and lists the skipped; a second
+run changes nothing).
 
 Client (`npm --prefix client test`): `reportDerivePeriod.test.js`, `reportMapData.test.js`,
 `reportPdf.test.js`, `shareSession.test.js`, `apiIdentify.test.js`, `clientReportsLogic.test.js`,
@@ -3237,7 +3365,12 @@ wiring), `clientReportBuilderLinks.smoke.test.js` (the builder's link lines) and
 `reportPdfSingleLink.test.js` (the one-report earlier-totals line in a real PDF); a link to all your
 reports renders byte for byte as before, pinned by `publicReportAllLinks.snapshot.json` (regenerate
 only on purpose: `UPDATE_PUBLIC_REPORT_SNAPSHOT=1 node --test src/lib/publicReportRender.smoke.test.js`;
-regenerated once for §M, whose only differences are the totals line and the Latest card's sentence).
+regenerated once for §M, whose only differences are the totals line and the Latest card's sentence). For privacy
+record item 52: `clientReportAutoSave.test.js` (a draft's missing view reads as areas, a published
+report's as pins; `withHouseLevelConfirm` only after the confirm), `clientReportRefreshDialog.smoke.test.js`
+(`initialRefreshMode`, `refreshRequest` carrying `confirmHouseLevel` only for pins, the House-level map
+choice), `clientReportsRender.smoke.test.js` (the area note, Before you publish's house-level line, the
+Refresh options) and `clientReportsLogic.test.js` (the two History rows).
 The §M wording is pinned in `reportDerivePeriod.test.js` (the totals line, dateless when the numbers
 stopped early), `clientReportsLogic.test.js` and `clientReportsSimplify.smoke.test.js` (New report's line,
 named for a team or walk list, its example following the dates) and `reportPdf.test.js` (the line right

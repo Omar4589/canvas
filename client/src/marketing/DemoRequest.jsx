@@ -2,36 +2,52 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { api } from '../api/client.js';
 import { CONTACT_EMAIL } from './contact.js';
 import { isValidEmail } from '../lib/validators.js';
+import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN_AT_AAPC, WHEN_AFTER, SOURCE_PATTERN } from './demoOptions.js';
+import { aapcPhase } from './aapc.js';
 
 // The demo request — the site's ONLY conversion action, and the single source of truth for it.
-// All three "Request a demo" controls (nav, hero, cta band) call open() from useDemoRequest()
-// rather than linking anywhere, the same way every auth CTA reads from useAuthCta(). Three
-// buttons, one dialog, one form. The footer's "Contact" is deliberately NOT one of them — it
-// stays a plain mailto, the escape hatch for someone who'd rather write their own email.
+// Every "Request a demo" control (nav, hero, cta band, and later /aapc and its banner) calls open()
+// from useDemoRequest() rather than linking anywhere, the same way every auth CTA reads from
+// useAuthCta(). Many buttons, one dialog, one form. The footer's "Contact" is deliberately NOT one of
+// them — it stays a plain mailto, the escape hatch for someone who'd rather write their own email.
 //
 // It replaced a `mailto:`, which opened the visitor's mail client — and did VISIBLY NOTHING for
 // anyone whose OS has no mail handler (webmail in a desktop browser, i.e. much of the audience
 // this page is written for). A silent failure on the only way to buy.
 //
-// A dialog rather than a page: the CTAs sit at four different scroll depths, and sending someone
-// to /demo from the footer would cost them the page they were reading. Nothing here navigates.
+// A dialog rather than a page: the CTAs sit at different scroll depths, and sending someone to /demo
+// from the footer would cost them the page they were reading. Nothing here navigates.
+//
+// Every request is saved on the server as well as emailed (server/src/routes/public/demoRequest.js),
+// with the ?src= tag and path of the page it came from — the Website page in the super-admin console
+// lists them.
 
 const DemoRequestContext = createContext(null);
 
-/** open() — show the demo dialog. Used by every "Request a demo" control on the marketing site. */
+/**
+ * open(options) — show the demo dialog. Used by every "Request a demo" control on the marketing site.
+ *   · source: attribution tag to send (e.g. 'aapc'); defaults to the page's own ?src= tag, if any.
+ *   · askWhen: also ask "When?" — /aapc's "meet at the event or after" choice.
+ */
 export const useDemoRequest = () => {
   const ctx = useContext(DemoRequestContext);
   if (!ctx) throw new Error('useDemoRequest must be used inside <DemoRequestProvider>');
   return ctx;
 };
 
-const TEAM_SIZES = ['Just me', '2–10', '11–50', '51–200', '200+'];
+// What the form promises (the owner's choice, Nov 2026). One place, so the intro and the thank-you
+// can't disagree. SCHEDULING_URL adds a "Pick a time now" link to the thank-you once there is one.
+const OWNER = 'Omar';
+const REPLY_WINDOW = 'within one business day';
+const WALKTHROUGH = '20-minute';
+const SCHEDULING_URL = null;
 
+// Neutral focus on the fields: a red ring reads as an error on a form. Buttons keep the brand ring.
 const FIELD_CLASS =
   'mt-1.5 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-[15px] text-stone-900 ' +
-  'placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus-visible:ring-2 ' +
-  'focus-visible:ring-brand-600 focus-visible:ring-offset-2';
+  'placeholder:text-stone-400 focus:border-stone-500 focus:outline-none focus:ring-2 focus:ring-stone-300';
 const LABEL_CLASS = 'block text-sm font-semibold text-stone-900';
+const OPTIONAL = <span className="font-normal text-stone-500">(optional)</span>;
 
 // Everything the dialog can be doing. `sending` disables submit; `sent` swaps the whole body for
 // the confirmation, so the form is never re-submittable by a double click.
@@ -39,9 +55,33 @@ const IDLE = 'idle';
 const SENDING = 'sending';
 const SENT = 'sent';
 
-const EMPTY = { name: '', email: '', organization: '', teamSize: '', message: '' };
+const EMPTY = { name: '', email: '', organization: '', role: '', teamSize: '', heardAbout: '', when: '', message: '' };
 
-const DemoDialog = ({ onClose }) => {
+// The page's own ?src= tag, if it carries a valid one (the AAPC banner links /aapc?src=home-banner).
+const pageSource = () => {
+  try {
+    const src = (new URLSearchParams(window.location.search).get('src') || '').trim().toLowerCase();
+    return SOURCE_PATTERN.test(src) ? src : null;
+  } catch {
+    return null;
+  }
+};
+
+const Select = ({ id, label, value, onChange, options, display = (o) => o }) => (
+  <div>
+    <label htmlFor={id} className={LABEL_CLASS}>
+      {label} {OPTIONAL}
+    </label>
+    <select id={id} name={id} value={value} onChange={onChange} className={FIELD_CLASS}>
+      <option value="">Select…</option>
+      {options.map((o) => (
+        <option key={o} value={o}>{display(o)}</option>
+      ))}
+    </select>
+  </div>
+);
+
+const DemoDialog = ({ options, onClose }) => {
   const [values, setValues] = useState(EMPTY);
   const [status, setStatus] = useState(IDLE);
   const [error, setError] = useState(null);
@@ -55,6 +95,9 @@ const DemoDialog = ({ onClose }) => {
   // just supply the inputs.
   const honeypotRef = useRef(null);
   const openedAt = useRef(Date.now());
+
+  // "At AAPC, Nov 17" is offered only through the event day (marketing/aapc.js).
+  const whenOptions = aapcPhase() === 'before' ? [WHEN_AT_AAPC, WHEN_AFTER] : [WHEN_AFTER];
 
   const set = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
@@ -91,7 +134,12 @@ const DemoDialog = ({ onClose }) => {
     document.addEventListener('keydown', onKeyDown);
     const priorOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    firstFieldRef.current?.focus();
+    // Focus goes into the dialog either way (keyboard and screen-reader users land inside it), but
+    // only a mouse-and-keyboard device gets the name field: on a phone, focusing a field throws the
+    // keyboard up over the form before the person has read it.
+    const finePointer = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches;
+    if (finePointer) firstFieldRef.current?.focus();
+    else dialogRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = priorOverflow;
@@ -121,8 +169,13 @@ const DemoDialog = ({ onClose }) => {
           name: values.name.trim(),
           email: values.email.trim(),
           organization: values.organization.trim(),
+          role: values.role,
           teamSize: values.teamSize,
+          heardAbout: values.heardAbout,
+          when: options.askWhen ? values.when : '',
           message: values.message.trim(),
+          source: options.source || pageSource() || '',
+          page: window.location.pathname,
           company: honeypotRef.current?.value || '',
           elapsedMs: Date.now() - openedAt.current,
         },
@@ -141,6 +194,8 @@ const DemoDialog = ({ onClose }) => {
     }
   };
 
+  const firstName = values.name.trim().split(/\s+/)[0];
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-stone-900/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
@@ -153,7 +208,8 @@ const DemoDialog = ({ onClose }) => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="demo-dialog-title"
-        className="relative w-full max-w-lg rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl sm:p-7"
+        tabIndex={-1}
+        className="relative w-full max-w-lg rounded-t-2xl bg-white p-6 shadow-2xl focus:outline-none sm:rounded-2xl sm:p-7"
       >
         <button
           type="button"
@@ -169,19 +225,34 @@ const DemoDialog = ({ onClose }) => {
         {status === SENT ? (
           <>
             <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
-              Thanks — we&apos;ll be in touch.
+              Thanks, {firstName}.
             </h2>
             <p className="mt-3 text-[15px] text-stone-600">
-              We usually reply the same day. We&apos;ll walk you through the console and the field
-              app together, on a live demo campaign.
+              {OWNER} will email you {REPLY_WINDOW}.
             </p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-6 inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-            >
-              Close
-            </button>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              {SCHEDULING_URL && (
+                <a
+                  href={SCHEDULING_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                >
+                  Pick a time now
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className={
+                  SCHEDULING_URL
+                    ? 'inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2'
+                    : 'inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2'
+                }
+              >
+                Close
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -189,7 +260,7 @@ const DemoDialog = ({ onClose }) => {
               See Doorline run your next canvass
             </h2>
             <p className="mt-2 text-[15px] text-stone-600">
-              Tell us a little about your team and we&apos;ll set up a walkthrough.
+              Tell us about your team. {OWNER} will reply {REPLY_WINDOW} to set up a {WALKTHROUGH} walkthrough.
             </p>
 
             <form onSubmit={onSubmit} noValidate className="mt-5 space-y-4">
@@ -229,7 +300,7 @@ const DemoDialog = ({ onClose }) => {
                   value={values.email}
                   onChange={set('email')}
                   className={FIELD_CLASS}
-                  placeholder="you@campaign.org"
+                  placeholder="you@yourfirm.com"
                 />
                 {touched && problem === 'email' && (
                   <p className="mt-1.5 text-[13px] text-brand-600">Please enter a valid email address.</p>
@@ -245,25 +316,33 @@ const DemoDialog = ({ onClose }) => {
                   value={values.organization}
                   onChange={set('organization')}
                   className={FIELD_CLASS}
-                  placeholder="Campaign, committee, or firm"
+                  placeholder="Firm, campaign, or committee"
                 />
               </div>
 
-              <div>
-                <label htmlFor="demo-team" className={LABEL_CLASS}>
-                  Approx. team size <span className="font-normal text-stone-400">(optional)</span>
-                </label>
-                <select id="demo-team" name="teamSize" value={values.teamSize} onChange={set('teamSize')} className={FIELD_CLASS}>
-                  <option value="">Select…</option>
-                  {TEAM_SIZES.map((size) => (
-                    <option key={size} value={size}>{size} canvassers</option>
-                  ))}
-                </select>
-              </div>
+              <Select id="demo-role" label="You are" value={values.role} onChange={set('role')} options={ROLES} />
+              <Select
+                id="demo-team"
+                label="Team size"
+                value={values.teamSize}
+                onChange={set('teamSize')}
+                options={TEAM_SIZES}
+                display={(size) => (size === 'Just me' ? size : `${size} canvassers`)}
+              />
+              <Select
+                id="demo-heard"
+                label="How did you hear about us?"
+                value={values.heardAbout}
+                onChange={set('heardAbout')}
+                options={HEARD_ABOUT}
+              />
+              {options.askWhen && (
+                <Select id="demo-when" label="When?" value={values.when} onChange={set('when')} options={whenOptions} />
+              )}
 
               <div>
                 <label htmlFor="demo-message" className={LABEL_CLASS}>
-                  Anything else? <span className="font-normal text-stone-400">(optional)</span>
+                  Anything else? {OPTIONAL}
                 </label>
                 <textarea
                   id="demo-message"
@@ -318,18 +397,22 @@ const DemoDialog = ({ onClose }) => {
 };
 
 export const DemoRequestProvider = ({ children }) => {
-  const [open, setOpen] = useState(false);
+  // null = closed; otherwise the options open() was called with.
+  const [openWith, setOpenWith] = useState(null);
   // The control that opened the dialog, so focus goes back where it came from on close —
   // otherwise a keyboard user is dropped at the top of the document.
   const invoker = useRef(null);
 
-  const openDialog = useCallback(() => {
+  // Buttons pass their click event straight in (onClick={demo.open}), so anything that isn't a plain
+  // options object is treated as "no options".
+  const openDialog = useCallback((opts) => {
     invoker.current = document.activeElement;
-    setOpen(true);
+    const o = opts && typeof opts === 'object' && !('nativeEvent' in opts) ? opts : {};
+    setOpenWith({ source: o.source || null, askWhen: !!o.askWhen });
   }, []);
 
   const closeDialog = useCallback(() => {
-    setOpen(false);
+    setOpenWith(null);
     invoker.current?.focus?.();
     invoker.current = null;
   }, []);
@@ -337,7 +420,7 @@ export const DemoRequestProvider = ({ children }) => {
   return (
     <DemoRequestContext.Provider value={{ open: openDialog }}>
       {children}
-      {open && <DemoDialog onClose={closeDialog} />}
+      {openWith && <DemoDialog options={openWith} onClose={closeDialog} />}
     </DemoRequestContext.Provider>
   );
 };
