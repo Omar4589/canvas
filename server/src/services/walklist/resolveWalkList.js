@@ -7,7 +7,8 @@ import { answerFilterClause, answerTagClause } from '../surveys/answerAgg.js';
 import { SurveyTemplate } from '../../models/SurveyTemplate.js';
 import { Effort } from '../../models/Effort.js';
 import { effectiveSurveyTemplateIdFor } from '../surveys/effectiveTemplate.js';
-import { targetingIdsMatching } from './targetingStatus.js';
+import { targetingIdsMatching, visitedIdsSince } from './targetingStatus.js';
+import { readVisitedSince, dayStart, zoneFor } from './visitedSince.js';
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const arr = (a) => (Array.isArray(a) && a.length ? a : null);
@@ -68,8 +69,9 @@ export function isActiveTargetFilter(f) {
 //   warnings — human-readable notes on predicates requested but dropped, surfaced by
 //              the preview endpoints.
 // Reads `f.priorPassId` from THIS side's sub-filter only — the exclude side never
-// inherits the include side's round scoping.
-async function collectPredicateSets(campaign, f, ctx) {
+// inherits the include side's round scoping. `side` ('include' | 'exclude') matters only to
+// the visited-since line, which can only ever leave doors out.
+async function collectPredicateSets(campaign, f, ctx, side = 'include') {
   const { campaignId, orgId, baseIds, baseOids, template } = ctx;
   const sets = [];
   const warnings = [];
@@ -160,7 +162,27 @@ async function collectPredicateSets(campaign, f, ctx) {
     }
   }
 
-  return { sets, vq, warnings };
+  // "Visited in the last N days" (docs/PROPOSAL_RECENT_VISITS.md): the doors with a field visit since a
+  // civil day in the campaign's zone. Exclude side only — every route refuses it on the include side,
+  // and should one arrive anyway it runs no set and flags the resolve, so generateTurf refuses instead
+  // of cutting a different set than the one asked for. An exclude-side value that isn't a real day runs
+  // no set either, so alone it is the degenerate exclusion the cut already refuses.
+  let visitedSet = null;
+  let includeUnsupported = false;
+  const visited = readVisitedSince(f.visitedSince);
+  if (visited.present) {
+    if (side !== 'exclude') {
+      includeUnsupported = true;
+      warnings.push('visited-since ignored: it can only exclude doors');
+    } else if (!visited.valid) {
+      warnings.push('visited-since ignored: not a date (use YYYY-MM-DD)');
+    } else {
+      visitedSet = await ctx.visitedIds(visited.day);
+      sets.push(visitedSet);
+    }
+  }
+
+  return { sets, vq, warnings, visitedSet, includeUnsupported };
 }
 
 // Resolve a walk-list filter into a frozen { householdIds, voterIds, counts }.
@@ -206,8 +228,10 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
       householdCount: 0,
       voterCount: 0,
       excludedHouseholdIds: [],
+      excludedVisitedHouseholdIds: [],
       excludedDoorCount: 0,
       excludeDegenerate: false,
+      includeUnsupported: readVisitedSince(filter.visitedSince).present,
       warnings: [],
     };
   }
@@ -232,9 +256,11 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
     template,
     // Each side asks for its own statuses; the ladder runs in the database and returns ids.
     statusIds: (wanted) => targetingIdsMatching(campaignId, baseIds, campaign.type, wanted),
+    // The visited-since line: midnight of the day in the campaign's zone, over the base doors only.
+    visitedIds: async (day) => visitedIdsSince(campaignId, baseIds, dayStart(day, await zoneFor(campaign))),
   };
 
-  const inc = await collectPredicateSets(campaign, filter, ctx);
+  const inc = await collectPredicateSets(campaign, filter, ctx, 'include');
   const warnings = [...inc.warnings];
 
   let finalSet;
@@ -260,15 +286,19 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
   // template); excluding nothing is the safe direction, but it must not be silent, so
   // `excludeDegenerate` is set for generateTurf to refuse on and previews to surface.
   const excludedSet = new Set();
+  let excludedVisited = [];
   let excludeDegenerate = false;
   if (isActiveTargetFilter(filter.exclude)) {
-    const exc = await collectPredicateSets(campaign, filter.exclude, ctx);
+    const exc = await collectPredicateSets(campaign, filter.exclude, ctx, 'exclude');
     warnings.push(...exc.warnings);
     // Set.delete returns true only when the id was present, so excludedSet is EXACTLY
     // the doors removed from the result (∩ the include result) — the honest "M excluded"
     // the preview shows, not the raw exclusion population.
     for (const s of exc.sets) for (const id of s) if (finalSet.delete(id)) excludedSet.add(id);
     excludeDegenerate = exc.sets.length === 0;
+    // The visited-since line's share of the removed doors, for the preview's reasons. A door it shares
+    // with another Exclude condition counts here too (the page labels it "visited").
+    if (exc.visitedSet) excludedVisited = [...excludedSet].filter((id) => exc.visitedSet.has(id));
     // exc.vq deliberately dropped: exclude-side demographics only pick doors to remove;
     // they must never constrain the include side's final voter query.
   }
@@ -290,8 +320,10 @@ export async function resolveWalkList(campaign, filter = {}, options = {}) {
     voterCount: voterIds.length,
     // NOT-branch bookkeeping — additive; existing callers destructure and ignore these.
     excludedHouseholdIds: [...excludedSet].map(oid),
+    excludedVisitedHouseholdIds: excludedVisited.map(oid),
     excludedDoorCount: excludedSet.size,
     excludeDegenerate,
+    includeUnsupported: !!inc.includeUnsupported,
     warnings,
   };
 }

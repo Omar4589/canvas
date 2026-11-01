@@ -3,6 +3,8 @@ import { createApp } from './app.js';
 import { connectDb } from './config/db.js';
 import { syncClientReportIndexes } from './services/reports/clientReportIndexes.js';
 import { syncPacePauseIndexes } from './services/audit/pacePause.js';
+import { startMemoryWatch } from './middleware/memoryWatch.js';
+import { getSharedRedis } from './queues/connection.js';
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -21,6 +23,9 @@ async function main() {
   const server = app.listen(PORT, () => {
     console.log(`[canvass-server] listening on http://localhost:${PORT}`);
   });
+  // The memory tripwire (middleware/memoryWatch.js): started here, so it runs on the web dyno only. Its
+  // lines are also kept in Redis, on the connection the job queues already share (Bull Board opened it).
+  const stopMemoryWatch = startMemoryWatch({ redis: getSharedRedis() });
 
   // Heroku stops this dyno once a day (scheduled cycling) and on every deploy/restart, by
   // sending SIGTERM. Without a handler the process just dies, and any request in flight at
@@ -32,6 +37,7 @@ async function main() {
   function shutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
+    stopMemoryWatch();
     console.log(`[canvass-server] ${signal} — draining in-flight requests…`);
     server.close(() => process.exit(0));
     server.closeIdleConnections();

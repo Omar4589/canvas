@@ -294,7 +294,11 @@ Notes:
      97–2003 `.xls`, or a password-protected or access-restricted `.xlsx`, which Excel wraps in the same
      container) → `LegacyXlsError`'s refusal, `code: 'legacy-xls'`; a zip signature, `PK\x03\x04` or
      `PK\x05\x06` (four bytes, so a CSV whose first column is named `PK…` stays a CSV) → the Excel reader
-     below; anything else → Papa, exactly as before (`header`, `skipEmptyLines`, trimmed headers).
+     below; anything else → Papa with the same options as before (`header`, `skipEmptyLines`, trimmed
+     headers), reading the text in 64 KB pieces and keeping only the ID column — and, with `keep`, the
+     counting column — since 2026-10-31 (`readCsvColumns`; why and how: §F, and
+     [PERFORMANCE.md](PERFORMANCE.md) → *Voter-ID list uploads*). Same rows as the whole-file read
+     (`test/idListCsvPieces.test.js`). A `[id-list] csv …` log line gives the size, row count and time.
    - **The ID column, both formats: `pickIdColumn(columns, idColumn)`.** The admin's `idColumn` when the
      file has it; else, over column names of 255 characters or fewer (a longer name is listed for the
      picker but never auto-matched), `suggestMapping().stateVoterId` → the first name matching
@@ -640,12 +644,18 @@ Still true:
   that campaign's households); re-upload to the correct campaign.
 - **`voteMethod` is unused.** The schema field exists but the upload doesn't populate it, from either
   format.
-- **The 50 MB cap is load-bearing for a CSV.** A CSV's whole buffer still becomes one string that Papa
-  parses every column of, every row, on the web dyno, though only the ID column is used (and, with
-  *Count only rows where*, one more). Measured 2026-10-27 on Nebraska's statewide early-ballot file (85
-  columns, 273,834 rows, 149 MB; parse only, no database): ~860 MB peak for its first 50 MB, ~2.3 GB for
-  the whole file — on the 1 GB web dyno. Raising the number alone would take the web dyno down; the
-  owner ruled 2026-10-27 that the cap stays, with no streaming rework of the CSV path. An `.xlsx` is
+- **The 50 MB cap, and the CSV reader (rewritten 2026-10-31).** Until then a CSV's whole buffer became
+  one string that Papa parsed every column of, every row, on the web dyno, though only the ID column was
+  used. Measured 2026-10-27 on Nebraska's statewide early-ballot file (85 columns, 273,834 rows, 149 MB;
+  parse only): ~860 MB peak for its first 50 MB, ~2.3 GB for the whole file. The owner then ruled that
+  the cap stays, with no streaming rework of the CSV path. On 2026-10-31 a ~45 MB county file (Douglas
+  County's already-voted list, about 80,800 rows) took the 1 GB web dyno over its quota (Heroku R14) and
+  froze it for over a second per read, and the owner asked for the reader fix: the CSV is now read in
+  pieces, keeping one or two columns ([PERFORMANCE.md](PERFORMANCE.md) → *Voter-ID list uploads*). End
+  to end on the preview route, a 45 MB file went from ~610 MB above the idle server to ~100 MB, and the
+  longest wait for any other request from 1.35 s to 40 ms. **The cap stays 50 MB:** multer still holds
+  the whole upload in memory, briefly twice while it joins the pieces, so a 150 MB cap would cost about
+  300 MB per upload at that moment; statewide files wait for the org-wide upload plan. An `.xlsx` is
   read differently — one or two columns, kept compactly, about 186–272 MB peak for the whole process at
   the reader's bound (measured on the owner's Mac for the plan) — but the bound is on what's inside the
   file: 320 MB unpacked, about 184,000 rows of a 35-column file, so a whole state's file doesn't go in

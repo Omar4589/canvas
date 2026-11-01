@@ -10,6 +10,7 @@ import { recomputeHouseholdStatusesByIds, recomputeSurveyStatus } from '../canva
 import { recomputeCampaignStats } from '../reports/campaignCounters.js';
 import { departedMemberIdSet } from '../campaignRoster.js';
 import { fencesForSlots, withFences } from '../canvass/answerEditWriter.js';
+import { isActiveTargetFilter } from '../walklist/resolveWalkList.js';
 
 // Capture a pass's current book set (+ assignments, + optionally the knock
 // history about to be cleared) into a TurfSnapshot for undo. Call this BEFORE
@@ -126,6 +127,18 @@ export async function restoreSnapshot({ campaign, snapshot, userId }) {
   });
   for (let i = 0; i < mirrorOps.length; i += 2000) {
     await Household.bulkWrite(mirrorOps.slice(i, i + 2000), { ordered: false });
+  }
+
+  // The round's remembered conditions follow the books restored (docs/PROPOSAL_RECENT_VISITS.md §C.6).
+  // Every book a cut made carries that cut's full params, its targetFilter included; Add as new book,
+  // the Turf Cutting page's "last cut with" line and its question all read Pass.targetFilter, so
+  // restoring an earlier cut must bring its conditions back with it. Books a cut did NOT make carry no
+  // conditions — supplemental books ({ supplemental: true }) and moved-door books ({}) — so a snapshot
+  // holding only those leaves the stored conditions as they are.
+  const cutBooks = (snap.books || []).filter((b) => b.params && Object.keys(b.params).length && !b.params.supplemental);
+  if (cutBooks.length) {
+    const tf = cutBooks.find((b) => b.params.targetFilter != null)?.params.targetFilter ?? null;
+    await Pass.updateOne({ _id: passId }, { $set: { targetFilter: isActiveTargetFilter(tf) ? tf : null } });
   }
 
   // A snapshot can be OLDER THAN THE ROSTER. releaseAssignedWork deletes a departed user's live

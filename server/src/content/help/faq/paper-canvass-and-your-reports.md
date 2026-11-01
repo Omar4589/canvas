@@ -16,7 +16,7 @@ Everything in Doorline that says how much got done is built from knocks recorded
 - **The book reads 0 of 41.** The round's coverage bar, the book chips, and the map fill all read zero, and the map stays grey.
 - **Nobody shows any hours or doors.** No canvasser rows on the timeline, no team numbers, no survey answers.
 - **The campaign home still says canvassing hasn't started**, if that paper day was the first activity.
-- **A later round will re-cut those doors.** A follow-up round aimed at "doors nobody has touched" reads the same records, which still say unknocked.
+- **A later round will re-cut those doors.** A follow-up round aimed at "doors nobody has touched" reads the same records, which still say unknocked — and Turf Cutting's **Visited in the last N days** doesn't see the paper day either.
 
 ## Does it change what we're billed?
 
@@ -26,7 +26,7 @@ No. Billing is a flat rate per campaign per month — it doesn't count knocks, s
 
 Not in bulk. There's no import for paper results and no admin screen for recording a knock on someone else's behalf. If a client needs their paper Saturday to appear in reports, someone has to enter it door by door in the app — realistically, that's a person with a stack of packets and an afternoon.
 
-**Do that typing from a team lead or admin account, never a canvasser's.** If your organization uses automatic pause, a canvasser account saving door after door from one spot can read as doors nobody could have knocked, and its recording pauses. Lead and admin accounts are never paused. Their entries still show in the GPS audit like anyone's — typed at a desk, they read as far from every house — so tell whoever reviews the audit. (A door that's already recorded but missing its survey is a different job: an org admin adds the answers on the Door Outcomes page, as the *Can I add a survey answer after the fact?* article in an org admin's Help Center explains.)
+**Do that typing from a team lead or admin account, never a canvasser's.** If your organization uses automatic pause, a canvasser account saving door after door from one spot can read as doors nobody could have knocked, and its recording pauses. Lead and admin accounts are never paused. Their entries still show in the GPS audit like anyone's — typed at a desk, they read as far from every house — so tell whoever reviews the audit. They're also dated the day they're typed, not the day the doors were walked, so Turf Cutting's **Visited in the last N days** counts them from the typing day. (A door that's already recorded but missing its survey is a different job: an org admin adds the answers on the Door Outcomes page, as the *Can I add a survey answer after the fact?* article in an org admin's Help Center explains.)
 
 The honest advice: decide **before** the day whether the results need to be in Doorline. If they do, the app is the tool. If they don't, print the packets and accept that the numbers will show the day as untouched.
 

@@ -671,17 +671,58 @@ pass**: target *unknocked + not-home + Support/Likely/Undecided*, exclude *Yard 
 back to everyone persuadable-or-better whose yard isn't already converted, without re-knocking the doors
 that took a sign (a sibling option like *Candidate Follow-Up* stays in). Exclusion is **door-level**:
 one household member with a matching answer removes the whole door, and it matches answers from **any**
-round. The count line reads "*N* doors · *V* voters · *M* excluded", where *M* counts the doors
-Exclude doors removed among those the map draws (a door a checkbox would also have dropped still counts
-as the panel's). A malformed exclusion (one with no valid conditions) refuses to cut rather than silently
-walking the doors you removed.
+round. The Target doors panel's line reads "*N* doors · *V* voters · *M* excluded", where *M* counts the
+doors Exclude doors removed among those the map draws (a door a checkbox would also have dropped still
+counts as the panel's). A malformed exclusion (one with no valid conditions) refuses to cut rather than
+silently walking the doors you removed — at once, not after the background job's retries.
 
-**Why a door is faded.** The preview fades every door the cut would leave out, for one of five reasons,
-and the page says which: its all-rounds status isn't ticked; **Exclude doors** removed it; or one of
-the three boxes above Generate left it out — **Exclude restricted-access homes**, **Exclude no-soliciting
+**Visited in the last N days (2026-10-31).** Exclude doors also has a line, **Visited in the last [7]
+days — since [Oct 25]**: tick it and every door a canvasser visited since that date is left out of the
+cut. Type a number of days or pick a date; the other follows, and the date always shows. **A visit** is
+any result a canvasser recorded in the app — Not home, Surveyed, Refused, Lit dropped, Restricted, No
+soliciting, Wrong address, Not a target voter — in **any round or walk list of this campaign**, the
+round being cut included. An entry later corrected on Door Outcomes keeps the knock's time, and paper
+results typed into the app later count on the day they were typed. **Not** visits: notes; desk marks
+(Mark restricted, on the web or the phone — those doors are the restricted box's); entries removed with
+Unknock or cleared by a Discard with knocks; paper days nobody typed in; and other campaigns, which never
+share doors. **Days** are the campaign's: "last 7 days" is today plus the 6 days before it (the
+dashboards' **7 days** button), and "since" includes that whole day from midnight, campaign time. The
+line works with a target or alone (alone: the whole walk list minus the doors visited recently — the
+count line then says "doors in this cut", not "targeted"). The count line keeps ONE Exclude number with
+the line's share in brackets ("… · 1,240 removed by Exclude doors (1,100 visited since Oct 25)"), and
+while the line is ticked a house's pop-up shows its **last visit** (desk marks left out) in place of its
+last recorded entry. **The round stores the date**, not a day count, so **Add as new book** later leaves
+out the same doors, and a line over the books says so. **Doors are checked when you click Generate**
+(and again on Add as new book): books already cut are not re-checked, so a door the live round knocks
+after you cut stays in the new books — cut close to when you activate. Every other condition works the
+same way: a door targeted as Not home that is surveyed after the cut stays in its book too. Saved
+searches don't offer the line (their Filtered voters export re-checks a saved filter on export day, so a
+"since" there would drift from the saved list).
+
+**Coming back to a round.** The round remembers the conditions it was last cut with, but the two panels
+open as before — empty after a reload — so nothing can be dropped by accident: whenever the round was
+last cut with conditions that differ from the panels, a line above them says so (*This round was last
+cut with Not home, leaving out doors visited since Oct 25.*) with **Use them again**, which puts them back
+in the panels, opens them, and holds Generate until their count shows. The first time Generate is clicked
+on that round while they differ, it asks — *Use this round's last conditions?* — with **Cancel**, **Cut
+without them** (or **Cut with what's ticked now**), and **Use them again**, which only loads them. Once
+answered, it doesn't ask again on that round unless the round's last conditions change (a restore of a
+different cut, another admin's cut); the line stays as a reminder. Survey answers are named by their
+survey words, so two different answers never read the same, and a stored answer the current survey no
+longer has is listed with **Remove** rather than dropped silently by the next chip click. Generate also
+waits until the round's own data has loaded (*Loading this round's conditions…*). Restoring an earlier
+cut brings back the conditions that cut used, and a cut that fails before saving anything leaves them
+alone.
+
+**Why a door is faded.** The preview fades every door the cut would leave out, for one of six reasons,
+and the page says which: its all-rounds status isn't ticked; **Exclude doors** removed it, or its
+**Visited in the last N days** line did ("Faded: visited since Oct 25"); or one of the three boxes above
+Generate left it out — **Exclude restricted-access homes**, **Exclude no-soliciting
 homes**, **Leave out homes without a reliable map spot** (all on by default, and applied **on top of**
 the target). The count line names each box's share ("… · 12 without a reliable map spot left out"),
-and clicking a faded house shows its all-rounds status, its last visit, and the exact reason. The
+and clicking a faded house shows its all-rounds status, its last recorded entry (its last field visit
+while the visited line is ticked), and the exact reason; an apartment building lists the reason for each
+unit. The
 map-spot box stays on screen for the whole round (reading "none in this target" when the current
 target holds no such home), so it can never vanish under one tick and come back ticked under the next.
 Ticking *Restricted* or *No soliciting* while the matching box is on cuts nothing — the panel warns
@@ -853,9 +894,9 @@ to the walk list that should work them (or make a new one). Then get them into b
    any other book. No recut, no archive; canvassers
    see the new doors on their next refresh. → keeps the round running. On a **targeted** round, both
    the "not in any book" count and the supplemental cut respect the pass's own target filter —
-   doors the target skipped or the **Exclude doors** panel removed are bookless *on purpose*, so
-   they're never counted or re-introduced (a genuinely new door still flows in: it's unknocked and
-   has no survey answers).
+   doors the target skipped or the **Exclude doors** panel removed (its visited-since date included)
+   are bookless *on purpose*, so they're never counted or re-introduced (a genuinely new door still
+   flows in: it's unknocked, unvisited and has no survey answers).
 2. **Recut the same pass.** Discard its books (this resets the pass to draft), then generate again.
    Regeneration pulls from the walk list's **current** owned doors, so the newly claimed addresses
    are **included**. → the "remove all existing books and recut" path; use when you also want the
@@ -1035,6 +1076,48 @@ BullMQ worker). Operational steps live in [TURF_RUNBOOK.md](../TURF_RUNBOOK.md).
    [targetExclusion.int.test.js](../server/test/targetExclusion.int.test.js)'s fixture now backs each
    status with the knock row that would have produced it, because a status tick no longer reads
    `Household.status`.
+
+   **Visited in the last N days (2026-10-31; [PROPOSAL_RECENT_VISITS.md](PROPOSAL_RECENT_VISITS.md)).**
+   `exclude.visitedSince: 'YYYY-MM-DD'` — a civil day read in the campaign's zone (`campaign.timeZone`,
+   then the org's: `zoneFor` in [visitedSince.js](../server/src/services/walklist/visitedSince.js)) — is
+   one more Exclude predicate in `collectPredicateSets`: the base doors with a VISIT row
+   (`VISIT_ROW_MATCH` = `STATUS_ROW_MATCH` + `NOT_DESK_MARK`, so no notes and no desk marks) at or after
+   `zonedDayRange(day, null, zone).$gte`, fetched by `visitedIdsSince` in targetingStatus.js (the
+   ladder's 10k-id chunks and `{ householdId, timestamp }` hint with its fallback; `since` a Date,
+   because pipelines aren't cast). One reader, `readVisitedSince`, makes `undefined` / `null` / `''` "no
+   line" everywhere; a present value must be a string and a real calendar day (`civilDaySchema` in
+   [validators.js](../server/src/utils/validators.js)). Exclude side only: target-preview and `/generate`
+   400 an include-side value or a bad date (`visitedSinceProblem`, before anything is queued); the
+   saved-search preview and create 400 any value (`carriesVisitedSince`). Should one reach the resolver
+   anyway, an include-side value sets `includeUnsupported` (generateTurf refuses) and an unusable
+   exclude-side value runs no set (degenerate on its own). The resolver returns
+   `excludedVisitedHouseholdIds`; target-preview sends those it draws as `visitedHouseholdIds`,
+   **disjoint** from `excludedHouseholdIds` (which keeps the rest), with `counts.visited` a part of
+   `counts.excluded`, so the remainder arithmetic is unchanged. `GET /turfs?passId=` returns the round's
+   stored `targetFilter` (null for a round never cut with conditions, one from before the field, and
+   another campaign's round) — the "last cut with" line, Generate's question and the note over the books
+   read it there — and `GET /turfs/household/:id?withVisit=1` adds `lastVisitAt`, the newest VISIT row,
+   deliberately unhinted (the integration preload doesn't build that index); without `withVisit` the
+   response is unchanged, so the phone's house taps pay nothing. **The stored filter follows the
+   books:** `generateTurf` writes `Pass.targetFilter` after the late archive check, once the books are
+   saved (it used to write it before the cut, so a cut that failed left old books under new conditions),
+   and `restoreSnapshot` sets it from the restored cut books' own `params.targetFilter` (books a cut
+   didn't make — supplemental `{ supplemental: true }`, moved-door `{}` — carry none, so a snapshot of
+   only those leaves it alone). The degenerate refusal, the include-side refusal and manual mode's "No
+   doors inside the drawn area(s)" throw `UnrecoverableError`, so the queue no longer retries them for
+   ~15 s. Client: [lib/visitedSince.js](../client/src/lib/visitedSince.js) (days ↔ date,
+   `targetFilterForPanels`, `sameConditions` — `combine` compared whenever the target side has two or
+   more predicate sets — `describeConditions`, `lastConditionsDiffer` / `askBeforeGenerate`, orphaned
+   answers per value) and [VisitedSinceRow.jsx](../client/src/components/VisitedSinceRow.jsx) (drafts;
+   the days box commits 400 ms after typing stops and at once on blur or Enter, reporting `pending` so
+   Generate waits). On TurfsPage, `turfsReady` (`isFetchedAfterMount && isSuccess`) gates the panels and
+   Generate; `targetActive` / `targetView` are gated on the round having no accepted books (a filter
+   ticked before Accept used to leave the live round's map in the target view); `setExcludeSide` keeps
+   the side while the visited line remains; `acknowledged = { round, stored }` is recorded when the
+   question is answered or Use them again clicked; and a campaign switch clears `passId` so the
+   PassPicker picks the new campaign's round (the page stays mounted across the switch). Pinned by
+   [visitedSince.int.test.js](../server/test/visitedSince.int.test.js),
+   [visitedSince.test.js](../client/src/lib/visitedSince.test.js) and new cases in targetFade.test.js.
 2. **Cut** by mode: `attributeCut` ([attributeCut.js](../server/src/services/turf/attributeCut.js)) —
    group by a denormalized cut column (precinct/county/city/zip/districts), optional `capN`
    geometric subdivision; `geometricCut` ([geometricCut.js](../server/src/services/turf/geometricCut.js))

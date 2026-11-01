@@ -9,6 +9,7 @@ import { Effort } from '../../models/Effort.js';
 import { Turf } from '../../models/Turf.js';
 import { VoterNote } from '../../models/VoterNote.js';
 import { ImportJob } from '../../models/ImportJob.js';
+import { SavedSearch } from '../../models/SavedSearch.js';
 import { CANONICAL_FIELDS } from '../import/canonicalFields.js';
 import { NOT_BULK, BILLABLE_WITH_RESTRICTED, NOT_DESK_MARK, fieldVisitActionTypes } from '../reports/aggregations.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
@@ -1566,7 +1567,35 @@ export const buildVoterFile = async (ctx, sink) => {
 // (which applies the voter-level DNC exclusion itself — the DNC_FILTER in the chunk
 // queries is belt-and-braces, not the enforcement point).
 
+// The saved voters of an uploaded or import list (ctx.params.frozen): exactly what its Download CSV on
+// the Saved Searches page lists — everyone at the matched homes for an upload, the new voters for an
+// import list — read at build time; a list's voterIds never change after it is saved.
+export const frozenListVoterIds = async (ctx) => {
+  const search = await SavedSearch.findOne(
+    { _id: ctx.params.savedSearchId, campaignId: ctx.campaignId },
+    { voterIds: 1 }
+  ).lean();
+  if (!search) throw new ExportUserError('That saved search was deleted.');
+  return [...new Set((search.voterIds || []).map(String))];
+};
+
 export const buildVotersFiltered = async (ctx, sink) => {
+  if (ctx.params.frozen) {
+    // An uploaded or import list keeps no conditions to re-check — re-resolving its {} filter handed
+    // over every voter in the campaign (docs/PROPOSAL_RECENT_VISITS.md gap G1). Its own voters instead,
+    // with do-not-contact counted and withheld the way the voter-file import branch does it.
+    const ids = await frozenListVoterIds(ctx);
+    const dncExcluded = ids.filter((id) => ctx.dnc.has(id)).length;
+    if (dncExcluded) ctx.countDnc(dncExcluded);
+    ctx.setTotalEstimate(ids.length - dncExcluded);
+    const keys = CANONICAL_FIELDS.map((f) => f.key);
+    const writer = await sink.file('voters-filtered', [
+      ...CANONICAL_FIELDS.map((f) => f.label), 'Household DB id', 'Voter DB id',
+    ]);
+    const chunks = chunk(ids, 5000).map((part) => ({ _id: { $in: part }, ...DNC_FILTER }));
+    await emitVoterRows(ctx, writer, chunks, keys);
+    return { files: [{ name: 'voters-filtered', rows: writer.rowsWritten }] };
+  }
   const resolved = await resolveWalkList(ctx.campaign, ctx.params.filter || {}, {});
   const ids = (resolved.voterIds || []).map(String);
   ctx.setTotalEstimate(ids.length);

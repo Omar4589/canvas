@@ -267,8 +267,9 @@ const partTargets = (rels) => {
 
 // saxes hands out text as slices of its decoded chunks, and V8 keeps a slice of 13 or more characters
 // as a pointer INTO its parent: one kept 20-character ID held its whole 64 KB chunk alive (120,000 of
-// them held 300-576 MB in review). A kept value gets its own copy.
-const own = (s) => (typeof s === 'string' && s.length >= 13 ? (' ' + s).slice(1) : s);
+// them held 300-576 MB in review). A kept value gets its own copy. Papa's row values are slices of their
+// piece too, so the CSV reader copies with this as well (parseVoterIdList.js readCsvColumns).
+export const own = (s) => (typeof s === 'string' && s.length >= 13 ? (' ' + s).slice(1) : s);
 
 /**
  * Papa 5.5.3's duplicate-header rule exactly (papaparse.js `returnable`), so an Excel file and its CSV

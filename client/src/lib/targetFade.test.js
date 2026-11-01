@@ -83,3 +83,18 @@ test('dead ends: a ticked status a box removes, and AND between a status and an 
   assert.equal(targetDeadEnds({ statuses: ['refused', 'not_home'], answersOn: true, combine: 'and', boxes: { excludeNoSoliciting: true } }).length, 1, 'the AND note only');
   assert.equal(targetDeadEnds({ statuses: ['no_soliciting', 'not_home'], answersOn: true, combine: 'and', boxes: { excludeNoSoliciting: true } }).length, 2, 'both');
 });
+
+test('the visited line: its own reason, its own pop-up words, and ONE Exclude number on the count line', () => {
+  // The server sends the line's share disjoint from excludedHouseholdIds (routes/admin/turfs.js).
+  const idx = indexPreview({ ...PREVIEW, visitedHouseholdIds: ['v1'] });
+  assert.equal(fadeReasonOf('v1', idx), 'visited');
+  assert.equal(fadeReasonOf('x1', idx), 'excluded', 'the rest of Exclude doors keeps its reason');
+  const mode = { visitedSince: '2026-10-25' };
+  assert.equal(fadeReasonLine('visited', { mode }), 'Faded: visited since Oct 25 (Exclude doors).');
+  assert.equal(fadeReasonShort('visited', { mode }), 'visited since Oct 25');
+  assert.deepEqual(targetCountParts({ kept: 3410, excluded: 1240, visited: 1100, restricted: 12 }, mode).slice(1), [
+    '1,240 removed by Exclude doors (1,100 visited since Oct 25)',
+    '12 restricted left out',
+  ]);
+  assert.deepEqual(targetCountParts({ kept: 3, excluded: 2 }, mode).slice(1), ['2 removed by Exclude doors'], 'no line, no brackets');
+});

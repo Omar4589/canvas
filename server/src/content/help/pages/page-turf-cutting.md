@@ -9,7 +9,7 @@ summary: Cut a pass's doors into books, accept them, assign them, and watch a ro
 tags: turf, books, cutting, assign, progress, status, move, page, target doors, exclude doors, archived pass, view only, bring back
 ---
 
-**Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), move, merge, or split books, mark a house or a book restricted, and fix a pin that's sitting in the wrong spot.
+**Turf Cutting** is where you turn a pass's doors into walkable **books** — geometrically, by attribute (like precinct), or by drawing areas on the map. For a follow-up round, the optional **Target doors** panel narrows the cut to just the doors you're chasing, and **Exclude doors** removes the ones you want skipped — like doors that already took a yard sign, or every door visited in the last few days (see [Passes](passes)). You **Accept** the books to publish them, then **Assign** each to canvassers. It's also where you add new doors as a supplemental book (**Add as new book** — runs in the background with a progress bar), move, merge, or split books, mark a house or a book restricted, and fix a pin that's sitting in the wrong spot.
 
 ## Watching a round's progress here
 
@@ -38,7 +38,9 @@ Status colors appear on their own once the round has knocks. While you're still 
 
 **Hiding doors that aren't in a book.** After a cut — especially a second pass where you only cut the unknocked doors — every door left out of a book (the already-worked ones, restricted homes, voters added since you cut) still shows on the map as a gray dot, so the round can look bigger than the actual walk. The **Not in a book** checkbox in the **Layers** box hides them all in one flip. It starts hidden, so the map opens showing just the cut's books, and only appears when the cut left doors loose. Homes that are *inside* a book — including one a canvasser marked restricted mid-round — keep their book color and stay put, so you never lose worked doors; the one exception is yours to flip — the **Restricted & no soliciting** checkbox above.
 
-Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, and the bar all follow the round you pick. The page doesn't refresh on its own; reload it to see the latest.
+Switch rounds with the **Pass** dropdown at the top right — the colors, the counts, the bar and the round's last conditions (below) all follow the round you pick, and switching campaigns opens that campaign's round. The page doesn't refresh on its own; reload it to see the latest.
+
+**Coming back to a round you've cut before.** The **Target doors** and **Exclude doors** panels open empty after a reload, but the round remembers what it was last cut with. When those conditions aren't in the panels, a line above them says so — *This round was last cut with Not home, leaving out doors visited since Oct 25* — with **Use them again**, which puts them back and opens the panels so you can check the count. If you click **Generate** first, it asks once whether to use them again or cut with what's ticked; nothing is dropped by accident. **Generate** waits while the page loads the round.
 
 ## The Pass dropdown, and passes you can only look at
 
@@ -78,9 +80,16 @@ answer or a survey (a later not-home alone doesn't clear it). Homes **set aside*
 every cut until someone brings them back.
 
 They apply **on top of** the **Target doors** panel too. With a target ticked, the map fades every door the
-cut would leave out — because its all-rounds status isn't ticked, because **Exclude doors** removed it, or
-because one of these boxes left it out — and the count line under the panel names each box's share. Click
-any faded house to see its status across all rounds, its last visit, and the exact reason. The map-spot
+cut would leave out — because its all-rounds status isn't ticked, because **Exclude doors** removed it
+(including its **Visited in the last N days** line), or because one of these boxes left it out — and the
+count line under the panel names each share. Click any faded house — or open an apartment building — to
+see the status across all rounds, the last visit, and the exact reason.
+
+**Visited in the last N days**, in the **Exclude doors** panel, leaves out every door a canvasser visited
+since the date you pick (type a number of days, or pick the date). It counts any result recorded at the
+door in any round of this campaign — not notes, and not desk marks. The round remembers the date: the line
+over the books says *Add as new book leaves out doors visited since Oct 25*, and it does. Doors are checked
+when you click **Generate**, so cut close to when you activate. The map-spot
 box stays on screen for the whole round (reading "none in this target" when the current target has no
 such home), so it can't disappear under one tick and come back ticked under the next.
 

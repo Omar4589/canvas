@@ -21,6 +21,7 @@ import {
   resolveVoterResultsUniverse,
   countVoterResultsRows,
   countVoterResultsWithheld,
+  frozenListVoterIds,
 } from './exportBuilders.js';
 import { doorNotesMatch, surveyNotesMatch, adminNotesMatch } from '../notes/notesQuery.js';
 
@@ -190,6 +191,18 @@ const estimateVoterFile = async (ctx) => {
 // resolveWalkList applies the DNC exclusion itself, so its id list IS the row set; the
 // builder never counts DNC for this type and neither does the estimate.
 const estimateVotersFiltered = async (ctx) => {
+  // An uploaded or import list: its own saved voters, minus do-not-contact (the builder's twin above it).
+  if (ctx.params.frozen) {
+    const ids = await frozenListVoterIds(ctx);
+    const dncWithheld = ids.filter((id) => ctx.dnc.has(id)).length;
+    // EXISTING docs, like the voter-file import branch: a voter deleted since the save never reaches
+    // the file.
+    let rows = 0;
+    for (const part of chunk(ids, 5000)) {
+      rows += await Voter.countDocuments({ _id: { $in: part.map(oid) }, ...DNC_FILTER });
+    }
+    return { rows, dncWithheld, approx: false };
+  }
   const resolved = await resolveWalkList(ctx.campaign, ctx.params.filter || {}, {});
   return { rows: (resolved.voterIds || []).length, dncWithheld: 0, approx: false };
 };

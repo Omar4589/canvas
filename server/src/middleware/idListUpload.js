@@ -3,15 +3,17 @@ import multer from 'multer';
 // The file upload for the three Voter-ID list routes — early voting (routes/admin/voted.js), do not
 // contact (dnc.js) and walk list from CSV (walklists.js), preview and apply alike.
 //
-// WHY 50 MB. These routes hold the file in memory and parse every column of every row on the web
-// dyno (services/import/parseVoterIdList.js), although only the Voter ID column is used. Measured
-// 2026-10-27 on a state absentee file with 85 columns: 50 MB of it peaked near 860 MB, the whole
-// 149 MB file near 2.3 GB — on the 1 GB web dyno that serves everyone in the field. The cap stays.
+// WHY 50 MB. The file is held in memory on the web dyno that serves everyone in the field — and,
+// while multer joins its pieces, briefly twice. Reading it is cheap since 2026-10-31: a CSV is read
+// in pieces keeping only the Voter ID column (services/import/parseVoterIdList.js), where reading it
+// whole — every column of every row — took the 1 GB dyno over its quota with a 45 MB early-voting file.
+// Measured end to end on the preview route (docs/PERFORMANCE.md, "Voter-ID list uploads"): a 45 MB
+// file now peaks about 100 MB above the idle server, was about 610. A bigger cap would cost twice the
+// file at that moment, per upload, so it waits for the org-wide upload plan, where statewide files go.
 //
 // EXCEL TOO. The same 50 MB covers an .xlsx (docs/PROPOSAL_ID_LIST_EXCEL.md). Its reader keeps only the
-// columns it needs, in memory, so 50 MB of workbook costs far less than 50 MB of CSV; what it bounds
-// instead is what's INSIDE the file — the unpacked tab, rows, any one tag — in
-// services/import/readIdColumn.js (ID_LIST_XLSX_LIMITS).
+// columns it needs, in memory; what it bounds instead is what's INSIDE the file — the unpacked tab,
+// rows, any one tag — in services/import/readIdColumn.js (ID_LIST_XLSX_LIMITS).
 //
 // WHY THE WRAPPER. Multer's own refusal is a bare "File too large" that the error handler answers as
 // a 500, naming neither the limit nor the fix. This 413 says both, with the code the voter import's

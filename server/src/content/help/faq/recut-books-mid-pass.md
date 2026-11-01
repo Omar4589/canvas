@@ -11,7 +11,7 @@ tags: recut, books, turf, discard, supplemental, drafts
 
 Yes, but there are three different situations.
 
-**Just adding new/uncut doors?** Use **Add as new book** on the Turf Cutting page — it cuts only the doors that aren't in any book yet into new books, without touching your live books, assignments, or knocks. It runs in the background with a progress bar (big adds take a few minutes). Then Accept and Assign them. This is almost always what you want.
+**Just adding new/uncut doors?** Use **Add as new book** on the Turf Cutting page — it cuts only the doors that aren't in any book yet into new books, without touching your live books, assignments, or knocks (on a targeted pass, only the ones its conditions still let in — a visited-since date included). It runs in the background with a progress bar (big adds take a few minutes). Then Accept and Assign them. This is almost always what you want.
 
 **Regretting draft books (like an "Add as new book" that made too many)?** Discard offers **Drafts only** when the pass has both accepted books and drafts — it removes just the unaccepted drafts and touches nothing else. Or select the individual draft books in the list and delete just those. Drafts never reached canvassers, so neither needs a confirmation phrase.
 

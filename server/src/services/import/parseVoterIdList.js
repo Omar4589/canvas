@@ -1,10 +1,12 @@
 import Papa from 'papaparse';
+import { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import { Voter } from '../../models/Voter.js';
 import { Household } from '../../models/Household.js';
 import { Campaign } from '../../models/Campaign.js';
 import { suggestMapping, VOTER_ID_NAMES, normalizeHeaderName } from './canonicalFields.js';
 import { looksLegacyXls, LegacyXlsError } from './parseUpload.js';
-import { readIdColumn, IdListReadError } from './readIdColumn.js';
+import { readIdColumn, IdListReadError, own } from './readIdColumn.js';
 import { findVotersByVoterIds } from '../voters/voterIdLookup.js';
 
 // IDs in a file that didn't match a voter in this campaign — capped so the response
@@ -113,9 +115,9 @@ const refusal = (err, extra = {}) => ({
 });
 
 // Sizes, a count, a time and a code — never a file or tab name, column names, values or IDs.
-const logRead = (fileBuffer, startedAt, detail) =>
+const logRead = (format, fileBuffer, startedAt, detail) =>
   console.log(
-    `[id-list] xlsx ${(fileBuffer.length / 1048576).toFixed(1)} MB · ${detail} · ${((Date.now() - startedAt) / 1000).toFixed(1)} s`
+    `[id-list] ${format} ${(fileBuffer.length / 1048576).toFixed(1)} MB · ${detail} · ${((Date.now() - startedAt) / 1000).toFixed(1)} s`
   );
 
 const readExcel = async (fileBuffer, idColumn, keep) => {
@@ -128,15 +130,16 @@ const readExcel = async (fileBuffer, idColumn, keep) => {
     });
   } catch (err) {
     if (!(err instanceof IdListReadError)) throw err;
-    logRead(fileBuffer, startedAt, `refused ${err.code}`);
+    logRead('xlsx', fileBuffer, startedAt, `refused ${err.code}`);
     return refusal(err);
   }
   const tab = { sheetName: r.sheetName ?? null, otherSheets: r.otherSheets ?? [] };
   if (!r.col) {
-    logRead(fileBuffer, startedAt, 'no Voter ID column');
+    logRead('xlsx', fileBuffer, startedAt, 'no Voter ID column');
     return { error: NO_COLUMN, code: null, columns: r.headers, ...tab, headerRowHint: headerRowHintOf(r.row1Filled, r.earlyRows) };
   }
   logRead(
+    'xlsx',
     fileBuffer,
     startedAt,
     `sheet ${(r.sheetBytes / 1048576).toFixed(0)} MB + strings ${(r.stringsBytes / 1048576).toFixed(0)} MB · ${r.totalRows.toLocaleString('en-US')} ${r.totalRows === 1 ? 'row' : 'rows'}`
@@ -144,34 +147,131 @@ const readExcel = async (fileBuffer, idColumn, keep) => {
   return applyKeep({ columns: r.headers, col: r.col, raw: r.values, keepRaw: r.keepValues, totalRows: r.totalRows, ...tab }, keep);
 };
 
-const readCsv = (fileBuffer, idColumn, keep) => {
-  const csv = fileBuffer.toString('utf8');
-  const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() });
-  const columns = parsed.meta?.fields || [];
-  const col = pickIdColumn(columns, idColumn);
+// A CSV is read a piece at a time, keeping only the Voter ID column (and, with Count only rows where,
+// the counting column). Read whole — one string, then an object per row holding every column — a 45 MB
+// early-voting file took the 1 GB web dyno over its quota on 2026-10-31 and froze it for over a second
+// for everyone in the field (docs/PERFORMANCE.md, "Voter-ID list uploads"). Same parser, same options:
+// the pieces give exactly the rows the whole file gave (test/idListCsvPieces.test.js).
+const CSV_PIECE_BYTES = 64 * 1024;
+// Papa guesses a text's line ending from its first 1M characters and its delimiter from its first 10
+// rows. The reader decodes at least that much before parsing and hands it over as the first piece, so
+// the guesses are made from the same text as a whole-file read — and passes them in as well, so a later
+// change to how the first piece is cut can't change them either.
+const GUESS_CHARS = 1024 * 1024;
+const CSV_OPTIONS = { header: true, skipEmptyLines: true, transformHeader: (h) => h.trim() };
+
+// The file as text, a piece at a time: what toString('utf8') gives in one go, with a character split
+// across two pieces joined and invalid bytes replaced the same way.
+const decodePieces = function* (fileBuffer, pieceBytes) {
+  const decoder = new StringDecoder('utf8');
+  for (let at = 0; at < fileBuffer.length; at += pieceBytes) {
+    const text = decoder.write(fileBuffer.subarray(at, at + pieceBytes));
+    if (text) yield text;
+  }
+  const tail = decoder.end();
+  if (tail) yield tail;
+};
+
+const guessFormat = (text) => {
+  const { delimiter, linebreak } = Papa.parse(text, { skipEmptyLines: true, preview: 1 }).meta;
+  return { delimiter, newline: linebreak };
+};
+
+/**
+ * The CSV half of readIdList, without its refusals: { columns, col, raw, keepRaw, totalRows, head }.
+ * `head` is the start of the text, holding at least the first 10 rows. When no Voter ID column is found
+ * (col null), or the keep column is missing, reading stops at the header. Between pieces it steps aside
+ * for one turn of the event loop, so the dyno keeps answering everyone else. `pieceBytes` is for tests.
+ */
+export const readCsvColumns = async (fileBuffer, { idColumn = null, keepColumn = null, pieceBytes = CSV_PIECE_BYTES } = {}) => {
+  const pieces = decodePieces(fileBuffer, pieceBytes);
+  let head = '';
+  let ended = false;
+  const extend = (chars) => {
+    while (!ended && head.length < chars) {
+      const next = pieces.next();
+      if (next.done) ended = true;
+      else head += next.value;
+    }
+  };
+  extend(GUESS_CHARS);
+  // Papa drops a byte-order mark from a string it's handed whole; text arriving in pieces is ours to drop.
+  if (head.charCodeAt(0) === 0xfeff) head = head.slice(1);
+  let format = guessFormat(head);
+  // Rows over ~100 KB: decode on until the first 10 rows are all in, then guess again.
+  while (!ended && Papa.parse(head, { ...format, preview: EARLY_ROWS + 1 }).data.length <= EARLY_ROWS) {
+    extend(head.length * 2);
+    format = guessFormat(head);
+  }
+
+  return new Promise((resolve, reject) => {
+    const stream = Readable.from(
+      (function* () {
+        if (head) yield head;
+        yield* pieces;
+      })()
+    );
+    let columns = null;
+    let col = null;
+    const raw = [];
+    let keepRaw = null;
+    // Both wait: pausing only the parser would let the stream decode the rest of the file into the
+    // parser's queue in the meantime.
+    const stepAside = (parser) => {
+      parser.pause();
+      stream.pause();
+      setImmediate(() => {
+        stream.resume();
+        parser.resume();
+      });
+    };
+    Papa.parse(stream, {
+      ...CSV_OPTIONS,
+      ...format,
+      chunk: (results, parser) => {
+        if (columns == null) {
+          // Nothing but blank lines so far: the header row is still to come.
+          if (!results.meta.fields?.length && !results.data.length) return stepAside(parser);
+          columns = results.meta.fields || [];
+          col = pickIdColumn(columns, idColumn);
+          if (!col || (keepColumn != null && !columns.includes(keepColumn))) {
+            stream.destroy();
+            return parser.abort(); // runs complete
+          }
+          if (keepColumn != null) keepRaw = [];
+        }
+        // Copies: a kept value of 13+ characters would otherwise hold its whole piece alive (own()).
+        for (const row of results.data) {
+          raw.push(own(row[col]));
+          if (keepRaw) keepRaw.push(own(row[keepColumn]));
+        }
+        stepAside(parser);
+      },
+      complete: () => resolve({ columns: columns ?? [], col, raw, keepRaw, totalRows: raw.length, head }),
+      error: reject,
+    });
+  });
+};
+
+const readCsv = async (fileBuffer, idColumn, keep) => {
+  const startedAt = Date.now();
+  const r = await readCsvColumns(fileBuffer, { idColumn, keepColumn: keep?.column ?? null });
   const tab = { sheetName: null, otherSheets: [] };
-  if (!col) {
+  if (!r.col) {
+    logRead('csv', fileBuffer, startedAt, 'no Voter ID column');
     // The title-row line counts physical lines (blank ones included), so the row it names is the
     // row the admin sees in the file.
-    const lines = Papa.parse(csv, { header: false, preview: EARLY_ROWS }).data;
+    const lines = Papa.parse(r.head, { header: false, preview: EARLY_ROWS }).data;
     const clean = (cells) => (cells || []).map((v) => String(v ?? '').trim()).filter(Boolean);
     const earlyRows = lines.slice(1).map((cells, i) => ({ row: i + 2, values: clean(cells) }));
-    return { error: NO_COLUMN, code: null, columns, ...tab, headerRowHint: headerRowHintOf(clean(lines[0]).length, earlyRows) };
+    return { error: NO_COLUMN, code: null, columns: r.columns, ...tab, headerRowHint: headerRowHintOf(clean(lines[0]).length, earlyRows) };
   }
-  if (keep?.column != null && !columns.includes(keep.column)) {
+  if (keep?.column != null && !r.columns.includes(keep.column)) {
+    logRead('csv', fileBuffer, startedAt, 'refused keep-column');
     return refusal({ message: "That column isn't in this file.", code: 'keep-column' });
   }
-  return applyKeep(
-    {
-      columns,
-      col,
-      raw: parsed.data.map((row) => row[col]),
-      keepRaw: keep?.column != null ? parsed.data.map((row) => row[keep.column]) : null,
-      totalRows: parsed.data.length,
-      ...tab,
-    },
-    keep
-  );
+  logRead('csv', fileBuffer, startedAt, `${r.totalRows.toLocaleString('en-US')} ${r.totalRows === 1 ? 'row' : 'rows'}`);
+  return applyKeep({ columns: r.columns, col: r.col, raw: r.raw, keepRaw: r.keepRaw, totalRows: r.totalRows, ...tab }, keep);
 };
 
 const ZIP_SIGNATURES = new Set([0x04034b50, 0x06054b50]); // a local file header; an empty zip's end record

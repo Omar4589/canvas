@@ -50,7 +50,9 @@ whole organization.
 1. Imports look up only the parked IDs the file can actually match, in small batches.
 2. A nightly pass catches the rare cases that misses — one for voted lists, one for do-not-contact.
 3. One parked row per voter instead of one per upload, so the pile stops growing (needs a data migration).
-4. List uploads stop holding whole files in the website's memory.
+4. List uploads stop holding whole files in the website's memory. *Mostly done 2026-10-31: a CSV is now
+   read in pieces, keeping only the ID column, so a 45 MB file costs about 100 MB instead of 610. The
+   upload itself is still held in memory (see §G for why not on disk).*
 5. A small read-only command that reports how big each pile is.
 
 ---
@@ -163,6 +165,14 @@ the write bumps the door's timestamp, which is how phones' change feed learns of
 `routes/admin/voted.js` and `routes/admin/dnc.js` use `multer.memoryStorage()` (up to 50 MB in the web
 dyno) and `parseVoterIdList` parses every column of every row. Switch to disk storage and parse only the ID
 column — the change the import route made after its own web-dyno R14s.
+
+*[2026-10-31 — BUILT, the parse half: `readCsvColumns` reads the CSV in 64 KB pieces and keeps only the
+ID column (and the counting column), stepping aside between pieces; a 45 MB file went from ~610 MB above
+the idle server to ~100 MB, and from freezing the server for 1.35 s to a 40 ms worst wait
+([PERFORMANCE.md](PERFORMANCE.md) → Voter-ID list uploads). The storage half was NOT done: the privacy
+record (item 45(b), written 2026-10-28, after this plan) promises these uploads are "held in memory, never
+written to disk", so disk storage is a privacy-record change, not a free one. What memory storage still
+costs — the file, briefly twice while multer joins its pieces — is why the 50 MB cap stays.]*
 
 ## H. A safe pile count
 

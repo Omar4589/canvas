@@ -10,6 +10,7 @@ import { Household } from '../../models/Household.js';
 import { Voter } from '../../models/Voter.js';
 import { Effort } from '../../models/Effort.js';
 import { resolveWalkList } from '../../services/walklist/resolveWalkList.js';
+import { carriesVisitedSince, VISITED_SINCE_SAVED_SEARCH } from '../../services/walklist/visitedSince.js';
 import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import {
   parseAndMatch,
@@ -74,6 +75,9 @@ router.get('/', async (req, res, next) => {
 // Dry-run: resolve a filter and return counts + a small sample (no save).
 router.post('/preview', async (req, res, next) => {
   try {
+    // The visited-since line stays on Turf Cutting: a saved search's Filtered voters export re-resolves
+    // its filter on export day, so a "since" here would quietly drift from the list that was saved.
+    if (carriesVisitedSince(req.body?.filter)) return res.status(400).json({ error: VISITED_SINCE_SAVED_SEARCH });
     const r = await resolveWalkList(req.campaign, req.body?.filter || {});
     const sample = await Household.find(
       { _id: { $in: r.householdIds.slice(0, 20) } },
@@ -97,6 +101,7 @@ router.post('/', async (req, res, next) => {
   try {
     const { name, filter } = req.body || {};
     if (!name) return res.status(400).json({ error: 'name is required' });
+    if (carriesVisitedSince(filter)) return res.status(400).json({ error: VISITED_SINCE_SAVED_SEARCH });
     const r = await resolveWalkList(req.campaign, filter || {});
     const walkList = await SavedSearch.create({
       organizationId: req.campaign.organizationId,

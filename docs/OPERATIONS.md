@@ -76,6 +76,41 @@ Existing super-admins are grandfathered to `break_glass` by `migrate:platform-ro
 be created as `support`** — that split exists so that hiring someone doesn't mean handing them an
 omniscient login.
 
+## The memory tripwire (what was running when Metrics showed a spike)
+
+Heroku's **Metrics** tab shows *that* the website's server ran over its memory (an **R14**) or that a
+phone gave up waiting (an **H27**), but never *which* request it was. Since 2026-10-31 the server writes a
+line starting with **`[memory-watch]`** in its log when:
+
+- **its memory goes over 700 MB** (it has 1,024 MB and normally sits near 270): the line lists what was
+  running right then;
+- **it froze for a second or more**, meaning one job held up everyone else: the line lists what was
+  running;
+- **a request took 15 seconds or more** (`slow request …`), **or the person gave up first** (`caller gave up
+  after …`): that second one is what Heroku shows as an H27. The phone app gives up after 20 seconds.
+
+Each line names the page or upload by its pattern, how long it ran and how big an upload was. For
+example, `POST /api/admin/campaigns/:id/voted/preview 0.2 s, 45.8 MB upload` is an Early Voting preview
+of a 45.8 MB file. Never a name, a voter ID or a link.
+
+**Reading it, any time later:** Heroku dashboard → the app → **More ▸ Run console**, type
+`npm run report:memory-watch` and press Enter. It prints the lines the server kept, oldest first, each
+with its time in Central time. Copy what it prints into your chat with Claude. The server keeps the newest
+300 lines and drops them all 30 days after the last one. Reading them changes nothing.
+
+**Why not just the logs:** **More ▸ View logs** shows the same lines (search for `[memory-watch]`), but
+Heroku keeps only the last 1,500 log lines for the whole app, and during field hours that's a few
+minutes. A spike you notice later on Metrics is already gone from there, which is why the server keeps
+its own copy.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `MEMORY_WATCH_MB` | **700** | The memory line, in MB (**Settings ▸ Reveal Config Vars**). Saving a config var restarts the dyno, which is when it takes effect. |
+
+The first time it mattered: a 45 MB early-voting file took the server over its memory on 2026-10-31,
+which is why list uploads are now read a little at a time ([PERFORMANCE.md](PERFORMANCE.md) → *Voter-ID
+list uploads*).
+
 ## Jobs that run themselves (set up once, then forget)
 
 **A "scheduled job" is a robot that runs a command for you on a timer.** You set it up once on Heroku's
@@ -1495,6 +1530,7 @@ fraud audit).
 | `npm run migrate:client-report-visibility -- --apply` | **Once, after the client reports upgrade deploy** (add `--keep-legacy-all` to keep the charts of legacy reports whose operator unticked every question). Writes only what is still missing, so a second run, or one over documents the new code wrote, changes nothing |
 | `npm run report:tab-weeks` | **Read-only, optional.** Per organization, how many open client-report tabs' latest report runs whole weeks on another weekday than the organization's report week — the tabs whose New report shows the week nudge ([reportTabWeeks.js](../server/src/migrations/reportTabWeeks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Report weeks and the next period*). Counts and organization names only; refuses any extra argument; ends "Nothing was changed." |
 | `npm run report:all-reports-links` | **Read-only.** After the one-link-per-report deploy and before `RETIRE_ALL_REPORTS_LINKS` is set: per organization (names only, internal and being-deleted ones marked), how many old links to all your reports still work, are off because of billing, are turned off or have expired, on how many campaigns, when one was last opened, and how many of its reports have more than one link; then totals, and a count of links whose organization no longer exists ([reportAllReportsLinks.js](../server/src/migrations/reportAllReportsLinks.js); [CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *Migration, deploy and old documents*). No campaign, label, token or person; refuses any argument (exit 2); ends "Nothing was changed." Run from the repo root against a throwaway database on 2026-10-28 |
+| `npm run report:memory-watch` | **Read-only, any time.** After Metrics shows a memory spike (R14) or timeouts (H27): prints the memory tripwire's lines the website's server kept in Redis, oldest first, in Central time, with the dyno that wrote each. The newest 300, none 30 days after the last ([reportMemoryWatch.js](../server/src/migrations/reportMemoryWatch.js); [The memory tripwire](#the-memory-tripwire-what-was-running-when-metrics-showed-a-spike)). Route patterns, times and sizes only; refuses any argument (exit 2); gives up after 10 seconds if Redis doesn't answer (exit 1); ends "Nothing was changed." Run from the repo root against a throwaway Redis on 2026-10-31 |
 | `npm run sweep:raw-imports` | Once after the import-fix release (purges the pre-fix backlog of orphaned raw voter-file uploads), or whenever an import looks wedged — same code as the nightly `sweep-stale-imports` job ([sweepStaleImports.js](../server/src/services/import/sweepStaleImports.js)) |
 | `npm run migrate:activity-coordinator -- --preflight` | **Read-only.** Before the team-attribution backfill — who resolves to a team, and who can't |
 | `npm run migrate:activity-coordinator -- --apply` | Once, after the release that adds `CanvassActivity.coordinatorId` |

@@ -29,6 +29,7 @@
     "pace:resolve-open": "npm --prefix server run pace:resolve-open --",
     "report:tab-weeks": "npm --prefix server run report:tab-weeks --",
     "report:all-reports-links": "npm --prefix server run report:all-reports-links --",
+    "report:memory-watch": "npm --prefix server run report:memory-watch --",
     "remirror:pass": "npm --prefix server run remirror:pass --",
     "repair:orphan-attribution": "npm --prefix server run repair:orphan-attribution --",
     "repair:archived-walk-lists": "npm --prefix server run repair:archived-walk-lists --",

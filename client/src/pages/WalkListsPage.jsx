@@ -377,7 +377,7 @@ export default function WalkListsPage() {
                 </label>
               ))}
               <span className="text-fg-subtle">
-                {f.priorPassId ? 'status within the selected pass' : 'no pass picked → the door’s current status'}
+                {f.priorPassId ? 'status within the selected pass' : 'no pass picked → the door’s whole history, same as Target doors'}
               </span>
             </div>
 
@@ -399,8 +399,8 @@ export default function WalkListsPage() {
           <div className="mb-4 rounded-md border border-danger/30 p-3">
             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-danger">Exclude doors</div>
             <p className="mb-2 text-xs text-fg-muted">
-              Doors matching ANY of these are removed — even when they match the filters above. Statuses use the door’s
-              current status; survey answers match any round.
+              Doors matching ANY of these are removed — even when they match the filters above. Statuses read each
+              door’s whole history across every round; survey answers match any round.
             </p>
             <div className="flex flex-wrap items-end gap-4">
               <label className="text-sm">

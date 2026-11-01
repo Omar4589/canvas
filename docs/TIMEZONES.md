@@ -38,6 +38,11 @@ removes that — the data belongs to the campaign, so it is shown in the campaig
   own (which, 14 hours ahead, could already be a different day).
 - **Times** — a knock made at 12:01 PM Central shows as **"12:01 PM CDT"** to everyone, with the
   zone label so it is never ambiguous.
+- **Turf Cutting's "Visited in the last N days"** — "since Oct 25" starts at midnight Oct 25 in the
+  **campaign's** zone, and "last 7 days" is the campaign's today plus the 6 days before it, like the
+  dashboards' **7 days**. The date is stored with the round and read in the campaign's zone each time
+  the round is checked, so editing a campaign's time zone moves that cutoff by the zones' difference
+  ([PASSES_AND_TURF.md](PASSES_AND_TURF.md)).
 
 ## When the *organization's* timezone is used
 

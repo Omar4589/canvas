@@ -215,7 +215,17 @@ filter or re-reads the uploaded file (which is never kept).
     `baseSet` so the in-place deletes can't mutate it; and the shared `isActiveTargetFilter` export
     treats `{ exclude: {} }` as inactive while honoring a legitimate exclude-*only* filter. Extra return
     keys: `excludedHouseholdIds` / `excludedDoorCount` (exactly the doors removed — the intersection
-    with the include result, not the raw exclusion population), `excludeDegenerate`, `warnings`.
+    with the include result, not the raw exclusion population), `excludedVisitedHouseholdIds`,
+    `excludeDegenerate`, `includeUnsupported`, `warnings`.
+  - **Visited since (Turf Cutting only, 2026-10-31).** `exclude.visitedSince: 'YYYY-MM-DD'` removes the
+    doors with a field visit (any status row but a desk mark; never a note) since that civil day in the
+    campaign's zone — Turf Cutting's **Visited in the last N days** line
+    ([PASSES_AND_TURF.md](PASSES_AND_TURF.md); [PROPOSAL_RECENT_VISITS.md](PROPOSAL_RECENT_VISITS.md)).
+    `undefined` / `null` / `''` are no line. It is exclude-side only: on the include side the resolver
+    runs no set and sets `includeUnsupported`, which `generateTurf` refuses. **Saved searches refuse it**
+    (`POST /preview` and `POST /` answer 400): the Filtered voters export re-resolves a saved filter on
+    export day, so a "since" would quietly drift from the list that was saved. The SavedSearch schema is
+    unchanged, so no saved filter can carry it.
   - **Template scoping.** `answerFilters` (both sides) match `surveyTemplateId` — the same questionKey
     under a different template no longer cross-matches, aligning the resolver with the map/report
     endpoints. The template is the one the doors actually answer: with `options.effortId` (a cut, its
@@ -271,8 +281,8 @@ team leads for the campaigns they manage).
 | Method · path | Body | Returns |
 |---|---|---|
 | `GET /` | — | `{ walkLists }` (id arrays projected out; includes `source`/`sourceMeta`) |
-| `POST /preview` | `{ filter }` | `{ householdCount, voterCount, sample }` — filter dry-run, no save |
-| `POST /` | `{ name, filter }` | `201 { walkList }` — save a filter saved search |
+| `POST /preview` | `{ filter }` | `{ householdCount, voterCount, excludedDoorCount, excludeDegenerate, warnings, sample }` — filter dry-run, no save; 400 when the filter carries `visitedSince` on either side (Turf Cutting only) |
+| `POST /` | `{ name, filter }` | `201 { walkList }` — save a filter saved search; the same 400 for `visitedSince` |
 | `POST /from-csv/preview` | `multipart`: `file` (CSV or `.xlsx`; the path predates Excel) (+ optional `idColumn`) | `{ idColumn, columns, sheetName, otherSheets, sampleIds, totalRows, idsInFile, spellings, noId, matched, matchedViaZeros, zeroMatchExample, householdCount, voterCount, noCoordinates, notFound, notFoundIds, ownedDoors, intakeDoors, ownedByEffort, sample }` — no save |
 | `POST /from-csv` | `multipart`: `file`, `name` (+ optional `idColumn`) | `201 { walkList }` — save an uploaded saved search (`source: 'csv'` for either format; `sourceMeta` records `fileName`, `idColumn` and `matchedViaZeros`). The page sends the column the preview matched on |
 | `GET /distinct` | — | filter-value pickers (genders, parties, precincts, …) |

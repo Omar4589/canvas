@@ -1,4 +1,5 @@
 import { STATUS_LABELS } from './statusColors.js';
+import { sinceLabel } from './visitedSince.js';
 
 // Why the Turf Cutting map fades a door while a target filter is previewed — and the words for it.
 //
@@ -18,6 +19,9 @@ export const indexPreview = (preview) => {
   const reason = new Map();
   const leftOut = preview.leftOut || {};
   for (const id of preview.excludedHouseholdIds || []) reason.set(String(id), 'excluded');
+  // Exclude doors' "Visited in the last N days" line: the server sends its share as a separate list,
+  // disjoint from excludedHouseholdIds (a door it shares with another condition is the line's).
+  for (const id of preview.visitedHouseholdIds || []) reason.set(String(id), 'visited');
   for (const key of ['restricted', 'noSoliciting', 'unplaced', 'other']) {
     for (const id of leftOut[key] || []) reason.set(String(id), key);
   }
@@ -59,6 +63,8 @@ export const fadeReasonLine = (reason, { targetStatus, mode } = {}) => {
     }
     case 'excluded':
       return 'Faded: removed by Exclude doors.';
+    case 'visited':
+      return `Faded: visited since ${sinceLabel(mode?.visitedSince)} (Exclude doors).`;
     case 'restricted':
       return 'Faded: left out by "Exclude restricted-access homes".';
     case 'noSoliciting':
@@ -77,6 +83,7 @@ export const fadeReasonShort = (reason, { mode } = {}) => {
     if (mode?.answersOn) return mode.combine === 'and' ? "doesn't match both" : 'matches neither';
     return "status isn't ticked";
   }
+  if (reason === 'visited') return `visited since ${sinceLabel(mode?.visitedSince)}`;
   return (
     {
       excluded: 'removed by Exclude doors',
@@ -95,7 +102,12 @@ export const fadeReasonShort = (reason, { mode } = {}) => {
 export const targetCountParts = (counts = {}, mode = {}) => {
   const n = (v) => (Number(v) || 0).toLocaleString();
   const parts = [`${n(counts.kept)} targeted door${counts.kept === 1 ? '' : 's'}`];
-  if (counts.excluded) parts.push(`${n(counts.excluded)} removed by Exclude doors`);
+  // ONE Exclude number — the visited line's share rides along in brackets, never as a second "removed".
+  if (counts.excluded) {
+    parts.push(
+      `${n(counts.excluded)} removed by Exclude doors${counts.visited ? ` (${n(counts.visited)} visited since ${sinceLabel(mode.visitedSince)})` : ''}`
+    );
+  }
   if (counts.restricted) parts.push(`${n(counts.restricted)} restricted left out`);
   if (counts.noSoliciting) parts.push(`${n(counts.noSoliciting)} no-soliciting left out`);
   if (counts.unplaced) parts.push(`${n(counts.unplaced)} without a reliable map spot left out`);

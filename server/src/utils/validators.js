@@ -50,6 +50,21 @@ export const isoDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Use YYYY-MM-DD.' });
 
+// The same shape, and also a day the calendar has: '2026-02-30' passes isoDateSchema (the key dates
+// only compare strings) but has no midnight to start a window at. Round-tripped through Date.UTC,
+// which rolls an impossible day over into the next month. zod still runs a refinement after the
+// regex has failed, so the shape is re-checked here first — '2026-10-25T00:00:00Z' would otherwise
+// reach Date with a NaN day and throw instead of failing.
+export const civilDaySchema = isoDateSchema.refine(
+  (v) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const [y, m, d] = v.split('-').map(Number);
+    const t = new Date(Date.UTC(y, m - 1, d));
+    return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === v;
+  },
+  { message: 'Use a real calendar day.' }
+);
+
 // A person's name (given or family). Trimmed, non-empty, bounded.
 export const nameSchema = z.string().trim().min(1).max(80);
 

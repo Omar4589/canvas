@@ -56,7 +56,7 @@ still works** — that window exists precisely so you can take your data with yo
 | **Survey answers (detailed)** | one recorded answer, as it stands now — as captured at the door unless an admin has since edited it | the audit-grade record — survives question re-wording; takes the same opt-in columns |
 | **Results by voter** | one registered voter at a door that was visited, with that door's outcome and their answers | the file you send a client — who lives there, what happened at their address, and what they said, in one row per person, with the outcome in plain English and answers grouped by round |
 | **Voter file** | one voter currently in the campaign | your file back; optionally with the column names from one of your uploads |
-| **Filtered voters** | one voter matching a saved search | handing a targeted subset to another tool |
+| **Filtered voters** | one voter matching a saved search — for a search built from filters, re-checked on the day you export; for a list uploaded from a file or made by an import, exactly that list's people (the same as its **Download CSV** on the Saved Searches page), minus do-not-contact | handing a targeted subset to another tool |
 | **Notes** | one note — typed at a door, attached to a survey, or written on a voter profile | reading what the field actually wrote; "every not-home note from last week" |
 | **Voter profile notes** (admins only) | one note written on a voter profile | the profile trail on its own, with author and edit history |
 
@@ -1149,6 +1149,16 @@ a statement (`type: 'statement'`, read-aloud text or a closing) is never a colum
   Voter ID, First Name, Last Name, UID, Phone, …, County, Latitude, Longitude) + Household DB
   id, Voter DB id. **`voterfile-import.csv`** — the import's own vendor headers in canonical
   order (duplicates collapse first-wins) + the two DB ids.
+- **Which voters `voters-filtered.csv` holds.** A filter-built saved search re-resolves its stored
+  filter through `resolveWalkList` on export day (the filter is snapshotted onto the job at request
+  time). An uploaded (`source: 'csv'`) or import (`'import'`) list stores `filter: {}`, so
+  `validateParams` records `frozen: true` and the builder and estimate read that list's own `voterIds`
+  (`frozenListVoterIds` in [exportBuilders.js](../server/src/services/export/exportBuilders.js)),
+  withholding and counting do-not-contact voters like the voter-file import branch; a list deleted
+  between the request and the build fails with *That saved search was deleted.* Until 2026-10-31 those
+  lists re-resolved `{}` — every voter in the campaign
+  ([PROPOSAL_RECENT_VISITS.md](PROPOSAL_RECENT_VISITS.md) gap G1; pinned by
+  [filteredVotersFrozen.int.test.js](../server/test/filteredVotersFrozen.int.test.js)).
 - **`voter-notes.csv`** (the *Voter profile notes* type) — Created (ISO)/Date/Time; **State voter
   ID, UID**, Voter first/last name; Address, City, State, Zip; Author first/last/status; Edited,
   Edited at (ISO), Note; Voter DB id, Note DB id.

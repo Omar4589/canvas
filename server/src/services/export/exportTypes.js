@@ -407,15 +407,19 @@ export const EXPORT_TYPES = {
       }
       const search = await SavedSearch.findOne(
         { _id: params.savedSearchId, campaignId: scope.campaignId },
-        'name filter'
+        'name filter source'
       ).lean();
       if (!search) throw new ExportUserError('That saved search does not belong to this campaign.');
       // Snapshot the filter JSON at POST time so a later edit to the saved search cannot
       // falsify this job's record of what was exported.
+      // `frozen`: a list built from an uploaded file or by an import keeps no conditions (filter: {}),
+      // and re-resolving {} is the whole campaign — so those export the list's own saved voters
+      // (docs/PROPOSAL_RECENT_VISITS.md gap G1). Filter-built searches stay live, as before.
       return {
         savedSearchId: String(search._id),
         savedSearchName: search.name,
         filter: search.filter || {},
+        frozen: search.source === 'csv' || search.source === 'import',
       };
     },
     build: buildVotersFiltered,

@@ -50,6 +50,25 @@ import { pickRound, roundMarkFromEntries, unmarkButtonLabel } from '../lib/restr
 import MoveTargetModal from '../components/MoveTargetModal.jsx';
 import { unplacedToggleCopy, unplacedLeftOutLine, unassignedDoorCount } from '../lib/turfUnplacedToggle.js';
 import { indexPreview, fadeReasonOf, fadeReasonLine, fadeReasonShort, targetCountParts, targetCensus, targetDeadEnds, TARGET_RULE_HINT } from '../lib/targetFade.js';
+import {
+  sideHasConditions,
+  conditionsOn,
+  hasVisitedLine,
+  sinceLabel,
+  targetFilterForPanels,
+  describeConditions,
+  lastCutSentence,
+  tickedSentence,
+  lastConditionsDiffer,
+  askBeforeGenerate,
+  orphanCount,
+  withOrphans,
+  withoutOrphans,
+} from '../lib/visitedSince.js';
+import { todayInTz } from '../lib/datePresets.js';
+import VisitedSinceRow from '../components/VisitedSinceRow.jsx';
+import Modal from '../components/ui/Modal.jsx';
+import Button from '../components/ui/Button.jsx';
 import { isOffWorld } from '../lib/pinFixes.js';
 import {
   moveTargetCandidates,
@@ -870,6 +889,18 @@ const DeskTag = () => (
   </span>
 );
 
+// A survey answer from a round's last cut that the current survey doesn't have (its survey was swapped,
+// or the answer was saved before options had ids): it still counts in a cut, but no chip shows it, so it
+// is named here until the owner removes it (lib/visitedSince.js orphanAnswers).
+const OrphanAnswersNotice = ({ count, onRemove }) => (
+  <p className="text-[11px] text-warning-fg">
+    {count} survey answer{count === 1 ? '' : 's'} from the last cut {count === 1 ? "isn't" : "aren't"} on this survey ·{' '}
+    <button type="button" onClick={onRemove} className="font-semibold underline">
+      Remove
+    </button>
+  </p>
+);
+
 // What happened at this door THIS round, plus the answers recorded here. Both come from the
 // endpoints the Map page's HouseholdDetailPanel already uses — same roles (admin + a lead who
 // manages the campaign), same per-campaign gate, and the same router.param audit hook, so this
@@ -1185,8 +1216,18 @@ function HousePopup({ data, loading, book, bookColor, books = [], moving, onMove
           <div className="flex items-center gap-1.5 text-xs">
             <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS[target.status] || STATUS_COLORS.unknocked }} />
             <span className="font-medium text-fg">{STATUS_LABELS[target.status] || 'Unknocked'}</span>
-            {target.lastActionAt && (
-              <span className="text-fg-muted">· last recorded {formatInTz(target.lastActionAt, tz, { month: 'short', day: 'numeric' }, false)}</span>
+            {/* While "Visited in the last N days" is ticked the date is the door's last FIELD visit (desk
+                marks left out) — the date the line judges; undefined while that answer loads. */}
+            {target.visitedOn ? (
+              target.lastVisitAt !== undefined && (
+                <span className="text-fg-muted">
+                  · {target.lastVisitAt ? `last visit ${formatInTz(target.lastVisitAt, tz, { month: 'short', day: 'numeric' }, false)}` : 'never visited'}
+                </span>
+              )
+            ) : (
+              target.lastActionAt && (
+                <span className="text-fg-muted">· last recorded {formatInTz(target.lastActionAt, tz, { month: 'short', day: 'numeric' }, false)}</span>
+              )
             )}
           </div>
           {target.active && <div className="mt-0.5 text-[11px] text-fg-muted">{fadeReasonLine(target.reason, { targetStatus: target.status, mode: target.mode })}</div>}
@@ -1570,6 +1611,17 @@ function BuildingPopup({ building, books = [], colorByTurf, moving, onMove, onMo
                       <span className="text-[10px] text-fg-muted">{book ? book.name : 'Unassigned'}</span>
                     </span>
                   </div>
+                  {/* The same all-rounds line the separate-homes list carries: a building drawn bright can
+                      still hold faded units, and each one says why. */}
+                  {target?.view && (
+                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-fg-muted">
+                      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_COLORS[u.targetStatus || 'unknocked'] || STATUS_COLORS.unknocked }} />
+                      <span>
+                        {STATUS_LABELS[u.targetStatus || 'unknocked'] || 'Unknocked'} across all rounds
+                        {target.active ? ` · ${fadeReasonShort(fadeReasonOf(u.id, target.index), { mode: target.mode })}` : ''}
+                      </span>
+                    </div>
+                  )}
                   {!viewOnly && (
                     <select
                       value=""
@@ -1681,8 +1733,23 @@ export default function TurfsPage() {
   // decides what that query asks for.
   // A filter set on another pass waits on a view-only one: its panels are gone, so nothing could
   // turn it off there.
-  const sideActive = (f) => !!f && ((f.priorPassStatuses?.length || 0) > 0 || (f.answerFilters?.length || 0) > 0);
-  const targetActive = !viewOnly && (sideActive(targetFilter) || sideActive(targetFilter.exclude));
+  // slim=1: the response drops each book's householdIds — this page never reads
+  // them, and at big campaigns they are a multi-MB payload (server strips them).
+  const turfsQ = useQuery({
+    queryKey: ['turfs', campaignId, passId],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${passId}&slim=1`),
+    enabled: !!campaignId && !!passId,
+  });
+  // The round's own answer, fetched since this round was picked: isFetchedAfterMount resets on every key
+  // switch, and turns true after a failed fetch too — hence isSuccess. Until then the page can't know
+  // whether the round has accepted books or what it was last cut with, so the panels and Generate wait.
+  const turfsReady = turfsQ.isFetchedAfterMount && turfsQ.isSuccess;
+  const acceptedBooks = (turfsQ.data?.turfs || []).some((t) => t.status === 'published');
+  // A side holds a condition: statuses, answers, or the visited line (lib/visitedSince.js).
+  const sideActive = (f) => sideHasConditions(f);
+  // Gated on the round having no accepted books, like the panels themselves: conditions ticked before
+  // Accept used to keep the newly live round's map in the target colors until a reload.
+  const targetActive = !viewOnly && !acceptedBooks && (sideActive(targetFilter) || sideActive(targetFilter.exclude));
   const excludeActive = sideActive(targetFilter.exclude);
   // While Target doors / Exclude doors is open (or a target is live), the map shows the ALL-ROUNDS
   // targeting status those ticks read instead of this round's — a fresh round has no status of its
@@ -1690,7 +1757,38 @@ export default function TurfsPage() {
   // wrong. The doors query asks the server for that status only then (withTarget=1): the aggregate
   // behind it walks every drawn door's history, too much to pay on every page load. Off on a
   // view-only page, with the panels that open it.
-  const targetView = !viewOnly && (showTarget || showExclude || targetActive);
+  const targetView = !viewOnly && !acceptedBooks && (showTarget || showExclude || targetActive);
+  // The conditions the round was last cut with (GET /turfs → Pass.targetFilter) and the offer that keeps
+  // a re-cut from dropping them (docs/PROPOSAL_RECENT_VISITS.md, Coming back to a round): a standing line
+  // whenever they differ from the panels, and one question before Generate per round visit, until it is
+  // answered. `acknowledged` is recorded against the stored conditions, so a restore of a different cut
+  // (or another admin's cut) asks again by itself. Quiet while the round's answer is refetching, so a
+  // restore, an undo or a finished cut never flashes the old conditions.
+  const storedTarget = turfsQ.data?.targetFilter ?? null;
+  const roundKey = `${campaignId}|${passId}`;
+  const editableRound = !viewOnly && turfsReady && !acceptedBooks;
+  const [acknowledged, setAcknowledged] = useState(null);
+  const [askOpen, setAskOpen] = useState(false);
+  const [holdGenerate, setHoldGenerate] = useState(false);
+  const [visitedPending, setVisitedPending] = useState(false);
+  const lastDiffer = !turfsQ.isFetching && lastConditionsDiffer({ editable: editableRound, stored: storedTarget, panels: targetFilter });
+  const needsAsk =
+    !turfsQ.isFetching && askBeforeGenerate({ editable: editableRound, stored: storedTarget, panels: targetFilter, acknowledged, roundKey });
+  const visitLineOn = hasVisitedLine(targetFilter.exclude);
+  const today = todayInTz(tz);
+  // Use them again: the round's last conditions back in the panels, the panels holding them opened (so
+  // the preview runs and the survey questions load), Generate held until that count shows, and focus
+  // moved into the panel rather than left on Generate. Nothing is cut.
+  const useLastConditions = () => {
+    const next = targetFilterForPanels(storedTarget);
+    setTargetFilter(next);
+    if (sideHasConditions(next)) setShowTarget(true);
+    if (sideHasConditions(next.exclude)) setShowExclude(true);
+    setAcknowledged({ round: roundKey, stored: storedTarget });
+    setHoldGenerate(true);
+    setAskOpen(false);
+    requestAnimationFrame(() => document.querySelector('[data-panel-body] input')?.focus());
+  };
   const [selectedBooks, setSelectedBooks] = useState(new Set());
   const [drawnAreas, setDrawnAreas] = useState([]); // [{ id, geometry }] from MapboxDraw
   const [manualSplit, setManualSplit] = useState(false);
@@ -1773,13 +1871,6 @@ export default function TurfsPage() {
   const movePin = useMovePin({ mapRef, campaignId, onSaved: onPinMoved });
 
   const tokenQ = useQuery({ queryKey: ['config', 'mapbox-token'], queryFn: () => api('/admin/config/mapbox-token') });
-  // slim=1: the response drops each book's householdIds — this page never reads
-  // them, and at big campaigns they are a multi-MB payload (server strips them).
-  const turfsQ = useQuery({
-    queryKey: ['turfs', campaignId, passId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs?passId=${passId}&slim=1`),
-    enabled: !!campaignId && !!passId,
-  });
   // Doors load for the whole pass so every household shows on the map as a dot
   // colored by its book the moment a cut completes — not only in edit mode.
   // (Drag-to-move is still gated behind editMode in the map handlers below.)
@@ -1923,11 +2014,23 @@ export default function TurfsPage() {
     queryKey: ['reports', 'survey-results', campaignId, targetSurveyTemplateId],
     queryFn: () =>
       api(`/admin/reports/survey-results?campaignId=${campaignId}${targetSurveyTemplateId ? `&surveyTemplateId=${targetSurveyTemplateId}` : ''}`),
-    enabled: !!campaignId && campaign?.type !== 'lit_drop' && (showTarget || showExclude),
+    // Also while the "last cut with" line or question could show answers, so they read by their survey
+    // words — two different answers must never read the same.
+    enabled:
+      !!campaignId &&
+      campaign?.type !== 'lit_drop' &&
+      (showTarget ||
+        showExclude ||
+        (lastDiffer &&
+          [storedTarget?.answerFilters, storedTarget?.exclude?.answerFilters, targetFilter.answerFilters, targetFilter.exclude?.answerFilters].some(
+            (a) => a?.length > 0
+          ))),
   });
   const targetQuestions = (targetSurveyQ.data?.questions || []).filter(
     (q) => q.type === 'single_choice' || q.type === 'multiple_choice'
   );
+  // null until the survey has loaded: orphaned answers are judged only against a survey we've seen.
+  const loadedQuestions = targetSurveyQ.isSuccess ? targetQuestions : null;
   const targetPreviewQ = useQuery({
     queryKey: ['turf-target-preview', campaignId, passId, JSON.stringify(targetFilter), excludeRestricted && restrictedDoorCount > 0, excludeNoSoliciting && noSolicitingDoorCount > 0, excludeUnplaced && unplacedAny],
     queryFn: () =>
@@ -1951,6 +2054,11 @@ export default function TurfsPage() {
   // so the box never flips to "(none in this target)" on an empty read. `previewReady` also gates
   // the pop-ups' fade line, which would otherwise print "In this cut." for every door mid-fetch.
   const previewReady = targetActive && !!targetPreviewQ.data;
+  // Use them again holds Generate until the loaded conditions' count has answered (or can't).
+  useEffect(() => {
+    if (!holdGenerate) return;
+    if (!targetActive || targetPreviewQ.isError || (targetPreviewQ.data && !targetPreviewQ.isFetching)) setHoldGenerate(false);
+  }, [holdGenerate, targetActive, targetPreviewQ.isError, targetPreviewQ.data, targetPreviewQ.isFetching]);
   const unplacedDoorCount = (previewReady ? targetPreviewQ.data.unplacedCount : turfsQ.data?.unplacedDoorCount) || 0;
   const targetedSet = useMemo(
     () => (targetActive && targetPreviewQ.data?.householdIds ? new Set(targetPreviewQ.data.householdIds.map(String)) : null),
@@ -1975,8 +2083,10 @@ export default function TurfsPage() {
   const setExcludeSide = (patch) =>
     setTargetFilter((t) => {
       const ex = { priorPassStatuses: [], answerFilters: [], ...(t.exclude || {}), ...patch };
-      const empty = ex.priorPassStatuses.length === 0 && ex.answerFilters.length === 0;
-      return { ...t, exclude: empty ? null : ex };
+      // An unticked visited line leaves no key behind (the server reads null and '' as no line too).
+      if (!hasVisitedLine(ex)) delete ex.visitedSince;
+      // Empty only when nothing is left — unticking the last status or answer must not drop the line.
+      return { ...t, exclude: sideHasConditions(ex) ? ex : null };
     });
   const toggleExcludeStatus = (s) =>
     setExcludeSide({
@@ -2203,6 +2313,7 @@ export default function TurfsPage() {
     statusesOn: targetFilter.priorPassStatuses.length > 0,
     answersOn: targetFilter.answerFilters.length > 0,
     combine: targetFilter.combine,
+    visitedSince: targetFilter.exclude?.visitedSince || null,
   };
   const targetLegend = useMemo(() => (targetView ? targetCensus(drawnDoors) : null), [targetView, drawnDoors]);
   // The selection RESOLVED against what is drawn. A door a refetch dropped from the cut, or one
@@ -2359,9 +2470,10 @@ export default function TurfsPage() {
   }, [clearDoorSelection]);
 
   // Single household detail for the click-a-dot popup.
+  const withVisit = targetView && visitLineOn;
   const householdQ = useQuery({
-    queryKey: ['turf-household', campaignId, popupHouseholdId],
-    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/household/${popupHouseholdId}`),
+    queryKey: ['turf-household', campaignId, popupHouseholdId, withVisit ? 'visit' : 'plain'],
+    queryFn: () => api(`/admin/campaigns/${campaignId}/turfs/household/${popupHouseholdId}${withVisit ? '?withVisit=1' : ''}`),
     enabled: !!campaignId && !!popupHouseholdId,
   });
 
@@ -3177,10 +3289,24 @@ export default function TurfsPage() {
     // is skipped, since every reset re-renders the page.
     setLastSnapshot(null);
     setLifecycleDialog(null);
+    // …and the "last cut with" question and its hold on Generate.
+    setAskOpen(false);
+    setHoldGenerate(false);
     for (const m of [generate, accept, rename, deleteDrafts, excludeApts, includeApts, addSupplemental, restore, deleteSnapshot]) {
       if (!m.isIdle) m.reset();
     }
   }, [passId, campaignId, clearDoorSelection]);
+
+  // A campaign switch keeps this page mounted (the switcher swaps only the campaign in the path), so the
+  // round picked under the previous campaign has to go, or the page shows another campaign's round as an
+  // empty map (docs/PROPOSAL_RECENT_VISITS.md gap G6). The PassPicker then picks this campaign's round;
+  // the first render keeps a ?passId= deep link.
+  const prevCampaignRef = useRef(campaignId);
+  useEffect(() => {
+    if (prevCampaignRef.current === campaignId) return;
+    prevCampaignRef.current = campaignId;
+    setPassId('');
+  }, [campaignId]);
 
   // Stale pages (docs/PROPOSAL_WALK_LIST_ARCHIVE.md §D.3): a write refused because the pass, its walk
   // list or the campaign was archived elsewhere (or is being changed right now) means this page's
@@ -3216,8 +3342,26 @@ export default function TurfsPage() {
 
   const jobBusy = job.busy;
   const pct = job.pct;
+  // Also waits for the round's own answer (what it was last cut with), for a typed number of days to
+  // settle, and — after Use them again — for the loaded conditions' count to show.
   const canGenerate =
-    passId && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors && (mode !== 'manual' || drawnAreas.length > 0);
+    passId && turfsReady && !generate.isPending && !jobBusy && publishedCount === 0 && !hasNoDoors &&
+    (mode !== 'manual' || drawnAreas.length > 0) && !visitedPending && !holdGenerate;
+  // Generate asks first when it would cut without the round's last conditions (askBeforeGenerate).
+  const onGenerateClick = () => {
+    if (!canGenerate) return;
+    if (needsAsk) {
+      setAskOpen(true);
+      return;
+    }
+    generate.mutate();
+  };
+  // The question's middle button: the owner has seen the round's last conditions and chose the panels.
+  const cutAsTicked = () => {
+    setAcknowledged({ round: roundKey, stored: storedTarget });
+    setAskOpen(false);
+    if (canGenerate) generate.mutate();
+  };
   // Rename mode outlives a flip to view-only in state, never on screen.
   const renaming = editMode && !viewOnly;
   const undoSnapshotId = undoDiscardSnapshotId(lastSnapshot, passId);
@@ -3512,18 +3656,38 @@ export default function TurfsPage() {
             </div>
           )}
 
-          {!viewOnly && passId && publishedCount === 0 && (
+          {/* Until the round's own answer is in, the page doesn't know what the round was last cut with or
+              whether it has accepted books — the panels wait, and Generate with them. */}
+          {!viewOnly && passId && !turfsReady && (
+            turfsQ.isError ? (
+              <p className="mb-3 text-xs text-danger">
+                Couldn't load this round.{' '}
+                <button type="button" onClick={() => turfsQ.refetch()} className="font-semibold underline">Try again</button>
+              </p>
+            ) : (
+              <p className="mb-3 text-xs text-fg-muted">Loading this round's conditions…</p>
+            )
+          )}
+
+          {lastDiffer && !generate.isPending && !jobBusy && (
+            <div className="mb-3 rounded-md border border-info/30 bg-info-tint px-3 py-2 text-xs text-info-fg">
+              {lastCutSentence(describeConditions(storedTarget, loadedQuestions))}{' '}
+              <button type="button" onClick={useLastConditions} className="font-semibold underline">Use them again</button>
+            </div>
+          )}
+
+          {!viewOnly && passId && turfsReady && publishedCount === 0 && (
             <div className="mb-3">
               <button
                 type="button"
                 onClick={() => setShowTarget((v) => !v)}
                 className="flex w-full items-center justify-between rounded-md border border-border-strong px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-sunken"
               >
-                <span>Target doors {targetActive ? '· on' : '(optional)'}</span>
+                <span>Target doors {sideActive(targetFilter) ? '· on' : '(optional)'}</span>
                 <span>{showTarget ? '▾' : '▸'}</span>
               </button>
               {showTarget && (
-                <div className="mt-2 space-y-2 rounded-md border border-border-strong bg-sunken px-3 py-2">
+                <div data-panel-body className="mt-2 space-y-2 rounded-md border border-border-strong bg-sunken px-3 py-2">
                   <p className="text-[11px] text-fg-muted">
                     Cut this pass over only the doors that match — e.g. follow up on the unknocked, re-try not-homes, or GOTV your supporters.
                   </p>
@@ -3544,7 +3708,13 @@ export default function TurfsPage() {
                     <AnswerFilters
                       questions={targetQuestions}
                       value={targetFilter.answerFilters}
-                      onChange={(v) => setTargetFilter((t) => ({ ...t, answerFilters: v }))}
+                      onChange={(v) => setTargetFilter((t) => ({ ...t, answerFilters: withOrphans(v, t.answerFilters, loadedQuestions) }))}
+                    />
+                  )}
+                  {orphanCount(targetFilter.answerFilters, loadedQuestions) > 0 && (
+                    <OrphanAnswersNotice
+                      count={orphanCount(targetFilter.answerFilters, loadedQuestions)}
+                      onRemove={() => setTargetFilter((t) => ({ ...t, answerFilters: withoutOrphans(t.answerFilters, loadedQuestions) }))}
                     />
                   )}
                   {targetActive && (
@@ -3587,7 +3757,7 @@ export default function TurfsPage() {
             </div>
           )}
 
-          {!viewOnly && passId && publishedCount === 0 && (
+          {!viewOnly && passId && turfsReady && publishedCount === 0 && (
             <div className="mb-3">
               <button
                 type="button"
@@ -3598,7 +3768,7 @@ export default function TurfsPage() {
                 <span>{showExclude ? '▾' : '▸'}</span>
               </button>
               {showExclude && (
-                <div className="mt-2 space-y-2 rounded-md border border-danger/30 bg-sunken px-3 py-2">
+                <div data-panel-body className="mt-2 space-y-2 rounded-md border border-danger/30 bg-sunken px-3 py-2">
                   <p className="text-[11px] text-fg-muted">
                     Doors matching ANY of these are removed from the cut — even when they match the target above. e.g. skip
                     supporters who already took a yard sign.
@@ -3616,20 +3786,38 @@ export default function TurfsPage() {
                       </label>
                     ))}
                   </div>
+                  {/* Visited in the last N days (docs/PROPOSAL_RECENT_VISITS.md) — the round stores the date. */}
+                  <VisitedSinceRow
+                    value={targetFilter.exclude?.visitedSince || null}
+                    onChange={(day) => setExcludeSide({ visitedSince: day })}
+                    today={today}
+                    tz={tz}
+                    onPendingChange={setVisitedPending}
+                  />
                   {targetQuestions.length > 0 && (
                     <AnswerFilters
                       questions={targetQuestions}
                       value={targetFilter.exclude?.answerFilters || []}
-                      onChange={(v) => setExcludeSide({ answerFilters: v })}
+                      onChange={(v) => setExcludeSide({ answerFilters: withOrphans(v, targetFilter.exclude?.answerFilters, loadedQuestions) })}
+                    />
+                  )}
+                  {orphanCount(targetFilter.exclude?.answerFilters, loadedQuestions) > 0 && (
+                    <OrphanAnswersNotice
+                      count={orphanCount(targetFilter.exclude?.answerFilters, loadedQuestions)}
+                      onRemove={() => setExcludeSide({ answerFilters: withoutOrphans(targetFilter.exclude?.answerFilters, loadedQuestions) })}
                     />
                   )}
                   {excludeActive && (
                     <p className="text-[11px] text-danger">
                       {targetPreviewQ.isFetching
                         ? '…'
-                        : `${(targetPreviewQ.data?.counts?.excluded ?? 0).toLocaleString()} door${
-                            (targetPreviewQ.data?.counts?.excluded ?? 0) === 1 ? '' : 's'
-                          } removed from this cut`}
+                        : (() => {
+                            const excluded = targetPreviewQ.data?.counts?.excluded ?? 0;
+                            const visited = targetPreviewQ.data?.counts?.visited ?? 0;
+                            return `${excluded.toLocaleString()} door${excluded === 1 ? '' : 's'} removed from this cut${
+                              visited > 0 ? `, ${visited.toLocaleString()} of them visited since ${sinceLabel(targetFilter.exclude?.visitedSince)}` : ''
+                            }`;
+                          })()}
                     </p>
                   )}
                 </div>
@@ -3687,10 +3875,15 @@ export default function TurfsPage() {
             // one of the three boxes, or the ticks themselves (lib/targetFade.js, from the preview's
             // own counts) — never a bare "excluded".
             const reasons = targetActive && targetPreviewQ.data?.counts ? targetCountParts(targetPreviewQ.data.counts, fadeMode).slice(1) : [];
+            // A round that already has draft books: the preview is what a re-cut keeps NOW (visits since
+            // the cut included), so the books' own total sits beside it.
+            const draftDoors = turfs.filter((t) => t.status === 'draft').reduce((sum, t) => sum + (t.doorCount || 0), 0);
+            const noun = !targetActive ? 'knockable doors' : sideActive(targetFilter) ? 'targeted doors' : 'doors in this cut';
             return (
               <p className="mb-2 text-xs text-fg-muted">
-                <strong>{(n ?? 0).toLocaleString()}</strong> {targetActive ? 'targeted' : 'knockable'} doors
+                <strong>{(n ?? 0).toLocaleString()}</strong> {noun}
                 {reasons.map((r) => ` · ${r}`).join('')}
+                {targetActive && draftCount > 0 ? ` · the draft books hold ${draftDoors.toLocaleString()}` : ''}
                 {mode === 'geometric' && n != null ? ` → ~${Math.max(1, Math.ceil(n / (Number(maxDoors) || 65)))} books` : ''}
               </p>
             );
@@ -3750,7 +3943,7 @@ export default function TurfsPage() {
           )}
 
           {!viewOnly && (
-            <button onClick={() => canGenerate && generate.mutate()} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
+            <button onClick={onGenerateClick} disabled={!canGenerate} className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60">
               {generate.isPending || jobBusy ? 'Generating…' : 'Generate'}
             </button>
           )}
@@ -3866,6 +4059,15 @@ export default function TurfsPage() {
 
           {!!turfs.length && (
             <div className="mt-5 border-t border-border pt-4">
+              {/* The round remembers the date it was cut with; Add as new book re-applies it (GET /turfs →
+                  targetFilter, refreshed by every finished cut and restore). */}
+              {hasVisitedLine(storedTarget?.exclude) && (
+                <p className="mb-2 text-[11px] text-fg-muted">
+                  {viewOnly
+                    ? `This round was cut leaving out doors visited since ${sinceLabel(storedTarget.exclude.visitedSince)}.`
+                    : `Add as new book leaves out doors visited since ${sinceLabel(storedTarget.exclude.visitedSince)}, like this round's cut.`}
+                </p>
+              )}
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{turfs.length} books{draftCount ? ` · ${draftCount} draft` : ''}</span>
                 <div className="flex items-center gap-2">
@@ -4247,6 +4449,9 @@ export default function TurfsPage() {
                 active: previewReady,
                 status: householdQ.data?.household?.targetStatus || popupDoor?.targetStatus || 'unknocked',
                 lastActionAt: householdQ.data?.household?.lastActionAt || null,
+                visitedOn: withVisit,
+                // undefined until the withVisit answer lands (the key switch keeps no placeholder).
+                lastVisitAt: householdQ.data?.household && 'lastVisitAt' in householdQ.data.household ? householdQ.data.household.lastVisitAt : undefined,
                 reason: fadeReasonOf(popupHouseholdId, fadeIndex),
                 mode: fadeMode,
               }}
@@ -4517,6 +4722,39 @@ export default function TurfsPage() {
             else unrestrictBulk.mutate(turfIds);
           }}
         />
+      )}
+
+      {askOpen && (
+        <Modal
+          size="lg"
+          closable={false}
+          title="Use this round's last conditions?"
+          footer={
+            <>
+              <Button variant="secondary" size="sm" onClick={() => setAskOpen(false)}>Cancel</Button>
+              <Button variant="secondary" size="sm" onClick={cutAsTicked}>
+                {conditionsOn(targetFilter) ? "Cut with what's ticked now" : 'Cut without them'}
+              </Button>
+              <Button variant="primary" size="sm" onClick={useLastConditions}>Use them again</Button>
+            </>
+          }
+        >
+          {(() => {
+            const lastWords = describeConditions(storedTarget, loadedQuestions);
+            const tickedWords = describeConditions(targetFilter, loadedQuestions);
+            const ticked = tickedSentence(tickedWords);
+            // Different conditions that read the same (answers not yet named by their survey words).
+            const readAlike = lastWords.target === tickedWords.target && lastWords.exclude === tickedWords.exclude;
+            return (
+              <div className="space-y-2 text-sm text-fg-muted">
+                <p>{lastCutSentence(lastWords)}</p>
+                <p>{ticked || 'Target doors and Exclude doors are empty now.'}</p>
+                {readAlike && <p>The survey answers differ.</p>}
+                <p>Use them again puts them back so you can check the count; nothing is cut yet.</p>
+              </div>
+            );
+          })()}
+        </Modal>
       )}
 
       {showDiscard && (

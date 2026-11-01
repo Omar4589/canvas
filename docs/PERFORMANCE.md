@@ -56,6 +56,21 @@ it can't be double-billed, and a knock recorded *during* a flush can't be lost.
 - CSV export from the mobile admin screens works again (it broke silently with the Expo SDK 54
   file-system API change) and cleans up old export files as it goes.
 
+## Big list uploads don't slow down the field
+
+When an admin uploads an early-voting, do-not-contact or walk-list file, Doorline reads it a little at
+a time and keeps only the Voter ID column, the one it uses. Until October 31, 2026 it read the whole file
+at once, every column of every row. A 45 MB early-voting file of about 80,000 rows then pushed the
+website's server, the same one every canvasser's phone talks to, past its memory limit, and froze it for
+over a second each time the file was read. Now the same file needs about a sixth as much extra memory,
+and nobody else waits more than a few hundredths of a second. Uploads give exactly the same results as
+before, and files can still be up to 50 MB.
+
+When the server does run short of memory, or something takes too long, it now writes a line in its log
+naming the page or upload that was running. It keeps the last 300 of those lines for a month, so they can
+still be read after Heroku's own log has moved on ([OPERATIONS.md](OPERATIONS.md) → *The memory
+tripwire*).
+
 ---
 
 # Part 2 — Technical reference
@@ -357,6 +372,93 @@ the infra tier plus a few heavy/unbounded read paths. What changed:
 - **Running the suites** — `npm run test:int` ([scripts/test-int.sh](../server/scripts/test-int.sh))
   boots a throwaway `mongod`, runs every `*.int.test.js` (one DB per file), and tears it down; the
   int suites skip without `MONGODB_URI_TEST`.
+
+## Voter-ID list uploads (web dyno memory, 2026-10-31)
+
+**What happened.** At 18:42 UTC on 2026-10-31 the web dyno (Standard-2X, 1 GB, one dyno, idling near
+270 MB) reached 1,024.5 MB, a Heroku R14, during the owner's Early Voting upload of a ~45 MB county CSV
+(Douglas County's already-voted list, about 80,800 rows; applied 18:47), and again near 0.95 GB at 19:14.
+The two H27s in the same window were unrelated: an H27 is a caller that hung up before the answer, and the
+phone app gives up after 20 s (`DEFAULT_TIMEOUT_MS`, [mobile/lib/api.js](../mobile/lib/api.js)).
+
+**Why.** The CSV reader did `fileBuffer.toString('utf8')`, one string the size of the file (twice that
+when any character is outside Latin-1: a curly apostrophe, or the U+FFFD a stray Windows-1252 byte decodes
+to), then `Papa.parse(…, { header: true })`, an object per row holding every column, to use one column.
+All of it synchronous, so the event loop was held for the whole parse.
+
+**The reader now** (`readCsvColumns`, [parseVoterIdList.js](../server/src/services/import/parseVoterIdList.js)):
+1. Decodes the buffer in 64 KB slices with a `StringDecoder`: exactly `toString('utf8')`'s text, with a
+   character split across slices joined and invalid bytes replaced the same way.
+2. Decodes at least 1M characters and the first 10 rows up front (Papa guesses the line ending from a
+   text's first 1M characters and the delimiter from its first 10 rows), drops a byte-order mark (Papa
+   drops one only from a string handed to it whole), and passes both guesses in.
+3. Feeds Papa a `Readable` of the pieces, with a `chunk` callback and the same `header` /
+   `skipEmptyLines` / trimmed-header options; keeps `row[col]` and, with `keep`, `row[keepColumn]`. With
+   no ID column, or the keep column missing, it stops at the header (`stream.destroy()`, `parser.abort()`).
+4. Between pieces: `parser.pause(); stream.pause(); setImmediate(() => { stream.resume(); parser.resume(); })`.
+   Both, because pausing Papa's handle doesn't pause its input stream: `ReadableStreamStreamer` keeps
+   queueing `data` events, so the rest of the file would be decoded into its queue anyway.
+
+> **Traps found on the way.** Papa's `chunkSize` on a string (the first design) still needs the whole file
+> as one string. Chunks of 1 MB peaked at 441 MB against 64 KB's 187 MB: each chunk's ~2,000 row objects
+> live long enough to reach old space, so small pieces matter. The first 1M characters reach Papa as
+> one piece, so a test file shorter than that never puts a piece edge inside a row. And Papa's values are
+> slices of their piece: V8 keeps a slice of 13+ characters as a pointer into its parent, so kept IDs that
+> long held every piece alive, the whole file's text (150,000 twenty-character IDs: 59 MB of heap held,
+> 35 MB with copies). Kept values go through `own()` from
+> [readIdColumn.js](../server/src/services/import/readIdColumn.js), the same fix the Excel reader needed.
+> The test measures it in a child process ([support/idListCsvResources.child.js](../server/test/support/idListCsvResources.child.js)).
+
+**Same rows.** [test/idListCsvPieces.test.js](../server/test/idListCsvPieces.test.js) compares against the
+old reader verbatim: small files at piece sizes from 1 byte up (the decoding edges), large ones, and files
+past the first 1M characters, so piece edges land inside rows (a quoted `\r\n`, between `\r` and `\n`, in
+an emoji or an invalid byte). Planted breaks fail it: no byte-order-mark drop, or decoding each piece on
+its own.
+
+**Measured** on the owner's Mac. End to end: the real Early Voting preview route, a 60,000-voter campaign
+on a throwaway `mongod`, a synthetic 45 MB file of 80,323 rows × 85 columns, `/api/health` polled every
+20 ms meanwhile, peak memory by `/usr/bin/time -l`:
+
+| | Before | After |
+|---|---|---|
+| Peak memory (server idling at 174–188 MB) | 785 MB | 283 MB |
+| Same file with one curly apostrophe (two-byte text) | 854 MB | 277 MB |
+| Slowest `/api/health` during the upload | 1.35 s, 1.51 s | 40 ms, 61 ms |
+| Preview time | 1.79 s | 1.36 s |
+
+The reader alone on a 142 MB statewide-size file (250,000 rows): 238 MB peak for the whole process (Node
+and the code 73 MB, the file itself 142 MB), 262 MB with two-byte text, longest wait 30–43 ms. The old
+reader took ~2.3 GB on the real 149 MB statewide file (measured 2026-10-27, [EARLY_VOTING.md](EARLY_VOTING.md) §F).
+
+**Why the cap stays 50 MB** ([idListUpload.js](../server/src/middleware/idListUpload.js)). multer's
+`memoryStorage` collects the upload's chunks and joins them at the end (`concat-stream`, `Buffer.concat`):
+the file twice, for a moment. At 150 MB that's ~300 MB per upload on a dyno idling near 270 MB, and two at
+once ~850 MB. Raising it, for statewide files, is the org-wide upload plan's to design (keep the pieces
+rather than join them, or parse during the upload). Not disk storage: the privacy record promises these
+uploads are held in memory, never written to disk ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)
+items 45(b), 48).
+
+**The memory tripwire** ([middleware/memoryWatch.js](../server/src/middleware/memoryWatch.js)).
+`trackRequests`, mounted first in `app.js`, keeps the list of requests in flight; `startMemoryWatch()`,
+called from `server.js` so it runs on the web dyno only, checks memory every 5 s and how late a 100 ms
+timer runs. It logs memory over `MEMORY_WATCH_MB` (default 700) with the in-flight list, at most every
+30 s; a freeze of 1 s or more, written as it ends, with the in-flight list; and a request of 15 s or more
+(`slow request`) or one whose caller gave up first (`caller gave up after`). A request is named by its
+route pattern with ids as `:id`; an unrouted path keeps one segment, two under `/api`. Not
+`perf_hooks.monitorEventLoopDelay`: resetting that histogram between looks drops the reading of a freeze
+that has just ended, which is the one that matters. Pinned by
+[test/memoryWatch.test.js](../server/test/memoryWatch.test.js). Each line is also kept in Redis, because
+Heroku's log keeps the last 1,500 lines across all dynos, minutes during field hours. `server.js` passes
+the connection the job queues share (`getSharedRedis()`, which Bull Board opened at boot, so no new
+connection), and `keepLine` sends one `MULTI`: `LPUSH` the line, stamped with its ISO time and `DYNO`, onto
+`memory-watch:lines`; `LTRIM` to the newest 300 (`KEPT_LINES`); `EXPIRE` 30 days (`KEPT_DAYS`). The log gets
+the line first, and keeping it never throws. The copy is skipped unless the connection's status is
+`ready`, because the shared connection holds every command sent during an outage (`maxRetriesPerRequest:
+null`), and the log has the line anyway. `npm run report:memory-watch`
+([migrations/reportMemoryWatch.js](../server/src/migrations/reportMemoryWatch.js)) reads them back on its
+own connection, bounded at 10 s, oldest first in Central time. 300 short lines measured 37 KB in Redis.
+Operating it:
+[OPERATIONS.md](OPERATIONS.md) → *The memory tripwire*.
 
 ## State-reset patterns (no reset-in-effect)
 

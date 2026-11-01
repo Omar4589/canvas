@@ -654,7 +654,10 @@ pre-choice (the newest not-undone upload; a column the file lacks).
 ## G. Not in this plan
 
 - **The CSV path's memory** (860 MB for a 50 MB, 85-column CSV). Owner ruling 2026-10-27: the cap
-  stays, no streaming rework.
+  stays, no streaming rework. *[2026-10-31: after a 45 MB county file took the web dyno over its quota,
+  the owner asked for the reader fix. The CSV path now reads in 64 KB pieces and keeps only the ID
+  column (and the counting column), with the same rows as before; the cap still stays. EARLY_VOTING.md
+  §F, PERFORMANCE.md → Voter-ID list uploads.]*
 - **Reusing the Voter Import's `streamParse`.** About 2.5 times slower at the cap, more memory, two disk
   copies of files like CD-2, and the defects in §A.6.
 - **Reading old `.xls`, `.ods`, Numbers or `.xlsb`.** Refused, with the fix.

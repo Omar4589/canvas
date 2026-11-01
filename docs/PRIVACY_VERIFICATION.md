@@ -476,7 +476,7 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
   GridFS bucket + `/api/admin/exports` + a worker queue). Customers can now queue background
   CSV/ZIP exports — canvassing activity, doors-by-round, survey results (wide + long), a
   RECONSTRUCTION of their voter file (optionally under the vendor's own headers from
-  `ImportJob.fieldMapping`), saved-search subsets, voter notes (admin-only; previously
+  `ImportJob.fieldMapping`), saved-search subsets *[v7 2026-10-31, item 47: for a list uploaded from a file or made by an import, only from that date — before it, such a list's export re-resolved an empty filter, the whole campaign]*, voter notes (admin-only; previously
   exportable by NO route, §B8), and an admin-only full-backup ZIP — then download the
   artifact from the campaign's Exports page (web) or the mobile admin Exports screen until
   it expires. A new collection holding a *file of customer data at rest* is a named trigger,
@@ -4362,7 +4362,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       the rows that counted, so ticking one value narrows those to the IDs that carry it: still only to
       the uploader, from their own file, and never kept. Rows 1–10 are read
       whole (capped at 1 MB of text) only to find the column names and, when no Voter ID column is
-      found, which row they seem to be in — a row number goes back, never a cell. The CSV path is
+      found, which row they seem to be in — a row number goes back, never a cell. *[2026-10-31, item 48:
+      the CSV path now reads in 64 KB pieces and keeps only those columns as it goes; same rows, still in
+      memory, nothing written to disk.]* The CSV path is
       unchanged (Papa still parses every column; only the ID column, and with *Count only rows where*
       the chosen one, is used).
     - **(b) Held in memory, never written to disk.** The workbook arrives through `uploadIdList` (multer
@@ -4389,7 +4391,9 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     - **(e) One log line per Excel read**, `[id-list] xlsx …` (`logRead`, `parseVoterIdList.js`): the
       file's size, the tab's and the shared strings' unpacked sizes, a row count and the time, or a
       refusal code in their place; never a file, tab or column name, a value or an ID. Heroku's log
-      retention, like every other line. A CSV read logs nothing.
+      retention, like every other line. A CSV read logs nothing. *[2026-10-31, item 48: no longer true — a
+      CSV read now logs one line too, `[id-list] csv …`: the file's size, a row count (or *no Voter ID
+      column*, *refused keep-column*) and the time; nothing from the file.]*
     - **(f) No new third party.** `unzipper` and `saxes` were already direct dependencies — recorded as
       **not a subprocessor event** in the v5 2026-08-04 entry (*What changed since v2*). In-process
       parsing only: no network call, no new service, customer data never leaves the web dyno. DPA §6
@@ -4486,6 +4490,86 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       deletion lands mid-add, the 402 for a read-only organization, and `crewSize` left off a row hidden from
       a lead (item 40's pinned shape, `leadUserManagement.int.test.js`); email wording by
       `mailTemplates.test.js`.
+47. **[v7 2026-10-31 — "Filtered voters" of a list uploaded from a file, or made by an import, now exports
+    that list instead of the whole campaign; and Turf Cutting's "Visited in the last N days". BUILT
+    2026-10-31, uncommitted; deploy pending (stamp the date here when it ships). Triggers CLAUDE.md's "What
+    we expose — exports": an export's contents change, narrowed to the list it is named after. The visit
+    line triggers nothing: no new data, retention, access, recipient, subprocessor, export or link. No
+    Privacy Policy, Terms or DPA sentence changes; no customer notice.]**
+    Plan: [PROPOSAL_RECENT_VISITS.md](PROPOSAL_RECENT_VISITS.md) (gap G1; §H). Read from the code:
+    - **(a) What was wrong.** `voters-filtered` copies the saved search's `filter` onto the job
+      (`exportTypes.js` `validateParams`) and the builder re-resolves it live (`buildVotersFiltered`,
+      `resolveWalkList`). Lists uploaded from a file (`routes/admin/walklists.js` `POST /from-csv`) and the
+      import "New voters" lists (`services/import/collectRevisitHomes.js`) store `filter: {}`, which
+      resolves to the voters of every active, located door in the campaign (minus do-not-contact). So a
+      Filtered voters file of such a list held the whole campaign; reproduced on a throwaway database (a
+      one-voter list exported all 7 voters). Not a new ACCESS path — the same roles can export the whole
+      voter file (`voter-file`, like `voters-filtered`, is `adminOnly: false`) — but a file named for a
+      500-person list could carry everyone to whoever it was handed (a client, a phone-bank vendor). The
+      v3 Export Center entry's "saved-search subsets" (§B above) was untrue for these two kinds of list
+      until this item.
+    - **(b) As built.** `validateParams` also reads `source` and records `frozen` for `csv` and `import`;
+      the builder and the estimate then read that list's own `voterIds` at build time
+      (`frozenListVoterIds`, `services/export/exportBuilders.js`) — the same people as the Saved Searches
+      page's Download CSV (`GET /walklists/:id/export.csv`: frozen ids, live do-not-contact) — withholding
+      do-not-contact voters and counting them in `excludedDncCount` the way the voter-file import branch
+      does; a list deleted between the request and the build fails the job with *That saved search was
+      deleted.* Filter-built searches stay live, unchanged. Pinned by
+      `server/test/filteredVotersFrozen.int.test.js` (4).
+    - **(c) Owner action, not code.** Any Filtered voters file of an uploaded or "New voters" list made
+      before this ships held every voter in its campaign. The owner checks whether such a file left the
+      organization.
+    - **(d) The visit line, same build.** Turf Cutting's Exclude doors gains *Visited in the last N days*,
+      which reads visit times already stored to decide which doors a cut includes.
+      `GET /turfs/household/:id?withVisit=1` adds `lastVisitAt` (the door's newest field visit) for the
+      roles that route already serves (org admins, and leads who manage the campaign; record-level
+      audited per the v4 2026-07-22 entry), who already see each visit's time through this route's
+      `lastActionAt`, `GET /admin/households/:id/activity` and Results by voter. `GET /turfs?passId=`
+      returns the round's stored target filter — statuses, survey-answer ids and a date; conditions, not
+      personal data. Saved searches refuse the line, so no export carries it. Not privacy-affecting.
+
+48. **[v7 2026-10-31 — The CSV reader of the three Voter-ID list uploads reads in pieces, and a memory
+    tripwire on the web dyno. BUILT 2026-10-31, uncommitted; deploy pending (stamp the date here when it
+    ships). Recorded because it changes how an uploaded voter file is read (item 45's test) and adds log
+    lines, the newest 300 of which are also kept in Redis for 30 days; but nothing new is kept about a
+    person (the lines name no person, voter, organization, record or link), no retention or deletion change
+    for customer data, no new access, no new third party, nothing newly exposed, and no published Privacy
+    Policy, Terms or DPA sentence changes. No customer notice.]** Why: a 45 MB early-voting CSV took the 1 GB web dyno over its memory quota (Heroku
+    R14) on 2026-10-31. Doc of record [PERFORMANCE.md](PERFORMANCE.md) → *Voter-ID list uploads*. Read from
+    the code:
+    - **(a) What is read — unchanged.** `readCsvColumns` (`services/import/parseVoterIdList.js`) decodes the
+      upload in 64 KB pieces and hands them to Papa with the same options. Each row is still parsed whole
+      for a moment (Papa builds the row), but only the Voter ID column — and with *Count only rows where*,
+      the counting column — is kept; before, every row's every column was held until the read finished.
+      Reading stops at the header when no Voter ID column is found. Same rows as the whole-file read
+      (`test/idListCsvPieces.test.js`). Still multer `memoryStorage`: item 45(b)'s *held in memory, never
+      written to disk* stays true — which is why [PROPOSAL_PARKED_IDS.md](PROPOSAL_PARKED_IDS.md) §G's disk
+      storage was not adopted.
+    - **(b) Two kinds of log line, nothing personal in either.** `[id-list] csv …` per CSV read (item
+      45(e)'s stamp). `[memory-watch] …` (`middleware/memoryWatch.js`, started in `server.js`, so the web
+      dyno only): when memory crosses `MEMORY_WATCH_MB` (default 700), when the server froze for a second
+      or more, and when a request ran 15 s or more or its caller gave up first. A request is named by its
+      route PATTERN with database ids replaced by `:id` (`POST /api/admin/campaigns/:id/voted/preview`),
+      with how long it ran, its status and an upload's size; never a query string, a path past the route
+      (an unrouted path keeps one segment, two under `/api`), a name, an IP address or a report link's
+      token. Pinned by `test/memoryWatch.test.js`. Heroku keeps the last 1,500 log lines, like every other
+      line. The web dyno also keeps the newest 300 `[memory-watch]` lines in Redis (`keepLine`; key
+      `memory-watch:lines`, the whole list expiring 30 days after its newest line), each stamped with its
+      time and dyno name (`web.1`): the same text, nothing added. Read back only by `npm run
+      report:memory-watch` (`migrations/reportMemoryWatch.js`, read-only), which runs in a Heroku dashboard
+      one-off dyno, so only someone with access to the Heroku app can read them. No organization's data — a
+      route pattern names no organization — so an organization's deletion has nothing to remove there; they
+      expire on their own. `[id-list] csv …` lines stay in the Heroku log only.
+    - **(c) No new third party.** The kept lines go to the Heroku Key-Value Store the job queues already use
+      (subprocessor table row 5), on the connection they already share; no new dependency or service. DPA
+      §6 unchanged.
+    - **Assessment: no published Privacy Policy, Terms or DPA sentence changes.** The policy says customers
+      upload voting-participation records and Doorline uses them only to provide the Services
+      (privacy.html `:85`, `:91`); how a file is read in memory is not described. The policy's
+      *automatically collected* paragraph (`:97`) already covers the resources requested and when — a route
+      pattern and a time are less than that — and says that information is used to troubleshoot the
+      Services, which is all the Redis copy is for. The retention paragraphs (`:118`–`:122`) are about
+      customer records, which these lines are not. No customer notice.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
@@ -5715,7 +5799,7 @@ The `Person` layer **is** now org-scoped: `organizationId` is required and index
 | 2 | **Heroku** | Hosts both the web dyno and the worker dyno — **all data in transit and in process memory.** Plus an **HTTP access log for every request** (see below). | VERIFIED |
 | 3 | **GEOCODIO** (`api.geocod.io`) | **VOTERS' FULL HOME STREET ADDRESSES.** | VERIFIED — **MUST BE DISCLOSED AS A SUBPROCESSOR** |
 | 4 | **Mapbox** | Map tiles + a public token from web **and** mobile. **Web additionally sends usage telemetry with a persistent identifier.** | VERIFIED (asymmetric — see below) |
-| 5 | **Heroku Key-Value Store (Redis)** | BullMQ job payloads: ids, plus turf **targeting criteria and drawn polygons**; failed-job error strings retained 30 days. | PARTIAL |
+| 5 | **Heroku Key-Value Store (Redis)** | BullMQ job payloads: ids, plus turf **targeting criteria and drawn polygons**; failed-job error strings retained 30 days. *[v7 2026-10-31, item 48: and the memory tripwire's newest 300 log lines (route patterns, times, sizes and the dyno's name, nothing personal), the list expiring 30 days after its newest line.]* | PARTIAL |
 | 6 | **Expo / EAS** | OTA update checks (device IP + update metadata). EAS Build receives the app **source code**. *[v6 2026-10-15: precisely — device IP, a per-install `EAS-Client-ID`, update metadata, and after a fatal error inside expo-updates' error window up to 1,024 characters of it (the error text on iOS). Error recovery Part A keeps post-launch JavaScript errors out of that window — item 30.]* | VERIFIED |
 | 7 | **Apple / Google** | App distribution and review. Plus **platform location services** (see below). | PARTIAL |
 

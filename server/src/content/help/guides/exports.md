@@ -47,7 +47,7 @@ details**; see below.
   claim.
 - **Voter file** — everyone currently in the campaign. Pick one of your uploads in the
   **Columns** selector to get the file back under that vendor's own column names.
-- **Filtered voters** — only the voters matching one of your saved searches.
+- **Filtered voters** — only the voters matching one of your saved searches. A search built from filters is checked again on the day you export; a list you uploaded from a file (or a "New voters" list from an import) exports exactly its own people — the same as its **Download CSV** on the Saved Searches page — minus do-not-contact.
 - **Notes** — every note currently on the campaign in one file, one row per note: the ones
   canvassers type at a door, the ones attached to a submitted survey, and the ones written on a
   voter's profile. Filter by source, door outcome, date, walk list, round, author, or note text.

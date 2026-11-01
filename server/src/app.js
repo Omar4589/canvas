@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import routes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
+import { trackRequests } from './middleware/memoryWatch.js';
 import {
   loginIpLimiter,
   loginEmailLimiter,
@@ -54,6 +55,10 @@ export function createApp() {
   // hardcoded; when API_HOST is unset the redirect guard below is a no-op.
   const API_HOST = process.env.API_HOST;
   const WEB_ORIGIN = process.env.WEB_ORIGIN || 'https://doorline.app';
+
+  // Every request joins the memory tripwire's in-flight list until it ends, so a [memory-watch] log
+  // line can name what was running (middleware/memoryWatch.js; the watch itself starts in server.js).
+  app.use(trackRequests);
 
   // Behind Heroku's single router/proxy — trust it so req.ip reflects the real
   // client IP (required for express-rate-limit to key correctly).

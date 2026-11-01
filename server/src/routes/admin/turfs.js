@@ -39,7 +39,8 @@ import { addAuditSubjects } from '../../services/access/supportAccess.js';
 import { ensureCampaignAssignments, partitionAssignable, deactivatedMemberIdSet } from '../../services/campaignRoster.js';
 import { isOrgAdmin } from '../../services/authz/campaignManagement.js';
 import { resolveWalkList, isActiveTargetFilter } from '../../services/walklist/resolveWalkList.js';
-import { getTargetingStatusMap } from '../../services/walklist/targetingStatus.js';
+import { getTargetingStatusMap, lastVisitAt } from '../../services/walklist/targetingStatus.js';
+import { visitedSinceProblem } from '../../services/walklist/visitedSince.js';
 import { KNOCKABLE_DOOR_FILTER } from '../../services/canvass/knockableDoorFilter.js';
 import { effectivePinSuspect, pinWireFields, isPinUnplaced } from '../../services/households/pinState.js';
 import {
@@ -305,6 +306,10 @@ router.post('/generate', async (req, res, next) => {
     if (!['attribute', 'geometric', 'manual'].includes(mode)) {
       return res.status(400).json({ error: 'mode must be attribute|geometric|manual' });
     }
+    // The visited-since line: exclude side only, and a real day (services/walklist/visitedSince.js) —
+    // refused here, before anything is queued, rather than as a failed job.
+    const visitedProblem = visitedSinceProblem(params?.targetFilter);
+    if (visitedProblem) return res.status(400).json({ error: visitedProblem });
     const pass = await loadGuardPass(req.campaign._id, passId);
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     // The job re-checks too (generateTurf.js), since an archive can land while it waits.
@@ -798,12 +803,18 @@ router.get('/', async (req, res, next) => {
     let supplementalUnplacedCount = 0;
     let supplementalUnplacedRestrictedCount = 0;
     let supplementalUnplacedNoSolicitingCount = 0;
+    // The conditions the round was last cut with (Pass.targetFilter) — the page's "This round was last
+    // cut with …" line, its question before Generate, and the note over the books read them here, the
+    // response every finished cut refreshes. null for a round never cut with conditions, a round from
+    // before the field, and another campaign's pass.
+    let targetFilter = null;
     const NOT_CUTTABLE_PIN = { pinSuspect: { $type: 'string', $ne: 'complex' }, locationConfirmedAt: null };
     if (filter.passId) {
       const pass = await Pass.findOne(
         { _id: filter.passId, campaignId: req.campaign._id },
         { effortId: 1, targetFilter: 1 }
       ).lean();
+      targetFilter = pass?.targetFilter ?? null;
       if (pass) {
         const base = {
           campaignId: req.campaign._id,
@@ -896,6 +907,7 @@ router.get('/', async (req, res, next) => {
       supplementalUnplacedCount,
       supplementalUnplacedRestrictedCount,
       supplementalUnplacedNoSolicitingCount,
+      targetFilter,
     });
   } catch (err) {
     next(err);
@@ -1015,10 +1027,12 @@ router.post('/target-preview', async (req, res, next) => {
   try {
     const { passId, filter, excludeRestricted, excludeNoSoliciting, excludeUnplaced } = req.body || {};
     if (!mongoose.isValidObjectId(passId)) return res.status(400).json({ error: 'passId required' });
+    const visitedProblem = visitedSinceProblem(filter);
+    if (visitedProblem) return res.status(400).json({ error: visitedProblem });
     const pass = await Pass.findOne({ _id: passId, campaignId: req.campaign._id }, { effortId: 1 }).lean();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
     const resolved = await resolveWalkList(req.campaign, filter || {}, { effortId: pass.effortId });
-    const { householdIds, excludedHouseholdIds, excludeDegenerate, warnings } = resolved;
+    const { householdIds, excludedHouseholdIds, excludedVisitedHouseholdIds, excludeDegenerate, warnings } = resolved;
     // The same cuttability the cut itself applies (generateTurf's baseFilter) — including the two
     // boxes, judged by the targeting ladder — so the preview's number equals what the cut produces.
     // It arrives as `$and` and the outer query owns `_id`, so the two cannot collide. ONE builder
@@ -1067,6 +1081,13 @@ router.post('/target-preview', async (req, res, next) => {
     const excludedDrawn = excludedHouseholdIds.length
       ? (await Household.find({ _id: { $in: excludedHouseholdIds }, ...KNOCKABLE_DOOR_FILTER }, { _id: 1 }).lean()).map((h) => String(h._id))
       : [];
+    // The visited-since line's share of those (docs/PROPOSAL_RECENT_VISITS.md): the resolver's visited
+    // removals are a subset of its removals, so they are picked out of excludedDrawn here, in memory,
+    // and the two lists go out DISJOINT — excludedHouseholdIds keeps the rest — so no id ships twice.
+    // A door the line shares with another Exclude condition is the line's (the page says "visited").
+    const visitedOf = new Set((excludedVisitedHouseholdIds || []).map(String));
+    const visitedDrawn = visitedOf.size ? excludedDrawn.filter((id) => visitedOf.has(id)) : [];
+    const excludedOtherDrawn = visitedDrawn.length ? excludedDrawn.filter((id) => !visitedOf.has(id)) : excludedDrawn;
     // WHY the rest of the include result is not in the cut — by the checkbox that removed it, in
     // the order the page lists them. The page fades a door for any of five reasons and used to say
     // none of them; a never-visited home with a flagged pin faded under every status tick, and the
@@ -1108,6 +1129,8 @@ router.post('/target-preview', async (req, res, next) => {
       drawable,
       kept: cuttable.length,
       excluded: excludedDrawn.length,
+      // Part of `excluded`, not beside it — the remainder below is unchanged.
+      visited: visitedDrawn.length,
       restricted: leftOut.restricted.length,
       noSoliciting: leftOut.noSoliciting.length,
       unplaced: leftOut.unplaced.length,
@@ -1127,7 +1150,8 @@ router.post('/target-preview', async (req, res, next) => {
       excludeDegenerate,
       warnings,
       householdIds: cuttable.map(String),
-      excludedHouseholdIds: excludedDrawn,
+      excludedHouseholdIds: excludedOtherDrawn,
+      visitedHouseholdIds: visitedDrawn,
       leftOut,
       counts,
     });
@@ -1563,6 +1587,11 @@ router.get('/household/:householdId', async (req, res, next) => {
       .sort({ fullName: 1 })
       .lean();
     const targeting = (await getTargetingStatusMap(req.campaign._id, [hh._id], req.campaign.type)).get(String(hh._id));
+    // withVisit=1 (the web page, while "Visited in the last N days" is ticked): the door's newest FIELD
+    // visit, desk marks left out — the date the line judges. Opt-in, so the phone's house taps and every
+    // other caller get exactly today's response.
+    const withVisit = req.query.withVisit === '1';
+    const lastVisit = withVisit ? await lastVisitAt(req.campaign._id, hh._id) : null;
     res.json({
       household: {
         id: String(hh._id),
@@ -1577,6 +1606,7 @@ router.get('/household/:householdId', async (req, res, next) => {
         // (services/walklist/targetingStatus.js) — never a replacement for `status` above.
         targetStatus: targeting?.status || 'unknocked',
         lastActionAt: targeting?.lastActionAt || hh.lastActionAt || null,
+        ...(withVisit ? { lastVisitAt: lastVisit } : {}),
         // Pin + provenance for the pop-up's Move pin action (same shape as the pin PATCH's
         // response): where the dot is, and whether a person corrected it / it is approximate.
         location: hh.location?.coordinates?.length === 2

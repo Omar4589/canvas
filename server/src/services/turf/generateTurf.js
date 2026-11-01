@@ -248,8 +248,15 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
   // The admin asked to exclude doors but every exclude condition was unusable —
   // cutting anyway would silently send canvassers to the doors they removed. Fail
   // the job loudly instead (the throw surfaces via the generation job status).
+  // UnrecoverableError, so the queue doesn't retry a filter that can only fail again
+  // (three attempts used to hold the refusal back about 15 s).
   if (resolved?.excludeDegenerate) {
-    throw new Error('The exclusion filter has no valid conditions — fix or remove it, then re-cut');
+    throw new UnrecoverableError('The exclusion filter has no valid conditions — fix or remove it, then re-cut');
+  }
+  // The visited-since line only ever excludes (the routes refuse it on the target side). One that
+  // reached here anyway would have cut a different set than the one asked for.
+  if (resolved?.includeUnsupported) {
+    throw new UnrecoverableError('"Visited in the last … days" can only exclude doors — fix the filter, then re-cut');
   }
 
   // A round cuts from its EFFORT's owned households (Household.effortId). Skip
@@ -270,8 +277,6 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     })),
   };
   if (resolved) baseFilter._id = { $in: resolved.householdIds };
-  // Record (or clear) what this round targeted — for reproducibility + a label.
-  await Pass.updateOne({ _id: passId }, { $set: { targetFilter: targeted ? params.targetFilter : null } });
 
   let books;
   if (mode === 'manual') {
@@ -308,7 +313,7 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
         books.push({ name: `Area ${idx}`, households: hh, boundary: polygon });
       }
     }
-    if (!books.length) throw new Error('No doors inside the drawn area(s)');
+    if (!books.length) throw new UnrecoverableError('No doors inside the drawn area(s)');
   } else {
     const households = byId(await Household.find(baseFilter, CUT_COLUMNS).lean());
     await onProgress?.({ phase: 'clustering', pct: 25 });
@@ -408,6 +413,12 @@ export async function generateTurf({ campaignId, passId, mode, params = {}, gene
     await dropOwnDrafts(inserted.map((t) => t._id));
     throw new UnrecoverableError(late.error);
   }
+
+  // Record (or clear) what this round targeted — for reproducibility, the page's "last cut with" line,
+  // and Add as new book, which re-applies it. Written only now, once the books are saved: written
+  // before the cut, a cut that then failed left the round's old books under conditions they were never
+  // cut with (docs/PROPOSAL_RECENT_VISITS.md §C.5).
+  await Pass.updateOne({ _id: passId }, { $set: { targetFilter: targeted ? params.targetFilter : null } });
 
   await onProgress?.({ phase: 'done', pct: 100, booksTotal: inserted.length });
   return { bookCount: inserted.length };

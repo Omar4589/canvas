@@ -7,7 +7,8 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
  *
  * Most callers want getSharedRedis() below, not this. A fresh client is only right for code
  * that owns its connection and closes it itself — today, the worker's boot probe (worker.js),
- * which quits as soon as the maxmemory-policy check answers.
+ * which quits as soon as the maxmemory-policy check answers, and the report:memory-watch console
+ * script (migrations/reportMemoryWatch.js), which disconnects once it has printed.
  *
  * BullMQ needs `maxRetriesPerRequest: null` + `enableReadyCheck: false` or it throws at boot.
  * Heroku Key-Value Store uses `rediss://` with a self-signed cert, so we relax TLS
@@ -58,7 +59,8 @@ export function createRedis() {
  * a Worker that would not start. The plan is now Premium 0 (40 connections); sharing keeps the
  * baseline far under either, with room for a deploy overlap and a second web dyno.
  *
- * Lazy and per-process: the web dyno opens it on its first getQueue() (Bull Board, at boot);
+ * Lazy and per-process: the web dyno opens it on its first getQueue() (Bull Board, at boot), and
+ * server.js hands the same one to the memory tripwire, which keeps its lines there;
  * the worker on its first Worker. Only closeQueues() (queues/index.js) should close it, last.
  */
 let shared = null;
