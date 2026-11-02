@@ -34,6 +34,7 @@ const { VoterNote } = await import('../src/models/VoterNote.js');
 const { ImportJob } = await import('../src/models/ImportJob.js');
 const { SavedSearch } = await import('../src/models/SavedSearch.js');
 const { ExportJob } = await import('../src/models/ExportJob.js');
+const { tzAbbrev } = await import('../src/utils/timezone.js');
 const { EXPORT_TYPES } = await import('../src/services/export/exportTypes.js');
 const { loadDncVoterIdSet } = await import('../src/services/export/exportScope.js');
 const { processExportJob } = await import('../src/services/export/exportProcessor.js');
@@ -837,8 +838,12 @@ test('results-by-voter: one row per voter at a visited door, sorted, with the do
   assert.strictEqual(alice[col('Address outcome')], 'Surveyed', 'completion is sticky');
   assert.strictEqual(alice[col('Address visits')], '4');
   assert.strictEqual(alice[col('Rounds worked')], '2');
-  assert.strictEqual(alice[col('Address first visited (CDT)')], '2026-07-01');
-  assert.strictEqual(alice[col('Address last visited (CDT)')], '2026-07-11');
+  // The export labels its date columns with the zone's abbreviation on the day it runs (tzAbbrev at
+  // now: CDT in summer, CST from the first Sunday of November). Hard-coding 'CDT' here failed every run
+  // after daylight saving ended on 2026-11-01, so ask the same function the export does.
+  const zone = tzAbbrev(TZ) || TZ;
+  assert.strictEqual(alice[col(`Address first visited (${zone})`)], '2026-07-01');
+  assert.strictEqual(alice[col(`Address last visited (${zone})`)], '2026-07-11');
   assert.strictEqual(alice[col('Last visited by first name')], 'Ada');
   assert.strictEqual(alice[col('Last visited by last name')], 'Knocks');
   assert.strictEqual(alice[col('Last visited by status')], 'active', 'three cells, so a departed canvasser reads as departed');
