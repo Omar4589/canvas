@@ -41,6 +41,9 @@ const DAY1 = '2026-06-10';
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
+  // The voter and household indexes in place before any fixture, as in production, rather than whenever
+  // Mongoose's background build happens to land (see the Voter IDs and address keys below).
+  await Promise.all([Voter.init(), Household.init()]);
   for (const M of [Organization, User, Membership, Campaign, CampaignManager, SurveyTemplate, SurveyResponse, Voter, Household]) {
     await M.deleteMany({});
   }
@@ -101,19 +104,24 @@ before(async () => {
 
   // Voters/households raw-inserted with just what populate reads (the drill endpoints
   // only project fullName/party + address fields). One voter per response — passId is
-  // null on all rows, so the unique {voterId,passId} index demands distinct voters.
+  // null on all rows, so the unique {voterId,passId} index demands distinct voters. Each gets a Voter
+  // ID of its own too: rows are unique by {campaignId, stateVoterId} (models/Voter.js), and rows with
+  // none collide on null whenever Mongoose's background index build beats this insert, as it
+  // sometimes does on GitHub (two other suites failed that way on 2026-11-02).
   const voterIds = Array.from({ length: 7 }, () => new mongoose.Types.ObjectId());
   await Voter.collection.insertMany(
     voterIds.map((id, i) => ({
-      _id: id, organizationId: org._id, campaignId: C._id,
+      _id: id, organizationId: org._id, campaignId: C._id, stateVoterId: `DRILL-${i + 1}`,
       fullName: `Drill Voter ${i + 1}`, party: i % 2 ? 'R' : 'D', isActive: true,
     }))
   );
   const h1 = new mongoose.Types.ObjectId();
   const h2 = new mongoose.Types.ObjectId();
+  // An address key each: households are unique by {campaignId, normalizedAddress} (models/Household.js),
+  // and two without one collide on null, like the voters above.
   await Household.collection.insertMany([
-    { _id: h1, organizationId: org._id, campaignId: C._id, addressLine1: '101 Main St', city: 'Tyler', state: 'TX', zipCode: '75701', isActive: true },
-    { _id: h2, organizationId: org._id, campaignId: C._id, addressLine1: '202 Oak Ave', city: 'Tyler', state: 'TX', zipCode: '75702', isActive: true },
+    { _id: h1, organizationId: org._id, campaignId: C._id, addressLine1: '101 Main St', city: 'Tyler', state: 'TX', zipCode: '75701', normalizedAddress: '101 MAIN ST|TYLER|TX|75701', isActive: true },
+    { _id: h2, organizationId: org._id, campaignId: C._id, addressLine1: '202 Oak Ave', city: 'Tyler', state: 'TX', zipCode: '75702', normalizedAddress: '202 OAK AVE|TYLER|TX|75702', isActive: true },
   ]);
 
   const support = (text, ids = []) => ({
@@ -447,13 +455,15 @@ test('write-in answers: counted, labelled, drillable, and never confused with a 
   });
 
   const vIds = Array.from({ length: 5 }, () => new mongoose.Types.ObjectId());
+  // A Voter ID each, for the same reason as the drill voters above.
   await Voter.collection.insertMany(vIds.map((id, i) => ({
-    _id: id, organizationId: org2._id, campaignId: camp._id, fullName: `Write-in Voter ${i + 1}`, isActive: true,
+    _id: id, organizationId: org2._id, campaignId: camp._id, stateVoterId: `WRITEIN-${i + 1}`,
+    fullName: `Write-in Voter ${i + 1}`, isActive: true,
   })));
   const hh = new mongoose.Types.ObjectId();
   await Household.collection.insertMany([{
     _id: hh, organizationId: org2._id, campaignId: camp._id,
-    addressLine1: '9 Elm St', city: 'Tyler', state: 'TX', zipCode: '75701', isActive: true,
+    addressLine1: '9 Elm St', city: 'Tyler', state: 'TX', zipCode: '75701', normalizedAddress: '9 ELM ST|TYLER|TX|75701', isActive: true,
   }]);
 
   let vi = 0;

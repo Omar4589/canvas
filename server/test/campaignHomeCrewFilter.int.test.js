@@ -80,9 +80,11 @@ const knock = (hh, pass, user, coordinatorId, at, actionType = 'not_home') =>
 
 let voterSeq = 0;
 const respond = async (hh, pass, user, coordinatorId, optionId, at) => {
+  // A Voter ID of its own: rows are unique by {campaignId, stateVoterId} (models/Voter.js), and two
+  // with none collide on null (GitHub, 2026-11-02, when the index happened to be built first).
   const voter = await Voter.collection.insertOne({
     organizationId: ctx.org._id, campaignId: ctx.campaign._id, householdId: hh._id,
-    fullName: `Crew Voter ${++voterSeq}`, isActive: true,
+    stateVoterId: `CREW-${++voterSeq}`, fullName: `Crew Voter ${voterSeq}`, isActive: true,
   });
   const text = optionId === 'opt_yes' ? 'Yes' : 'No';
   await SurveyResponse.create({
@@ -111,6 +113,10 @@ const optionCount = (resultsJson, optId) => {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
+  // The voter indexes in place before any fixture, as in production. Left to Mongoose's background
+  // build they land before or after the fixtures depending on the machine, so a fixture production
+  // would refuse passed here some days and failed others.
+  await Voter.init();
   for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity,
     SurveyResponse, SurveyTemplate, Voter, Household, Effort, Pass, CampaignAssignment])
     await M.deleteMany({});

@@ -50,12 +50,18 @@ before(async () => {
     isActive: true, status: 'unknocked',
   });
 
-  // Recreate the LEGACY index state: old unique pair present, new pair absent.
+  // Recreate the LEGACY index state: old unique pair present, new pair absent. Mongoose's background
+  // build of the model's own indexes races this setup, so wait for it first: when it landed first, its
+  // non-unique {organizationId, stateVoterId} index (the same auto-name as the legacy one) refused the
+  // createIndex below (GitHub, 2026-11-02), and when it landed last the new unique pair came back. Then
+  // drop both pairs, so the state is exact either way. --apply's syncIndexes rebuilds them.
+  await Voter.init();
   const indexes = await Voter.collection.indexes();
   for (const ix of indexes) {
-    if (ix.unique && ix.key?.campaignId === 1 && ix.key?.stateVoterId === 1) {
-      await Voter.collection.dropIndex(ix.name);
-    }
+    const k = ix.key || {};
+    const orgPair = k.organizationId === 1 && k.stateVoterId === 1 && Object.keys(k).length === 2;
+    const newUniquePair = ix.unique && k.campaignId === 1 && k.stateVoterId === 1;
+    if (orgPair || newUniquePair) await Voter.collection.dropIndex(ix.name);
   }
   await Voter.collection.createIndex({ organizationId: 1, stateVoterId: 1 }, { unique: true });
 

@@ -27,7 +27,9 @@ let base;
 const ctx = {};
 
 // A campaign's households by status. `voted` = fully-voted + unknocked (coverageBucketExpr
-// remaps it), everything else stores its literal status.
+// remaps it), everything else stores its literal status. Each has an address key of its own:
+// households are unique by {campaignId, normalizedAddress} (models/Household.js), and rows without
+// one collide on null whenever that index is built before the seed.
 function seedDocs(orgId, campaignId, counts) {
   const docs = [];
   for (const [status, n] of Object.entries(counts)) {
@@ -35,6 +37,7 @@ function seedDocs(orgId, campaignId, counts) {
       docs.push({
         organizationId: orgId,
         campaignId,
+        normalizedAddress: `${docs.length + 1} SEED ST|TOWN|TX|75701`,
         isActive: true,
         fullyVoted: status === 'voted',
         status: status === 'voted' ? 'unknocked' : status,
@@ -47,6 +50,9 @@ function seedDocs(orgId, campaignId, counts) {
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
+  // The household indexes in place before the seed, as in production, rather than whenever Mongoose's
+  // background build happens to land.
+  await Household.init();
   for (const M of [Organization, User, Membership, Campaign, Household]) await M.deleteMany({});
 
   const org = await Organization.create({ name: 'Rollup Org', slug: 'rollup-org', isActive: true });
@@ -125,7 +131,7 @@ test('the rollup does not count a dnc-suppressed unknocked door as knocked', { s
   // rollup's old hand-rolled check (unknocked/voted/restricted) let this through.
   await Household.collection.insertOne({
     organizationId: ctx.org._id, campaignId: ctx.A._id, isActive: true,
-    fullyDnc: true, status: 'unknocked',
+    normalizedAddress: 'DNC DOOR|TOWN|TX|75701', fullyDnc: true, status: 'unknocked',
   });
   const res = await authed('/admin/reports/campaign-rollup');
   const json = await res.json();

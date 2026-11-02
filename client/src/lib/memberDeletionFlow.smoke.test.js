@@ -508,7 +508,12 @@ test('no answer at all: back to a reloaded review that says so, and it closes if
   click(button('Delete permanently'));
   await waitFor(() => heldCall((h) => h.path.endsWith('/deletion-check')), 'the review to reload');
   assert.ok(calls.slice(before).some((c) => c.includes('/stats')), 'the stats reload too');
-  const note = elements().find((e) => e.getAttribute('role') === 'alert');
+  // The reload's request goes out from the same handler that sets the note, a render BEFORE the note
+  // is on screen, so a busy machine can poll in that gap (a GitHub run did, 2026-11-02): wait for the
+  // note, with focus on the review, rather than reading the screen the moment the request appears.
+  const alertNote = () => elements().find((e) => e.getAttribute('role') === 'alert');
+  await waitFor(() => alertNote() && document.activeElement.contains(alertNote()), 'the note, with focus on the review');
+  const note = alertNote();
   assert.ok(note, 'the note is a live region');
   assert.equal(
     words(note),
