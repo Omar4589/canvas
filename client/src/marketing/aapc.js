@@ -17,6 +17,7 @@ export const AAPC = {
   // Midnight here decides the day: the Post-Mortem's own clock.
   timeZone: 'America/New_York',
   start: '2026-11-01', // the banner shows from the day /aapc shipped (the owner, 2026-11-01: "today")
+  day: '2026-11-17', // the event itself — the console's Website page marks it on its visits chart
   switchOn: '2026-11-18', // the after-event texts from this day
   end: '2026-11-25', // the banner is gone from this day (live "through at least Nov 24")
   bannerHref: '/aapc?src=home-banner',

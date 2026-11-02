@@ -4708,7 +4708,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     - **(f) Tests.** `test/demoRequestStore.int.test.js` (saved fields and the 730-day expiry; a failed
       email still saved and answered 200; bots never saved; super-admin-only read, handle and delete;
       visits per day with split rows summed), `test/demoRequest.test.js` (9 cases, no DB),
-      `test/siteVisits.test.js`, `test/demoOptionsMirror.test.js`.
+      `test/siteVisits.test.js`, `test/demoOptionsMirror.test.js`. *[2026-11-02: the visits read is now
+      `GET /traffic`, tested in `test/siteTraffic.int.test.js` — item 55.]*
     - **(g) [2026-11-01, Phase 2 of the AAPC landing — committed with it; item 51 itself shipped in
       `27e8711`.]** Three additions, none a new kind of data or recipient:
       - **An optional mobile number** on a demo request that books a meeting (any form that asks When? —
@@ -4909,6 +4910,53 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     - **(d) Tests.** Server `test/refusedUploads.int.test.js` (17) and `test/refusalRecorder.test.js` (7), and
       the deletion suites with `RefusedUpload` in their sweeps; phone `lib/queueCore.test.js` (18) and
       `lib/queueRules.test.js` (10); client `notSaved` and `doorsNotSavedRender` tests.
+55. **[v7 2026-11-02 — The website's visit counts gain the hour and the kind of device (phone, tablet or
+    computer), and the canvasser app page is counted. BUILT 2026-11-02, uncommitted. Counts only: no new
+    personal information, no new recipient, no subprocessor, no customer notice. No published-policy edit
+    required; an optional general purpose clause is offered to the owner (e) below.]**
+    Plan: the owner's request of 2026-11-02 (a Website page that answers how traffic was today, how many came,
+    from where and how, kept simple and inside the current policy). The owner approved the design, with the
+    device split, the hour and the app page in it. Read from the code:
+    - **(a) What is stored.** `models/SiteVisitHour.js` (new): `{day, hour, device, count}` — the owner's
+      (Central) day and hour, `phone` | `tablet` | `computer`, and a number; one row per (day, hour, device).
+      Bumped by `services/site/siteVisits.js` `countVisit` beside the existing `SiteVisitDay` row, for
+      ARRIVALS on the marketing pages only (never a move between our own pages, never the app page). The
+      device class is worked out while the page is served, from the `User-Agent` and `Sec-CH-UA-Mobile`
+      headers the request already carries (the counter already read the user agent to leave bots out); the
+      header itself is never stored. On purpose these rows carry no page and no source: `SiteVisitDay
+      {day, path, source}` and `SiteVisitHour {day, hour, device}` share only the day, so no stored row ties
+      one visit's hour and device to the site it came from.
+    - **(b) The app page.** `app.js` now counts serves of `/app` (`client/public/app.html`) as `SiteVisitDay`
+      rows with path `/app` — the same day, path and source label as the marketing pages (item 51 (d)). The
+      Website page shows it on a line of its own.
+    - **(c) Retention.** Counts with no personal information, so no limit, as for `SiteVisitDay` (item 51
+      (d)). The unique index is synced at boot (`server.js` → `syncSiteVisitIndexes`); no build-indexes step.
+    - **(d) Who sees it.** Super-admins only: `GET /api/super-admin/website/traffic` (`requireAuth,
+      requireSuperAdmin`), which replaces `/visits`. It also counts `DemoRequest` rows by day, by the form's
+      "How did you hear about us?", by page and by tag — fields super-admins already read one by one on the
+      same page (item 51 (c)); no new reader. One honest limit: on a quiet day a super-admin could guess that
+      a request sent at 2:05 PM came from the one phone that arrived that hour. That is a guess from counts
+      about someone who chose to write to us, never a stored link — and it is why the device and hour must
+      never be stored on `DemoRequest` or shown beside a request.
+    - **(e) Claims checked.**
+      - privacy.html `:98` ("limited technical information, such as your IP address, the pages or resources
+        you request, and the date and time of your request"): the hour is the time of the request, and the
+        kind of device is technical information read from the same request; holds. Its purpose sentence
+        ("to operate, secure, and troubleshoot the Services") is read the way item 51 read it for the daily
+        count. If the owner wants the purpose stated outright, an optional clause in the general style —
+        *"and to understand, in aggregate, how people find and use our website"* — would do it. Not required
+        for any sentence to be true.
+      - privacy.html `:99` (no advertising cookies or third-party advertising trackers): holds — no cookie, no
+        script, no third party. `:110` (no sale, no sharing for advertising): holds.
+      - terms.html `:91` (aggregate usage statistics that identify no customer, user or individual):
+        consistent — the counts identify no one.
+      - DPA: website visitors' requests are not Customer Data; §6: no subprocessor.
+      - `docs/MARKETING_SITE.md` *No third-party tracking or analytics*: still true; its wording now says
+        "our own counts of page loads".
+    - **(f) Tests.** `test/siteVisits.test.js` (device, hour, channels, own-page and reserved tags),
+      `test/siteTraffic.int.test.js` (page serves write the rows; hour rows carry no page or source; the boot
+      sync builds the index; the Traffic read; super-admins only); client `lib/siteTraffic.test.js` and
+      `lib/websiteTrafficRender.smoke.test.js`.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 

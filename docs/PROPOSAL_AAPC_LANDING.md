@@ -13,7 +13,7 @@ build from the same text. What shipped is documented where it lives: [MARKETING_
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Brief §3–6, and the §7.11 words removed from the current page | **Committed 2026-11-01 (`27e8711`)** — see *Phase 1, as built* |
-| 2 | §7–9 (new page structure, /aapc), the offline-queue fix in §10 | **Website half BUILT 2026-11-01, uncommitted** — see *Phase 2 (website), as built*; the queue fix is [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) (two review rounds done; not built) |
+| 2 | §7–9 (new page structure, /aapc), the offline-queue fix in §10 | **Website half committed 2026-11-01 (`162feb1`)** — see *Phase 2 (website), as built*; **the queue fix committed 2026-11-01 (`fd7bc5e`)** — [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) §P, release steps in [OPERATIONS.md](OPERATIONS.md) (the owner's two privacy-policy edits go live before its phone update) |
 | 3 (after AAPC) | The rest of §10: the iOS fake-GPS check, isolation tests before any trust page, later polish | Not started |
 
 ## Owner rulings during the build (2026-11-01)

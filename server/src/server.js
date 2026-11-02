@@ -4,6 +4,7 @@ import { connectDb } from './config/db.js';
 import { syncClientReportIndexes } from './services/reports/clientReportIndexes.js';
 import { syncPacePauseIndexes } from './services/audit/pacePause.js';
 import { drainRefusalWrites, syncRefusedUploadIndexes } from './middleware/refusalRecorder.js';
+import { syncSiteVisitIndexes } from './services/site/siteVisits.js';
 import { startMemoryWatch } from './middleware/memoryWatch.js';
 import { getSharedRedis } from './queues/connection.js';
 
@@ -23,6 +24,9 @@ async function main() {
   // Doors not saved: the one-row-per-queue-item index and the 180-day expiry, before the first refusal can
   // be recorded. This dyno is the collection's only writer (middleware/refusalRecorder.js).
   await syncRefusedUploadIndexes('canvass-server');
+  // The website's by-the-hour visit counts: one row per hour and device, before the first page serve can
+  // write one (services/site/siteVisits.js). Served, and so written, only by this dyno.
+  await syncSiteVisitIndexes('canvass-server');
   const app = createApp();
   const server = app.listen(PORT, () => {
     console.log(`[canvass-server] listening on http://localhost:${PORT}`);

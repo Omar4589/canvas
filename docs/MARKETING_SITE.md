@@ -137,14 +137,46 @@ Heroku dashboard):
 Then the link and password go into `client/src/marketing/siteFacts.js` (`SAMPLE_REPORT`), and every
 "Open a sample report" appears. If it ever reports *locked*: **Unlock now** in Share — never rotate.
 
-## Visit counts
+## Traffic: the Website page
 
-The super-admin **Website** page shows how many times the homepage and `/aapc` were loaded each day,
-page by page, split by where visitors came from: a link's own tag (the banner's `home-banner`), the
-website that sent them (like google.com), "internal" (a move from one of our pages to another), or
-"direct" — which is what a scan of the untagged QR code looks like. The counting happens on our own
-server: no cookies, no tracking script, no stored IP addresses; search-engine crawlers and link
-previews are left out.
+The super-admin **Website** page opens on **Traffic**, so the first thing you see is today:
+
+- **Visits today**, next to how many there were by this time of day yesterday and on the same day last
+  week. Visits are counted by the hour, so the hour you're in is shared out evenly by the minute; a day
+  from before visits were counted by the hour shows its whole-day total instead.
+- **Demo requests today**, and how many are still open.
+- **On phones**: the share of today's visits on a phone (tablets and computers next to it).
+- **Top way in**: the way most of today's visitors got here.
+
+Below that, pick **7, 30 or 90 days**:
+
+- **Visits per day**, a bar chart. Click a day to see it hour by hour. Dots under the bars mark the days
+  a demo request came in, and a line marks the AAPC event (Nov 17). **Show as a table** lists every
+  number.
+- **By the hour**: today, or the day you clicked, with how its visitors got here and on what.
+- **How they got here**, in five groups: **QR code & direct** (QR scans, typed or saved addresses, links
+  in emails and texts — the printed ad's QR code has no tag, so its scans land here), **Search & AI**
+  (Google, Bing, DuckDuckGo, ChatGPT and the like), **Social media**, **Other websites**, and **Tagged
+  links** (links shared with a `?src=` tag). Then the top sites and tags by name.
+- **Where they landed**: the homepage or the AAPC page. Moving from one of our pages to another (the
+  homepage's AAPC banner, say) isn't a new visit; those moves are listed on their own, and so is the
+  canvasser app page, `/app`, whose visitors are mostly canvassers a customer sent there.
+- **Phones and computers** for the period.
+- **What it turned into**: the period's demo requests, about how many visits each one took, how people
+  said they heard about us, the page they sent it from, and whether they came through the homepage's AAPC
+  banner or a tagged link.
+
+With **Live** on, the tab refreshes itself every minute. The second tab, **Demo requests**, is the
+inbox; it shows how many are open.
+
+**How it's counted.** On our own server, as each page is sent: no cookies, no tracking script, no stored
+IP addresses or browser details; search-engine crawlers and link previews are left out. A reload counts
+again, so these are visits, not people. The hour and the kind of device are kept as separate totals, never
+tied to where a visit came from. Counting them began the day this shipped, and so did counting the canvasser
+app page, so earlier days show a dash for those in the table. An iPad usually counts as a computer, because
+its browser describes itself as a Mac. A link in an email or a text counts as QR code & direct, even when
+an Android mail or messaging app names itself; the banner's AAPC-page address, copied and sent on, counts
+as a visit like any other link.
 
 ## The `/app` page
 
@@ -177,8 +209,8 @@ from the footer.
   because that is the billing unit, and a firm running three races pays three times. See
   [BILLING.md](BILLING.md).
 - **No third-party tracking or analytics.** No third-party scripts of any kind run on the marketing
-  site, and nothing sets a cookie. The one measurement is our own daily count of homepage loads
-  (*Visit counts* above), kept on our server with no personal information in it.
+  site, and nothing sets a cookie. The one measurement is our own counts of page loads (*Traffic* above),
+  kept on our server with no personal information in them.
 
 ## What the page claims — and the words we avoid
 
@@ -305,7 +337,8 @@ flash):**
 `entry-prerender.jsx`'s `PAGES` — `path`, `file`, `module`, `Component`, and a `head` (title,
 description, canonical `url`, optional `robots`, OG title and description) unless it should carry the
 homepage's; (3) a loader in `main.jsx`'s `PRERENDERED` map, so it loads its module before hydrating;
-(4) a row in `PRERENDERED_PAGES` (it's then visit-counted too, a column on the Website page). Its
+(4) a row in `PRERENDERED_PAGES` (it's then visit-counted too, a landing page on the Website page's
+Traffic tab — give it a name in `pageLabel`, `client/src/lib/siteTraffic.js`, or it shows its path). Its
 `useEffect` adds the `marketing` class and `stampAapc()` for a client-side arrival, as both pages do.
 
 **Check a build:** `npm run build` ends with `prerendered / → dist/.prerendered/index.html` and
@@ -443,7 +476,8 @@ pinned identical by `server/test/demoOptionsMirror.test.js`.
 Super-admins work the saved requests on **`/super-admin/website`** (`routes/superAdmin/website.js`):
 `GET /api/super-admin/website/demo-requests?status=open|handled|all`, `PATCH …/:id {handled}` (records
 who handled it), `DELETE …/:id` (permanent — for a person's deletion request), and
-`GET /api/super-admin/website/visits?days=60`.
+`GET /api/super-admin/website/traffic?days=30` (1–366; the page asks for 7, 30 or 90) — *Visit counts*
+below.
 
 Mail goes out as kind `demoRequest` ([`templates.js`](../server/src/services/mail/templates.js)),
 the only template addressed to Doorline rather than to a customer. It overrides the shared layout's
@@ -463,18 +497,60 @@ saved, and the Website routes' access rules are in `server/test/demoRequestStore
 
 ## Visit counts
 
-`services/site/siteVisits.js` bumps `SiteVisitDay {day, path, source, count}` as `app.js` serves a
-prerendered page. A visit is a `GET` that wants HTML from something that isn't a bot (a broad
-user-agent filter, no user agent at all counts as a script) and isn't a prefetch/prerender. `day` is
-the owner's calendar day (Central). `source` is the page's valid `?src=` tag, else `internal` when
-the browser says the request came from one of our own pages (`Sec-Fetch-Site: same-origin` — our pages
-send no Referer, so a hop from `/aapc` to the homepage would otherwise read as `direct`, the QR-scan
-bucket), else the referring site's host without `www.` (only the host — never the URL), else
-`direct`. Fire-and-forget: a failed
-write costs one count, never the page. No IP, cookie or user agent is stored. The unique
-`{day, path, source}` index needs `migrate:build-indexes`; until then racing first visits can split a
-key across rows, which the reader sums. Tests: `server/test/siteVisits.test.js` (the rules) and
-`demoRequestStore.int.test.js` (the per-day read).
+`services/site/siteVisits.js` `countVisit` runs as `app.js` serves a prerendered page (`PRERENDERED_PAGES`)
+or `/app` (the `STATIC_PAGES` handler, `APP_PAGE`). A visit is a `GET` that wants HTML from something that
+isn't a bot (a broad user-agent filter; no user agent at all counts as a script) and isn't a
+prefetch/prerender. It writes two kinds of row, fire-and-forget (a failed write costs one count, never the
+page; the returned promise settles when both have, for tests):
+
+- **`SiteVisitDay {day, path, source, count}`**, for every visit. `day` is the owner's calendar day
+  (Central). `source` is the page's valid `?src=` tag (never the reserved words `direct` or `internal`;
+  a tag in `OWN_PAGE_TAGS` only when `Sec-Fetch-Site` is `same-origin` or absent, so the banner's /aapc
+  address shared elsewhere is filed by where it really came from), else `internal` when the browser says the request came from one of our own pages (`Sec-Fetch-Site:
+  same-origin` — our pages send no Referer, so a hop from `/aapc` to the homepage would otherwise read as
+  `direct`, the QR-scan bucket), else the referring site's host without `www.` (only the host — never the
+  URL), else `direct`. Its unique `{day, path, source}` index needs `migrate:build-indexes`; until then
+  racing first visits can split a key across rows, which the reader sums.
+- **`SiteVisitHour {day, hour, device, count}`**, for an ARRIVAL on a marketing page only — never a move,
+  never `/app`. `hour` is the owner's (0–23; the hour a fall-back repeats holds both); `device` is
+  `deviceOf(req)`: `Sec-CH-UA-Mobile: ?1` → phone, else the user agent (iPad / tablet / Android without
+  "Mobile" → tablet; Mobi / iPhone / Android → phone; else computer — a new iPad's Safari says Mac). These
+  rows carry no page and no source on purpose (privacy record item 55). Its unique index is synced at boot
+  (`server.js` → `syncSiteVisitIndexes`), so no build-indexes step.
+
+No IP, cookie or user agent is stored. **Arrivals vs moves:** `channelOf(source)` returns `null` for a move
+— `internal`, or a tag in `OWN_PAGE_TAGS` (`home-banner`, the homepage banner's link to `/aapc`, pinned to
+`client/src/marketing/aapc.js` by `siteVisits.test.js`; add any new tag our own pages put on a link to
+each other) — else the channel: `direct` (also webmail sites and the Android mail and messaging apps that
+name themselves as the referrer, `DIRECT_HOSTS`), `search` (a search engine's own address on any country
+domain, plus AI assistants), `social` (networks, their shorteners and apps; subdomains match), `tagged` (no
+dot: a `?src=` tag) or `other`.
+
+**The read**, `GET /api/super-admin/website/traffic?days=N` (`routes/superAdmin/website.js`, super-admin
+only; a bad `days` is a 400): `days[]` oldest first with zeros — `visits` (arrivals on the marketing
+pages), `channels`, `moves`, `appPage`, `devices`, `hours[24]`, `demoRequests` (by `visitDay` of
+`createdAt`); `today {day, hour, yesterday, lastWeek}`, each comparison day with `visits` and `byNow`
+(its whole hours before this one plus this hour's share by the minute — the owner's zone is a whole number
+of hours from UTC — or `null` unless the day came after `hoursSince`, the first day with hour rows, which
+began mid-day), read from at least 8 days whatever the range; and for
+the range, `sources` (non-direct arrivals with their channel, top 25), `pages`, `movesTo`, and
+`demoRequests {total, heardAbout, pages, tags}` (an untagged `/aapc` request's `aapc` is its page, not a
+tag; the tab names `home-banner` as the homepage's AAPC banner, `tagLabel`). Ranked biggest first, ties
+alphabetical with "didn't say" (`null`) last. The open count comes from `GET /demo-requests` (`open`). The
+table shows a dash, not a zero, for devices and the app page on days before `hoursSince`: both began with
+the same release.
+
+**The tab**, `client/src/components/website/TrafficTab.jsx` (`TrafficView` renders one read; the tab owns
+the range and the picked day), polls every 60 s under `lib/livePoll.js`'s contract with the open-count
+query beside it (`SuperAdminWebsitePage.jsx`, whose tab lives in `?tab=requests`). Charts are plain markup
+in theme tokens: `VisitColumns.jsx` (columns with a tooltip on hover and focus, one Tab stop and arrow
+keys, the selected day full brand and the rest `/75`, a dots strip for request days, the AAPC line from
+`AAPC.day`) and `ShareRows.jsx`. Words and sums: `client/src/lib/siteTraffic.js`.
+
+Tests: `server/test/siteVisits.test.js` (the rules: visit, source, channel, own-page and reserved tags,
+device, hour), `server/test/siteTraffic.int.test.js` (real page serves through `app.js` against a
+fixture dist write the rows; the read's numbers; super-admins only), client `lib/siteTraffic.test.js` and
+`lib/websiteTrafficRender.smoke.test.js`.
 
 ## Privacy
 

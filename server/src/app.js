@@ -18,7 +18,7 @@ import {
 } from './middleware/loginRateLimit.js';
 import { requireBullBoardAuth, createBullBoardRouter } from './queues/bullBoard.js';
 import { WEB_SEGMENTS } from './webRoutes.js';
-import { countVisit } from './services/site/siteVisits.js';
+import { countVisit, APP_PAGE } from './services/site/siteVisits.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Resolves to <repo>/client/dist when running from server/src/. Overridable so the static +
@@ -39,7 +39,8 @@ const STATIC_PAGES = [
   ['/delete-account', 'delete-account.html'],
   // Not a legal notice, but here for the same reason: /app has to be findable in search and
   // correct in a link preview, and the SPA shell would hand it the homepage's canonical tag and
-  // OG copy. See the comment block in client/public/app.html.
+  // OG copy. See the comment block in client/public/app.html. Its serves are visit-counted, on a
+  // line of their own on the Website page (services/site/siteVisits.js → APP_PAGE).
   ['/app', 'app.html'],
 ];
 // The public marketing pages, prerendered to real HTML by the client build (client/scripts/prerender.js)
@@ -48,7 +49,7 @@ const STATIC_PAGES = [
 // serve (dotfiles: 'ignore' below), so each is reachable only at its clean URL. dist/index.html stays
 // the EMPTY shell: the SPA fallback hands it to every console route. A missing file (a dist built
 // before prerendering) falls through to that shell, exactly as before. Each one is also a visit-counted
-// page (the Website page's columns). Adding one: docs/MARKETING_SITE.md → "Adding a prerendered page".
+// page (the Website page's traffic). Adding one: docs/MARKETING_SITE.md → "Adding a prerendered page".
 const PRERENDERED_DIR = path.join(CLIENT_DIST, '.prerendered');
 const PRERENDERED_PAGES = [
   ['/', 'index.html'],
@@ -175,6 +176,7 @@ export function createApp() {
       const abs = path.join(CLIENT_DIST, file);
       if (!fs.existsSync(abs)) continue; // stale dist → fall through to the SPA fallback below
       app.get(route, (req, res, next) => {
+        if (route === APP_PAGE) countVisit(req, APP_PAGE);
         res.sendFile(abs, { maxAge: 0 }, (err) => (err ? next(err) : undefined));
       });
     }

@@ -1,20 +1,25 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import Pager from '../components/Pager.jsx';
+import { Tabs } from '../components/ui/index.js';
+import TrafficTab, { TRAFFIC_POLL_MS } from '../components/website/TrafficTab.jsx';
+import { livePollOptions } from '../lib/livePoll.js';
 
-// The public website, seen from the inside: /super-admin/website. Two things the marketing site
-// produces and nothing else in the product does —
-//   · demo requests: every submission of the site's one form, saved before its notice email so a
-//     failed send can't lose it (routes/public/demoRequest.js). Mark one handled once someone has
-//     replied; delete it when the person asks (Privacy Policy, "Demo requests" — it also expires on
-//     its own 24 months after it came in);
-//   · visits: page loads of the public pages per day, by source — counted on the server with no
-//     cookie and no stored IP. The printed AAPC ad's QR code carries no tag, so its scans show up as
-//     "direct" (and in the demo form's "How did you hear about us?").
+// The public website, seen from the inside: /super-admin/website. Two tabs, for the two things the
+// marketing site produces and nothing else in the product does —
+//   · Traffic (the default; components/website/TrafficTab.jsx): today's visits against yesterday and
+//     last week, then the last 7, 30 or 90 days — per day and by the hour, how people got here, where
+//     they landed, on what, and the demo requests it turned into. Counted on our server with no cookie
+//     and no stored IP; the printed AAPC ad's QR code carries no tag, so its scans count as "QR code &
+//     direct" (and show in the demo form's "How did you hear about us?");
+//   · Demo requests (?tab=requests): every submission of the site's one form, saved before its notice
+//     email so a failed send can't lose it (routes/public/demoRequest.js). Mark one handled once
+//     someone has replied; delete it when the person asks (Privacy Policy, "Demo requests" — it also
+//     expires on its own 24 months after it came in). The tab shows how many are open.
 // Platform-scoped, super-admin only.
 const LIMIT = 50;
-const VISIT_DAYS = 60;
 
 const STATUS_TABS = [
   ['open', 'Open'],
@@ -165,92 +170,52 @@ const DemoRequests = () => {
   );
 };
 
-// "Nov 17" from "2026-11-17", read as a calendar date (never shifted by the viewer's time zone).
-const dayLabel = (day) => {
-  const [y, m, d] = day.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, { month: 'short', day: 'numeric', weekday: 'short', timeZone: 'UTC' });
-};
-
-const Visits = () => {
-  const visitsQ = useQuery({
-    queryKey: ['super-admin-website', 'visits', VISIT_DAYS],
-    queryFn: () => api(`/super-admin/website/visits?days=${VISIT_DAYS}`),
+const SuperAdminWebsitePage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') === 'requests' ? 'requests' : 'traffic';
+  const setTab = (next) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'traffic') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params);
+  };
+  const [live, setLive] = useState(true);
+  // The open count on the Demo requests tab, and in the Traffic tab's tile — one read, refreshed with the
+  // traffic while Live, and by every Mark handled or Delete (they refresh the whole demo-requests key).
+  const openQ = useQuery({
+    queryKey: ['super-admin-website', 'demo-requests', 'open-count'],
+    queryFn: ({ signal }) => api('/super-admin/website/demo-requests?status=open&limit=1', { signal }),
+    select: (d) => d.open,
+    ...livePollOptions(live && tab === 'traffic', true, TRAFFIC_POLL_MS),
   });
-  const days = visitsQ.data?.days || [];
-  const sources = (visitsQ.data?.sources || []).slice(0, 5);
-  // One column per page the server counts (PRERENDERED_PAGES in server/src/app.js), the homepage first.
-  const pages = [...new Set(days.flatMap((d) => Object.keys(d.byPath || {})))].sort((a, b) => (a === '/' ? -1 : b === '/' ? 1 : a.localeCompare(b)));
-  const pageLabel = (path) => (path === '/' ? 'Homepage' : path);
-  const peak = Math.max(1, ...days.map((d) => d.total));
-  const total = days.reduce((n, d) => n + d.total, 0);
+  const open = openQ.data;
 
   return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-base font-semibold text-fg">Visits</h2>
-        <p className="mt-0.5 max-w-2xl text-sm text-fg-muted">
-          Page loads per day for the last {VISIT_DAYS} days, Central time ({total.toLocaleString()} in all), for the homepage and
-          /aapc. Counted on our server — no cookies, no stored IP addresses; crawlers and previews are left out. A scan of
-          the printed AAPC ad&apos;s QR code counts as &ldquo;direct&rdquo;; moving from one of our pages to another counts as
-          &ldquo;internal&rdquo;.
-        </p>
-      </div>
-      {visitsQ.isLoading && <p className="text-sm text-fg-subtle">Loading…</p>}
-      {days.length > 0 && (
-        <div className="overflow-x-auto rounded border border-border">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-muted text-xs uppercase tracking-wide text-fg-muted">
-              <tr>
-                <th className="px-3 py-2">Day</th>
-                <th className="px-3 py-2 text-right">Visits</th>
-                <th className="w-1/4 px-3 py-2" aria-label="Bar" />
-                {pages.map((p) => (
-                  <th key={p} className="px-3 py-2 text-right normal-case">{pageLabel(p)}</th>
-                ))}
-                {sources.map((s) => (
-                  <th key={s.source} className="px-3 py-2 text-right normal-case">{s.source}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {[...days].reverse().map((d) => (
-                <tr key={d.day} className="border-t border-border">
-                  <td className="whitespace-nowrap px-3 py-1.5 text-fg-muted">{dayLabel(d.day)}</td>
-                  <td className="px-3 py-1.5 text-right font-medium tabular-nums text-fg">{d.total.toLocaleString()}</td>
-                  <td className="px-3 py-1.5">
-                    <div className="h-2 rounded-full bg-brand-accent/70" style={{ width: `${(d.total / peak) * 100}%` }} />
-                  </td>
-                  {pages.map((p) => (
-                    <td key={p} className="px-3 py-1.5 text-right tabular-nums text-fg">
-                      {((d.byPath || {})[p] || 0).toLocaleString()}
-                    </td>
-                  ))}
-                  {sources.map((s) => (
-                    <td key={s.source} className="px-3 py-1.5 text-right tabular-nums text-fg-muted">
-                      {(d.bySource[s.source] || 0).toLocaleString()}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-};
-
-export default function SuperAdminWebsitePage() {
-  return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-6 p-6">
       <div>
         <h1 className="text-xl font-semibold text-fg">Website</h1>
         <p className="mt-1 max-w-2xl text-sm text-fg-muted">
-          What doorline.app brings in: demo requests from the site&apos;s form, and daily visits to the homepage and /aapc.
+          How doorline.app is doing: how many visits it gets, how people got there, and the demo requests it brings in.
         </p>
       </div>
-      <DemoRequests />
-      <Visits />
+      <Tabs
+        tabs={[
+          { key: 'traffic', label: 'Traffic' },
+          { key: 'requests', label: 'Demo requests', count: open ?? null, tone: open > 0 ? 'brand' : undefined },
+        ]}
+        value={tab}
+        onChange={setTab}
+        label="Website sections"
+      />
+      <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+        {tab === 'traffic' ? (
+          <TrafficTab live={live} onToggleLive={() => setLive((v) => !v)} openQ={openQ} onShowRequests={() => setTab('requests')} />
+        ) : (
+          <DemoRequests />
+        )}
+      </section>
     </div>
   );
-}
+};
+
+export default SuperAdminWebsitePage;

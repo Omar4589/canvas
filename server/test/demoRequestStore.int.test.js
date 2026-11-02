@@ -4,14 +4,13 @@ import http from 'node:http';
 import mongoose from 'mongoose';
 
 // Demo requests are SAVED, not just emailed (routes/public/demoRequest.js → models/DemoRequest.js),
-// and super-admins work them on /super-admin/website, beside the site's daily visit counts
-// (routes/superAdmin/website.js). The promises this pins:
+// and super-admins work them on /super-admin/website, beside the site's traffic
+// (routes/superAdmin/website.js; the traffic itself is siteTraffic.int.test.js). The promises this pins:
 //   · a real request is saved with what the person picked, where they came from, and an expiry
 //     24 months out (the published "up to 24 months");
 //   · a failed email no longer loses the lead — it is saved, and the prospect is told it went through;
 //   · bot submissions are never saved;
-//   · only super-admins can read, handle or delete them; delete is permanent;
-//   · visits come back per day (zeros included), by page and by source, split rows summed.
+//   · only super-admins can read, handle or delete them; delete is permanent.
 //
 //   MONGODB_URI_TEST=mongodb://127.0.0.1:PORT/demostore node --test test/demoRequestStore.int.test.js
 process.env.RESEND_API_KEY = 'test:accept';
@@ -23,8 +22,6 @@ const { createApp } = await import('../src/app.js');
 const { signUserToken } = await import('../src/services/auth/tokens.js');
 const { User } = await import('../src/models/User.js');
 const { DemoRequest, DEMO_REQUEST_RETENTION_DAYS } = await import('../src/models/DemoRequest.js');
-const { SiteVisitDay } = await import('../src/models/SiteVisitDay.js');
-const { visitDay } = await import('../src/services/site/siteVisits.js');
 const { outbox, clearOutbox } = await import('../src/services/mail/mailer.js');
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -40,7 +37,7 @@ const makeUser = (first, { isSuperAdmin = false } = {}) =>
 before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
-  for (const M of [User, DemoRequest, SiteVisitDay]) await M.deleteMany({});
+  for (const M of [User, DemoRequest]) await M.deleteMany({});
   const superU = await makeUser('Sue', { isSuperAdmin: true });
   const plainU = await makeUser('Pat');
   Object.assign(ctx, { sup: { token: signUserToken(superU), userId: superU._id }, plain: { token: signUserToken(plainU) } });
@@ -122,7 +119,7 @@ test('a bot submission is answered like a success and never saved', { skip }, as
 });
 
 test('only super-admins can read, handle and delete demo requests', { skip }, async () => {
-  for (const [method, path] of [['GET', '/super-admin/website/demo-requests'], ['GET', '/super-admin/website/visits']]) {
+  for (const [method, path] of [['GET', '/super-admin/website/demo-requests'], ['GET', '/super-admin/website/traffic']]) {
     assert.strictEqual((await call(method, path, ctx.plain)).status, 403, `${method} ${path} as a plain user`);
     assert.strictEqual((await call(method, path)).status, 401, `${method} ${path} signed out`);
   }
@@ -152,29 +149,4 @@ test('only super-admins can read, handle and delete demo requests', { skip }, as
   assert.strictEqual(await DemoRequest.countDocuments({ _id: id }), 0, 'gone for good');
   assert.strictEqual((await call('DELETE', `/super-admin/website/demo-requests/${id}`, ctx.sup)).status, 404);
   assert.strictEqual((await call('PATCH', '/super-admin/website/demo-requests/not-an-id', { ...ctx.sup, body: { handled: true } })).status, 400);
-});
-
-test('visits come back per day — zeros included — by page and by source, split rows summed', { skip }, async () => {
-  const today = visitDay();
-  const [y, m, d] = today.split('-').map(Number);
-  const twoDaysAgo = new Date(Date.UTC(y, m - 1, d - 2)).toISOString().slice(0, 10);
-  // Two rows for one key, as two racing first visits would leave before the unique index exists —
-  // production's state until `migrate:build-indexes` runs. Tests build indexes automatically, so drop
-  // that one first to be in the same state.
-  await SiteVisitDay.collection.dropIndex('day_1_path_1_source_1').catch(() => {});
-  await SiteVisitDay.collection.insertMany([
-    { day: today, path: '/', source: 'direct', count: 5 },
-    { day: today, path: '/', source: 'direct', count: 2 },
-    { day: today, path: '/', source: 'google.com', count: 3 },
-    { day: twoDaysAgo, path: '/', source: 'qr', count: 4 },
-    { day: '2020-01-01', path: '/', source: 'direct', count: 99 }, // outside the window
-  ]);
-  const res = await call('GET', '/super-admin/website/visits?days=3', ctx.sup);
-  assert.strictEqual(res.status, 200);
-  assert.deepStrictEqual(res.json.days.map((x) => x.total), [4, 0, 10], 'oldest first, the empty day as zero');
-  const last = res.json.days[2];
-  assert.strictEqual(last.day, today);
-  assert.deepStrictEqual(last.byPath, { '/': 10 });
-  assert.deepStrictEqual(last.bySource, { direct: 7, 'google.com': 3 });
-  assert.deepStrictEqual(res.json.sources, [{ source: 'direct', count: 7 }, { source: 'qr', count: 4 }, { source: 'google.com', count: 3 }]);
 });
