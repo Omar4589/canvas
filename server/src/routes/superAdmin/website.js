@@ -27,6 +27,7 @@ const shapeRequest = (r) => ({
   teamSize: r.teamSize,
   heardAbout: r.heardAbout,
   when: r.when,
+  phone: r.phone || null,
   message: r.message,
   source: r.source,
   page: r.page,

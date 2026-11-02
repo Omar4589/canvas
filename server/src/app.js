@@ -47,10 +47,13 @@ const STATIC_PAGES = [
 // then hydrates in place. They live in dist/.prerendered/, a dot-directory express.static refuses to
 // serve (dotfiles: 'ignore' below), so each is reachable only at its clean URL. dist/index.html stays
 // the EMPTY shell: the SPA fallback hands it to every console route. A missing file (a dist built
-// before prerendering) falls through to that shell, exactly as before. /aapc joins this list with its
-// page (docs/MARKETING_SITE.md).
+// before prerendering) falls through to that shell, exactly as before. Each one is also a visit-counted
+// page (the Website page's columns). Adding one: docs/MARKETING_SITE.md → "Adding a prerendered page".
 const PRERENDERED_DIR = path.join(CLIENT_DIST, '.prerendered');
-const PRERENDERED_PAGES = [['/', 'index.html']];
+const PRERENDERED_PAGES = [
+  ['/', 'index.html'],
+  ['/aapc', 'aapc.html'],
+];
 
 // The zero-JS 404 document. If a stale dist lacks it, serve the SPA shell WITH a 404 status —
 // App.jsx's catch-all renders its NotFoundPage, so the status code stays honest either way.

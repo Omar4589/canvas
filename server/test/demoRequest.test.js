@@ -65,7 +65,7 @@ after(async () => {
 });
 
 // The endpoint allows 20 requests/hour per IP and every test here shares 127.0.0.1, so this file
-// must stay well under that. It currently spends 9.
+// must stay well under that. It currently spends 10.
 const post = async (body) => {
   const res = await fetch(base, {
     method: 'POST',
@@ -144,13 +144,14 @@ test('the optional selects and where the form was opened reach the notice', asyn
     role: 'Canvassing firm',
     heardAbout: 'AAPC event',
     when: 'After the event',
+    phone: '(515) 555-0134',
     source: 'home-banner',
     page: '/aapc',
   });
   assert.strictEqual(res.status, 200);
   for (const half of ['html', 'text']) {
     const content = outbox[0][half];
-    for (const v of ['Canvassing firm', 'AAPC event', 'After the event', '/aapc', 'src=home-banner']) {
+    for (const v of ['Canvassing firm', 'AAPC event', 'After the event', '(515) 555-0134', '/aapc', 'src=home-banner']) {
       assert.ok(content.includes(v), `${v} in ${half}`);
     }
   }
@@ -163,6 +164,13 @@ test('a malformed ?src= tag or page is dropped, never a reason to lose the lead'
   assert.strictEqual(res.status, 200);
   assert.ok(!outbox[0].text.includes('Sent from'), 'nothing recorded for where it came from');
   assert.ok(!outbox[0].text.includes('evil.example'));
+});
+
+test('a mobile number that is not one is rejected, so a person who asked for a text is never silently dropped', async () => {
+  clearOutbox();
+  const res = await post({ ...VALID, when: 'After the event', phone: 'call me maybe' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(outbox.length, 0);
 });
 
 test('a select value the form never offers is rejected', async () => {

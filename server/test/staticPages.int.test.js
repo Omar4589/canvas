@@ -47,6 +47,10 @@ fs.writeFileSync(
   path.join(fixture, '.prerendered', 'index.html'),
   '<!doctype html><html lang="en" class="marketing"><body><div id="root" class="h-full" data-prerendered="landing"><h1>PRERENDERED-HOME</h1></div></body></html>'
 );
+fs.writeFileSync(
+  path.join(fixture, '.prerendered', 'aapc.html'),
+  '<!doctype html><html lang="en" class="marketing"><head><meta name="robots" content="noindex" /></head><body><div id="root" class="h-full" data-prerendered="aapc"><h1>PRERENDERED-AAPC</h1></div></body></html>'
+);
 fs.mkdirSync(path.join(fixture, '.vite'));
 fs.writeFileSync(path.join(fixture, '.vite', 'manifest.json'), '{}');
 
@@ -260,8 +264,19 @@ test('"/" serves the prerendered homepage; console routes keep the empty shell; 
     assert.match(text, /<div id="root"><\/div>/, p);
   }
 
-  for (const p of ['/.prerendered/index.html', '/.vite/manifest.json']) {
+  for (const p of ['/.prerendered/index.html', '/.prerendered/aapc.html', '/.vite/manifest.json']) {
     assert.strictEqual((await get(p)).status, 404, p);
+  }
+});
+
+test('"/aapc" serves its own prerendered page — with a ?src= tag too — and never the homepage', { skip }, async () => {
+  for (const p of ['/aapc', '/aapc?src=home-banner']) {
+    const res = await get(p);
+    assert.strictEqual(res.status, 200, p);
+    assert.match(res.headers.get('cache-control') || '', /max-age=0/, p);
+    const text = await res.text();
+    assert.match(text, /PRERENDERED-AAPC/, p);
+    assert.ok(!text.includes('PRERENDERED-HOME'), p);
   }
 });
 

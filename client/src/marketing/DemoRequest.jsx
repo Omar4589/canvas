@@ -3,13 +3,13 @@ import { api } from '../api/client.js';
 import { CONTACT_EMAIL } from './contact.js';
 import { isValidEmail } from '../lib/validators.js';
 import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN_AT_AAPC, WHEN_AFTER, SOURCE_PATTERN } from './demoOptions.js';
-import { aapcPhase } from './aapc.js';
+import { aapcEventPhase } from './aapc.js';
 
 // The demo request — the site's ONLY conversion action, and the single source of truth for it.
-// Every "Request a demo" control (nav, hero, cta band, and later /aapc and its banner) calls open()
-// from useDemoRequest() rather than linking anywhere, the same way every auth CTA reads from
-// useAuthCta(). Many buttons, one dialog, one form. The footer's "Contact" is deliberately NOT one of
-// them — it stays a plain mailto, the escape hatch for someone who'd rather write their own email.
+// Every "Request a demo" control (nav, hero, cta band, /aapc) is a DemoButton (DemoButton.jsx), which
+// calls open() from useDemoRequest() — the same way every auth CTA reads from useAuthCta(). Many
+// buttons, one dialog, one form. The footer's "Contact" is deliberately NOT one of them — it stays a
+// plain mailto, the escape hatch for someone who'd rather write their own email.
 //
 // It replaced a `mailto:`, which opened the visitor's mail client — and did VISIBLY NOTHING for
 // anyone whose OS has no mail handler (webmail in a desktop browser, i.e. much of the audience
@@ -26,8 +26,10 @@ const DemoRequestContext = createContext(null);
 
 /**
  * open(options) — show the demo dialog. Used by every "Request a demo" control on the marketing site.
- *   · source: attribution tag to send (e.g. 'aapc'); defaults to the page's own ?src= tag, if any.
- *   · askWhen: also ask "When?" — /aapc's "meet at the event or after" choice.
+ *   · source: an attribution tag for this one control. The page's own ?src= tag always wins over it,
+ *     and it wins over the provider's defaultSource ('aapc' on /aapc).
+ *   · askWhen: also ask "When?" (and offer a mobile number) — /aapc's "15 minutes at the event or
+ *     after". Defaults to the provider's askWhen, so every control on /aapc asks.
  */
 export const useDemoRequest = () => {
   const ctx = useContext(DemoRequestContext);
@@ -41,6 +43,9 @@ const OWNER = 'Omar';
 const REPLY_WINDOW = 'within one business day';
 const WALKTHROUGH = '20-minute';
 const SCHEDULING_URL = null;
+// A booking (any dialog that asks When?) is a 15-minute meeting, at the event or after. There's no
+// table at AAPC, so Omar emails or texts to set the time — hence the optional mobile number.
+const MEETING = '15 minutes';
 
 // Neutral focus on the fields: a red ring reads as an error on a form. Buttons keep the brand ring.
 const FIELD_CLASS =
@@ -55,7 +60,7 @@ const IDLE = 'idle';
 const SENDING = 'sending';
 const SENT = 'sent';
 
-const EMPTY = { name: '', email: '', organization: '', role: '', teamSize: '', heardAbout: '', when: '', message: '' };
+const EMPTY = { name: '', email: '', organization: '', role: '', teamSize: '', heardAbout: '', when: '', phone: '', message: '' };
 
 // The page's own ?src= tag, if it carries a valid one (the AAPC banner links /aapc?src=home-banner).
 const pageSource = () => {
@@ -65,6 +70,15 @@ const pageSource = () => {
   } catch {
     return null;
   }
+};
+
+// A number someone can be texted on: 7 to 15 digits, with the usual separators. Optional — blank passes.
+// The server applies the same rule (routes/public/demoRequest.js).
+const phoneProblem = (raw) => {
+  const v = raw.trim();
+  if (!v) return false;
+  const digits = v.replace(/\D/g, '');
+  return /[^0-9+().\-\s]/.test(v) || digits.length < 7 || digits.length > 15;
 };
 
 const Select = ({ id, label, value, onChange, options, display = (o) => o }) => (
@@ -96,8 +110,10 @@ const DemoDialog = ({ options, onClose }) => {
   const honeypotRef = useRef(null);
   const openedAt = useRef(Date.now());
 
-  // "At AAPC, Nov 17" is offered only through the event day (marketing/aapc.js).
-  const whenOptions = aapcPhase() === 'before' ? [WHEN_AT_AAPC, WHEN_AFTER] : [WHEN_AFTER];
+  // "At AAPC, Nov 17" is offered through the event day itself — the event's own clock, not the banner's
+  // window (marketing/aapc.js aapcEventPhase).
+  const whenOptions = aapcEventPhase() === 'before' ? [WHEN_AT_AAPC, WHEN_AFTER] : [WHEN_AFTER];
+  const booking = options.askWhen;
 
   const set = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
@@ -105,6 +121,7 @@ const DemoDialog = ({ options, onClose }) => {
     !values.name.trim() ? 'name'
     : !isValidEmail(values.email) ? 'email'
     : !values.organization.trim() ? 'organization'
+    : booking && phoneProblem(values.phone) ? 'phone'
     : null;
 
   // Escape to close + a Tab loop that can't leave the dialog. Both listeners are removed on
@@ -172,9 +189,12 @@ const DemoDialog = ({ options, onClose }) => {
           role: values.role,
           teamSize: values.teamSize,
           heardAbout: values.heardAbout,
-          when: options.askWhen ? values.when : '',
+          when: booking ? values.when : '',
+          phone: booking ? values.phone.trim() : '',
           message: values.message.trim(),
-          source: options.source || pageSource() || '',
+          // A tagged arrival (/aapc?src=home-banner) always wins; then this control's own tag; then the
+          // page's default ('aapc' on /aapc).
+          source: pageSource() || options.source || options.defaultSource || '',
           page: window.location.pathname,
           company: honeypotRef.current?.value || '',
           elapsedMs: Date.now() - openedAt.current,
@@ -228,7 +248,7 @@ const DemoDialog = ({ options, onClose }) => {
               Thanks, {firstName}.
             </h2>
             <p className="mt-3 text-[15px] text-stone-600">
-              {OWNER} will email you {REPLY_WINDOW}.
+              {booking ? `${OWNER} will email or text you to set a time.` : `${OWNER} will email you ${REPLY_WINDOW}.`}
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
               {SCHEDULING_URL && (
@@ -257,10 +277,12 @@ const DemoDialog = ({ options, onClose }) => {
         ) : (
           <>
             <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
-              See Doorline run your next canvass
+              {booking ? `Book ${MEETING} with ${OWNER}` : 'See Doorline run your next canvass'}
             </h2>
             <p className="mt-2 text-[15px] text-stone-600">
-              Tell us about your team. {OWNER} will reply {REPLY_WINDOW} to set up a {WALKTHROUGH} walkthrough.
+              {booking
+                ? `Book ${MEETING} with ${OWNER}, at the event or after. He'll email or text you to set a time.`
+                : `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`}
             </p>
 
             <form onSubmit={onSubmit} noValidate className="mt-5 space-y-4">
@@ -336,8 +358,28 @@ const DemoDialog = ({ options, onClose }) => {
                 onChange={set('heardAbout')}
                 options={HEARD_ABOUT}
               />
-              {options.askWhen && (
-                <Select id="demo-when" label="When?" value={values.when} onChange={set('when')} options={whenOptions} />
+              {booking && (
+                <>
+                  <Select id="demo-when" label="When?" value={values.when} onChange={set('when')} options={whenOptions} />
+                  <div>
+                    <label htmlFor="demo-phone" className={LABEL_CLASS}>
+                      Mobile number (for a text) {OPTIONAL}
+                    </label>
+                    <input
+                      id="demo-phone"
+                      name="phone"
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={values.phone}
+                      onChange={set('phone')}
+                      className={FIELD_CLASS}
+                    />
+                    {touched && problem === 'phone' && (
+                      <p className="mt-1.5 text-[13px] text-brand-600">Please enter a number we can text, or leave it blank.</p>
+                    )}
+                  </div>
+                </>
               )}
 
               <div>
@@ -355,7 +397,7 @@ const DemoDialog = ({ options, onClose }) => {
                 />
               </div>
 
-              {touched && problem && problem !== 'email' && (
+              {touched && problem && problem !== 'email' && problem !== 'phone' && (
                 <p className="text-[13px] text-brand-600">Please fill in your {problem}.</p>
               )}
               {error && (
@@ -396,7 +438,9 @@ const DemoDialog = ({ options, onClose }) => {
   );
 };
 
-export const DemoRequestProvider = ({ children }) => {
+// defaultSource: the tag a request from this page carries when its URL has none ('aapc' on /aapc).
+// askWhen: whether every control on the page books a meeting (When? + mobile number) — /aapc.
+export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = false }) => {
   // null = closed; otherwise the options open() was called with.
   const [openWith, setOpenWith] = useState(null);
   // The control that opened the dialog, so focus goes back where it came from on close —
@@ -405,11 +449,14 @@ export const DemoRequestProvider = ({ children }) => {
 
   // Buttons pass their click event straight in (onClick={demo.open}), so anything that isn't a plain
   // options object is treated as "no options".
-  const openDialog = useCallback((opts) => {
-    invoker.current = document.activeElement;
-    const o = opts && typeof opts === 'object' && !('nativeEvent' in opts) ? opts : {};
-    setOpenWith({ source: o.source || null, askWhen: !!o.askWhen });
-  }, []);
+  const openDialog = useCallback(
+    (opts) => {
+      invoker.current = document.activeElement;
+      const o = opts && typeof opts === 'object' && !('nativeEvent' in opts) ? opts : {};
+      setOpenWith({ source: o.source || null, defaultSource, askWhen: o.askWhen ?? askWhen });
+    },
+    [defaultSource, askWhen]
+  );
 
   const closeDialog = useCallback(() => {
     setOpenWith(null);

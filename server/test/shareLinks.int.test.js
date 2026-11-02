@@ -706,3 +706,54 @@ test('every link row says what it opens: the report on a link to one, null on a 
   assert.deepStrictEqual(Object.keys(created.toValue).sort(), ['expiresAt', 'label']);
   assert.deepStrictEqual([String(created.clientReportId), created.seriesId], [String(report._id), null]);
 });
+
+// The homepage's public sample report (routes/public/share.js isPublicSample): the demo campaign's link,
+// pinned by SEED_DEMO_SHARE_TOKEN, with its password printed on the site. A venue full of visitors on one
+// Wi-Fi address, or 50 typos a day from anywhere, must not lock everyone out of it — but only while the
+// link belongs to an INTERNAL organization; the same token on a customer's link gets no exemption.
+test('the public sample link skips the wrong-password budget and gets a wider per-address cap — internal orgs only', { skip }, async () => {
+  const demoOrg = await Organization.create({ name: 'Demo Field Co', slug: 'demo-field-co', isActive: true, isInternal: true });
+  await Subscription.create({ organizationId: demoOrg._id, status: 'active' });
+  const demoCamp = await Campaign.create({ organizationId: demoOrg._id, name: 'Demo Race', type: 'survey', state: 'IA', isActive: true, timeZone: 'America/Chicago' });
+  const demoReport = await ClientReport.create({
+    organizationId: demoOrg._id, campaignId: demoCamp._id, title: 'Weekly field report', status: 'published', publishedAt: new Date(),
+    weekStart: '2026-10-25', weekEnd: '2026-10-31', timeZone: 'America/Chicago',
+    rangeStartUtc: new Date('2026-10-25T05:00:00Z'), rangeEndUtc: new Date('2026-11-01T05:00:00Z'),
+    visibility: { visibleQuestionKeys: [], mapAnswerKeys: [], showMap: false },
+    stats: { cumulative: { totals: { doorsKnocked: 3 } }, period: { totals: { doorsKnocked: 3 } } },
+  });
+  const password = 'open sesame sample';
+  const now = new Date();
+  const { insertedId } = await ReportShareLink.collection.insertOne({
+    organizationId: demoOrg._id, campaignId: demoCamp._id, reportId: demoReport._id, token: 'public-sample-token-0001',
+    label: 'Client demo link', isActive: true, passwordHash: await bcrypt.hash(password, 4),
+    expiresAt: new Date(now.getTime() + 300 * DAY), lifetimeStartAt: now, createdAt: now, updatedAt: now,
+  });
+  const prior = process.env.SEED_DEMO_SHARE_TOKEN;
+  process.env.SEED_DEMO_SHARE_TOKEN = 'public-sample-token-0001';
+  try {
+    const venue = freshIp();
+    for (let i = 0; i < 60; i += 1) {
+      const wrong = await unlock('public-sample-token-0001', `Open sesame sample ${i}`, { ip: venue });
+      assert.strictEqual(wrong.status, 401, `wrong guess ${i + 1} from one address is a plain 401, never a lock (${wrong.json?.code})`);
+    }
+    const right = await unlock('public-sample-token-0001', password, { ip: venue });
+    assert.strictEqual(right.status, 200, 'the printed password still opens it after 60 typos from the same Wi-Fi');
+    assert.ok(right.json.accessToken);
+    const stored = await ReportShareLink.findById(insertedId).lean();
+    assert.ok(!(stored.failedUnlockAt || []).length, 'no budget entries were spent on the sample link');
+
+    // The same pinned token naming a CUSTOMER's link: the budget applies as for any link.
+    const customer = await makeLink('customer-secret-pw');
+    process.env.SEED_DEMO_SHARE_TOKEN = customer.token;
+    let locked = null;
+    for (let i = 0; i < 51 && !locked; i += 1) {
+      const r = await unlock(customer.token, `nope ${i}`);
+      if (r.status === 429) locked = r.json?.code;
+    }
+    assert.strictEqual(locked, 'SHARE_LOCKED', "a customer's link is never exempt from the budget");
+  } finally {
+    if (prior === undefined) delete process.env.SEED_DEMO_SHARE_TOKEN;
+    else process.env.SEED_DEMO_SHARE_TOKEN = prior;
+  }
+});

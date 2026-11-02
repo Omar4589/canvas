@@ -36,6 +36,12 @@ function GatePassword({ id, value, onChange, disabled }) {
         value={value}
         onChange={onChange}
         autoComplete="off"
+        // Shown as text (the eye button), iOS would capitalize the first letter and autocorrect the rest —
+        // every typed password a wrong one. Passwords are case-sensitive; the homepage prints the sample
+        // report's in lowercase.
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
         required
         disabled={disabled}
         className={`${FIELD_CLS} w-full pr-10`}

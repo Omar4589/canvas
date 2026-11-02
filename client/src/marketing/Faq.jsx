@@ -4,11 +4,14 @@
 const ITEMS = [
   {
     q: 'How fast can we be knocking doors?',
-    a: "Usually the same day. Send your voter file in any vendor's format; once it's imported and cut, your crews install the app and walk. We set up your first campaign with you on the demo call.",
+    // "Often", until a measured report backs "usually". No prospect's voter file is loaded before they
+    // sign up — the demo uses the demo campaign.
+    a: "Often the same day. Send your voter file in any vendor's format; once it's imported and cut, your crews install the app and walk. We walk you through it on a demo campaign, and set up yours the day you sign up.",
   },
   {
     q: 'What do we need to get started?',
-    a: "A voter file with addresses and state voter IDs, as CSV or Excel, from i360, L2, Data Trust, the state or your client. Don't have one? We'll help you get one.",
+    // Advice only: Doorline connects them with a vendor and never obtains or handles the file itself.
+    a: "A voter file with addresses and state voter IDs, as CSV or Excel, from i360, L2, Data Trust, the state or your client. Don't have one? We'll connect you with a vendor.",
   },
   {
     q: 'What happens when a canvasser loses signal?',
@@ -20,9 +23,10 @@ const ITEMS = [
   },
   {
     // The answer to a live-tracking assumption, and a published promise (privacy.html: location is
-    // collected only when an action is recorded, never continuously or in the background).
+    // collected only when an action is recorded, never continuously or in the background). "Someone":
+    // a lead's pin move stores the lead's position as the new pin.
     q: 'Do you track canvassers all day?',
-    a: "No. Location is recorded only when a canvasser records a door. That's what gets verified; nothing is tracked between doors.",
+    a: "No. Location is recorded only when someone saves something at a door — that's what gets verified. Nothing is tracked between doors.",
   },
   {
     // The map is by area unless the report's house-level map is turned on — an opt-in, behind a warning,
@@ -54,8 +58,8 @@ const ITEMS = [
 
 export default function Faq() {
   return (
-    <section className="bg-white">
-      <div className="mx-auto w-full max-w-6xl px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
+    <section id="faq" className="scroll-mt-16 bg-stone-50">
+      <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
         <div className="max-w-2xl">
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">
             Common questions
@@ -64,9 +68,9 @@ export default function Faq() {
             Before you ask
           </h2>
         </div>
-        <div className="mt-10 grid max-w-3xl gap-2.5">
+        <div className="mt-8 grid max-w-3xl gap-2 sm:mt-10 sm:gap-2.5">
           {ITEMS.map((item) => (
-            <div key={item.q} className="rounded-lg border border-stone-200 bg-stone-50 p-5">
+            <div key={item.q} className="rounded-lg border border-stone-200 bg-white p-4 sm:p-5">
               <h3 className="text-[15.5px] font-bold text-stone-900">{item.q}</h3>
               <p className="mt-1.5 text-sm text-stone-500">{item.a}</p>
             </div>

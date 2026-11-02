@@ -55,6 +55,7 @@
     "report:tab-weeks": "node src/migrations/reportTabWeeks.js",
     "report:all-reports-links": "node src/migrations/reportAllReportsLinks.js",
     "report:memory-watch": "node src/migrations/reportMemoryWatch.js",
+    "report:setup-times": "node src/migrations/reportSetupTimes.js",
     "remirror:pass": "node src/migrations/remirrorPass.js",
     "sweep:raw-imports": "node src/migrations/sweepRawImports.js",
     "recompute:territories": "node src/migrations/recomputeTerritories.js",

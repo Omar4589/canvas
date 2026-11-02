@@ -10,6 +10,7 @@ import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 // Lazy so the marketing chunk (screenshot webps + section components) never loads
 // for signed-in users heading straight to the console.
 const LandingPage = lazy(() => import('./pages/LandingPage.jsx'));
+const AapcPage = lazy(() => import('./pages/AapcPage.jsx'));
 
 // Public, unauthenticated password-reset flow — lazy so it never loads for the console.
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'));
@@ -106,6 +107,7 @@ function LegacyPassesRedirect() {
 // time). Every other route — and these, when the page wasn't prerendered — stays lazy.
 export default function App({ pages = {} }) {
   const Landing = pages.landing || LandingPage;
+  const Aapc = pages.aapc || AapcPage;
   return (
     <Suspense fallback={<PageFallback />}>
       {/* The password, in place, over any page (select-org and change-password included) when a
@@ -113,6 +115,8 @@ export default function App({ pages = {} }) {
       <ReauthModal />
       <Routes>
         <Route path="/" element={<Landing />} />
+        {/* The AAPC Election Post-Mortem page (the printed ad's page) — prerendered, like "/". */}
+        <Route path="/aapc" element={<Aapc />} />
         <Route path="/login" element={<LoginPage />} />
         {/* Public password-reset flow — beside /login, OUTSIDE any ProtectedRoute. The reset
             page also serves first-time invite / set-password links. */}

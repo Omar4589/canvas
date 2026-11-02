@@ -111,6 +111,7 @@ const DemoRequests = () => {
                   <Detail label="Team size" value={r.teamSize && (r.teamSize === 'Just me' ? r.teamSize : `${r.teamSize} canvassers`)} />
                   <Detail label="Heard about us" value={r.heardAbout} />
                   <Detail label="When" value={r.when} />
+                  <Detail label="Mobile" value={r.phone} />
                   <Detail label="Sent from" value={[r.page, r.source && `src=${r.source}`].filter(Boolean).join(' ')} />
                 </div>
                 {r.message && <p className="mt-2 whitespace-pre-line text-sm text-fg">{r.message}</p>}
@@ -177,17 +178,21 @@ const Visits = () => {
   });
   const days = visitsQ.data?.days || [];
   const sources = (visitsQ.data?.sources || []).slice(0, 5);
+  // One column per page the server counts (PRERENDERED_PAGES in server/src/app.js), the homepage first.
+  const pages = [...new Set(days.flatMap((d) => Object.keys(d.byPath || {})))].sort((a, b) => (a === '/' ? -1 : b === '/' ? 1 : a.localeCompare(b)));
+  const pageLabel = (path) => (path === '/' ? 'Homepage' : path);
   const peak = Math.max(1, ...days.map((d) => d.total));
   const total = days.reduce((n, d) => n + d.total, 0);
 
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-base font-semibold text-fg">Homepage visits</h2>
+        <h2 className="text-base font-semibold text-fg">Visits</h2>
         <p className="mt-0.5 max-w-2xl text-sm text-fg-muted">
-          Page loads per day for the last {VISIT_DAYS} days, Central time ({total.toLocaleString()} in all). Counted on our
-          server — no cookies, no stored IP addresses; crawlers and previews are left out. A scan of the printed AAPC ad&apos;s
-          QR code counts as &ldquo;direct&rdquo;.
+          Page loads per day for the last {VISIT_DAYS} days, Central time ({total.toLocaleString()} in all), for the homepage and
+          /aapc. Counted on our server — no cookies, no stored IP addresses; crawlers and previews are left out. A scan of
+          the printed AAPC ad&apos;s QR code counts as &ldquo;direct&rdquo;; moving from one of our pages to another counts as
+          &ldquo;internal&rdquo;.
         </p>
       </div>
       {visitsQ.isLoading && <p className="text-sm text-fg-subtle">Loading…</p>}
@@ -198,7 +203,10 @@ const Visits = () => {
               <tr>
                 <th className="px-3 py-2">Day</th>
                 <th className="px-3 py-2 text-right">Visits</th>
-                <th className="w-1/3 px-3 py-2" aria-label="Bar" />
+                <th className="w-1/4 px-3 py-2" aria-label="Bar" />
+                {pages.map((p) => (
+                  <th key={p} className="px-3 py-2 text-right normal-case">{pageLabel(p)}</th>
+                ))}
                 {sources.map((s) => (
                   <th key={s.source} className="px-3 py-2 text-right normal-case">{s.source}</th>
                 ))}
@@ -212,6 +220,11 @@ const Visits = () => {
                   <td className="px-3 py-1.5">
                     <div className="h-2 rounded-full bg-brand-accent/70" style={{ width: `${(d.total / peak) * 100}%` }} />
                   </td>
+                  {pages.map((p) => (
+                    <td key={p} className="px-3 py-1.5 text-right tabular-nums text-fg">
+                      {((d.byPath || {})[p] || 0).toLocaleString()}
+                    </td>
+                  ))}
                   {sources.map((s) => (
                     <td key={s.source} className="px-3 py-1.5 text-right tabular-nums text-fg-muted">
                       {(d.bySource[s.source] || 0).toLocaleString()}
@@ -233,7 +246,7 @@ export default function SuperAdminWebsitePage() {
       <div>
         <h1 className="text-xl font-semibold text-fg">Website</h1>
         <p className="mt-1 max-w-2xl text-sm text-fg-muted">
-          What doorline.app brings in: demo requests from the site&apos;s form, and daily visits to the homepage.
+          What doorline.app brings in: demo requests from the site&apos;s form, and daily visits to the homepage and /aapc.
         </p>
       </div>
       <DemoRequests />

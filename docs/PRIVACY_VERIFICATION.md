@@ -4697,6 +4697,48 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       email still saved and answered 200; bots never saved; super-admin-only read, handle and delete;
       visits per day with split rows summed), `test/demoRequest.test.js` (9 cases, no DB),
       `test/siteVisits.test.js`, `test/demoOptionsMirror.test.js`.
+    - **(g) [2026-11-01, Phase 2 of the AAPC landing — committed with it; item 51 itself shipped in
+      `27e8711`.]** Three additions, none a new kind of data or recipient:
+      - **An optional mobile number** on a demo request that books a meeting (any form that asks When? —
+        `/aapc`): `DemoRequest.phone`, 7–15 digits or nothing (a malformed one is refused, never
+        silently dropped), kept with the request for the same 24 months, listed on the Website page and
+        in the notice email's BODY (never its subject, so never in EmailLog). The Demo requests
+        paragraph's *"…and anything else you choose to tell us in the form"* covers it; no policy edit.
+      - **`/aapc` is counted** like the homepage (`PRERENDERED_PAGES`), one more `path` value.
+      - **A new source label, `internal`**: a request whose `Sec-Fetch-Site` header says it came from one
+        of our own pages. Still a label, nothing about the visitor; tests in `test/siteVisits.test.js`.
+53. **[v7 2026-11-01 — AAPC landing Phase 2: the public sample report, and a read-only import-timing
+    report. Committed with Phase 2. No new data collected, no new recipient, no subprocessor; one
+    exposure that is ours, not a customer's.]**
+    Plan: `docs/PROPOSAL_AAPC_LANDING.md` → *Phase 2 plan* (C-f, decision 5). Read from the code:
+    - **(a) The sample report link.** The homepage and `/aapc` print one report link and its password:
+      the internal demo organization's link (`Organization.isInternal`), pinned by
+      `SEED_DEMO_SHARE_TOKEN`. What it shows is the demo campaign's published report — fictional
+      canvassing on real Des Moines streets, on the AREA map (counts by area, no address; area reports
+      refuse the per-door call with a 409 — item 52). No customer data. Its views are counted on the
+      report without IP or device (`reportOpens.js`), as for every link.
+    - **(b) Its exemptions** (`routes/public/share.js` `isPublicSample`): exactly that token, and only
+      while its link belongs to an internal organization, skips the per-link wrong-password budget (50
+      a day) and gets a per-address cap of 100 instead of 10 per 15 minutes — a published password
+      would otherwise let a venue's typos lock everyone out. Any other link, including a customer's
+      link that somehow carried the pinned token, keeps both limits (`test/shareLinks.int.test.js`).
+      The share password field also turns off auto-capitalize, auto-correct and spell-check, for every
+      viewer.
+    - **(c) Its lifetime.** A pinned demo link renews IN PLACE at the same URL when Rebuild demo day
+      finds its one-year life nearly over (`seedDemoOrg.js` `refreshDemoLinkLife`), so this one URL
+      lives past the policy's "up to one year" for a link. Our own internal demo organization's link
+      only; every customer link still expires within a year. Recorded here so the gap is known.
+    - **(d) `npm run report:setup-times`** (`migrations/reportSetupTimes.js`, rule in
+      `services/site/setupTimes.js`): READ-ONLY, customer organizations only (internal ones excluded),
+      reading each completed import's row count and three clock fields — no file name, organization,
+      campaign or person, so none is printed. Totals by size bucket only, per the console-output rule
+      of items 27(c) and 50. Proxied in the root `package.json` for the Run console.
+    - **(e) The Proof screenshots** on the homepage are captured from the demo campaign with every
+      address blurred before the screenshot, so no real home's address sits beside a made-up flag
+      (`docs/MARKETING_SITE.md` → *Screenshots*). The demo seed now stages one run of six doors
+      "recorded from a parked car" in the internal demo organization only.
+    - **(f) Claims checked.** privacy.html's reports paragraph (passwords, expiry, areas by default)
+      holds for the sample link but for (c); terms.html §6 holds; DPA: no change.
 
 52. **[v7 2026-11-01 — Client report maps open in AREAS by default; the house-level map (each knocked
     house with its street address, door status and the map's survey answers) becomes an explicit,

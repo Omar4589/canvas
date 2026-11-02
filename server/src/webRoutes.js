@@ -18,6 +18,7 @@
 //     ('admin' is still listed, for the React /admin console route.)
 export const WEB_SEGMENTS = new Set([
   '', // "/" — the landing page
+  'aapc', // the AAPC Election Post-Mortem page — prerendered (app.js PRERENDERED_PAGES), still a React route
   'login',
   'forgot-password', // public: request a reset link
   'reset-password', // public: /reset-password/:token — emailed reset + invite links must NEVER 404

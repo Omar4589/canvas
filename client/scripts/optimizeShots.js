@@ -16,14 +16,18 @@ const OUT = path.resolve(__dirname, '../src/assets/marketing');
 // whole console rendered at ~27% scale, so its sidebar and filter column read as noise, and the toast
 // and phone overlays in Hero.jsx carry the "live field app" half of the story. The crop keeps the
 // Mapbox logo and attribution along the bottom edge.
+//
+// The Proof shots (audit, locations) drop the console's sidebar the same way. They're captured from the
+// demo campaign with every address blurred before the screenshot: the demo's doors are real Des Moines
+// homes, and a readable address must never sit beside a made-up flag or answer (the brief's §7.6 check
+// — the old survey phone shot failed it and was retired with the product tour).
 const BUDGETS = {
   'map.png': { out: 'shot-map.webp', width: 1400, extract: { left: 1060, top: 445, width: 1820, height: 1355 } }, // hero
   'turfs.png': { out: 'shot-turfs.webp', width: 1600 },
-  'timeline.png': { out: 'shot-timeline.webp', width: 1600 },
   'portal.png': { out: 'shot-portal.webp', width: 1600 },
+  'audit.png': { out: 'shot-audit.webp', width: 1600, extract: { left: 497, top: 0, width: 2383, height: 1800 } }, // Proof
+  'locations.png': { out: 'shot-locations.webp', width: 1600, extract: { left: 497, top: 0, width: 2383, height: 1800 } }, // Proof
   'phone-books.png': { out: 'shot-phone-books.webp', width: 760 },   // real device shots (1206 wide)
-  'phone-door.png': { out: 'shot-phone-door.webp', width: 760 },
-  'phone-survey.png': { out: 'shot-phone-survey.webp', width: 760 },
 };
 
 const only = process.argv.slice(2);

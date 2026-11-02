@@ -2,24 +2,23 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
 import { useAuthCta } from './useAuthCta.js';
-import { useDemoRequest } from './DemoRequest.jsx';
+import DemoButton from './DemoButton.jsx';
 
-// Sticky top nav for the public marketing site. Anchor links scroll to the
-// in-page sections; the auth control adapts to whether someone is signed in.
-// Below lg the section links collapse into a disclosure menu so phone and tablet users
-// can still jump to sections — at 768px the five links beside the two buttons wrapped
-// onto two lines.
+// Sticky top nav for the public marketing site. Anchor links scroll to the homepage's sections; the
+// auth control adapts to whether someone is signed in. Below lg the section links collapse into a
+// disclosure menu so phone and tablet users can still jump to sections.
+//
+// `base` is '' on the homepage, so a link is a plain '#proof' (a '/#proof' would reload a tagged
+// '/?src=…' and lose the tag), and '/' on other pages (/aapc), where the sections live elsewhere.
 const SECTIONS = [
-  { href: '#turf', label: 'Turf' },
-  { href: '#field', label: 'Field app' },
-  { href: '#oversight', label: 'Oversight' },
-  { href: '#reports', label: 'Reports' },
-  { href: '#how', label: 'How it works' },
+  { id: 'proof', label: 'Proof' },
+  { id: 'reports', label: 'Reports' },
+  { id: 'setup', label: 'Setup' },
+  { id: 'faq', label: 'FAQ' },
 ];
 
-export default function MarketingNav() {
+export default function MarketingNav({ base = '' }) {
   const cta = useAuthCta();
-  const demo = useDemoRequest();
   const [open, setOpen] = useState(false);
 
   return (
@@ -38,10 +37,10 @@ export default function MarketingNav() {
             aria-label="Primary"
             className="hidden items-center gap-8 lg:flex"
           >
-            {SECTIONS.map(({ href, label }) => (
+            {SECTIONS.map(({ id, label }) => (
               <a
-                key={href}
-                href={href}
+                key={id}
+                href={`${base}#${id}`}
                 className="rounded text-sm text-stone-600 transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
               >
                 {label}
@@ -78,14 +77,10 @@ export default function MarketingNav() {
                 'Sign in'
               )}
             </Link>
-            <button
-              type="button"
-              onClick={demo.open}
-              className="inline-flex items-center justify-center rounded-md bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4"
-            >
+            <DemoButton className="inline-flex items-center justify-center rounded-md bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:px-4">
               <span className="sm:hidden">Demo</span>
               <span className="hidden sm:inline">Request a demo</span>
-            </button>
+            </DemoButton>
 
             {/* Mobile section menu toggle */}
             <button
@@ -126,10 +121,10 @@ export default function MarketingNav() {
         >
           <div className="mx-auto w-full max-w-6xl px-4 py-2 sm:px-6 lg:px-8">
             <ul className="flex flex-col">
-              {SECTIONS.map(({ href, label }) => (
-                <li key={href}>
+              {SECTIONS.map(({ id, label }) => (
+                <li key={id}>
                   <a
-                    href={href}
+                    href={`${base}#${id}`}
                     onClick={() => setOpen(false)}
                     className="block rounded-md px-2 py-3 text-sm text-stone-600 transition-colors hover:bg-stone-50 hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                   >

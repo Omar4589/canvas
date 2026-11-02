@@ -926,6 +926,14 @@ client. Give it a new address." (or, after 50 in a week, "50 or more wrong passw
 else may have this link. Give it a new address."). **Unlock now** lets the right password in again at
 once. A new address also clears the week's count; the lifetime total stays.
 
+**The homepage's sample report is the one exception.** Doorline's own demo campaign link, pinned by
+`SEED_DEMO_SHARE_TOKEN` and printed on doorline.app with its password, has no 50-a-day limit and allows
+100 wrong tries per connection per 15 minutes instead of 10 — only while it belongs to an internal
+organization (`routes/public/share.js` `isPublicSample`; [MARKETING_SITE.md](MARKETING_SITE.md) → *The
+sample report*). On that link, never take Share's advice to give it a new address: the printed URL
+would stop working. **Unlock now** if it ever locks. The password box on every report link turns off
+auto-capitalize, auto-correct and spell-check, so a phone never changes what the client types.
+
 **Older links.** A link whose password turns out to be shorter than 12 characters is flagged **Short
 password** the next time it's used. A link from before mid-July 2026 that has no password is always an
 old link to all your reports: its row on the *Old links to all your reports* card (below) offers **Add a

@@ -75,6 +75,7 @@ const VALID = {
   role: 'Canvassing firm',
   teamSize: '11–50',
   heardAbout: 'AAPC event',
+  phone: '+1 515-555-0134',
   message: 'Two county races.',
   source: 'home-banner',
   page: '/',
@@ -89,7 +90,7 @@ test('a request is saved with what was picked, where it came from, and a 24-mont
   assert.deepStrictEqual(res.json, { ok: true });
   const row = await DemoRequest.findOne({ email: VALID.email }).lean();
   assert.ok(row, 'saved');
-  for (const k of ['name', 'organization', 'role', 'teamSize', 'heardAbout', 'message', 'source', 'page']) {
+  for (const k of ['name', 'organization', 'role', 'teamSize', 'heardAbout', 'phone', 'message', 'source', 'page']) {
     assert.strictEqual(row[k], VALID[k], k);
   }
   assert.strictEqual(row.when, null, 'not asked on the homepage');

@@ -26,6 +26,8 @@ const demoRequestSchema = new mongoose.Schema(
     teamSize: { type: String, default: null },
     heardAbout: { type: String, default: null },
     when: { type: String, default: null },
+    // Optional, only when the form books a meeting (When?): Omar texts to set the time.
+    phone: { type: String, default: null },
     message: { type: String, default: null },
     // Where it came from: the ?src= tag of the page (home-banner, aapc, …) and that page's path.
     source: { type: String, default: null },

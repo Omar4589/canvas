@@ -113,6 +113,57 @@ function jitterLocation(rng, hh) {
   return { lat: lat + dLat, lng: lng + dLng, accuracy: rng.int(5, 20) };
 }
 
+// A point `meters` from (lat, lng) on bearing `angle` (radians) — the same flat-earth step jitterLocation
+// takes, fine at block scale.
+function offsetPoint(lat, lng, meters, angle) {
+  const dLat = (meters * Math.sin(angle)) / 111320;
+  const dLng = (meters * Math.cos(angle)) / (111320 * Math.cos((lat * Math.PI) / 180));
+  return { lat: lat + dLat, lng: lng + dLng };
+}
+
+/**
+ * One canvasser's run of doors recorded from a parked car: six consecutive non-survey results on a
+ * past evening, all from one spot about 330 m from the first house, seconds apart, one of them from an
+ * Android fake-GPS app. It is exactly what the Audit page exists to catch — far, rapid, one-spot and
+ * mock flags (services/audit/flagThresholds.js) — so a demo, and the homepage's Proof screenshot, show
+ * the real thing instead of only the low "offline submission" weak-GPS flags. Rewrites the rows IN
+ * PLACE (location, distance, time); returns how many it changed (0 when no run qualifies).
+ */
+export function stageSuspiciousKnocks({ rng, activities, hhById, now = Date.now() }) {
+  const RUN = 6;
+  const day = (ts) => new Date(ts).toISOString().slice(0, 10);
+  const today = day(now);
+  for (let i = 0; i + RUN <= activities.length; i += 1) {
+    const run = activities.slice(i, i + RUN);
+    const first = run[0];
+    const homes = run.map((a) => hhById.get(String(a.householdId)));
+    const ok =
+      day(first.timestamp) !== today &&
+      homes.every(Boolean) &&
+      new Set(run.map((a) => String(a.householdId))).size === RUN &&
+      run.every((a) => String(a.userId) === String(first.userId) && day(a.timestamp) === day(first.timestamp) && a.actionType !== 'survey_submitted');
+    if (!ok) continue;
+    // The houses must spread out (one-spot needs doors 60 m+ apart recorded from one place).
+    const [lng0, lat0] = homes[0].location.coordinates;
+    const spread = Math.max(...homes.map((h) => haversineMeters(lat0, lng0, h.location.coordinates[1], h.location.coordinates[0])));
+    if (spread < 70) continue;
+    const car = offsetPoint(lat0, lng0, 330, rng.next() * Math.PI * 2);
+    const t0 = new Date(first.timestamp).getTime();
+    let t = t0;
+    run.forEach((a, k) => {
+      const [hLng, hLat] = homes[k].location.coordinates;
+      const p = offsetPoint(car.lat, car.lng, rng.next() * 4, rng.next() * Math.PI * 2);
+      a.location = { lat: p.lat, lng: p.lng, accuracy: rng.int(6, 10), ...(k === 3 ? { mocked: true } : {}) };
+      a.distanceFromHouseMeters = Math.round(haversineMeters(hLat, hLng, p.lat, p.lng));
+      a.timestamp = new Date(t);
+      a.wasOfflineSubmission = false;
+      t += rng.int(9, 16) * 1000; // seconds apart, not minutes
+    });
+    return RUN;
+  }
+  return 0;
+}
+
 function activityDoc({ rng, hh, userId, actionType, ts, passId, turfId, voterId = null, wasOffline = false, coordinatorId = null }) {
   const loc = jitterLocation(rng, hh);
   const [hLng, hLat] = hh.location.coordinates;

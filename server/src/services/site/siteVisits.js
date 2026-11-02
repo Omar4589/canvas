@@ -32,12 +32,17 @@ export const countsAsVisit = (req) => {
 
 /**
  * Where the visit came from, as a short label: the page's own ?src= tag (home-banner, qr, …) when it
- * has a valid one, else the referring site's host without "www." (only the host is ever kept), else
- * "direct" — which is what a scan of the printed ad's untagged QR code looks like.
+ * has a valid one, else "internal" for a move between our own pages, else the referring site's host
+ * without "www." (only the host is ever kept), else "direct" — which is what a scan of the printed
+ * ad's untagged QR code looks like.
  */
 export const visitSource = (req) => {
   const src = typeof req.query?.src === 'string' ? req.query.src.trim().toLowerCase() : '';
   if (src && SOURCE_PATTERN.test(src)) return src;
+  // A move between our own pages (/aapc → the homepage's #proof) is not an arrival. The pages send no
+  // Referer at all (index.html's no-referrer meta), so without this it would read as "direct" — the
+  // bucket that stands for QR scans. Browsers send Sec-Fetch-Site whatever the referrer policy.
+  if (req.get('sec-fetch-site') === 'same-origin') return 'internal';
   const ref = req.get('referer') || '';
   if (ref) {
     try {

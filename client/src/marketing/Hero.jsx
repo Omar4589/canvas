@@ -1,6 +1,5 @@
-import { Link } from 'react-router-dom';
-import { useDemoRequest } from './DemoRequest.jsx';
-import { useAuthCta } from './useAuthCta.js';
+import DemoButton from './DemoButton.jsx';
+import SampleReport from './SampleReport.jsx';
 import BrowserFrame from './frames/BrowserFrame.jsx';
 import shotMap from '../assets/marketing/shot-map.webp';
 import shotPhoneBooks from '../assets/marketing/shot-phone-books.webp';
@@ -81,8 +80,6 @@ function MiniPhone() {
 }
 
 export default function Hero() {
-  const cta = useAuthCta();
-  const demo = useDemoRequest();
   return (
     <section className="relative overflow-hidden bg-white">
       <div
@@ -108,25 +105,14 @@ export default function Hero() {
               Simple for your canvassers. Total visibility for you: every door GPS-stamped,
               suspicious knocks flagged, and every result live on one map.
             </p>
-            {/* Stacked full-width below sm, side by side above. The row used to be a bare
-                `flex flex-wrap`, which at 320-375px wrapped the second button into a ragged
-                orphan against the left edge — signed in ("Go to dashboard") that happens on any
-                phone, since the pair is wider than the container. Stacking is deliberate rather
-                than accidental, and gives both a full-width tap target. */}
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-3.5">
-              <button
-                type="button"
-                onClick={demo.open}
-                className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:w-auto"
-              >
+            {/* Stacked full-width below sm, side by side above, so both get a full-width tap target on a
+                phone. Sign in lives in the header and footer only: the hero's second button shows the
+                product — a real published report, or the Proof section until that link exists. */}
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3.5">
+              <DemoButton className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:w-auto">
                 Request a demo
-              </button>
-              <Link
-                to={cta.to}
-                className="inline-flex w-full items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:w-auto"
-              >
-                {cta.label}
-              </Link>
+              </DemoButton>
+              <SampleReport variant="button" />
             </div>
             {/* The LOCAL-RACE starting price, and only that. A local race is the volume buyer and
                 shops on budget, so hiding the number reads as "enterprise, can't afford it" and

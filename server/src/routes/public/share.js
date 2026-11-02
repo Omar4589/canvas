@@ -154,13 +154,28 @@ router.get('/:token', loadShare, (req, res) => {
 // missing password.
 const unlockSchema = z.object({ password: z.string().min(1).max(200) });
 
+// The homepage's public sample report (docs/PROPOSAL_AAPC_LANDING.md, C-f): the demo campaign's link,
+// pinned by SEED_DEMO_SHARE_TOKEN, its password printed on the site beside every link to it. The two
+// limits below protect a private link, and would only lock the public out of this one: a venue's
+// visitors share one Wi-Fi address, and 50 typos a day from anywhere would lock it for everyone. So
+// this ONE link — and only while it belongs to an internal (Doorline-owned) organization — skips the
+// per-link failure budget and gets a wider per-address cap. Its password is public by design, and
+// nothing behind it is customer data (the internal demo org; an area map, no addresses).
+const sampleToken = () => String(process.env.SEED_DEMO_SHARE_TOKEN || '').trim();
+const isSampleToken = (token) => !!sampleToken() && token === sampleToken();
+const isPublicSample = async (link) => {
+  if (!isSampleToken(link.token)) return false;
+  const org = await Organization.findById(link.organizationId).select('isInternal').lean();
+  return org?.isInternal === true;
+};
+
 // Throttle password guessing on a share link. Keyed by IP + token so guessing one link
 // can't lock the IP out of others; only FAILED attempts count (a legit viewer unlocks in
 // a try or two). `trust proxy` (app.js) makes req.ip the real client behind Heroku.
 // It stays beside the per-LINK failure budget below, which no number of addresses can get past.
 const unlockLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: (req) => (isSampleToken(req.params.token) ? 100 : 10),
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
@@ -192,6 +207,14 @@ router.post('/:token/unlock', unlockLimiter, loadShare, async (req, res, next) =
     // Never a lone surrogate to bcrypt — it takes the whole process down (utils/passwordText.js). No real
     // password has one, so it's a wrong password, answered without a slot: it never reaches a compare.
     if (!isWellFormedText(password)) return res.status(401).json({ error: 'Incorrect password', code: 'SHARE_PASSWORD_WRONG' });
+    // The public sample report: no budget to reserve from or to fill (see isPublicSample).
+    if (await isPublicSample(req.share)) {
+      if (!(await bcrypt.compare(password, req.share.passwordHash || ''))) {
+        return res.status(401).json({ error: 'Incorrect password', code: 'SHARE_PASSWORD_WRONG' });
+      }
+      stampLinkAccess(req.share).catch(() => {});
+      return issue(req.share);
+    }
     const slot = await reserveUnlockSlot({ linkId: req.share._id, token: req.params.token });
     if (!slot) return res.status(404).json({ error: 'This report link is not available.', code: 'SHARE_NOT_FOUND' });
     if (!slot.reserved) {

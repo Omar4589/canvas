@@ -129,7 +129,7 @@ import { isOneLinkGuardError } from '../reports/clientReportIndexes.js';
 import { sealedSecretConfigured } from '../../utils/sealedSecret.js';
 import { isWellFormedText } from '../../utils/passwordText.js';
 import { zonedDayRange } from '../../utils/timezone.js';
-import { stageDemoActivity, persistDemoActivity, ARCHIVED_DAY_OFFSETS } from './demoActivity.js';
+import { stageDemoActivity, stageSuspiciousKnocks, persistDemoActivity, ARCHIVED_DAY_OFFSETS } from './demoActivity.js';
 import { inStateBounds } from '../../utils/stateBounds.js';
 import {
   makeRng,
@@ -476,6 +476,9 @@ async function stageCanvassHistory({ rng, campaign, template, rounds, votersByHo
     doorSets.push(new Set(staged.activities.map((a) => String(a.householdId))));
     perRound.push({ label: round.label, activities: staged.activities.length, surveys: staged.surveys.length });
   }
+  // One run of doors "recorded from the car" — far, rapid, one-spot and one fake-GPS knock — so the
+  // Audit page has something real to show (demoActivity.js stageSuspiciousKnocks).
+  const suspicious = stageSuspiciousKnocks({ rng, activities: allActivities, hhById: votersByHousehold.docs });
   // Cross-round re-knocks: distinct doors that took a knock in more than one round
   // (the "second pass" story the knocks-by-pass report tells).
   const hitCounts = new Map();
@@ -484,7 +487,7 @@ async function stageCanvassHistory({ rng, campaign, template, rounds, votersByHo
   await persistDemoActivity({ campaign, activities: allActivities, surveys: allSurveys });
   return {
     activities: allActivities.length, surveys: allSurveys.length,
-    overlaps, todayKnocks, perRound, reknockDoors,
+    overlaps, todayKnocks, perRound, reknockDoors, suspicious,
   };
 }
 
@@ -1448,7 +1451,7 @@ export async function seedDemoOrg({
         { label: r2.name, ...round2 }, // default offsets: today + four prior evenings
       ],
     });
-    log(`8. staged ${staged.activities} activities · ${staged.surveys} surveys · ${staged.overlaps} overlap doors`);
+    log(`8. staged ${staged.activities} activities · ${staged.surveys} surveys · ${staged.overlaps} overlap doors · ${staged.suspicious} doors recorded from one parked spot (Audit flags)`);
     log(
       `   rounds staged: ${staged.perRound.map((r) => `'${r.label}' ${r.activities} activities / ${r.surveys} surveys`).join(' · ')}` +
         ` · ${staged.reknockDoors} doors re-knocked across rounds`

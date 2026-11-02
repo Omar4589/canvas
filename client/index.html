@@ -12,6 +12,8 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#DC2626" />
 
+    <!-- page-head:start · client/scripts/prerender.js swaps this whole block for a prerendered page
+         that has its own head (entry-prerender.jsx PAGES → head), e.g. /aapc. Keep both markers. -->
     <title>Doorline — Door-to-door canvassing software for campaigns and causes</title>
     <meta
       name="description"
@@ -72,6 +74,7 @@
         }
       }
     </script>
+    <!-- page-head:end -->
 
     <!-- Apply the saved/system theme before first paint to avoid a flash of light. -->
     <script>

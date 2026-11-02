@@ -41,9 +41,15 @@ const rootEl = document.getElementById('root');
 // place — but only once its own module has loaded. Hydrating while the lazy route's chunk was still
 // in flight let AuthProvider's first state change throw the server HTML away (React #421) and flash
 // "Loading…" over the page. If the page's chunk can't load at all, render from scratch as before.
-if (rootEl.dataset.prerendered === 'landing') {
-  import('./pages/LandingPage.jsx')
-    .then(({ default: LandingPage }) => ReactDOM.hydrateRoot(rootEl, tree({ landing: LandingPage })))
+// One loader per name in entry-prerender.jsx's PAGES.
+const PRERENDERED = {
+  landing: () => import('./pages/LandingPage.jsx'),
+  aapc: () => import('./pages/AapcPage.jsx'),
+};
+const name = rootEl.dataset.prerendered;
+if (PRERENDERED[name]) {
+  PRERENDERED[name]()
+    .then(({ default: Page }) => ReactDOM.hydrateRoot(rootEl, tree({ [name]: Page })))
     .catch(() => ReactDOM.createRoot(rootEl).render(tree()));
 } else {
   ReactDOM.createRoot(rootEl).render(tree());

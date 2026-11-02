@@ -12,9 +12,9 @@ build from the same text. What shipped is documented where it lives: [MARKETING_
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Brief §3–6, and the §7.11 words removed from the current page | **Built 2026-11-01, uncommitted** — see *Phase 1, as built* |
-| 2 (by Nov 12) | §7–9 (new page structure, /aapc), the offline-queue fix in §10 | Not started |
-| 3 (after AAPC) | The rest of §10 | Not started |
+| 1 | Brief §3–6, and the §7.11 words removed from the current page | **Committed 2026-11-01 (`27e8711`)** — see *Phase 1, as built* |
+| 2 | §7–9 (new page structure, /aapc), the offline-queue fix in §10 | **Website half BUILT 2026-11-01, uncommitted** — see *Phase 2 (website), as built*; the queue fix is [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) (two review rounds done; not built) |
+| 3 (after AAPC) | The rest of §10: the iOS fake-GPS check, isolation tests before any trust page, later polish | Not started |
 
 ## Owner rulings during the build (2026-11-01)
 
@@ -33,6 +33,14 @@ These override the brief where they differ.
   walkthrough" (§5's bracketed values).
 - **Privacy policy / terms wording**: approved for reports, report links and demo requests — with the
   house-level sentence revised after the ruling above (see Phase 1).
+- **No target dates.** *"stop with the dates. we are deploying as soon as we finish which with your power,
+  is in hours, not days."* The brief's Nov 12 and Nov 14 deadlines no longer apply; the plan states gates,
+  not dates. What the page itself says on a given day stays (the banner's after-event text from Nov 18,
+  gone from Nov 25). When the banner starts is question Q1 of the Phase 2 plan: the brief's *"Live from the
+  /aapc launch"* was written for a launch around Nov 14.
+- **Phase 2 decisions: every recommendation accepted**, except that the production phone update for the
+  queue fix may go out before Election Day. A placeholder stands in for the photo; the name is **Omar
+  Zumaya**.
 
 ## Phase 1, as built
 
@@ -62,6 +70,292 @@ Deploy steps (owner, Heroku dashboard): deploy, then in **More → Run console**
 `npm run migrate:build-indexes -- --apply` (the demo-request expiry and the visit-count index),
 `npm run migrate:client-report-areas` (dry run — read the list), then
 `npm run migrate:client-report-areas -- --apply`.
+
+## Phase 2 (website), as built — 2026-11-01
+
+Built to the plan below (v2 with the owner's answers), in this tree, uncommitted. Where it differs:
+
+- **The homepage**: Hero, Numbers, Problem, Proof (`#proof`, light stone-100), Client reports, Setup,
+  Features, Founder & trust, FAQ, final CTA. 10,926 px at 390 wide (the brief's baseline was ~11,900;
+  12,725 before tightening phone spacing, hiding Setup's phone shot on phones — the hero shows the same
+  one — and showing Proof's map alone on phones). 8,341 px at 1440. Old ids kept as aliases.
+- **Proof's screenshots** are new: the Audit page and the map with canvasser locations, from the demo
+  campaign with every address blurred. The demo data had only weak-GPS flags, so the demo seed now
+  stages one run of six doors recorded from a parked car (far, rapid, one-spot, one fake-GPS knock) —
+  internal demo org only; production's copy changes at the next Rebuild demo day.
+- **Sample report**: wired (`siteFacts.js` `SAMPLE_REPORT`), but empty until the owner's four steps in
+  C-f give it a URL and password; until then the hero reads *See how it works* and the other spots show
+  nothing. The lockout exemption and the password-field fix are in.
+- **Numbers**: the brief's Nov 1 figures, pending the owner's `migrate:platform-stats` output.
+- **Timing report**: `npm run report:setup-times` (imports only).
+- **/aapc**: as planned; the banner starts Nov 1. The form's booking variant adds the optional mobile
+  number. Every date case checked in a browser (Nov 17 23:00, Nov 18, Nov 25, Dec 10 Eastern).
+- Docs: MARKETING_SITE.md, CLIENT_PORTAL.md, OPERATIONS.md, PRIVACY_VERIFICATION.md items 51(g) and 53,
+  the Website page's Help Center guide.
+
+## Phase 2 plan (v2, 2026-11-01) — rewritten after review round 1
+
+Four parts. A–C are the website: one server deploy, nothing for phones. D, the offline-queue fix, has its
+own plan, [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md): a server deploy plus a phone update.
+Line references are to HEAD `27e8711`.
+
+### A. The homepage, rebuilt to §7
+
+| # | Section | Background | What's in it | Waiting on |
+|---|---|---|---|---|
+| — | AAPC banner | red | Built in Phase 1. Switches on with /aapc, the day it ships (Q1); after-event text from Nov 18; gone from Nov 25, by itself | — |
+| — | Header | white | Proof · Reports · Setup · FAQ, Sign in, Request a demo | — |
+| 1 | Hero | white | As live now, plus **Request a demo** / **Open a sample report** (password beside it) and *Web console for the office · iOS & Android app for the field*. The demo buttons work before the page's JavaScript arrives (B) | the sample link (C-f) |
+| 2 | Numbers | stone-50 | Four totals from one constant, captioned with the date they were read (C-d); Fox Bryant on a client line (addendum 1); quote 1 | the numbers check (C-d), a quote |
+| 3 | Problem | white | *A door program shouldn't live in five tools*: today's three cards, the new honor-system card (question Q4), the closing line as *"Doorline puts it all in one place, and checks every door recorded in the app against its house."* | Q4 |
+| 4 | Proof `#proof` | decision 1 | Eyebrow, H2, body, the six bullets, two new screenshots (Audit page with flags; map with canvasser locations), quote 2 | decision 1, a quote |
+| 5 | Client reports `#reports` | brand-50 | *Send a report, not a spreadsheet*, body (the PDF is confirmed), the house-map line as built, **Open a sample report** with its password, the portal screenshot, quote 3 | the sample link, a quote |
+| 6 | Setup `#setup` | white | H2 as *"From voter file to knocking, often the same day"* until decision 5's report backs *usually*; the two columns, the turf and phone shots, quote 4, *How canvassers get the app →* | the geocoding check (C-c), Q2, a quote |
+| 7 | Features | stone-100 | *Built for firms running many campaigns*, nine cards | — |
+| 8 | Founder & trust | white | Your note (addendum 1 §2) signed *Omar Zumaya, Founder, Doorline*, the four trust lines, Privacy policy | a monogram (OZ) stands in for the photo, never a stock face; the title is a placeholder too |
+| 9 | FAQ `#faq` | stone-50 | Phase 1's nine answers (FAQ 1 per Q3, FAQ 2 per Q2) | Q2, Q3 |
+| 10 | Final CTA | brand-50 | *See Doorline run your next canvass*, body (per Q3), both buttons, the sample report's password beside its button | Q3 |
+
+**Goes away:** How it works (the brief cuts it), today's four-claim strip (its lines live on in Proof and
+Setup), and today's product tour (split into Proof and Setup). That takes the survey phone screenshot with
+it, which shows a real Des Moines address beside a made-up voter answering "Strongly support" (the §7.6
+check). Quote slots without a supplied quote don't render. The length is measured after the build against
+the brief's ~11,900 px at 390 wide; the bar is *clearly shorter*. **The old section ids stay as anchor
+aliases** (`#turf`, `#field`, `#oversight`, `#how`): `privacy.html`, `terms.html`, `app.html`,
+`delete-account.html` and `404.html` link to them, and the legal pages are owner-edited. On the homepage
+the header links are plain `#proof`; a `/#proof` would reload `/?src=…` and lose the tag.
+
+**New screenshots** come from the demo campaign on a local copy, captured the way the existing ones were
+(`client/shots-raw/` → `npm run shots:optimize`). If the demo data has no flagged doors to show, the demo
+seed gains a few; that touches only the internal demo org, and production's copy changes only when
+someone presses Rebuild demo day. **The Audit page lists each flag with its address**
+(`FlaggedEntryList.jsx:17-19, 77`), and the demo's addresses are real Des Moines homes, so that shot is
+cropped or blurred to keep any readable address from sitting beside a made-up flag; both new shots get
+the §7.6 check.
+
+**Copy the code requires** (beyond the brief's text): see *Claim check* below.
+
+### B. /aapc, and the banner switched on (addendum 2 §4)
+
+Top to bottom: eyebrow, H1, subhead, the ad's three bullets word for word, the ad's mockup card built in
+HTML with its example numbers (tagged *Example*, decision 2, with a *+ 12 more books* row so its 41% adds
+up), the monogram with the before/after line, **Book 15 minutes with Omar** / **Request a demo** (both
+open the form with **When?**), the numbers strip, three short blocks (Proof, Client reports, Many
+campaigns, in the claim-checked words), the sample report link with its password, the price line.
+
+- **Prerendered** like the homepage, with its own head and `noindex`. `prerender.js` swaps exact strings,
+  and three head tags span several lines, so `client/index.html`'s block from `<title>` to the JSON-LD is
+  wrapped in comment markers (Vite keeps comments) and replaced whole per page, values escaped. /aapc gets
+  a self-canonical and `noindex`; a half swap that left the homepage's canonical beside `noindex` could
+  get the homepage dropped from search. The build fails unless /aapc has exactly one self-canonical plus
+  `noindex` and `/`'s head is unchanged. /aapc stays out of `sitemap.xml` and isn't disallowed in
+  `robots.txt` (a crawler has to read the `noindex`). The rest is the four places in MARKETING_SITE.md,
+  plus `pageLive: true`.
+- **What the page says switches by itself, with one more attribute.** The banner keeps `data-aapc` (its
+  window, Q1). The same inline script also stamps `data-aapc-event`: `before` until Nov 18 (Eastern),
+  `after` from then, with no start or end. /aapc's photo line and the When? select read that one, so the
+  page never shows both lines (after Nov 25 or with JavaScript off, `data-aapc` reads `off`). CSS shows the
+  before-line by default; the variant is never chosen during render (that would break hydration).
+  `aapc.test.js` runs past Nov 25.
+- **Source:** the dialog sends `pageSource() || options.source || defaultSource`, with
+  `<DemoRequestProvider defaultSource="aapc">` on /aapc, so a `?src=home-banner` always wins and the
+  header's button (which passes its click event, not options) still sends `aapc`. Every demo button is
+  tested.
+- **Buttons work before the JavaScript arrives.** Until the page hydrates (about 94 KB gzipped plus the
+  page chunk, seconds on venue Wi-Fi) a `<button>` does nothing. Every demo control renders as
+  `<a href="mailto:hello@doorline.app?subject=…">`, whose click handler opens the dialog once the page is
+  live: same markup on server and client, so hydration is safe. `contact.js`'s comment changes to say the
+  mailto is the before-JavaScript fallback, never the primary path.
+- **The booking dialog fits a 15-minute meeting.** When the dialog asks When?, its intro reads *"Book 15
+  minutes with Omar, at the event or after. He'll email or text you to set a time."* instead of the
+  20-minute walkthrough and next-business-day promise, and it offers an optional **Mobile number (for a
+  text)** (Q5).
+- **After Nov 25** the banner disappears by itself; /aapc stays up with the after-event line (decision 3).
+- On /aapc the header's section links point at `/#proof` etc.; on the homepage they stay `#proof`.
+
+### C. The §9 checks — answered
+
+- **a. PDF — exists.** **Download PDF** on the shared report and in the builder
+  (`PublicReportDetailPage.jsx:118`, `ClientReportBuilderPage.jsx:1159`, renderer `lib/reportPdf.js`); the
+  map is left out on purpose. Reports copy: *"Send it as a password-protected link that expires on its own
+  and can be revoked, or as a PDF."*
+- **b. Unknock** drops an entry from campaign totals, Door Outcomes, future exports and the Billing page's
+  door count (`services/billing/statement.js:75-78`). A published client report keeps it until **Refresh
+  numbers**; issued statements stay frozen, with a drift warning. Proof copy: *"…an unknocked entry drops
+  out of every live count, and out of a client report when you refresh it."* The Billing page already shows
+  each campaign's billable doors per month (decision 4).
+- **c. Geocoding** — nothing in the app shows the setting. **You check:** Heroku dashboard → the app →
+  **Settings** → **Reveal Config Vars** → `GEOCODE_ENABLED` must read exactly `true`. Anything else (unset,
+  `1`, `TRUE`) is off, and then imports reject rows without coordinates, which makes Setup's *"the rest
+  wait for you to place by hand"* wrong.
+- **d. Platform totals and the legal text.** The Terms already allow it: Doorline "may create, retain, and
+  use aggregate usage statistics … (such as total organizations served, campaigns run, or doors knocked)"
+  (`terms.html:91`); the privacy policy and DPA speak only of retaining aggregates, and nothing forbids
+  publishing. Optional clarifying edit (yours, ideally with a lawyer): *"create, retain, use, and publish …
+  (such as total organizations served, campaigns run, doors knocked, surveys taken, or voter records
+  processed)"*. Not a blocker. **The numbers themselves need one check before they go live:** the Control
+  Room's overview cards count demo and internal campaigns, and its lifetime panel, which skips internal
+  orgs, still includes counts banked from deleted campaigns, test ones among them. Run
+  `npm run migrate:platform-stats` in **More → Run console** (without `--apply` it only reads; verified
+  from the repo root) and paste the output. The constant takes the dry run's freshly computed live
+  numbers (*"Would set the LIVE bucket to…"*), rounded down, and the caption names the day it was run. If
+  any comes out under the printed ad's figure (95,000+ knocks, 23,000+ surveys), I flag it before it
+  publishes rather than show a smaller number than the ad. Test organizations not marked internal are
+  counted too, so tell me if any exist. Same command whenever you refresh the numbers.
+- **e. "Usually the same day"** has never been measured. Import jobs keep start, finish and row counts;
+  turf cuts leave timing in the queue for 7 days. Decision 5.
+- **f. Sample report.** The demo campaign already publishes an **area-map** report with a demo link, and
+  area reports refuse door taps (the per-door call answers 409; no addresses anywhere). The page links to
+  `/r/<token>`, never to a report URL (the report id changes on every Rebuild demo day). The setup, once
+  (`SEED_DEMO_SHARE_PASSWORD` never replaces a password a link already has, `seedDemoOrg.js:716-736`):
+  1. In **Share**, set the demo link's password to a lowercase phrase of 12+ characters you're happy to
+     print.
+  2. In **Settings → Config Vars**, set `SEED_DEMO_SHARE_PASSWORD` to the same phrase and
+     `SEED_DEMO_SHARE_TOKEN` to the link's current token (so a `--rebuild` recreates the same URL and
+     password).
+  3. **Extend** the link to the end of its one-year life.
+  4. **Never press Renew, New address or rotate on it** — each gives it a new URL. If it ever expires,
+     **Rebuild demo day** brings it back at the same URL.
+  Acceptance: open the printed URL on a phone and unlock it with the printed password. **Lockouts:** a
+  published password turns two safety limits into ways to lock everyone out, even with the right
+  password: 10 wrong tries per Wi-Fi address per 15 minutes (a whole venue shares one) and 50 a day from
+  anywhere (`share.js:161-169`, `shareLinks.js:24`). The demo link (internal org, pinned token) is exempt
+  from the daily limit and gets a higher per-address one; the password field turns off auto-capitalize,
+  auto-correct and spell-check for every viewer (`PublicReportLayout.jsx:33-40`; iOS capitalizes the first
+  letter today). If it ever locks: **Unlock now** in Share, never rotate. **Renewal date:** the link's
+  **Expires** date in Share. The demo's view counts record no IP or device.
+
+### Decisions
+
+**Decided by the owner, 2026-11-01: all as recommended.**
+
+| # | Question | Recommended |
+|---|---|---|
+| 1 | The brief makes Proof a dark band (stone-900); you've said black isn't Doorline's color. | **Light**: stone-100 with the red eyebrow, the brief's order otherwise |
+| 2 | Tag the /aapc mockup card *Example*? Its numbers are made up. And keep the ad's word **Live** on it, though the app badges a running pass *Active*? | **Yes, and keep "Live"**: the page should read as the ad's page, and the app's numbers do refresh live |
+| 3 | Keep /aapc up after Nov 25, with the after-event line? | **Yes** (noindex) |
+| 4 | Feature the billable-door count for firms that bill clients per door? Proposed Proof bullet: *"A door count you can invoice from: once per door per pass each month, with unknocked entries removed."* (The Billing page counts by month, so a pass that spans a month end counts a door in both.) | **Yes** — the brief asked for it if it exists, and it does |
+| 5 | Back "usually the same day" with real numbers: a small read-only console report of import times by size, customer orgs only, no names (turf-cut timings last only 7 days, so imports only), run once it ships. The page says *"often the same day"* until it backs *usually*. If no import near 100,000 rows exists yet, keep *often*, or approve one timed test import into an internal org (a write). | **Build the report** |
+| 6 | Quotes: none yet. | **Ship without**; slots appear when you send them |
+| 7 | The printed ad says *"Numbers by pass, book and canvasser"*, and the homepage and /aapc repeat it. Pass and canvasser results exist; a book shows its progress (17/70, *In progress*), as the ad's own card does. Keep the words as printed, or add a **By book** table to campaign Home (doors, connection rate and surveys per book), so the line holds in full? | **Keep the words** for AAPC (the ad's card shows exactly what a book shows); the By book table makes a good first job after AAPC |
+
+### Questions from review round 1 — answered by the owner, 2026-11-01
+
+| # | Question | Answer |
+|---|---|---|
+| Q1 | **When does the banner start?** "From the /aapc launch" now means about three weeks, across Election Day. | **Today** — `AAPC.start` becomes the day /aapc ships |
+| Q2 | **"Need a voter file? We'll help you get one."** (FAQ 2 since Phase 1, and Setup) | **Advice: connecting them with a vendor.** Setup: *"Need a voter file? We'll connect you with a vendor."* FAQ 2: *"Don't have one? We'll connect you with a vendor."* Doorline never obtains or handles the file. |
+| Q3 | **"We set up your first campaign with you on the demo call"** (FAQ 1 and the final CTA) — a prospect's voter file before any agreement | **Reworded:** FAQ 1 *"…We walk you through it on a demo campaign, and set up yours the day you sign up."* (its opening also becomes *"Often the same day."*, decision 5); final CTA *"…on a live demo campaign, and set up yours the day you sign up."* |
+| Q4 | Keep the **honor-system** card? | **Keep** |
+| Q5 | **At AAPC, how does someone who books 15 minutes find you?** | **No table: email or text.** The booking dialog reads *"Book 15 minutes with Omar, at the event or after. He'll email or text you to set a time."* and, whenever it asks When?, offers an optional **Mobile number (for a text)**. Stored, emailed and listed with the request like its other fields; a new field of personal information, flagged under Privacy (the policy's *"anything else you choose to tell us in the form"* already covers it). |
+
+### What I need from you
+
+1. A photo (square, at least 800 px) to replace the monogram, and the line under *Omar Zumaya* if not
+   *Founder, Doorline* (it can't present Fox Bryant as who built or owns Doorline).
+2. Optional: up to four quotes, each with a name, a title and their written OK.
+3. Fox Bryant on the client line: the name as text (recommended) or a logo file.
+4. Optional: a scheduling link (adds *Pick a time now* after the form) and an AAPC attendee offer.
+5. The platform-stats output (C-d), the `GEOCODE_ENABLED` value (C-c), and the two demo-link config vars
+   (C-f, with the steps I'll give you).
+
+### Order and gates
+
+- **Website (A–C):** built and checked locally (phone and desktop widths, JavaScript off, Lighthouse, the
+  date cases) → you review screenshots → you commit → deploy as soon as it's checked. Nothing for phones.
+- **Offline queue (D):** its own plan — server first, the staging phone update, then production once the
+  staging check passes and the privacy-policy edit is live.
+- **One at a time:** the website first, handed over for its commit, then the queue fix. Your single
+  `git add -A` ships whatever is in the tree, so two half-built halves must never sit in it together.
+
+### Acceptance
+
+Brief §11 and addendum 2 §6, each run and reported, plus: `/aapc` serves prerendered HTML with `noindex`;
+a request from /aapc arrives with `source=aapc`, and from the banner with `home-banner`; with the date
+set to Nov 10, /aapc offers "At AAPC, Nov 17"; on Nov 18 it doesn't, and the photo line has switched.
+
+### Privacy (CLAUDE.md invariant)
+
+- **Numbers strip** — platform-wide totals derived from customer data; the Terms allow aggregate usage
+  statistics (C-d). Flagged, not blocked.
+- **Sample report** — the internal demo org, area map, no addresses or names; the password is published;
+  views are counted without IP or device.
+- **/aapc visits** — the same first-party daily count; PRIVACY_VERIFICATION item 51(d) gains `/aapc`, and
+  the Website page and its Help Center guide (`page-website.md:33-35`) show visits per page. A move from
+  /aapc to the homepage (`Sec-Fetch-Site: same-origin`) counts as internal, not *direct* — direct is the
+  bucket that measures QR scans.
+- **The sample link's exemptions** — the demo link skips the daily wrong-password limit and gets a higher
+  per-address one; its pinned token keeps one sample URL alive past the policy's "up to one year" (our
+  internal demo org only). Both recorded in PRIVACY_VERIFICATION.
+- **Decision 5's timing report** reads every customer org's import jobs: a new PRIVACY_VERIFICATION item
+  (item 50's console-output rule: totals only), a root `package.json` proxy, an OPERATIONS row.
+- **Q2 and Q3** settled as privacy questions: Doorline only connects a prospect with a vendor, and loads
+  no voter file before sign-up.
+- **New field: an optional mobile number** on demo requests that ask When? (Q5). Kept 24 months like the
+  rest of a request; PRIVACY_VERIFICATION item 51 gains it. The policy's demo-request sentence (*"…and
+  anything else you choose to tell us in the form"*) already covers it, so no policy edit.
+- **Founder photo and name** are yours; client names and quotes need written permission.
+- Nothing new is collected; the demo form changes only in when it offers "At AAPC" and its 15-minute
+  wording.
+- **The offline-queue fix is privacy-affecting** — see its §H.
+
+### Claim check (every new line, against the code)
+
+Twenty-two claims checked. Thirteen hold as the brief wrote them, including GPS on every door, flags
+recomputed each time the Audit page loads, the import taking .xlsx, cutting by size, precinct, district or
+a drawn area, re-cuts keeping history, fully-voted households dropping off, canvassers seeing only their
+own books, renaming survey options safely, lit drops, per-campaign time zones, and audited, time-limited
+staff access. The rest need these words:
+
+| Brief's line | Why | Ships as |
+|---|---|---|
+| "an unknocked entry drops out of every count [and the billable total]" | A published report keeps its numbers until refreshed; changing an outcome or unknocking is on Door Outcomes, org admins only | "…an unknocked entry drops out of every live count, and out of a client report when you refresh it." |
+| "Send it as a [PDF or a] password-protected link…" | The PDF exists (no map) | "Send it as a password-protected link that expires on its own and can be revoked, or as a PDF." |
+| "shows exactly what will change before anything is written" | The preview gives counts and examples, and "updated" counts every matched voter | "shows what will change before anything is written" |
+| "Every campaign is walled off with its own team, turf and reports" | People records, do-not-contact, do-not-knock addresses and the survey library are shared across the organization | "Each campaign gets its own team, books and reports. Run all of them from one account." |
+| "Give a lead full control of their campaign and nothing else" | Leads can't change dates or billing rules, unknock, set do-not-contact, edit voters or run the full backup | "Hand a lead one campaign to run day to day, and nothing else." |
+| "fully-voted households drop off every book" | Each campaign takes its own voted list | "…drop off every book in that campaign." |
+| "Export Center: Take your data with you any time." / "Export everything, any time." | Exports work even while paused, but do-not-contact voters, audit flags, survey designs, books and history aren't in any file | "Export your voters, results, survey answers and notes any time, even while your account is paused." / "Export your voters, results and notes any time, even while paused." |
+| "Location is recorded only when a door is recorded, never between doors." | A lead's pin move can store their position as the new pin | "Location is recorded only when you save something at a door, never between doors." (FAQ 5 takes the same words) |
+| "Numbers by pass, book and canvasser" (the printed ad) | Pass and canvasser results exist; a book shows progress only (17/70 and its status) | Decision 7 |
+| /aapc card: "Live" | The app badges a running pass **Active**; its green **Live** dot is the auto-refresh switch. *Done*, *Progress* and *Connection rate* are the app's own words | Decision 2 |
+| "Doorline puts it all in one place, and makes every door prove itself." | iOS fake GPS isn't detected, and paper results typed in at a desk carry the desk's GPS | "…and checks every door recorded in the app against its house." |
+| "From voter file to knocking, usually the same day" | Never measured (decision 5) | "…often the same day" until the report backs *usually* |
+| The mockup card's 41% | Its three books add up to 59/156 = 38% | A *+ 12 more books* row |
+
+**Found along the way (not in Phase 2 unless you say so):**
+- The phone's admin menu calls the live map **"Doors & canvasser pings"** (`mobile/components/CampaignHome.jsx:1107`) —
+  the word the site bans, and it reads like tracking. Fixed in the offline-queue phone update (*Doors &
+  canvasser locations*).
+- A **confirmed** fake-GPS knock stays in a client report's numbers with no warning; the publish warning
+  counts only unreviewed ones.
+- Paper results typed in at a desk carry the desk's GPS, so they show up as far-from-house flags.
+- The Audit page shows **no** flags (not a partial list) when a range holds over 250,000 entries; ranges
+  over 62 days are refused; the list stops at 500.
+- A pin move sends the phone's position even when the pin is dragged; the server ignores it (a note for
+  the privacy record).
+
+### What changed after review round 1 (2026-11-01)
+
+Four reviewers ran: one on this website half, three on the queue fix (their changes are in
+PROPOSAL_OFFLINE_QUEUE.md §K), one of whom also checked this half's privacy and release.
+
+| Found | Change |
+|---|---|
+| **Blocker:** the sample link's password plan couldn't work: the config var never replaces a link's existing password, and Renew gives a new URL | The four-step setup in C-f, with an acceptance check |
+| A published password makes the wrong-password limits lock everyone out, a whole venue at once; iOS capitalizes the first letter | The demo link is exempt; auto-capitalize off; a runbook |
+| A tagged visit (`?src=home-banner`) lost to the button's own source, and the header's button sent none on /aapc | One source order, a page default, every button tested |
+| After Nov 25, or with JavaScript off, /aapc would show both photo lines | `data-aapc-event` |
+| /aapc visits were added into the homepage's total, and hops from /aapc counted as *direct* (the QR bucket) | Per-page columns; same-origin moves count as internal |
+| Demo buttons do nothing until the JavaScript arrives, seconds on venue Wi-Fi | They render as mail links the dialog takes over |
+| "Book 15 minutes" opened a dialog promising a 20-minute walkthrough and a next-day reply | 15-minute wording; Q5 |
+| The head swap could leave the homepage's canonical beside `noindex` | Whole-block swap between markers; build checks |
+| Removing old sections would break links from five static pages, and `/#proof` reloads a tagged homepage | Old ids kept as aliases; `#proof` on the homepage |
+| Billing counts by month | Decision 4's bullet says *each month* |
+| Live-only numbers could come out under the printed ad's | Flagged before publishing; the caption names the read date |
+| Copy that claims more than the code (closing line, *usually*, the card's 41%), the CTA's missing password, /aapc's blocks | Claim check rows; fixed in A and B |
+| Privacy: voter-file help and day-one setup handle a prospect's voter data; the Audit shot shows real addresses; the sample URL outlives "one year"; the timing report reads every customer's imports | Q2, Q3, the shot cropped, records in PRIVACY_VERIFICATION |
+| The banner running three weeks through Election Day | Q1 |
 
 ---
 

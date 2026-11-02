@@ -14,7 +14,8 @@ import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN, SOURCE_PATTERN } from '../../serv
 // this page is written for), so the single entrance to a sales-led funnel failed invisibly.
 //
 // WHAT THIS COLLECTS, and why it is bounded the way it is: a name, work email, organization, a few
-// optional selects (role, team size, how they heard of us, and on /aapc when they'd like to meet) and
+// optional selects (role, team size, how they heard of us, and on /aapc when they'd like to meet), an
+// optional mobile number (only when the form books a meeting — Omar texts to set the time) and
 // optional free text, volunteered by a member of the public who is not a user, not a voter, and not a
 // customer — plus which page and ?src= tag the form was opened from. That is a data-subject class the
 // rest of the system never sees, so:
@@ -59,6 +60,20 @@ const limiter = rateLimit({
 // reason. The caps are generous for a human and hostile to a payload.
 const orgSchema = z.string().trim().min(1).max(120);
 const messageSchema = z.string().trim().max(2000).optional();
+// A number someone can be texted on: 7 to 15 digits with the usual separators, or nothing. The form
+// applies the same rule (client/src/marketing/DemoRequest.jsx phoneProblem); a bad one is a 400, not a
+// silent drop — the person asked to be texted.
+const phoneSchema = z
+  .string()
+  .trim()
+  .max(30)
+  .refine((v) => {
+    if (!v) return true;
+    const digits = v.replace(/\D/g, '');
+    return !/[^0-9+().\-\s]/.test(v) && digits.length >= 7 && digits.length <= 15;
+  }, 'Not a phone number')
+  .optional()
+  .transform((v) => v || null);
 // An optional select: one of its listed labels, or nothing (an empty string means "not picked").
 const pick = (options) =>
   z.union([z.enum(options), z.literal('')]).optional().transform((v) => v || null);
@@ -71,6 +86,7 @@ const bodySchema = z.object({
   teamSize: pick(TEAM_SIZES),
   heardAbout: pick(HEARD_ABOUT),
   when: pick(WHEN),
+  phone: phoneSchema,
   message: messageSchema,
   // Where the form was opened: the page's ?src= tag and its path. Unrecognised values are dropped,
   // never rejected — attribution is a nicety, and a stray tag must not cost a lead.

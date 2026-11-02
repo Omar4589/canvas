@@ -22,7 +22,7 @@ test('a person loading the page counts; bots, scripts, prefetches and HEAD do no
   assert.strictEqual(countsAsVisit(req({ headers: { accept: 'application/json' } })), false, 'not asking for a page');
 });
 
-test("a visit's source: its own ?src= tag, else the referring site's host, else direct", () => {
+test("a visit's source: its own ?src= tag, else internal, else the referring site's host, else direct", () => {
   assert.strictEqual(visitSource(req({ query: { src: 'Home-Banner' } })), 'home-banner');
   assert.strictEqual(visitSource(req({ query: { src: 'qr' }, headers: { referer: 'https://www.google.com/' } })), 'qr', 'the tag outranks the referrer');
   assert.strictEqual(visitSource(req({ headers: { referer: 'https://www.google.com/search?q=doorline' } })), 'google.com', 'host only — never the query');
@@ -30,6 +30,12 @@ test("a visit's source: its own ?src= tag, else the referring site's host, else 
   assert.strictEqual(visitSource(req({ query: { src: '<script>' } })), 'direct', 'a malformed tag is ignored');
   assert.strictEqual(visitSource(req({ headers: { referer: 'not a url' } })), 'direct');
   assert.strictEqual(visitSource(req()), 'direct', 'an untagged QR scan');
+  // A move from one of our pages to another (/aapc → the homepage) is not an arrival: no Referer is
+  // sent (no-referrer meta), but Sec-Fetch-Site says same-origin. A tag still outranks it.
+  assert.strictEqual(visitSource(req({ headers: { 'sec-fetch-site': 'same-origin' } })), 'internal');
+  assert.strictEqual(visitSource(req({ query: { src: 'home-banner' }, headers: { 'sec-fetch-site': 'same-origin' } })), 'home-banner', 'the banner link keeps its tag');
+  assert.strictEqual(visitSource(req({ headers: { 'sec-fetch-site': 'cross-site', referer: 'https://www.google.com/' } })), 'google.com');
+  assert.strictEqual(visitSource(req({ headers: { 'sec-fetch-site': 'none' } })), 'direct', 'typed, bookmarked or scanned');
 });
 
 test("the day is the owner's (Central) calendar day", () => {

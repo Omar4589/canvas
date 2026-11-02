@@ -1,8 +1,8 @@
 # The public marketing site
 
-Everything a signed-out visitor sees at `doorline.app`: the landing page, the demo-request form
-that is the product's only conversion action, and the `/app` install page for canvassers who
-arrive without an invite.
+Everything a signed-out visitor sees at `doorline.app`: the landing page, the `/aapc` page for the
+AAPC Election Post-Mortem, the demo-request form that is the product's only conversion action, and
+the `/app` install page for canvassers who arrive without an invite.
 
 Related: [CANVASSER_APP.md](CANVASSER_APP.md) (how a canvasser actually gets the app),
 [EMAIL.md](EMAIL.md) (the demo-request notice), [USERS.md](USERS.md) (there is no self-signup —
@@ -24,10 +24,15 @@ who **buys**: a campaign manager, a consultant, an advocacy director. The person
 mobile app — a canvasser — cannot create an account at all, and normally never visits the website;
 they get an invitation email instead.
 
-That split decides the whole layout. There are two calls to action, and only two:
+That split decides the whole layout. There is one call to action, and one way to see the product
+without a call:
 
 - **Request a demo** — the primary button, in the header, the hero, and the closing band.
-- **Sign in** — for people who already have an account.
+- **Open a sample report** — a real published report from our demo campaign, with its password
+  printed beside the link (*The sample report* below). Until that link is set up, the hero's second
+  button reads **See how it works** and jumps to the Proof section.
+
+**Sign in** sits in the header and the footer only, for people who already have an account.
 
 The starting-price line under those buttons is **copy, not a third CTA** — it carries no link and
 opens nothing. Its job is to answer the question that otherwise closes the tab, so the demo
@@ -38,6 +43,15 @@ an invitation gets you a sign-in screen you cannot get past, so a download butto
 homepage's audience would send a buyer somewhere useless. The store badges live in the footer,
 where they say "this is a real, published app" rather than "install this now."
 
+## What's on the homepage
+
+Top to bottom (the AAPC brief's §7, Nov 2026): the AAPC banner (while it runs), the header, the hero,
+the **numbers** (platform totals and the client line), **the problem** (four ways a door program goes
+wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit page and the map),
+**Client reports**, **Setup** (from the voter file to the first knock), the feature cards, the founder's
+note with the **Your data** list, the FAQ, and the closing band. The section links in the header are
+Proof · Reports · Setup · FAQ.
+
 ## Requesting a demo
 
 Every **Request a demo** button opens a short form in a dialog on the page. It promises *"Omar will
@@ -45,13 +59,21 @@ reply within one business day to set up a 20-minute walkthrough"* and asks for a
 and organization, then — all optional — what kind of team they are (canvassing firm, consulting
 firm, campaign, party or committee, advocacy group), team size, **how they heard about us** (AAPC
 event, referral, search, other — the printed AAPC ad's QR code carries no tag, so this question is
-the only way to tie a scan to a lead), and anything else. On `/aapc` it also asks **when** they'd
-like to meet; "At AAPC, Nov 17" is offered only through the event day.
+the only way to tie a scan to a lead), and anything else.
+
+On `/aapc` every button books a meeting instead: the form reads *"Book 15 minutes with Omar, at the
+event or after. He'll email or text you to set a time."*, asks **when** (*"At AAPC, Nov 17"* is
+offered through Nov 17 itself), and offers an optional **mobile number** — there's no table at the
+event, so Omar texts or emails to set the time. The thank-you says the same.
+
+The buttons work even before the page has finished loading: until then a tap opens an email to
+`hello@doorline.app`; once the page is ready, the same tap opens the form.
 
 Submitting it **saves the request** and emails the Doorline team. Saving comes first, so a failed
 email can no longer lose a lead; the request waits on the super-admin **Website** page either way,
 marked if its email failed. Each request also records the page it was sent from and that link's tag
-(say `src=home-banner`). It is kept for **up to 24 months**, then deletes itself — or sooner, from
+(say `src=home-banner`; a request from `/aapc` with no tag records `aapc`). It is kept for **up to
+24 months**, then deletes itself — or sooner, from
 the Website page, when the person asks. The person sees *"Thanks, Dana. Omar will email you within
 one business day."*, and replying to the notice email reaches them directly.
 
@@ -67,7 +89,7 @@ rather write their own email.
 
 ## The page loads as real HTML
 
-The homepage is built into a finished web page ahead of time, so the headline, the buttons and every
+The homepage and `/aapc` are built into finished web pages ahead of time, so the headline, the buttons and every
 section appear the moment the page arrives — before any of the app's JavaScript has downloaded. That
 matters most for someone scanning the AAPC ad's QR code on conference Wi-Fi, who used to look at a
 blank white screen until about 300 KB of script arrived. The page then quietly "wakes up" (the demo
@@ -75,17 +97,51 @@ button starts working) once the script is in.
 
 ## The AAPC banner
 
-From the day `/aapc` launches (Nov 14) through Nov 24, a slim red bar sits at the very top of the
-homepage, above the header. It is part of the page — it pushes everything down and never covers
+From the day `/aapc` launched (Nov 1, 2026 — the owner's call) through Nov 24, a slim red bar sits
+at the very top of the homepage, above the header. It is part of the page — it pushes everything down and never covers
 anything — and links to `/aapc?src=home-banner`. Through Nov 17 it reads *"At AAPC on Nov 17? Book 15
 minutes with Omar →"*; from Nov 18, *"Saw us at AAPC? Book 15 minutes with Omar →"*; from Nov 25 it is
 gone. The switch happens in the visitor's browser at midnight Eastern, so no deploy is needed on those
-days. The bar stays switched off until `/aapc` itself ships, so it can never point at a missing page.
+days.
+
+## The `/aapc` page
+
+`doorline.app/aapc` is the printed AAPC ad's own page: the ad's headline (*Every door. Every pass.
+Every number.*), its subhead and its three bullets word for word, a copy of its "Beaverdale · Pass 2"
+card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem in
+person…"*, switching on Nov 18 to *"Missed me at AAPC?…"*), **Book 15 minutes with Omar** and
+**Request a demo**, the numbers, three short blocks (Proof, Client reports, Many campaigns) and the
+price. It stays up after the event with the after-event line. Search engines are asked not to list it
+(it's an event page), and a link shared from it previews as Doorline's.
+
+## The sample report
+
+**Open a sample report** opens a real published report from Doorline's own demo campaign (made-up
+canvassing on real Des Moines streets): the area map — no addresses — with door counts, contact rate
+and survey results. Every report link has a password, so the page prints this one's beside the link.
+Because the password is public, the two wrong-password limits that protect a client's link would only
+lock visitors out of this one, so this one link — and only while it belongs to our internal demo
+organization — doesn't have them.
+
+Keeping its address from ever changing takes four steps, once (the owner, in the console and the
+Heroku dashboard):
+
+1. In **Share**, set the demo link's password to a lowercase phrase of 12+ characters you're happy to
+   print.
+2. In **Settings → Config Vars**, set `SEED_DEMO_SHARE_PASSWORD` to the same phrase and
+   `SEED_DEMO_SHARE_TOKEN` to the link's current token.
+3. **Extend** the link to the end of its one-year life.
+4. **Never press Renew, New address or rotate on it** — each gives it a new URL. If it ever expires,
+   **Rebuild demo day** brings it back at the same URL.
+
+Then the link and password go into `client/src/marketing/siteFacts.js` (`SAMPLE_REPORT`), and every
+"Open a sample report" appears. If it ever reports *locked*: **Unlock now** in Share — never rotate.
 
 ## Visit counts
 
-The super-admin **Website** page shows how many times the homepage was loaded each day, split by
-where visitors came from: a link's own tag, the website that sent them (like google.com), or
+The super-admin **Website** page shows how many times the homepage and `/aapc` were loaded each day,
+page by page, split by where visitors came from: a link's own tag (the banner's `home-banner`), the
+website that sent them (like google.com), "internal" (a move from one of our pages to another), or
 "direct" — which is what a scan of the untagged QR code looks like. The counting happens on our own
 server: no cookies, no tracking script, no stored IP addresses; search-engine crawlers and link
 previews are left out.
@@ -142,6 +198,19 @@ overstate what Doorline does, so they stay off the site:
 | "coverage" as a share of the universe | reports carry no such percentage | doors knocked, contact rate |
 | "Nothing bad" | glib, and not quite true (see the first row) | "They keep knocking" |
 
+Rows added by the Phase 2 claim check (Nov 2026 — every new line checked against the code):
+
+| Avoid | Because | Say instead |
+|---|---|---|
+| "walled off" (campaigns) | people records, do-not-contact, do-not-knock addresses and the survey library are shared across an organization | "Each campaign gets its own team, books and reports" |
+| "full control" (leads) | a lead can't change dates or billing rules, unknock, set do-not-contact, edit voters or run the full backup | "Hand a lead one campaign to run day to day, and nothing else" |
+| "usually the same day" | never measured — `npm run report:setup-times` measures it | "often the same day" |
+| "makes every door prove itself" | iOS doesn't report fake GPS, and results typed in at a desk carry the desk's location | "checks every door recorded in the app against its house" |
+| "export everything" | do-not-contact voters, audit flags, survey designs, books and history aren't in any file | "Export your voters, results, survey answers and notes any time, even while paused" |
+| "drops out of every count" (unknock) | a published client report keeps its numbers until refreshed | "drops out of every live count, and out of a client report when you refresh it" |
+| "We'll help you get a voter file" | Doorline never obtains or handles a voter file for anyone | "We'll connect you with a vendor" |
+| "We set up your first campaign on the demo call" | that would load a prospect's voter file before any agreement | "set up yours the day you sign up" |
+
 Platform totals say **"door knocks"**, never "doors knocked" — the printed AAPC ad's wording.
 
 ---
@@ -152,11 +221,11 @@ Platform totals say **"door knocks"**, never "doors knocked" — the printed AAP
 
 | | React route | Prerendered React page | Static document |
 |---|---|---|---|
-| Pages | `/login`, `/forgot-password`, `/reset-password/:token`, `/r/:token` (and the console) | `/` (landing) — `/aapc` joins it | `/privacy`, `/terms`, `/delete-account`, `/app` |
+| Pages | `/login`, `/forgot-password`, `/reset-password/:token`, `/r/:token` (and the console) | `/` (landing) and `/aapc` | `/privacy`, `/terms`, `/delete-account`, `/app` |
 | Lives in | [`client/src/pages/`](../client/src/pages/) | `client/src/pages/`, rendered at build time into `dist/.prerendered/` | [`client/public/*.html`](../client/public/) |
 | Served by | the SPA fallback in [`app.js`](../server/src/app.js) — the EMPTY shell | `PRERENDERED_PAGES` in `app.js`, **before** `express.static` | explicit `res.sendFile` routes, **before** the fallback |
 | Registered in | [`server/src/webRoutes.js`](../server/src/webRoutes.js) → `WEB_SEGMENTS` | `WEB_SEGMENTS` too (it is still a React route) + the four places in *Prerendered pages* below | `STATIC_PAGES` in `app.js` |
-| Head tags | inherited from `client/index.html` | `client/index.html`'s (the homepage's own); another page writes its own in `scripts/prerender.js` | its own |
+| Head tags | inherited from `client/index.html` | `client/index.html`'s page-head block (the homepage's own); a page with a `head` in `entry-prerender.jsx` gets that block replaced whole (`/aapc`) | its own |
 | Linked with | `<Link to>` | `<a href>` from outside the app, so the visitor gets the HTML; a `<Link>` from inside the app is fine | `<a href>` — must be a full page load |
 
 **The rule for choosing:** if the page has to be correct for a crawler or a link preview, it must
@@ -197,8 +266,14 @@ The homepage reaches the browser as finished HTML, then hydrates in place. The p
   `dist/.vite/manifest.json`), `vite build --ssr src/entry-prerender.jsx --outDir .ssr` (gitignored),
   and `node scripts/prerender.js`, which renders each page in `entry-prerender.jsx`'s `PAGES` and
   writes `dist/.prerendered/<file>`: the shell with `class="marketing"` on `<html>`, the markup inside
-  `#root` (marked `data-prerendered="<name>"`), `modulepreload` links for the page's own chunks, and —
-  while `/aapc` is live — the AAPC banner's inline date script. Any surprise fails the build: a
+  `#root` (marked `data-prerendered="<name>"`), `modulepreload` links for the page's own chunks, the
+  AAPC inline date script, and — for a page with a `head` of its own — that head in place of
+  `client/index.html`'s **page-head block** (everything between the `page-head:start` and
+  `page-head:end` comments: title through JSON-LD). The block is swapped whole: three of its tags span
+  several lines, and a half swap that left the homepage's canonical beside a `noindex` could get the
+  homepage dropped from search. The build fails unless a page with a head has exactly one canonical
+  (its own) and `noindex` exactly as configured, and a page without one keeps the shell's block
+  untouched. Any surprise fails the build: a
   failed Heroku build leaves the running release alone, while a page that silently fell back to the
   empty shell would go unnoticed.
 - **One tree** — `client/src/AppTree.jsx` is the provider stack for both the browser (`main.jsx`, with
@@ -225,13 +300,16 @@ flash):**
 3. Nothing starts invisible — no `opacity-0` entrance animations; the HTML is the first paint.
 4. The SSR render and the client bundle come from the same build (the one `build` script).
 
-**Adding a prerendered page (how `/aapc` ships):** (1) the page component, its route in `App.jsx`,
-and its segment in `WEB_SEGMENTS`; (2) an entry in `entry-prerender.jsx`'s `PAGES`, with its own
-title, description, canonical and OG tags written by `scripts/prerender.js`; (3) a `data-prerendered`
-branch in `main.jsx` that loads its module before hydrating; (4) a row in `PRERENDERED_PAGES`. For
-`/aapc`, also set `AAPC.pageLive` (`client/src/marketing/aapc.js`) so the banner appears.
+**Adding a prerendered page (how `/aapc` shipped):** (1) the page component, its route in `App.jsx`
+(`pages.<name> || lazy(...)`), and its segment in `WEB_SEGMENTS`; (2) an entry in
+`entry-prerender.jsx`'s `PAGES` — `path`, `file`, `module`, `Component`, and a `head` (title,
+description, canonical `url`, optional `robots`, OG title and description) unless it should carry the
+homepage's; (3) a loader in `main.jsx`'s `PRERENDERED` map, so it loads its module before hydrating;
+(4) a row in `PRERENDERED_PAGES` (it's then visit-counted too, a column on the Website page). Its
+`useEffect` adds the `marketing` class and `stampAapc()` for a client-side arrival, as both pages do.
 
-**Check a build:** `npm run build` ends with `prerendered / → dist/.prerendered/index.html`; then with
+**Check a build:** `npm run build` ends with `prerendered / → dist/.prerendered/index.html` and
+`prerendered /aapc → dist/.prerendered/aapc.html`; then with
 `NODE_ENV=production npm start`, `curl -s localhost:$PORT/ | grep 'Know exactly what happened'` finds
 the headline, `curl -s localhost:$PORT/login` is still the empty shell, and
 `curl -sI localhost:$PORT/.prerendered/index.html` is a 404. `server/test/staticPages.int.test.js`
@@ -239,12 +317,21 @@ pins the serving rules.
 
 ## The AAPC banner and dates
 
-`client/src/marketing/aapc.js` is the one config for every date-driven piece: `start` (Nov 14),
-`switchOn` (Nov 18), `end` (Nov 25), the event's time zone (Eastern), the banner link, and `pageLive`
-(off until `/aapc` ships). The prerendered page can't know the date, so the build inlines
-`aapcPhaseScript()` into `<head>`; it stamps `<html data-aapc="before|after|off">` before first paint,
-and `index.css` shows the matching text or hides the bar. `aapcPhase()` is the same rule for code that
-runs later (the demo form's "When?"); `aapc.test.js` pins the two together hour by hour.
+`client/src/marketing/aapc.js` is the one config for every date-driven piece: `start` (Nov 1 — the
+day `/aapc` shipped), `switchOn` (Nov 18), `end` (Nov 25), the event's time zone (Eastern), the
+banner link, and `pageLive` (on). The prerendered pages can't know the date, so the build inlines
+`aapcPhaseScript()` into `<head>`; before first paint it stamps two attributes, and `index.css` shows
+the matching text:
+
+- `<html data-aapc="before|after|off">` — **the banner's window**: off before `start` and from `end`.
+- `<html data-aapc-event="before|after">` — **the event itself, no window**: `before` until `switchOn`,
+  `after` from then, for good. `/aapc`'s founder line (`.aapc-ev-before` / `.aapc-ev-after`, the
+  before-line shown by default) and the demo form's *"At AAPC, Nov 17"* follow this one, so `/aapc`
+  never shows both lines and the option is offered from launch through Nov 17.
+
+`aapcPhase()` and `aapcEventPhase()` are the same rules for code that runs later; `stampAapc()` sets
+both attributes on a client-side arrival. `aapc.test.js` pins the script to both functions hour by
+hour, past Nov 25.
 
 ## Marketing components
 
@@ -252,8 +339,16 @@ runs later (the demo form's "When?"); `aapc.test.js` pins the two together hour 
 pins `theme-light` so the public site stays light even when the app's dark theme is saved.
 
 Conventions worth keeping: sections are `mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8` with
-`py-20 sm:py-24`; content data lives in a module-level `const` array that gets `.map`ped; `<h1>`
-belongs to `Hero` alone; every focusable element carries `focus-visible:ring-2 focus-visible:ring-brand-600`.
+`py-16 sm:py-24` (tighter on a phone, where the page runs ~10,900 px at 390 wide); content data lives
+in a module-level `const` array that gets `.map`ped; each page's `<h1>` belongs to its hero alone;
+every focusable element carries `focus-visible:ring-2 focus-visible:ring-brand-600`.
+
+The homepage (Phase 2, Nov 2026): `Hero`, `NumbersStrip`, `ProblemStrip`, `ProofSection` (`#proof`),
+`PortalSpotlight` (`#reports`), `SetupSection` (`#setup`), `FeatureGrid`, `FounderNote`, `Faq`
+(`#faq`), `CtaBand`. `/aapc` is `pages/AapcPage.jsx` with `AapcMockupCard`. The old product tour,
+four-claim strip and How it works are gone, but **their ids stay as aliases** (`#turf`, `#field`,
+`#how` on Setup; `#oversight` on Proof): `privacy.html`, `terms.html`, `app.html`,
+`delete-account.html` and `404.html` link to them, and the legal pages are owner-edited.
 
 Three rules from the Nov 2026 fixes:
 
@@ -271,16 +366,52 @@ Three rules from the Nov 2026 fixes:
   through a `<picture>` whose source only matches from 640px — a phone never downloads it.
   `npm run shots:optimize -- map.png` regenerates just that one file.
 
-Two single sources of truth, and CTAs must read from them rather than hard-coding:
+Single sources of truth, and CTAs must read from them rather than hard-coding:
 
 - [`useAuthCta.js`](../client/src/marketing/useAuthCta.js) — `{ loading, authed, to, label }`, so
-  nav, hero, band, and footer can never disagree about who is signed in.
-- [`DemoRequest.jsx`](../client/src/marketing/DemoRequest.jsx) — `useDemoRequest().open()`. The
-  provider wraps the whole page in `LandingPage.jsx` because the three buttons that call it sit at
-  three different scroll depths.
+  nav and footer can never disagree about who is signed in.
+- [`DemoRequest.jsx`](../client/src/marketing/DemoRequest.jsx) — `useDemoRequest().open()`, reached
+  only through [`DemoButton.jsx`](../client/src/marketing/DemoButton.jsx). A DemoButton is a
+  `mailto:` link in the markup, so a tap does something before the page hydrates (seconds on venue
+  Wi-Fi); once live, its click opens the dialog. The provider wraps each page; `/aapc` passes
+  `defaultSource="aapc"` and `askWhen`, so every control there books a meeting. The source a request
+  sends is `pageSource() || options.source || defaultSource` — a tagged URL always wins.
+- [`siteFacts.js`](../client/src/marketing/siteFacts.js) — the platform totals, the client names and
+  the sample report's link and password (*The facts the pages state* below).
+- [`SampleReport.jsx`](../client/src/marketing/SampleReport.jsx) — every "Open a sample report",
+  always with its password; the hero's falls back to "See how it works" until the link exists.
 
-The nav's section links (`SECTIONS` in `MarketingNav.jsx`) are in-page `#` anchors that only
-resolve on `/`; the static pages link back to them as `/#turf`.
+The nav's section links (`SECTIONS` in `MarketingNav.jsx`) take a `base`: `''` on the homepage (a
+plain `#proof` — a `/#proof` would reload a tagged `/?src=…` and lose the tag) and `'/'` on `/aapc`.
+
+### The facts the pages state
+
+- **Platform totals** (`PLATFORM_TOTALS`): refresh from `npm run migrate:platform-stats` in the Heroku
+  Run console — without `--apply` it only reads — using its *"Would set the LIVE bucket to"* line
+  (customer organizations only; the Control Room's overview cards count demo campaigns, and its
+  lifetime panel banks deleted test campaigns). Round down, and date the caption. The printed ad says
+  95,000+ door knocks and 23,000+ surveys, so never publish lower.
+- **Client names** (`CLIENTS`): each only with the client's written OK. Fox Bryant is a client, never
+  presented as who built or owns Doorline.
+- **The sample report** (`SAMPLE_REPORT`): `/r/<token>` and its password, set after the four steps in
+  Part 1. `routes/public/share.js` `isPublicSample` exempts exactly that token, and only while its link
+  belongs to an internal organization, from the per-link wrong-password budget, and raises its
+  per-address cap from 10 to 100 per 15 minutes. The share password field turns off auto-capitalize,
+  auto-correct and spell-check for every viewer (`PublicReportLayout.jsx`).
+- **"Often the same day"**: `npm run report:setup-times` (read-only; `services/site/setupTimes.js`)
+  prints how long voter-file imports took in production, by size, customer organizations only. When it
+  backs *usually*, the Setup heading and FAQ 1 may say so.
+
+### Screenshots
+
+Raw captures live in `client/shots-raw/` (gitignored); `npm run shots:optimize -- <file>` turns one
+into its committed webp (`scripts/optimizeShots.js`, with an optional crop). The Proof pair (`audit`,
+`locations`) is captured from the demo campaign on a local copy (`npm run seed:demo -- --apply` into a
+scratch database), at 1440×900 @2x, **with every address blurred before the screenshot**: the demo's
+doors are real Des Moines homes, and a readable address must never sit beside a made-up flag or answer.
+The demo seed stages one run of six doors recorded from a parked car (`demoActivity.js`
+`stageSuspiciousKnocks`: far, rapid, one-spot and one fake-GPS knock), so the Audit page has the real
+thing to show.
 
 ## The demo-request endpoint
 
@@ -289,7 +420,7 @@ mounted in `routes/index.js` above the auth gate.
 
 | | |
 |---|---|
-| Body | `name`, `email`, `organization` (required); `role`, `teamSize`, `heardAbout`, `when` (optional — each one of its labels in `services/site/demoOptions.js`), `message` (optional); `source` (a `?src=` tag) and `page` (a path) — dropped, never rejected, when malformed; `company` (honeypot), `elapsedMs` (timing) |
+| Body | `name`, `email`, `organization` (required); `role`, `teamSize`, `heardAbout`, `when` (optional — each one of its labels in `services/site/demoOptions.js`), `phone` (optional — 7–15 digits with the usual separators; a malformed one is a **400**, never a silent drop, because the person asked to be texted), `message` (optional); `source` (a `?src=` tag) and `page` (a path) — dropped, never rejected, when malformed; `company` (honeypot), `elapsedMs` (timing) |
 | Storage | saved as a `DemoRequest` **before** the email is sent; `expiresAt` = +730 days with a TTL index (needs `npm run migrate:build-indexes -- --apply` after the deploy — until then nothing expires). The model has `bufferCommands` off, so with no database the save fails at once and the email still goes |
 | Validation | Zod, reusing `nameSchema` / `emailSchema` from [`utils/validators.js`](../server/src/utils/validators.js); bounded free text for org (120) and message (2000) |
 | Rate limit | 20/hour per IP, counting **every** request. Not tighter: only a valid submission sends mail, and a low cap would lock out a person who mistypes their own email |
@@ -325,7 +456,7 @@ the prospect's name and address stay in the body, which is never logged.
 Recipient is `DEMO_REQUEST_TO` (default `hello@doorline.app`) — override it on staging so test
 submissions don't reach the real inbox.
 
-Tests: [`server/test/demoRequest.test.js`](../server/test/demoRequest.test.js), 9 cases, no DB, runs
+Tests: [`server/test/demoRequest.test.js`](../server/test/demoRequest.test.js), 10 cases, no DB, runs
 on plain `npm test`. It mounts the router on a bare Express app rather than calling `createApp()`,
 which eagerly opens ioredis handles for bull-board. Saving, the failed-email path, bot rows never
 saved, and the Website routes' access rules are in `server/test/demoRequestStore.int.test.js`.
@@ -335,8 +466,11 @@ saved, and the Website routes' access rules are in `server/test/demoRequestStore
 `services/site/siteVisits.js` bumps `SiteVisitDay {day, path, source, count}` as `app.js` serves a
 prerendered page. A visit is a `GET` that wants HTML from something that isn't a bot (a broad
 user-agent filter, no user agent at all counts as a script) and isn't a prefetch/prerender. `day` is
-the owner's calendar day (Central). `source` is the page's valid `?src=` tag, else the referring
-site's host without `www.` (only the host — never the URL), else `direct`. Fire-and-forget: a failed
+the owner's calendar day (Central). `source` is the page's valid `?src=` tag, else `internal` when
+the browser says the request came from one of our own pages (`Sec-Fetch-Site: same-origin` — our pages
+send no Referer, so a hop from `/aapc` to the homepage would otherwise read as `direct`, the QR-scan
+bucket), else the referring site's host without `www.` (only the host — never the URL), else
+`direct`. Fire-and-forget: a failed
 write costs one count, never the page. No IP, cookie or user agent is stored. The unique
 `{day, path, source}` index needs `migrate:build-indexes`; until then racing first visits can split a
 key across rows, which the reader sums. Tests: `server/test/siteVisits.test.js` (the rules) and
@@ -351,7 +485,12 @@ user, not a voter, and not a customer**. What keeps that bounded, all load-beari
   emailed. The Privacy Policy's *Demo requests* paragraph names what is collected, why (reply and
   arrange a demo) and for how long (up to 24 months — the TTL). Only super-admins can see them, and a
   person's deletion request is a Delete on the Website page. The visit counter stores no personal
-  information at all.
+  information at all. A booking (`/aapc`) may add a **mobile number** — optional, kept with the rest
+  of the request; the policy's *"anything else you choose to tell us in the form"* covers it.
+- **The sample report is ours, not a customer's.** It's the internal demo organization's report, on the
+  area map (no addresses), and its password is public by design; its view count records no IP or
+  device. Its one exemption from the wrong-password limits applies only while it belongs to an
+  internal organization.
 - **No new subprocessor.** Mail goes through Resend, already listed in [`DPA.md`](DPA.md) §6.
   A hosted captcha (Turnstile, hCaptcha, reCAPTCHA) would be a new subprocessor — under the signed
   DPA that is a **customer-notice event**, not a code decision. That is why bot defence is a
@@ -363,7 +502,9 @@ See the watchlist entry in [`PRIVACY_VERIFICATION.md`](PRIVACY_VERIFICATION.md).
 
 - `client/index.html` owns the head for **every** React route, and the prerendered homepage is built
   from it — treat any change there as a change to the homepage's identity. A prerendered page of its
-  own (like `/aapc`) gets its head from `scripts/prerender.js`.
+  own (like `/aapc`) gets its head from its `PAGES` entry, swapped in by `scripts/prerender.js`.
+- `/aapc` is `noindex` with a self-canonical: an event page, not a search landing page. It stays out
+  of `sitemap.xml` and must never be disallowed in `robots.txt` (a crawler has to read the noindex).
 - Its JSON-LD carries an **`offers` node — an `Offer` with `price: "300"` USD and a
   `UnitPriceSpecification` reading "per campaign, per month"** — so search results can show the
   starting price without implying a flat 300. It must track the published number: it is one of the three places that move

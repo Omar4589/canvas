@@ -408,7 +408,7 @@ export function dormancyWarning({ orgName, deleteOnDate }) {
 //
 // `organization` is the only field guaranteed present besides name/email — teamSize and message
 // are optional and simply drop out of both halves when absent.
-export function demoRequest({ name, email, organization, role, teamSize, heardAbout, when, message, source, page }) {
+export function demoRequest({ name, email, organization, role, teamSize, heardAbout, when, phone, message, source, page }) {
   const subject = `Demo request — ${organization}`;
   const row = (label, value) => para(`<strong>${esc(label)}:</strong> ${esc(value)}`);
   // Where it came from, in one line: the page, plus its ?src= tag when the link carried one.
@@ -422,6 +422,7 @@ export function demoRequest({ name, email, organization, role, teamSize, heardAb
     (teamSize ? row('Approx. team size', teamSize) : '') +
     (heardAbout ? row('Heard about us', heardAbout) : '') +
     (when ? row('When', when) : '') +
+    (phone ? row('Mobile (for a text)', phone) : '') +
     (message ? para(`<strong>Message:</strong><br />${esc(message).replace(/\n/g, '<br />')}`) : '') +
     (from ? row('Sent from', from) : '') +
     muted('Submitted from the demo form on doorline.app — also saved on the Website page in the super-admin console. Reply to this email to answer them directly.'),
@@ -437,6 +438,7 @@ export function demoRequest({ name, email, organization, role, teamSize, heardAb
     ...(teamSize ? [`Team size:    ${teamSize}`] : []),
     ...(heardAbout ? [`Heard about:  ${heardAbout}`] : []),
     ...(when ? [`When:         ${when}`] : []),
+    ...(phone ? [`Mobile:       ${phone}`] : []),
     ...(message ? ['', 'Message:', message] : []),
     ...(from ? ['', `Sent from:    ${from}`] : []),
     '',
