@@ -4957,6 +4957,33 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       `test/siteTraffic.int.test.js` (page serves write the rows; hour rows carry no page or source; the boot
       sync builds the index; the Traffic read; super-admins only); client `lib/siteTraffic.test.js` and
       `lib/websiteTrafficRender.smoke.test.js`.
+56. **[v7 2026-11-02 — The campaign Home's By book table and its CSV: one pass split by book, naming each
+    book's assigned canvassers. BUILT 2026-11-02, uncommitted. Nothing new collected, no new recipient, no
+    subprocessor, no policy change: a new route and a new file that name people, for the same people who
+    already see and set those names on Turf Cutting.]**
+    Plan: the owner's addendum 3 §8 (the printed ad's "Numbers by pass, book and canvasser"), design approved
+    2026-11-02. Read from the code:
+    - **(a) What it returns.** `GET /admin/reports/knocks-by-book` and `.csv` (`routes/admin/reports.js` →
+      `services/reports/knocksByBook.js`): per book of one pass, counts (knocks, surveys, rates), the book's
+      door count, and `canvassers` — the first and last names of the accounts assigned to the book now
+      (`TurfAssignment` → `User`, org-scoped). No email, phone, address or voter data; no field the reports
+      router didn't already return somewhere.
+    - **(b) Who can read it.** The reports router's campaign gate, unchanged: an org admin of the organization,
+      or a team lead only for a campaign they manage (`canManageCampaign`); staff only under the existing
+      support-access rules. These are the people who assign books on Turf Cutting, where the same names show.
+    - **(c) The new file.** The CSV lists every assigned name per book. It leaves Doorline only when that admin
+      or lead downloads it — like the per-round file's per-canvasser layout (`?groupBy=canvasser`), which
+      already names canvassers.
+    - **(d) Deleted and removed people.** Account deletion removes the person's `TurfAssignment` rows
+      (`services/users/deleteAccount.js`), and so does removal from a campaign or organization, so the table
+      never names a deleted account.
+    - **(e) Claims checked.** privacy.html's customer-data paragraphs (we process what customers record on
+      their behalf, visible to their own admins): holds. DPA §3(a) (process only to provide the Service) and
+      §3(d) (no combining across customers — every query is org- and campaign-scoped): hold; §6: no
+      subprocessor. Terms: nothing.
+    - **(f) Tests.** `test/knocksByBook.int.test.js` (the counting contract, the CSV, passId required, another
+      campaign's pass 404, a lead's campaign gate); client `lib/byBook.test.js` and
+      `lib/byBookTableRender.smoke.test.js`.
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 

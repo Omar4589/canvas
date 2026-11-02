@@ -8,6 +8,8 @@ import CoverageBar from '../components/CoverageBar.jsx';
 import QuestionResults, { TagResults } from '../components/QuestionResults.jsx';
 import CanvasserSummaryTable from '../components/CanvasserSummaryTable.jsx';
 import ByPassTable from '../components/ByPassTable.jsx';
+import ByBookTable from '../components/ByBookTable.jsx';
+import { bookPassOptions, defaultBookPass } from '../lib/byBook.js';
 import CanvasserResponsesModal from '../components/CanvasserResponsesModal.jsx';
 import DateRangeSelector, { defaultRange } from '../components/DateRangeSelector.jsx';
 import InfoHint from '../components/InfoHint.jsx';
@@ -41,6 +43,9 @@ function buildQuery(params) {
 // The By pass table's view before the admin touches it: Walk list order (ByPassTable's default for a
 // null sort), folded.
 const freshPassView = (campaignId) => ({ campaignId, sort: null, expanded: false });
+
+// The By book table's view before the admin touches it: the default pass (lib/byBook.js), book order, folded.
+const freshBookView = (campaignId) => ({ campaignId, passId: null, sort: null, expanded: false });
 
 function SectionHeading({ title, right }) {
   return (
@@ -97,6 +102,7 @@ export default function DashboardPage() {
     setSurveyPassId('');
     setSelectedCanvasser(null);
     setByPassView(freshPassView(campaignId));
+    setByBookView(freshBookView(campaignId));
     deepLinkedRef.current = false;
   }, [campaignId, surveyParam]);
 
@@ -236,6 +242,63 @@ export default function DashboardPage() {
       setExportingRounds(false);
     }
   }
+
+  // By book — one pass split by book, over the same window, walk-list filter and crew filter as By pass, so
+  // its TOTAL is that pass's By pass row. Its pass, sort and Show all are held here like passView, and the
+  // pass the table opens on is pinned once chosen, so a poll that reorders the passes' knocks never
+  // switches it. A pass the walk-list filter takes away falls back to the default until it's offered again.
+  const [byBookView, setByBookView] = useState(() => freshBookView(campaignId));
+  const bookView = byBookView.campaignId === campaignId ? byBookView : freshBookView(campaignId);
+  const onBookViewChange = (patch) =>
+    setByBookView((v) => ({ ...(v.campaignId === campaignId ? v : freshBookView(campaignId)), ...patch }));
+  const bookPasses = useMemo(() => bookPassOptions(byRoundQ.data?.rounds), [byRoundQ.data?.rounds]);
+  const defaultPassId = useMemo(() => defaultBookPass(byRoundQ.data?.rounds), [byRoundQ.data?.rounds]);
+  const bookPassId = bookPasses.some((p) => p.passId === bookView.passId) ? bookView.passId : defaultPassId;
+  useEffect(() => {
+    if (!bookView.passId && defaultPassId) onBookViewChange({ passId: defaultPassId });
+    // onBookViewChange is a fresh function each render; this only needs to run when the default appears.
+  }, [bookView.passId, defaultPassId]);
+  const byBookQ = useQuery({
+    queryKey: ['reports', 'knocks-by-book', campaignId, bookPassId, effortId, coordinatorId, dateRange?.from, dateRange?.to],
+    queryFn: () =>
+      api(
+        `/admin/reports/knocks-by-book${buildQuery({
+          campaignId,
+          passId: bookPassId,
+          effortId: effortId || undefined,
+          coordinatorId: coordinatorId || undefined,
+          from: dateRange?.from,
+          to: dateRange?.to,
+        })}`
+      ),
+    enabled: !!campaignId && !!dateRange && !!bookPassId,
+    // While another pass loads, the last answer stays on screen, dimmed — this campaign's only: the page
+    // stays mounted across a campaign switch, and another campaign's books must never show under this one.
+    // (A new range or crew empties the section with By pass, and it comes back dimmed until this answers.)
+    placeholderData: (previous) => (previous?.campaignId === String(campaignId) ? previous : undefined),
+    ...HOME_POLL,
+  });
+  const [exportingBooks, setExportingBooks] = useState(false);
+  const [booksExportError, setBooksExportError] = useState('');
+  const exportBooksCsv = async () => {
+    setBooksExportError('');
+    setExportingBooks(true);
+    try {
+      const qs = buildQuery({
+        campaignId,
+        passId: bookPassId,
+        effortId: effortId || undefined,
+        coordinatorId: coordinatorId || undefined,
+        from: dateRange?.from,
+        to: dateRange?.to,
+      });
+      await downloadFile(`/admin/reports/knocks-by-book.csv${qs}`, { fallbackName: 'knocks-by-book.csv' });
+    } catch (err) {
+      setBooksExportError(err.message || 'Export failed');
+    } finally {
+      setExportingBooks(false);
+    }
+  };
 
   const surveysQ = useQuery({
     queryKey: ['reports', 'surveys', campaignId],
@@ -744,6 +807,62 @@ export default function DashboardPage() {
             view={passView}
             onViewChange={onPassViewChange}
           />
+        </section>
+      )}
+
+      {/* By book — the picked pass split by book (ByBookTable), over the same window and crew filter as By
+          pass, so its TOTAL is that pass's By pass row. Shown once the campaign has a pass. */}
+      {bookPasses.length > 0 && (
+        <section className="mb-6">
+          <SectionHeading
+            title="By book"
+            right={
+              <span className="flex flex-wrap items-center justify-end gap-2">
+                {booksExportError && <span className="text-xs text-danger">{booksExportError}</span>}
+                <select
+                  value={bookPassId || ''}
+                  onChange={(e) => onBookViewChange({ passId: e.target.value, expanded: false })}
+                  title="The pass to split by book"
+                  aria-label="Pass"
+                  className="min-w-0 max-w-full rounded border border-border-strong bg-card px-2 py-1 text-sm text-fg-muted focus:border-brand-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:max-w-xs"
+                >
+                  {bookPasses.map((p) => (
+                    <option key={p.passId} value={p.passId}>
+                      {p.label}
+                      {p.status === 'active' && current?.isActive !== false ? ' (active)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-fg-muted">Selected range</span>
+                <button
+                  type="button"
+                  onClick={exportBooksCsv}
+                  disabled={exportingBooks || !bookPassId}
+                  className="rounded border border-border-strong bg-card px-3 py-1 text-sm text-fg-muted hover:bg-sunken disabled:opacity-50"
+                >
+                  {exportingBooks ? 'Exporting…' : 'Export CSV'}
+                </button>
+              </span>
+            }
+          />
+          {byBookQ.error && !byBookQ.data ? (
+            <div className="rounded-lg border border-danger/30 bg-danger-tint p-4 text-sm text-danger">
+              Error loading books: {byBookQ.error.message}
+            </div>
+          ) : !byBookQ.data ? (
+            <div className="rounded-lg border border-border bg-card p-4 text-sm text-fg-muted">Loading…</div>
+          ) : (
+            <div className={`transition-opacity ${byBookQ.isPlaceholderData ? 'opacity-60' : ''}`} aria-busy={byBookQ.isPlaceholderData}>
+              <ByBookTable
+                books={byBookQ.data.books}
+                notInBook={byBookQ.data.notInBook}
+                totals={byBookQ.data.totals}
+                isLitDrop={isLitDrop}
+                view={bookView}
+                onViewChange={onBookViewChange}
+              />
+            </div>
+          )}
         </section>
       )}
 

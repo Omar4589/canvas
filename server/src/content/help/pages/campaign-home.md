@@ -6,7 +6,7 @@ kind: page
 order: 100
 sourceDoc: CAMPAIGNS.md
 summary: What the campaign dashboard shows and when to use it.
-tags: dashboard, home, metrics, not a target voter, by pass, passes
+tags: dashboard, home, metrics, not a target voter, by pass, passes, by book, books
 ---
 
 The campaign **Home** is your dashboard — the first screen when you open a campaign. If you're a team lead who runs just one active campaign, it's also where you land when you sign in. It does two jobs depending on where the campaign is in its life.
@@ -33,7 +33,7 @@ If the campaign has a **door goal** set, a thin line sits at the very top of the
 
 Once your campaign has coordinators, a **coordinator filter** appears next to the walk-list one — a dropdown on the web, and in the app a chip in the filter row showing whichever crew you're on, the same control the Timeline has. Leave it on **All coordinators** for everyone's numbers, pick a coordinator to see just their crew's, or pick **No coordinator** for people who aren't on any crew. A coordinator's own door-knocking counts toward their crew.
 
-Everything activity-based follows it — the activity numbers, the By pass table and its CSV export, the survey results (the Tags panel included) and their drill-ins, and the canvasser list. The one exception is **Coverage**: doors don't belong to a crew, so coverage always shows the whole campaign's progress, and its caption says so while a crew is selected.
+Everything activity-based follows it — the activity numbers, the By pass and By book tables and their CSV exports, the survey results (the Tags panel included) and their drill-ins, and the canvasser list. The one exception is **Coverage**: doors don't belong to a crew, so coverage always shows the whole campaign's progress, and its caption says so while a crew is selected.
 
 ## "How these are counted"
 
@@ -50,6 +50,28 @@ Below the activity numbers, the **By pass** section lists one row per walk list 
 **New homes reached** counts a home only in the pass of its **first-ever** knock: going back to a Pass-1 door in Pass 2 adds a knock, not a new home. So the column shows what each pass added to your coverage. With a crew selected, "first-ever" is still judged campaign-wide — a home counts for the crew only if that crew made its very first knock, so a door another crew reached first is never a "new home" here. Knocks no pass claims — recorded before the campaign had passes, or at a door that wasn't in any live book — appear as one "Legacy / no pass" row. A door a canvasser recorded on a pass with no signal, and sent after that pass ended, still counts in that pass after the app update, so a finished pass's row can keep growing for a little while as phones catch up.
 
 **Export CSV** downloads the same table, TOTAL row included — pick the date range first, since the export uses it. It always has every pass, including any folded away on screen. See [Understanding the numbers](metrics) for how each column is counted.
+
+## The By book breakdown
+
+Under By pass, **By book** takes one pass and shows it book by book: who's assigned to each book, its
+**doors**, how many were **knocked** in the selected range (with the share of the book's doors, like
+*42 · 60%*), the **connection rate**, and **surveys taken** (lit drops on a lit-drop campaign). Pick the
+pass from the menu beside the heading; it opens on the busiest active pass and stays on the one you pick.
+
+It follows the same date range, walk list and crew as By pass and counts the same way, so the books add up
+to that pass's row in By pass. A knock counts in the book it was recorded in, even if the door moves to
+another book later; a door knocked in two books during the pass counts once, in the book it was last
+knocked in. So a book that gave away doors it had already knocked can show more knocks than doors — then it
+shows no percentage. Anything recorded outside the pass's current books
+(with no book, or in a book that was later merged or deleted) shows as one **Not in a book** line. Doors and
+canvassers are the book as it is now, so picking a crew doesn't change them.
+
+More than ten books? The rest fold into one line that adds them up — **Show all** lists every book. Click a
+column heading to sort, biggest first. **Export CSV** downloads every book with every assigned canvasser's
+name, its doors and the full set of counts.
+
+The book progress on Turf Cutting and in the app's Books screen (*42/70*) counts a little differently: every
+door with any result this pass, restricted marks included, out of the doors that are still eligible to knock.
 
 ## Reading the survey results
 
