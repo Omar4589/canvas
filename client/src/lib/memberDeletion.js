@@ -82,8 +82,18 @@ const syncLine = (first, lastActivityAt, now) => {
   return `Ask ${first || 'them'} to open the app with signal first, so their phone sends everything it's still holding.`;
 };
 
+// A switched-off phone's uploads are all turned down, so the ask alone can't work for them. Turned-down doors
+// aren't thrown away unseen any more: the Audit page lists them under Doors not saved
+// (docs/PROPOSAL_OFFLINE_QUEUE.md). The phone's words, letter for letter (memberDeletion.parity.test.js).
 const deactivatedLine = (first) =>
-  `${first ? `${first} is` : "They're"} switched off (deactivated), so their phone can't send anything: whatever it already tried to send while switched off was refused and thrown away. Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused).`;
+  `${first ? `${first} is` : "They're"} switched off (deactivated), so their phone can't save anything: whatever it already tried to send while switched off was turned down, not saved (see Doors not saved on the web console's Audit page). Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused).`;
+
+// Before Remove from org, Deactivate and Remove from this campaign (docs/PROPOSAL_OFFLINE_QUEUE.md §O): a door
+// their phone still holds is turned down once it uploads after that. Never on a deleted account's Remove — a
+// deleted account's phone can't upload anything. `verb` is 'remove' or 'deactivate'. The phone's words
+// (mobile/lib/memberDeletion.js unsyncedDoorsLine), and Remove from this campaign's in lib/addToCampaigns.js.
+export const unsyncedDoorsLine = (verb) =>
+  `If they still have doors on their phone that haven't uploaded, let it sync first — after you ${verb} them, those doors can't be saved.`;
 
 const crewLine = (crew) => {
   if (!(crew?.people > 0)) return null;

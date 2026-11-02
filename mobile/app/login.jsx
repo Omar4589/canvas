@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -15,8 +15,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { WEB_URL } from '../lib/config';
 import { signIn, useAuthToken, getSessionState } from '../lib/authState';
-import { flushQueue, getPendingCount } from '../lib/offlineQueue';
-import { signedOutNote, pendingLine } from '../lib/sessionEnd';
+import { flushQueue, clearNotices } from '../lib/offlineQueue';
+import { signedOutNote } from '../lib/sessionEnd';
+import { QueueLines } from '../components/NotSaved';
 import {
   saveCurrentUser,
   saveMemberships,
@@ -44,22 +45,6 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [pending, setPending] = useState(0);
-
-  // Only alongside a note: with no note, the next person to pick up the phone may not be the one
-  // whose work is waiting, and the line would invite them to sign in over it.
-  useEffect(() => {
-    if (!notice) return undefined;
-    let alive = true;
-    getPendingCount()
-      .then((n) => {
-        if (alive) setPending(n);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [notice]);
 
   if (token) return <Redirect href="/" />;
 
@@ -92,6 +77,9 @@ export default function Login() {
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'build-status' });
       qc.getMutationCache().clear();
       await signIn(res.token);
+      // The lines owed to the next person (a deleted account's saves removed, saves that waited 30 days)
+      // were on this screen; they're read.
+      clearNotices().catch(() => {});
       // Knocks held through an auth outage (queue survives sign-out) drain on re-auth itself,
       // not only when a map screen happens to mount — an admin who signs back in to check
       // dashboards must not leave field work parked all day. Fire-and-forget; each queued
@@ -120,11 +108,13 @@ export default function Login() {
           {notice && (
             <View style={styles.noteBox}>
               <Text style={styles.noteText}>{signedOutNote(notice.reason)}</Text>
-              {pendingLine(pending, notice.reason) && (
-                <Text style={[styles.noteText, styles.noteSecondLine]}>{pendingLine(pending, notice.reason)}</Text>
-              )}
             </View>
           )}
+          {/* Saves on this phone and whose they are (components/NotSaved.jsx): they upload only when
+              the person who recorded them signs in here, so anyone may sign in over them. Shown with
+              or without a note — and the lines owed after a removal (a deleted account's saves,
+              someone's that waited 30 days) until the next sign-in. */}
+          <QueueLines style={styles.queueLines} />
           <Text style={styles.label}>Email address</Text>
           <TextInput
             value={email}
@@ -238,7 +228,8 @@ function makeStyles(t) {
     backgroundColor: colors.infoBg,
   },
   noteText: { color: colors.infoFg, fontSize: 14 },
-  noteSecondLine: { marginTop: spacing.xs },
+  // Saves waiting on this phone (QueueLines): above the email box, under the note when there is one.
+  queueLines: { marginBottom: spacing.lg },
   button: {
     backgroundColor: colors.brand,
     borderRadius: radius.md,

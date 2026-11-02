@@ -38,6 +38,7 @@ import { DeletedUserRecord } from '../../models/DeletedUserRecord.js';
 import { deleteRawImport } from '../import/rawImportStore.js';
 import { ImportProfile } from '../../models/ImportProfile.js';
 import { Membership } from '../../models/Membership.js';
+import { RefusedUpload } from '../../models/RefusedUpload.js';
 import { Pass } from '../../models/Pass.js';
 import { Person } from '../../models/Person.js';
 import { PersonEditProposal } from '../../models/PersonEditProposal.js';
@@ -77,7 +78,7 @@ export const ORG_SCOPED = [
   Effort, EffortMember,
   ExportJob, FbTimeConnection, FbTimePersonLink, FbTimeShift,
   FlagReview, Household, HouseholdLocationChange, ImportJob, ImportProfile, IntegrationEvent,
-  Membership, OrgBranding, Pass,
+  Membership, RefusedUpload, OrgBranding, Pass,
   ReclassifyRun, ReportShareLink, SavedSearch, Statement, Subscription, SubscriptionEvent, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk,
   AnswerEditRun, AnswerEditRunChunk,
   SurveyResponse, SurveyResponseArchive, SurveyTemplate, Tag, Turf, TurfAssignment, TurfSnapshot, VotedPendingId,

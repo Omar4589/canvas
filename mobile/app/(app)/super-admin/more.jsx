@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
-import { signOut } from '../../../lib/authState';
+import { confirmSignOut } from '../../../lib/signOutFlow';
 import {
   loadCurrentUser,
   clearActiveOrgId,
@@ -38,9 +38,9 @@ export default function SuperAdminMore() {
     loadCurrentUser().then((u) => setUser(u));
   }, []);
 
+  // Asks first when this person has saves still waiting (lib/signOutFlow.js), before anything is cleared.
   async function onLogout() {
-    qc.clear();
-    await signOut();
+    await confirmSignOut({ qc });
   }
 
   // A cache-clearing state transition, not a plain navigation — same full body as the admin

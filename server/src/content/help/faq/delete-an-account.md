@@ -94,13 +94,15 @@ A phone can hold doors it hasn't sent yet. **Before you delete, ask them to open
 with signal**, so it sends everything it's holding. The review reminds you for any account that's been
 used, and more firmly if their phone sent doors in the last week.
 
-Until a phone update after Election Day, anything still on their phone after the deletion goes up
-under **whoever signs in on that phone next**.
+Anything still on their phone after the deletion can't be credited to anyone. After the app update,
+it never goes up under someone else: the phone removes it once it learns the account is gone (or after
+30 days of waiting), and the sign-in screen says so. On an older version of the app, it goes up under
+**whoever signs in on that phone next**.
 
-If they're **switched off (deactivated)**, their phone can't send anything. Whatever it tried to send
-while they were switched off was refused and thrown away. If the doors it still holds matter, switch
-them back on first (once billing is sorted, if your account is paused), let the phone send, then
-delete.
+If they're **switched off (deactivated)**, their phone can't save anything. Whatever it tried to send
+while they were switched off was turned down, not saved; the campaign's **Audit** page lists those doors
+under **Doors not saved**. If the doors it still holds matter, switch them back on first (once billing is
+sorted, if your account is paused), let the phone send, then delete.
 
 ## Your Users list afterwards
 

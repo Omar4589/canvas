@@ -37,10 +37,13 @@ account was deleted. Then you land on the sign-in screen with a note saying why.
 browser tab signs out your other tabs too, the next time they reach Doorline — except one already
 showing the password screen, which waits for you.
 
-**Always sign back in as yourself.** Anything saved on the phone goes up under whoever signs in next.
-Doorline can still turn an item down — for example if you were taken off the campaign while signed
-out — and those items aren't kept. The one other way to lose saved work is deleting the app (or
-clearing its data) while the pending badge on **Refresh** shows a number, so don't.
+**Always sign back in as yourself.** After the app update, anything you saved waits on the phone for
+you — it uploads only when you sign in there, never under someone else's name. (Before the update, it
+went up under whoever signed in next.) Doorline can still turn an item down — for example if you were
+taken off the campaign while signed out. After the update you'll see it in a **Not saved** list with the
+reason ([My phone says something wasn't saved](phone-says-not-saved)), and your team sees it on the
+Audit page. The one other way to lose saved work is deleting the app (or clearing its data) while the
+pending badge on **Refresh** shows a number, so don't.
 
 **Lost a phone that was signed in, or left a shared computer signed in?** Change your password yourself
 — **Forgot password?** on the sign-in page, or your profile. Every other device then needs the new

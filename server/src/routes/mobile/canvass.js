@@ -99,9 +99,9 @@ function isOrgAdminOrSuper(req) {
 // below: a lead who MANAGES a campaign was often never rostered onto it as a walker.
 function assertHouseholdOrg(req, household) {
   const orgId = activeOrgId(req);
-  if (!orgId) return { error: { status: 400, message: 'Active organization required' } };
+  if (!orgId) return { error: { status: 400, code: 'ORG_REQUIRED', message: 'Active organization required' } };
   if (String(household.organizationId) !== String(orgId)) {
-    return { error: { status: 404, message: 'Household not found' } };
+    return { error: { status: 404, code: 'HOUSEHOLD_NOT_FOUND', message: 'Household not found' } };
   }
   return {};
 }
@@ -114,7 +114,7 @@ async function assertHouseholdAccess(req, household) {
     campaignId: household.campaignId,
     userId: req.user._id,
   });
-  if (!assigned) return { error: { status: 403, message: 'Not assigned to this campaign' } };
+  if (!assigned) return { error: { status: 403, code: 'NOT_ASSIGNED', message: 'Not assigned to this campaign' } };
   return {};
 }
 
@@ -195,6 +195,11 @@ const ADD_VOTER_RESTRICTED = {
   message: 'Only team leads and admins can add a person on this campaign. Ask your lead to add them.',
 };
 
+// Every refusal on these routes carries a machine-readable `code` (docs/PROPOSAL_OFFLINE_QUEUE.md §D): a
+// queued door the server turns down is listed under Doors not saved, worded from its code, and a
+// code-less 403 or 404 couldn't say why. Additive only — the phone acts on ORG_CONTEXT, FORBIDDEN_ROLE,
+// SUPPORT_ACCESS_REQUIRED and SESSION_REVOKED alone (mobile/lib/api.js), and no client matches the
+// messages, which stay word for word. The routes that once rebuilt `{ error }` pass the code through here.
 function sendRouteError(res, error) {
   const body = { error: error.message };
   if (error.code) body.code = error.code;
@@ -424,7 +429,7 @@ async function toWireHousehold(household, passId, campaignType) {
 async function recordHouseholdAction({ req, householdId, actionType, body, requireCampaignType }) {
   const userId = req.user._id;
   const household = await Household.findById(householdId);
-  if (!household) return { error: { status: 404, message: 'Household not found' } };
+  if (!household) return { error: { status: 404, code: 'HOUSEHOLD_NOT_FOUND', message: 'Household not found' } };
 
   const access = await assertHouseholdAccess(req, household);
   if (access.error) return access;
@@ -432,9 +437,9 @@ async function recordHouseholdAction({ req, householdId, actionType, body, requi
   const campaign = await Campaign.findById(household.campaignId).lean();
   // A mid-delete campaign reads as gone — this closes the knock-after-stamp race
   // (services/campaigns/deletionState.js).
-  if (!campaign || campaign.deletion?.requestedAt) return { error: { status: 404, message: 'Campaign not found' } };
+  if (!campaign || campaign.deletion?.requestedAt) return { error: { status: 404, code: 'CAMPAIGN_NOT_FOUND', message: 'Campaign not found' } };
   if (requireCampaignType && campaign.type !== requireCampaignType) {
-    return { error: { status: 400, message: `Action not valid for campaign type "${campaign.type}".` } };
+    return { error: { status: 400, code: 'WRONG_CAMPAIGN_TYPE', message: `Action not valid for campaign type "${campaign.type}".` } };
   }
   // An outcome this campaign does not allow right now: FRESH submissions are refused; offline
   // replays are accepted. `wasOfflineSubmission` is stamped at ENQUEUE time
@@ -619,13 +624,13 @@ const locationCorrectionSchema = z.object({
 router.post('/households/:householdId/location', async (req, res, next) => {
   try {
     const household = await Household.findById(req.params.householdId);
-    if (!household) return res.status(404).json({ error: 'Household not found' });
+    if (!household) return res.status(404).json({ error: 'Household not found', code: 'HOUSEHOLD_NOT_FOUND' });
 
     // Org scoping only — deliberately NOT assertHouseholdAccess: its roster check would 403 a
     // lead who manages this campaign but never walked it, which is exactly who should be fixing
     // pins. The role gate below is the real boundary.
     const org = assertHouseholdOrg(req, household);
-    if (org.error) return res.status(org.error.status).json({ error: org.error.message });
+    if (org.error) return sendRouteError(res, org.error);
 
     // Moving a pin is a DATA change with an audit trail, so it belongs to the people accountable
     // for the data — not to whoever is standing there. It used to be open to any canvasser working
@@ -679,7 +684,7 @@ router.post('/households/:householdId/location', async (req, res, next) => {
       throw err;
     }
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -699,7 +704,7 @@ router.post('/households/:householdId/not-home', async (req, res, next) => {
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -719,7 +724,7 @@ router.post('/households/:householdId/wrong-address', async (req, res, next) => 
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -739,7 +744,7 @@ router.post('/households/:householdId/refused', async (req, res, next) => {
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -759,7 +764,7 @@ router.post('/households/:householdId/lit-drop', async (req, res, next) => {
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -785,7 +790,7 @@ router.post('/households/:householdId/not-target', async (req, res, next) => {
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -813,7 +818,7 @@ router.post('/households/:householdId/restricted', async (req, res, next) => {
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -839,7 +844,7 @@ router.post('/households/:householdId/no-soliciting', async (req, res, next) => 
     // drains on any 2xx, so this drops the stale item without the client reporting a failure.
     res.status(result.superseded ? 200 : 201).json(result);
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -868,13 +873,13 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     if (missingLocation(req.body)) return sendRouteError(res, LOCATION_REQUIRED);
     const data = surveySchema.parse(req.body);
     const voter = await Voter.findById(req.params.voterId);
-    if (!voter) return res.status(404).json({ error: 'Voter not found' });
+    if (!voter) return res.status(404).json({ error: 'Voter not found', code: 'VOTER_NOT_FOUND' });
 
     const household = await Household.findById(voter.householdId);
-    if (!household) return res.status(404).json({ error: 'Household for voter not found' });
+    if (!household) return res.status(404).json({ error: 'Household for voter not found', code: 'HOUSEHOLD_FOR_VOTER_NOT_FOUND' });
 
     const access = await assertHouseholdAccess(req, household);
-    if (access.error) return res.status(access.error.status).json({ error: access.error.message });
+    if (access.error) return sendRouteError(res, access.error);
 
     // After the access check (keeps the 404-for-wrong-org concealment) and before ANY write —
     // everything below this line until the SurveyResponse upsert is read-only, so a blocked
@@ -887,18 +892,18 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
 
     const campaign = await Campaign.findById(household.campaignId).lean();
     // A mid-delete campaign reads as gone (services/campaigns/deletionState.js).
-    if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found' });
+    if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found', code: 'CAMPAIGN_NOT_FOUND' });
     if (campaign.type !== 'survey') {
       return res
         .status(400)
-        .json({ error: 'Surveys can only be submitted on survey-type campaigns.' });
+        .json({ error: 'Surveys can only be submitted on survey-type campaigns.', code: 'WRONG_CAMPAIGN_TYPE' });
     }
 
     const template = await SurveyTemplate.findOne({
       _id: data.surveyTemplateId,
       organizationId: household.organizationId,
     });
-    if (!template) return res.status(404).json({ error: 'Survey template not found' });
+    if (!template) return res.status(404).json({ error: 'Survey template not found', code: 'TEMPLATE_NOT_FOUND' });
 
     // Per-effort survey: the door's effort overrides the campaign default. Shared with the admin
     // conversion tool (services/surveys/effectiveTemplate.js) so the two can't drift — a tool that
@@ -907,7 +912,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
     if (effectiveSurveyId && String(effectiveSurveyId) !== String(template._id)) {
       return res
         .status(400)
-        .json({ error: "Survey template doesn't match this door's effort survey." });
+        .json({ error: "Survey template doesn't match this door's effort survey.", code: 'SURVEY_TEMPLATE_MISMATCH' });
     }
 
     const ts = data.timestamp ? new Date(data.timestamp) : new Date();
@@ -1175,7 +1180,7 @@ router.post('/voters/:voterId/survey', async (req, res, next) => {
       pace: await paceAfterWrite(req, { campaign, ts, actionType: 'survey_submitted' }),
     });
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });
@@ -1225,18 +1230,18 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
     const voterId = data.voterId.toLowerCase();
 
     const household = await Household.findById(req.params.householdId);
-    if (!household) return res.status(404).json({ error: 'Household not found' });
+    if (!household) return res.status(404).json({ error: 'Household not found', code: 'HOUSEHOLD_NOT_FOUND' });
 
     const access = await assertHouseholdAccess(req, household);
-    if (access.error) return res.status(access.error.status).json({ error: access.error.message });
+    if (access.error) return sendRouteError(res, access.error);
 
     const campaign = await Campaign.findById(household.campaignId).lean();
     // A mid-delete campaign reads as gone (services/campaigns/deletionState.js).
-    if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found' });
+    if (!campaign || campaign.deletion?.requestedAt) return res.status(404).json({ error: 'Campaign not found', code: 'CAMPAIGN_NOT_FOUND' });
     // A data change, not a disposition — archived campaigns take no new voters (the pin-fix rule).
     if (!assertCampaignWritable(res, campaign)) return;
     if (campaign.type !== 'survey') {
-      return res.status(400).json({ error: 'People can only be added on survey-type campaigns.' });
+      return res.status(400).json({ error: 'People can only be added on survey-type campaigns.', code: 'WRONG_CAMPAIGN_TYPE' });
     }
     if (
       campaign.doorAddPolicy === 'leads' &&
@@ -1345,7 +1350,7 @@ router.post('/households/:householdId/voters', async (req, res, next) => {
       pace: await paceAnswer(req),
     });
   } catch (err) {
-    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', issues: err.issues });
+    if (err.name === 'ZodError') return res.status(400).json({ error: 'Invalid input', code: 'INVALID_INPUT', issues: err.issues });
     next(err);
   }
 });

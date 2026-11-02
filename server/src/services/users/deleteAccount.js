@@ -21,6 +21,7 @@ import { FbTimeShift } from '../../models/FbTimeShift.js';
 import { CanvassActivity } from '../../models/CanvassActivity.js';
 import { SurveyResponse } from '../../models/SurveyResponse.js';
 import { PacePause } from '../../models/PacePause.js';
+import { RefusedUpload } from '../../models/RefusedUpload.js';
 import { CoordinatorChange } from '../../models/CoordinatorChange.js';
 import { EmailLog } from '../../models/EmailLog.js';
 import { NOT_BULK } from '../reports/aggregations.js';
@@ -640,16 +641,20 @@ export const finishDeletion = async (userId, { preImage = null, reason = 'self',
   //    plus the orgs of their own ledger rows (desk marks excluded — their userId is whoever pressed
   //    the button), plus the orgs holding an automatic pause about them — a canvasser whose doors were
   //    all unknocked and whose membership was removed still has their pauses attributed
-  //    (docs/PROPOSAL_PACE_PAUSE.md §D.4). userId-only filters, so no index hint is needed.
-  const [memberOrgs, knockOrgs, surveyOrgs, pauseOrgs] = await Promise.all([
+  //    (docs/PROPOSAL_PACE_PAUSE.md §D.4) — plus the orgs listing a door of theirs under Doors not saved,
+  //    so the Audit page keeps the kept name on those rows too (docs/PROPOSAL_OFFLINE_QUEUE.md §D).
+  //    userId-only filters, so no index hint is needed. RefusedUpload has no plain userId index (its one
+  //    is partial), so that read scans the collection — kept small by its daily cap and 180-day expiry.
+  const [memberOrgs, knockOrgs, surveyOrgs, pauseOrgs, refusedOrgs] = await Promise.all([
     Membership.distinct('organizationId', { userId: id }),
     CanvassActivity.aggregate([{ $match: { userId: id, ...NOT_BULK } }, { $group: { _id: '$organizationId' } }]),
     SurveyResponse.aggregate([{ $match: { userId: id } }, { $group: { _id: '$organizationId' } }]),
     PacePause.distinct('organizationId', { userId: id }),
+    RefusedUpload.distinct('organizationId', { userId: id }),
   ]);
   const organizationIds = [
     ...new Map(
-      [...memberOrgs, ...knockOrgs.map((r) => r._id), ...surveyOrgs.map((r) => r._id), ...pauseOrgs]
+      [...memberOrgs, ...knockOrgs.map((r) => r._id), ...surveyOrgs.map((r) => r._id), ...pauseOrgs, ...refusedOrgs]
         .filter(Boolean)
         .map((o) => [String(o), o])
     ).values(),

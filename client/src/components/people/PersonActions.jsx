@@ -6,7 +6,7 @@ import PasswordInput from '../PasswordInput.jsx';
 import DeleteMemberDialog from '../DeleteMemberDialog.jsx';
 import { invalidatePaceCaches } from '../audit/PacePausePanel.jsx';
 import { tempPasswordProblem } from '../../lib/validators.js';
-import { deletedNotice, fullName, goneNotice } from '../../lib/memberDeletion.js';
+import { deletedNotice, fullName, goneNotice, unsyncedDoorsLine } from '../../lib/memberDeletion.js';
 import { actionsFor, firstNameOf } from '../../lib/personAccess.js';
 import { crewsDisbanded, disbandLine, orgDisbandLine } from '../../lib/teamSelection.js';
 
@@ -386,6 +386,8 @@ const PersonActions = ({
             {reach}
             {confirming === 'deactivate' ? ' Their work stays counted, and you can switch them back on anytime.' : ''}
           </p>
+          {/* A door their phone still holds is turned down once it uploads after this (docs/PROPOSAL_OFFLINE_QUEUE.md). */}
+          {confirming === 'deactivate' && <p>{unsyncedDoorsLine('deactivate')}</p>}
         </ConfirmBox>
       )}
       {confirming === 'remove-campaign' && (
@@ -403,12 +405,14 @@ const PersonActions = ({
               {disbandLine({ ...d, firstName: first })}
             </p>
           ))}
+          <p>{unsyncedDoorsLine('remove')}</p>
         </ConfirmBox>
       )}
       {confirming === 'remove-org' && (
         <ConfirmBox danger title={`Remove ${first} from your organization?`} confirmLabel="Remove from org" busy={busy} onConfirm={runConfirmed} onCancel={() => setConfirming(null)}>
           <p>This also removes their campaign assignments here. Their work stays counted.</p>
           {orgDisband && <p className="text-fg">{orgDisband}</p>}
+          <p>{unsyncedDoorsLine('remove')}</p>
         </ConfirmBox>
       )}
 

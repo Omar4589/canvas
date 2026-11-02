@@ -21,7 +21,8 @@ import PullableSheet, { SHEET_TIMING } from '../../components/PullableSheet';
 import * as Location from 'expo-location';
 import Mapbox from '@rnmapbox/maps';
 import { api } from '../../lib/api';
-import { signOut, getSessionState, expandReauth, subscribeSession, useSessionState } from '../../lib/authState';
+import { getSessionState, expandReauth, subscribeSession, useSessionState } from '../../lib/authState';
+import { confirmSignOut } from '../../lib/signOutFlow';
 import {
   saveBootstrap,
   loadActiveCampaign,
@@ -56,6 +57,7 @@ import LocationBlockedBanner from '../../components/LocationBlockedBanner';
 import PausedBanner from '../../components/PausedBanner';
 import DataHealthBanner from '../../components/DataHealthBanner';
 import ReauthNotice from '../../components/ReauthNotice';
+import { NotSavedBanner } from '../../components/NotSaved';
 import PinIcon from '../../components/PinIcon';
 import { groupBuildings } from '../../lib/buildings';
 import { buildListEntries } from '../../lib/listEntries';
@@ -791,9 +793,9 @@ export default function MapScreen() {
   const paused = isPaused(data);
   const canRecord = (data?.entitlement ? data.entitlement.canCanvass !== false : true) && !paused;
 
+  // Asks first when this person has saves still waiting (lib/signOutFlow.js), before anything is cleared.
   async function onLogout() {
-    qc.clear();
-    await signOut();
+    await confirmSignOut({ qc });
   }
 
   async function onRefresh() {
@@ -848,6 +850,9 @@ export default function MapScreen() {
     const gone = error?.status === 404 && rosterErrorIsFinal(error);
     return (
       <SafeAreaView style={styles.center}>
+        {/* The reasons a save is turned down (taken off the campaign, say) are the same ones that put
+            this screen in place of the map — so the banner shows here too. */}
+        <NotSavedBanner />
         <Text style={styles.errorText}>
           {gone
             ? "This campaign has been archived — it's read-only now. Pick another campaign to keep canvassing."
@@ -1167,6 +1172,8 @@ export default function MapScreen() {
 
         {/* After "Later" on the password screen: work is waiting and the team can't see it yet. */}
         <ReauthNotice />
+        {/* Saves the server turned down on upload (components/NotSaved.jsx). */}
+        <NotSavedBanner />
 
         {/* Map/List toggle (left) shares one row with the houses filter + sort (right). */}
         <View style={styles.controlRow}>

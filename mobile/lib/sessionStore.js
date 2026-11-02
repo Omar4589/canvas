@@ -30,6 +30,11 @@ export const createSessionStore = ({
   loadEmail,
   notifyServerSignOut,
   clearSupportPrompt,
+  // What every sign-out does with the phone's unsent work before the session is cleared, given
+  // { reason, token } (docs/PROPOSAL_OFFLINE_QUEUE.md): items saved before the app update are stamped
+  // as the ending account's, and a deleted account's are removed (§E2 of
+  // docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md). Optional, so the store's own tests run without it.
+  onSessionEnd = async () => {},
 }) => {
   let token;
   let notice = null;
@@ -74,6 +79,12 @@ export const createSessionStore = ({
       // Fire-and-forget; with no signal it never arrives and the session runs out on its own.
       const ended = token;
       quietly(async () => notifyServerSignOut(ended));
+    }
+    // Before anything is cleared, and inside the lock, while the ending session is still the one in
+    // memory: nothing of this account's can upload under the next person to sign in.
+    {
+      const ended = token;
+      await quietly(async () => onSessionEnd({ reason, token: ended }));
     }
     notice = reason
       ? {

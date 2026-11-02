@@ -34,6 +34,7 @@ import { ReclassifyRun } from '../../models/ReclassifyRun.js';
 import { UnknockRun } from '../../models/UnknockRun.js';
 import { UnknockRunChunk } from '../../models/UnknockRunChunk.js';
 import { PacePause } from '../../models/PacePause.js';
+import { RefusedUpload } from '../../models/RefusedUpload.js';
 import { ConversionStrike } from '../../models/ConversionStrike.js';
 import { waitForDoorOutcomesToStop } from '../canvass/answerEditRuns.js';
 import { LATE_WRITE_MODELS } from '../platform/lateWriteSweep.js';
@@ -181,7 +182,7 @@ export async function deleteCampaignCascade(campaign, { heartbeat = () => {} } =
     SavedSearch, VotedUpload, VotedVoter, VotedPendingId, CampaignAssignment,
     CampaignManager, CoordinatorChange, CampaignChange, ReclassifyRun, SurveyConversionRun, ConversionStrike, UnknockRun, UnknockRunChunk, AnswerEditRun, AnswerEditRunChunk, ClientReport, ClientReportMapPoint, ClientReportAreaCell, ClientReportSeries, ReportShareLink,
     CanvassActivity, SurveyResponse, SurveyResponseArchive, ImportJob, HouseholdLocationChange,
-    ExportJob, PacePause,
+    ExportJob, PacePause, RefusedUpload,
   ];
 
   // The raw uploaded spreadsheets, FIRST — while we can still find the ImportJob rows that name

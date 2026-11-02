@@ -12,7 +12,8 @@ import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import Animated, { useAnimatedStyle, withTiming, Easing, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { signOut } from '../lib/authState';
+import { confirmSignOut } from '../lib/signOutFlow';
+import { NotSavedBanner, QueueLines } from './NotSaved';
 import { loadRoleContext } from '../lib/role';
 import {
   loadActiveCampaign,
@@ -149,10 +150,10 @@ export default function CanvasserDrawer() {
     router.replace('/(app)/admin');
   }
 
+  // Asks first when this person has saves still waiting (lib/signOutFlow.js), before anything is cleared.
   async function onLogout() {
     closeDrawer();
-    qc.clear();
-    await signOut();
+    await confirmSignOut({ qc });
   }
 
   const canSwitchOrg = ctx.isSuperAdmin || (ctx.memberships?.length || 0) > 1;
@@ -181,6 +182,10 @@ export default function CanvasserDrawer() {
               {/* The org name was a brand micro-line INSIDE the old account card; it is a caption,
                   so the shared caption slot holds it and the row keeps one job. */}
               {orgName ? <SectionHeader caption title={orgName} /> : <View style={{ marginTop: spacing.xs }} />}
+              {/* Saves the server turned down, and saves waiting on this phone for someone else
+                  (components/NotSaved.jsx) — the menu is where a canvasser lands from most screens. */}
+              <NotSavedBanner />
+              <QueueLines style={{ marginHorizontal: spacing.xs, marginVertical: spacing.xs }} />
               <InsetGroup>
                 <InsetNavRow
                   emphasis="hero"

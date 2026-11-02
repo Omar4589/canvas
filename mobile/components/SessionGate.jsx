@@ -5,6 +5,8 @@ import { useSessionState, endSessionIfCurrent, getCurrentToken } from '../lib/au
 import { hasInFlightActions } from '../lib/recordAction';
 import { inCanvassFlow, isFieldScreen } from '../lib/sessionEnd';
 import { isReloadPending, useReloadPending } from '../lib/appRestart';
+import { subscribeFinishing, getFinishing } from '../lib/signOutFlow';
+import { FINISHING_SAVE } from '../lib/queueRules';
 import ReauthSheet from './ReauthSheet';
 import { spacing } from '../lib/theme';
 import { useThemedStyles } from '../lib/useThemedStyles';
@@ -93,6 +95,8 @@ const SessionGate = () => {
   const [action, setAction] = useState(pending);
   // components/RestartCover.jsx is on top while a Restart waits; nothing here is reachable then.
   const reloadPending = useReloadPending();
+  // A manual Sign out waiting for a save still on its way (lib/signOutFlow.js).
+  const finishing = useSyncExternalStore(subscribeFinishing, getFinishing);
 
   useEffect(() => {
     pendingListeners.add(setAction);
@@ -149,6 +153,16 @@ const SessionGate = () => {
   }, [action, pathname]);
 
   if (reloadPending) return null;
+  if (finishing && !ending) {
+    return (
+      <View style={styles.cover} accessibilityViewIsModal>
+        <ActivityIndicator />
+        <Text style={styles.coverText} accessibilityRole="header">
+          {FINISHING_SAVE}
+        </Text>
+      </View>
+    );
+  }
   if (ending) {
     return (
       <View style={styles.cover} accessibilityViewIsModal>

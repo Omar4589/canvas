@@ -39,4 +39,4 @@ Now and then a home will say **Marked restricted by the office** before you get 
 
 ## Working offline
 
-No signal? Keep knocking. The app records everything and sends it up when you're back online, so you never lose work in a dead zone. More in [Canvassing offline](canvasser-offline).
+No signal? Keep knocking. The app saves every door on your phone and sends it up when you're back online. If you sign out before it has, your saves wait on that phone until you sign back in there (after the app update). More in [Canvassing offline](canvasser-offline).

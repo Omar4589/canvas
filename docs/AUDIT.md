@@ -371,6 +371,31 @@ still work. (An in-product preview, *What automatic pause would have done*, help
 was removed on 2026-10-25. Doorline's console replay still counts what the rule would have done, without
 names.)
 
+## Doors not saved (what a phone couldn't upload)
+
+A canvasser's phone saves doors without signal and sends them later. Sometimes, by the time a door
+arrives, Doorline can't accept it any more: the canvasser was taken off the campaign or out of the
+organization, the walk list's survey was switched, the voter was marked do-not-contact, the house or the
+campaign was removed, a pin move came from someone who is no longer a lead, or the account was paused
+before the door was recorded. Those doors used to be deleted from the phone without a word. Since
+November 2026 (plan: [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md)) the Audit page lists them under
+**Doors not saved**, and the canvasser who recorded one sees it on their phone too.
+
+- **What a row says:** when it was recorded, who was **signed in** when it uploaded (on an older app, or with
+  Doorline's switch off, that can be someone other than who recorded it), the house and book — or *No longer
+  in this campaign* — what was recorded (Not home, Survey, Added a person, Moved a pin…), and why, in plain
+  words (*Not on this campaign's team*, *The walk list's survey changed*…).
+- **What you do:** these doors weren't saved. Knock them again or re-enter what you can, then **Mark
+  reviewed**; **Reopen** brings a row back. **Open**, **Reviewed** and **All** tabs, and the page's canvasser
+  filter. A row whose door went up fine on a later try reads **Saved later**.
+- **Who sees it:** whoever can open the Audit page for that campaign — org admins and the campaign's leads.
+  Doorline keeps these rows for 180 days, and removes them with their campaign or organization.
+- **Limits:** the list keeps no survey answers, notes or coordinates — only that something was turned
+  down. It lists what the server can tie to your campaign: not, for example, doors from someone removed
+  from your organization before any of their work reached Doorline (deactivate instead, and the doors are
+  listed), and not more than 500 a day from one person (a removed canvasser's phone can't flood it). A door turned down before November 2026 isn't there. It works for
+  every phone from the day the server was updated, because the server is the one that turns the door down.
+
 ---
 
 # Part 2 — Technical reference
@@ -634,12 +659,14 @@ Recording a disposition or survey **requires a live GPS fix**, enforced twice:
   F-26). Finite values off the Earth were refused a step later (2026-10-05), once the first production run
   of `npm run audit:gps-stamps` ([OPERATIONS.md](OPERATIONS.md)) found none among the stored stamps
   (86,672 door results, 16,251 survey responses), because a queued offline knock refused with a 4xx is
-  dropped from the phone. The add-person route requires the stamp but stores none (F-23).
+  never saved (dropped from the phone then; since the queue fix of November 2026 listed as not saved —
+  [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md)). The add-person route requires the stamp but
+  stores none (F-23).
 - **The accuracy is sanitised, never refused.** `usableAccuracy` stores only a finite radius above zero;
   an Android `0` (no estimate), an iPhone negative (invalid fix) or a non-finite value is stored as
   `null` (unknown), on both ledgers, in the `replaced` snapshot and on the pin-correction audit row
-  (`HouseholdLocationChange`). Refusing would cost a knock: the phone deletes a queued item the server
-  answers with a 4xx (offlineQueue.js). A `null` accuracy gets no far allowance and no Weak GPS flag
+  (`HouseholdLocationChange`). Refusing would cost a knock: a queued item the server answers with a 4xx
+  is never saved (the phone moves it to Not saved, queueCore.js). A `null` accuracy gets no far allowance and no Weak GPS flag
   (unknown ≠ bad).
 
 Every stamp now carries provenance, nested in `location`: **`mocked`** (Android
@@ -651,7 +678,8 @@ covers `location`. `SurveyResponse.location` mirrors the fields so the two ledge
 **Offline is unaffected**: GPS is satellite-based (no cell signal needed), and the stamp is captured
 at tap time — only the POST queues. Old-client rollout note: a pre-gate client that fails GPS still
 sends `location: null` and gets the 400 (now with a readable message); if such an item was queued
-offline, the flush's pre-existing 4xx policy drops it (offlineQueue.js doFlush) — unchanged behavior.
+offline, the flush refuses it like any 4xx (queueCore.js doFlush: dropped then, moved to the recorder's Not
+saved list since November 2026, and filed under *Doors not saved*).
 
 ## C. Review persistence (`FlagReview`)
 
@@ -1103,3 +1131,93 @@ in-flight lock and before the door-change confirmation; pin fixes (`requireFix: 
   on every day of a 22-day range — millions — and took the 1 GB web dyno to about 4 GB ([OPERATIONS.md](OPERATIONS.md)
   → *If the preview takes the web server down*). Group rows by day in one pass, never filter the rows once
   per day.
+
+## H. Doors not saved (`RefusedUpload`)
+
+Plan and review history: [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) (§D, §O). The phone side
+(the Not saved list, the hold) is [CANVASSER_APP.md](CANVASSER_APP.md) → *The offline queue*.
+
+### H.1 The record
+
+[RefusedUpload.js](../server/src/models/RefusedUpload.js): `organizationId`, `campaignId`, `userId` (whoever
+was signed in), `kind` (`result` | `survey` | `add_person` | `pin_move`), `actionType` (the door result for
+`result`), `householdId`, `voterId`, `turfId` (kept only when the book is in this campaign),
+`surveyTemplateId`, `recordedAt` (the body's `timestamp`, only a real date), `status`, `code`, `reason` (the
+server's message, clipped to 500 characters), `queueItemId` (updated phones; ≤ 64 characters, else null),
+`savedLaterAt`, `reviewedAt`, `reviewedBy`, `expiresAt` (180 days), timestamps. **No survey answers, notes,
+names or coordinates.** Indexes, built at boot by `syncRefusedUploadIndexes` (`server.js`; production
+`autoIndex` is off, and the unique index has to exist before the first row): `{ organizationId, campaignId,
+createdAt: -1 }` (the list and both cascades' sweep), a **unique partial** `{ userId, queueItemId }`
+(`queueItemId: { $type: 'string' }`; queries state the `$type` themselves, or MongoDB won't use it), and the
+`expiresAt` TTL.
+
+### H.2 The recorder
+
+[refusalRecorder.js](../server/src/middleware/refusalRecorder.js), mounted once in `routes/index.js` as
+`router.use('/mobile', refusalRecorder)` — after `requireAuth` + `blockIfMustChangePassword` (so a 401 and the
+temp-password 403 never reach it) and before `requireEntitlement` (so it sees the 402 and the org-context
+refusals as well as the routes' own).
+
+- **Match on arrival** (`matchQueuedWrite`, on `req.path`): POST
+  `/(households|voters)/:id/:action`, case-insensitive, an optional trailing slash; the seven door results →
+  `result`, `households/:id/voters` → `add_person`, `households/:id/location` → `pin_move`,
+  `voters/:id/survey` → `survey`. `voters/:id/notes` doesn't match. A non-hex id matches with the id null.
+- **Capture** the first `res.json` while headers are unsent (`{ status, code, error }`), inside try/catch,
+  always calling the real `res.json`. On `res.once('finish')`, `record()` is called and its promise tracked
+  as `record().catch(safeLog)` — catch first, then track (reversed, the first failed write exits the web
+  dyno, which has no `unhandledRejection` handler).
+- **Records when** `body.wasOfflineSubmission === true` and the status is 4xx other than 401 and 403
+  `PASSWORD_CHANGE_REQUIRED`. A 2xx replay carrying a `queueItemId` instead closes that item's open row
+  (`savedLaterAt`), matched on `{ userId, queueItemId, kind, door }` — every 2xx, including
+  `200 { superseded: true }` (the server already holds that tap or a newer one).
+- **Filing from server records only** (`fileFromServerRecords`): the voter or household in the URL, else the
+  book in `body.turfId`; every join must name one organization or nothing is filed; never `X-Org-Id`, never
+  a body campaign id. Then `orgCarriesUser` (`services/reports/canvasserIdentity.js`: a membership in any
+  state, or their own knocks or surveys there) must say the organization carries the person — memoized a
+  minute per `userId:orgId` (at most 10,000 entries), "no" included. A removed canvasser with earlier work
+  there is filed there; a stranger nowhere.
+- **Never during a deletion:** skipped when the organization is missing, inactive or has a deletion
+  requested, or the campaign does; after the write it checks again and deletes its own row by `_id` if a
+  deletion began. Not in `LATE_WRITE_MODELS`.
+- **No duplicates:** with a `queueItemId`, an upsert on `{ userId, queueItemId, kind, door }` (a resend takes
+  the latest status, code and message; review state kept); a concurrent copy's E11000 is "already recorded".
+  Without one (old phones), an insert.
+- **Cap:** 500 rows per person per organization per Central-time day, counted in memory (one web dyno; a
+  restart starts the count again), taken before the write and handed back if nothing was written.
+- **Switch and shutdown:** `REFUSAL_RECORDER=off`, read per request, passes every request through untouched.
+  SIGTERM waits up to 5 s for writes still running (`drainRefusalWrites`, inside `server.close`'s callback).
+
+Codes: every refusal on the queued routes now carries one (`routes/mobile/canvass.js`; added, never changed:
+`NOT_ASSIGNED`, `HOUSEHOLD_NOT_FOUND`, `VOTER_NOT_FOUND`, `HOUSEHOLD_FOR_VOTER_NOT_FOUND`,
+`TEMPLATE_NOT_FOUND`, `SURVEY_TEMPLATE_MISMATCH`, `WRONG_CAMPAIGN_TYPE`, `CAMPAIGN_NOT_FOUND`, `ORG_REQUIRED`,
+`INVALID_INPUT`), and the location, survey and add routes pass the code through.
+
+### H.3 Endpoints and the console
+
+- `GET /admin/campaigns/:campaignId/refused-uploads?status=open|reviewed|all&userId=&limit=` →
+  `{ open, all, total, limit, rows }` (limit ≤ 500, the flag list's cap). Open = not reviewed and not saved
+  later. Each row carries `signedInAs` (`hydrateCanvassers`, so a removed or deleted person keeps the kept
+  name in its window), the address or null when the house is gone from the campaign, the book and survey
+  names; every query and join filters by organization (and campaign where it has one).
+- `PATCH /admin/campaigns/:campaignId/refused-uploads/:id { reviewed }` — filters `{ _id, organizationId,
+  campaignId }`, records `reviewedBy`/`reviewedAt` (or clears them to reopen); 409 `campaign-deleting` while
+  the campaign is being deleted.
+- Both sit behind the campaigns router's `requireOrgRole('admin', 'lead')` plus `canManageCampaign` (the
+  Audit rule). (The plan's `notSavedOpen` on `GET /admin/reports/flags` was dropped: nothing read it, and it
+  added a count to every poll — the section's own `open` is the count.)
+- [DoorsNotSaved.jsx](../client/src/components/audit/DoorsNotSaved.jsx) on `AuditPage.jsx`, under Paused
+  canvassers: Open / Reviewed / All, the page's canvasser filter, polled with the page's `livePollOptions`;
+  the wording (tabs, What, Door, Why by code, kind and message, empty states) is in
+  [client/src/lib/notSaved.js](../client/src/lib/notSaved.js). A *house not found* whose house is still in
+  the campaign reads *Uploaded while another organization was selected on the phone*: the server hides
+  another organization's house behind the same 404.
+
+### H.4 Deletion and gotchas
+
+- In `ORG_SCOPED` (after `Membership`) and `CAMPAIGN_SCOPED`; account deletion adds the person's
+  `RefusedUpload` organizations to `DeletedUserRecord.organizationIds`, so the kept name still shows.
+- **Never let the recorder throw or reject out**, and never change a response: it only observes.
+- **Never file from the request's own claims** (header, body campaign): a book or door from another
+  organization would put that organization's address in front of the wrong admins.
+- **Adding a field** (an answer, a note, a coordinate, a name) changes privacy item 54
+  ([PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md)).

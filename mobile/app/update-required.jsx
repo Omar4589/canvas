@@ -1,7 +1,8 @@
 import { View, Text, Pressable, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect } from 'expo-router';
-import { signOut, useAuthToken } from '../lib/authState';
+import { useAuthToken } from '../lib/authState';
+import { confirmSignOut } from '../lib/signOutFlow';
 import { STORE_URL } from '../lib/config';
 import Logo from '../components/Logo';
 import { radius, spacing } from '../lib/theme';
@@ -45,7 +46,7 @@ export default function UpdateRequired() {
           >
             <Text style={styles.buttonText}>Get the update</Text>
           </Pressable>
-          <Pressable onPress={() => signOut()} hitSlop={8} style={styles.signOutWrap}>
+          <Pressable onPress={() => confirmSignOut()} hitSlop={8} style={styles.signOutWrap}>
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
         </View>

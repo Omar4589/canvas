@@ -5,13 +5,13 @@ audience: canvasser
 kind: guide
 order: 34
 sourceDoc: CANVASSER_APP.md
-summary: Keep knocking with no signal — everything saves and syncs when you reconnect.
-tags: canvasser, offline, sync, connection
+summary: Keep knocking with no signal — your doors save on your phone and upload when you reconnect.
+tags: canvasser, offline, sync, connection, not saved, sign out, waiting
 ---
 
 Lost signal? Keep going. The app is built to work in dead zones.
 
-Every door you record — statuses, surveys, pin fixes — is saved on your phone right away, and the app sends it up automatically the moment you're back online. You don't have to do anything special: being offline never loses a knock.
+Every door you record — statuses, surveys, pin fixes — is saved on your phone right away, and the app sends it up automatically the moment you're back online. You don't have to do anything special: a dead zone doesn't cost you a knock.
 
 If you see a house recolor the instant you tap it but you're offline, that's normal — it's saved locally and will sync later.
 
@@ -21,7 +21,7 @@ Change a door's answer and **the most recent one is what sticks** — even if an
 
 One thing that **does** need to stay on, even offline: your phone's **location**. GPS comes from satellites, not cell signal — airplane mode or a dead zone won't stop it — but the app records a GPS stamp with every door, so if the Location toggle itself is off, recording is blocked until you turn it back on. Signal off, location on: that's the offline combo that works. One difference offline: the very first position fix after opening the app can take longer, because the phone can't download its usual satellite assistance data — give the blue dot a moment to settle before your first door ([Why is my blue dot across the street?](blue-dot-not-where-i-am)).
 
-You can tell when work is still waiting to go up: the **Refresh** button (in the bottom-right controls on the map) shows a small **pending badge** with the number of recorded items (door results, surveys, pin fixes) that haven't synced yet. It clears on its own once you're back on signal, but you can tap **Refresh** any time to push everything up right away and pull the latest doors.
+You can tell when work is still waiting to go up: the **Refresh** button (in the bottom-right controls on the map) shows a small **pending badge** with the number of your recorded items (door results, surveys, pin fixes) that haven't synced yet. It clears on its own once you're back on signal, but you can tap **Refresh** any time to push everything up right away and pull the latest doors.
 
 ## If the app asks for your password
 
@@ -29,7 +29,17 @@ Nothing is wrong — for security, Doorline asks for your password again from ti
 
 No signal to sign in? After the sign-in fails for lack of signal, tap **Later** and keep knocking. The map then shows **"Password needed"** with how many items are waiting — your team can't see them until you enter your password, so do it as soon as you have signal (tap the notice, or **Refresh**).
 
-**Always sign back in as yourself**: anything saved on the phone goes up under whoever signs in next. And never delete the app while the pending badge shows a number — deleting it loses the work on it. More in [Doorline asked for my password again](signed-out-sign-in-again).
+**Always sign back in as yourself.** After the app update, anything you saved waits on the phone for you: it uploads only when you sign in there, never under someone else's name. (Before the update, it went up under whoever signed in next.) And never delete the app while the pending badge shows a number — deleting it loses the work on it. More in [Doorline asked for my password again](signed-out-sign-in-again).
+
+## Signing out, and sharing a phone
+
+After the app update, if you sign out while some of your saves haven't uploaded, the app asks first: *"3 saved items haven't uploaded yet. They'll stay on this phone and upload the next time you sign in here."* Choose **Sign out** or **Cancel**. If a save is still on its way, you'll see *Finishing a save…* for a few seconds first.
+
+On a shared phone, the sign-in screen and the menu say whose saves are waiting, for example *"2 saved items from Jane D. are waiting on this phone."* They upload only when that person signs in, and they're removed if they wait 30 days.
+
+## If something wasn't saved
+
+Sometimes Doorline can't accept a door by the time it arrives. Say you were taken off the campaign, or the walk list's survey was changed. After the app update, the map says **"1 item wasn't saved — tap to see why"**, with the door, what you recorded and the reason. Knock the door again if you can. More in [My phone says something wasn't saved](phone-says-not-saved).
 
 ## What the offline notices mean
 

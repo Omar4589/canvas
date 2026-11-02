@@ -88,6 +88,8 @@ import { ACTIVE_STATUSES as IMPORT_ACTIVE_STATUSES } from '../../services/import
 import { getQueue, QUEUE_NAMES } from '../../queues/index.js';
 import { bumpLive } from '../../services/platform/platformStats.js';
 import { restoreHistoryRow, eraseHistory, HistoryError } from '../../services/reports/clientReportHistory.js';
+import { Turf } from '../../models/Turf.js';
+import { RefusedUpload } from '../../models/RefusedUpload.js';
 
 const router = Router();
 // Team leads reach this router too, but scoped: the list returns only campaigns
@@ -2696,6 +2698,154 @@ router.get('/:campaignId/survey-conversions/:runId', async (req, res, next) => {
       }
     }
     res.json({ run: wire });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Doors not saved (docs/PROPOSAL_OFFLINE_QUEUE.md §D) ──────────────────────────────────────────────
+// What phones saved without signal and the server then turned down, as middleware/refusalRecorder.js
+// filed them: the Audit page's section. Who may look is the Audit page's rule (reports.js): an org admin,
+// or a lead for a campaign they manage — this router admits both, canManageCampaign narrows the lead.
+// canManageCampaign passes ANY org admin whatever org the campaign is in, so every query below filters
+// { organizationId, campaignId } (the PATCH adds _id, never findById) — that filter is the tenant wall —
+// and every join is org-scoped too. Not behind requireActiveCampaign: reviewing is bookkeeping about past
+// work, like flag review, so an archived campaign's list stays reviewable. A paused org's PATCH gets
+// requireEntitlement's 402, also like flag review.
+const NOT_SAVED_LIMIT = 500; // the Audit flag list's cap (client AuditPage.jsx ENTRY_LIMIT)
+// Open = nobody has reviewed it and no later resend of the same item got in.
+const NOT_SAVED_STATUS = {
+  open: { reviewedAt: null, savedLaterAt: null },
+  reviewed: { reviewedAt: { $ne: null } },
+  all: {},
+};
+
+const notSavedAddress = (h) =>
+  h ? `${h.addressLine1 || ''}${h.addressLine2 ? ` ${h.addressLine2}` : ''}${h.city ? `, ${h.city}` : ''}`.trim() || null : null;
+
+// Shared preamble: the Audit rule, then the campaign in THIS org. Answers and returns null when refused.
+const loadNotSavedCampaign = async (req, res) => {
+  if (!ensureOrgScoped(req, res)) return null;
+  if (!mongoose.isValidObjectId(req.params.campaignId)) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return null;
+  }
+  if (!(await canManageCampaign(req, req.params.campaignId))) {
+    res.status(403).json({ error: 'Forbidden' });
+    return null;
+  }
+  const campaign = await Campaign.findOne({ _id: req.params.campaignId, organizationId: activeOrgId(req) }, { deletion: 1 }).lean();
+  if (!campaign) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return null;
+  }
+  return campaign;
+};
+
+// ?status=open|reviewed|all (open by default) &userId= (the page's canvasser filter) &limit= (≤ 500).
+// `open` and `all` count the same person-scope as the list, so the section's header and empty state
+// agree with the rows under them.
+router.get('/:campaignId/refused-uploads', async (req, res, next) => {
+  try {
+    const campaign = await loadNotSavedCampaign(req, res);
+    if (!campaign) return;
+    const orgId = activeOrgId(req);
+    const status = Object.hasOwn(NOT_SAVED_STATUS, String(req.query.status)) ? String(req.query.status) : 'open';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || NOT_SAVED_LIMIT, 1), NOT_SAVED_LIMIT);
+    const scope = { organizationId: orgId, campaignId: campaign._id };
+    if (typeof req.query.userId === 'string' && mongoose.isValidObjectId(req.query.userId)) {
+      scope.userId = new mongoose.Types.ObjectId(req.query.userId);
+    }
+    const filter = { ...scope, ...NOT_SAVED_STATUS[status] };
+    const [rows, total, open, all] = await Promise.all([
+      RefusedUpload.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
+      RefusedUpload.countDocuments(filter),
+      RefusedUpload.countDocuments({ ...scope, ...NOT_SAVED_STATUS.open }),
+      RefusedUpload.countDocuments(scope),
+    ]);
+
+    const ids = (key) => [...new Set(rows.map((r) => r[key]).filter(Boolean).map(String))];
+    const householdIds = ids('householdId');
+    const turfIds = ids('turfId');
+    const templateIds = ids('surveyTemplateId');
+    const [people, houses, books, templates] = await Promise.all([
+      // hydrateCanvassers never drops an id: a removed or deleted person still gets a name (the kept one,
+      // within its window).
+      hydrateCanvassers([...rows.map((r) => r.userId), ...rows.map((r) => r.reviewedBy)].filter(Boolean), orgId),
+      householdIds.length
+        ? Household.find({ _id: { $in: householdIds }, organizationId: orgId, campaignId: campaign._id }, 'addressLine1 addressLine2 city').lean()
+        : [],
+      turfIds.length ? Turf.find({ _id: { $in: turfIds }, organizationId: orgId, campaignId: campaign._id }, 'name').lean() : [],
+      templateIds.length ? SurveyTemplate.find({ _id: { $in: templateIds }, organizationId: orgId }, 'name').lean() : [],
+    ]);
+    const byId = (docs) => new Map(docs.map((d) => [String(d._id), d]));
+    const houseById = byId(houses);
+    const bookById = byId(books);
+    const templateById = byId(templates);
+    const nameOf = (id) => {
+      const p = id ? people.get(String(id)) : null;
+      return p ? [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unknown user' : null;
+    };
+
+    res.json({
+      open,
+      all,
+      total,
+      limit,
+      rows: rows.map((r) => ({
+        id: String(r._id),
+        kind: r.kind,
+        actionType: r.actionType || null,
+        recordedAt: r.recordedAt || null,
+        refusedAt: r.createdAt,
+        userId: String(r.userId),
+        signedInAs: nameOf(r.userId),
+        householdId: r.householdId ? String(r.householdId) : null,
+        // null when the house is gone from this campaign (Undo import, say) — "No longer in this campaign".
+        address: r.householdId ? notSavedAddress(houseById.get(String(r.householdId))) : null,
+        book: r.turfId ? bookById.get(String(r.turfId))?.name || null : null,
+        survey: r.surveyTemplateId ? templateById.get(String(r.surveyTemplateId))?.name || null : null,
+        status: r.status,
+        code: r.code || null,
+        reason: r.reason || null,
+        savedLaterAt: r.savedLaterAt || null,
+        reviewedAt: r.reviewedAt || null,
+        reviewedBy: r.reviewedBy ? { id: String(r.reviewedBy), name: nameOf(r.reviewedBy) } : null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const notSavedReviewSchema = z.object({ reviewed: z.boolean() });
+
+// Mark reviewed ({ reviewed: true }) or Reopen ({ reviewed: false }). Records who reviewed it and when.
+router.patch('/:campaignId/refused-uploads/:id', async (req, res, next) => {
+  try {
+    const campaign = await loadNotSavedCampaign(req, res);
+    if (!campaign) return;
+    if (isDeleting(campaign)) return res.status(409).json({ error: 'This campaign is being deleted.', code: 'campaign-deleting' });
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    const parsed = notSavedReviewSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Send { reviewed: true } or { reviewed: false }.' });
+    const update = parsed.data.reviewed
+      ? { reviewedAt: new Date(), reviewedBy: req.user._id }
+      : { reviewedAt: null, reviewedBy: null };
+    const row = await RefusedUpload.findOneAndUpdate(
+      { _id: req.params.id, organizationId: activeOrgId(req), campaignId: campaign._id },
+      { $set: update },
+      { new: true, projection: { reviewedAt: 1, reviewedBy: 1, savedLaterAt: 1 } }
+    ).lean();
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    res.json({
+      row: {
+        id: String(row._id),
+        reviewedAt: row.reviewedAt || null,
+        reviewedBy: row.reviewedBy ? String(row.reviewedBy) : null,
+        savedLaterAt: row.savedLaterAt || null,
+      },
+    });
   } catch (err) {
     next(err);
   }

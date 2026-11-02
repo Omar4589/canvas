@@ -104,6 +104,16 @@ test('copy: the pending line, the notice and the Not-you confirm', () => {
   assert.match(reauthNotice(4), /4 items are waiting/);
   assert.equal(notYouConfirm(), 'Signing out removes your saved houses from this phone. Sign out anyway?');
   assert.match(notYouConfirm({ pending: 2, noSignal: true }), /2 saved items .* need signal/);
+  // Saved items wait for the person who recorded them (docs/PROPOSAL_OFFLINE_QUEUE.md); the kill switch
+  // off brings back the old words.
+  assert.equal(
+    notYouConfirm({ pending: 2 }),
+    'Signing out removes your saved houses from this phone. 2 saved items will upload when you sign back in on this phone. Sign out anyway?'
+  );
+  assert.equal(
+    notYouConfirm({ pending: 1, holdOn: false }),
+    'Signing out removes your saved houses from this phone. 1 saved item will go up under whoever signs in next. Sign out anyway?'
+  );
 });
 
 test('the reset window runs from the last use of the password screen, not from when it went up', () => {

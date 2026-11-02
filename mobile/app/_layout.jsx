@@ -19,11 +19,18 @@ import {
   expandReauth,
   expandReauthIfStale,
   setServerSignOutNotifier,
+  setSessionEndCleanup,
 } from '../lib/authState';
 import { api, setSessionEndedHandler } from '../lib/api';
-import { setFlushPaceSink } from '../lib/offlineQueue';
-import { applyFlushedPace } from '../lib/recordAction';
-import { phoneAction, inCanvassFlow, retryUnless401, keepReauthInPlace } from '../lib/sessionEnd';
+import {
+  setFlushPaceSink,
+  setFlushRefusalSink,
+  cleanupDeletedAccount,
+  prepareQueue,
+  startupCleanup,
+} from '../lib/offlineQueue';
+import { applyFlushedPace, clearPendingHousehold, clearPendingLocation, clearAllPending } from '../lib/recordAction';
+import { phoneAction, inCanvassFlow, retryUnless401, keepReauthInPlace, tokenSub } from '../lib/sessionEnd';
 import { promptSupportAccess } from '../lib/supportAccessState';
 import { refreshSession } from '../lib/session';
 import { loadRoleContext } from '../lib/role';
@@ -169,6 +176,37 @@ const queryClient = new QueryClient({
 // A queued door the offline queue uploads answers with the automatic-pause state too; it reaches the cached
 // state only when it is about the org this phone is in now (lib/recordAction.js applyFlushedPace).
 setFlushPaceSink((pace, item) => applyFlushedPace(queryClient, pace, item));
+
+// A door the server turned down on upload (docs/PROPOSAL_OFFLINE_QUEUE.md): its pending marks go at once,
+// so the pin can't keep a color the server refused (a status, or a pin move's coordinate), and the roster
+// is refetched ONCE per flush pass — a survey switch can refuse dozens of items in a row, and every
+// refetch is the whole roster. The entry itself is in the Not saved list (components/NotSaved.jsx).
+setFlushRefusalSink({
+  onItem: (item) => {
+    if (!item?.householdId) return;
+    clearPendingHousehold(item.householdId);
+    clearPendingLocation(item.householdId);
+  },
+  onPass: () => queryClient.invalidateQueries({ queryKey: ['bootstrap'] }),
+});
+
+// Every sign-out (lib/sessionStore.js), before the session is cleared:
+//   - the pins' pending colors and moves go: they're this person's unsent work, and the next person's map
+//     must show what the server has;
+//   - items saved before the app update are stamped as this account's (prepareQueue), so they wait for
+//     it instead of going up under whoever signs in next;
+//   - a deleted account's unsent work is removed, and the account remembered, so the cleanup survives a
+//     restart (§E2, decision 7).
+// Each step on its own: one failing never skips the next.
+setSessionEndCleanup(async ({ reason, token }) => {
+  clearAllPending();
+  await prepareQueue().catch(() => {});
+  if (reason !== 'deleted') return;
+  const sub = tokenSub(token);
+  if (sub) await cleanupDeletedAccount(sub).catch(() => {});
+});
+// At every start: finish any deleted account's cleanup and prune the Not saved list.
+startupCleanup().catch(() => {});
 
 // Pause React Query interval polling while the app is backgrounded (battery).
 // refetchIntervalInBackground defaults to false, so once focusManager knows the

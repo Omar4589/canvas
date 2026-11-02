@@ -25,6 +25,11 @@ import rateLimit from 'express-rate-limit';
 //                                   every answer as `errorRecovery`; a phone picks it up at launch, when
 //                                   the app comes back to the screen (at most every 15 minutes) and every
 //                                   four hours while it stays open, and remembers it.
+//   MOBILE_QUEUE_HOLD               "off" = phones stop holding a saved door for the person who recorded it,
+//                                   skip the deleted-account cleanup and the 30-day removal of someone
+//                                   else's waiting doors, and upload as they did before
+//                                   (docs/PROPOSAL_OFFLINE_QUEUE.md). Anything else, or unset = on. Rides
+//                                   every answer as `queueHold`, picked up and remembered like errorRecovery.
 //
 // The runtimeVersion to set after a build: `eas build:list` → the build's "Runtime Version".
 //
@@ -65,16 +70,22 @@ const router = Router();
 const errorRecoveryOn = () =>
   String(process.env.MOBILE_ERROR_RECOVERY || '').trim().toLowerCase() !== 'off';
 
+// The kill switch for the offline queue's who-recorded-it hold. Same rule: only an explicit "off" turns
+// it off, so a typo or an unset var leaves the hold on.
+const queueHoldOn = () =>
+  String(process.env.MOBILE_QUEUE_HOLD || '').trim().toLowerCase() !== 'off';
+
 router.get('/', limiter, (req, res) => {
   const platform = String(req.query.platform || '');
   const runtimeVersion = String(req.query.runtimeVersion || '');
   const current = currentRuntimes(platform);
   const errorRecovery = errorRecoveryOn();
+  const queueHold = queueHoldOn();
 
   // Fail open on anything unexpected — a malformed request or an unconfigured platform must
   // read as "ok", never as a nag. The cost of a wrong "outdated" is a fleet-wide false alarm.
   if (!current || !runtimeVersion || current.includes(runtimeVersion)) {
-    return res.json({ status: 'ok', errorRecovery });
+    return res.json({ status: 'ok', errorRecovery, queueHold });
   }
 
   const mode =
@@ -89,7 +100,7 @@ router.get('/', limiter, (req, res) => {
     String(
       process.env[platform === 'ios' ? 'MOBILE_STORE_URL_IOS' : 'MOBILE_STORE_URL_ANDROID'] || ''
     ).trim() || null;
-  res.json({ status: 'outdated', mode, note, storeUrl, errorRecovery });
+  res.json({ status: 'outdated', mode, note, storeUrl, errorRecovery, queueHold });
 });
 
 export default router;

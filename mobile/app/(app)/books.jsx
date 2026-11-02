@@ -22,6 +22,7 @@ import { flushQueue, getPendingCount } from '../../lib/offlineQueue';
 import { ensureLocationPermission } from '../../lib/location';
 import CanvasserHeader from '../../components/CanvasserHeader';
 import ReauthNotice from '../../components/ReauthNotice';
+import { NotSavedBanner, QueueLines } from '../../components/NotSaved';
 import { RefreshFailedRow } from '../../components/DataHealthBanner';
 import { getSessionState, expandReauth, useSessionState } from '../../lib/authState';
 import MapControlStack from '../../components/MapControlStack';
@@ -327,6 +328,8 @@ export default function BooksScreen() {
     const gone = error?.status === 404 && rosterErrorIsFinal(error);
     return (
       <SafeAreaView style={styles.center}>
+        {/* As on the map: the reasons a save is turned down are the ones that put this screen up. */}
+        <NotSavedBanner />
         <Text style={styles.errorText}>
           {gone
             ? "This campaign has been archived — it's read-only now. Pick another campaign to keep canvassing."
@@ -436,6 +439,9 @@ export default function BooksScreen() {
         <CanvasserHeader variant="floating" onSwitchCampaign={switchCampaign} />
         {/* After "Later" on the password screen: work is waiting and the team can't see it yet. */}
         <ReauthNotice />
+        {/* Saves the server turned down on upload, and someone else's saves waiting on this phone. */}
+        <NotSavedBanner />
+        <QueueLines boxed notices={false} />
         <RefreshFailedRow
           what="your books"
           message={error && data && !rosterErrorIsFinal(error) && !reauthPending ? error.message : null}

@@ -627,15 +627,16 @@ book, the same list. Nothing is deleted while the screen waits.
   and signs out: anything you recorded stays on the phone and is sent once you sign in with the new
   password, and the houses download again.
 - **Not you?** **Not you? Sign out** signs this phone out. If work is waiting, the app asks first:
-  signing out removes the saved houses, and saved work goes up under whoever signs in next.
+  signing out removes the saved houses, and saved work uploads when you sign back in on this phone
+  (before the app update of November 2026: under whoever signs in next).
 
 **Some sign-outs are deliberate**, and those really sign you out: your password was changed on another
 device, or the account was deleted. The app waits until you're off a door, shows **Signing out…**, and
 lands on the sign-in screen with a note saying why.
 
-**Always sign back in as yourself.** Work saved on the phone is sent under whoever signs in next.
-Doorline can still turn an item down (for example, if you were taken off the campaign meanwhile), and
-those items aren't kept. **Never delete the app** while the pending badge shows a number.
+**Always sign back in as yourself.** Work saved on the phone uploads only while the person who recorded
+it is signed in (see *Work saved on the phone*, below). **Never delete the app** while the pending badge
+shows a number.
 
 **Lost your phone while signed in? Change your password yourself** (Forgot password? on the sign-in
 screen). The next time the lost phone connects, it can't be used without the new password: it signs out
@@ -643,6 +644,35 @@ and deletes its saved houses. The one exception is a phone whose password screen
 the half hour before (that's what tapping **Forgot password?** there and coming straight back looks
 like): it stays on that screen and asks for the new password instead, until it has been left untouched
 for half an hour. Until it connects, a phone with no signal keeps working on the houses it saved.
+
+## Work saved on the phone
+
+With no signal, every door, survey, walk-up person and pin fix is saved on the phone and uploaded once
+signal returns. Since the app update of November 2026 (plan:
+[PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md)):
+
+- **Each save remembers who recorded it** and uploads only while that person is signed in on the phone,
+  never under someone else. The pending badge counts your own saves. Someone else's waiting saves show
+  as a line on the sign-in screen, in the menu and on Books: *"2 saved items from Jane D. are waiting on
+  this phone. They'll upload when Jane signs in here."* Saves left waiting for someone else for 30 days
+  are removed, with a line on the sign-in screen.
+- **Signing out with saves waiting asks first** — *"3 saved items haven't uploaded yet. They'll stay on
+  this phone and upload the next time you sign in here."* **Sign out** · **Cancel** — after *Finishing a
+  save…* for up to 20 seconds if one is still on its way.
+- **A save Doorline can't accept any more is never dropped quietly.** The person who recorded it sees
+  *"1 item wasn't saved — tap to see why"* on the map, Books, the menu, the organization picker and the
+  *Not assigned to this campaign* screen; the list shows the house (from the books on the phone, when
+  they're there), what was recorded, when and why, with **Remove**. Nothing is resent from the phone:
+  the door is knocked again. Entries clear after 30 days, and only their recorder sees them. The
+  campaign's leads and admins see the same doors on the console's Audit page
+  ([AUDIT.md](AUDIT.md) → *Doors not saved*).
+- **A deleted account's saves are removed from the phone**, with a line on the sign-in screen, since
+  they can't be credited to anyone.
+- **Saves made on the older app** don't know who recorded them. They upload under the first person
+  signed in after the update, once; the sign-in screen says so while signed out.
+
+Doorline can switch off the who-recorded-it hold, the deleted-account removal and the 30-day removal for
+every phone from its server; phones then upload everything under whoever is signed in, as before.
 
 ## When something goes wrong
 
@@ -1363,7 +1393,7 @@ read an honest correction as a phantom knock (see [AUDIT.md](AUDIT.md)).
 
 **The hazard that creates, and the guard.** The offline queue can deliver an action long after it was
 recorded. A `not_home` that times out at 20s is queued (a timeout carries no HTTP status, so
-[offlineQueue.js](../mobile/lib/offlineQueue.js) treats it as retryable) — and because
+[queueRules.js](../mobile/lib/queueRules.js) `classify` treats it as retryable) — and because
 [recordAction.js](../mobile/lib/recordAction.js) fires `flushQueue()` at the tail of **every** submit,
 including a successful one, that stale action can replay *milliseconds* after the canvasser corrects
 the door to `refused`. Un-guarded, the replay deleted the newer `refused`, reinstated itself, dragged
@@ -1373,7 +1403,7 @@ the door to `refused`. Un-guarded, the replay deleted the newer `refused`, reins
 
 | | where it comes from | why it is trustworthy |
 |---|---|---|
-| `wasOfflineSubmission` | stamped at **enqueue** time, never at record time (`offlineQueue.js`) | marks exactly the replay population — including a replay caused by a timeout *while online* |
+| `wasOfflineSubmission` | stamped at **enqueue** time, never at record time (`queueCore.js` `enqueue`) | marks exactly the replay population — including a replay caused by a timeout *while online* |
 | `timestamp` | frozen when the canvasser taps (`recordAction.js`) | reports when the action happened, not when it arrived |
 
 **An equal timestamp is the same delivery, not a newer one.** The comparison was a strict `>`, so a
@@ -1591,10 +1621,10 @@ copied it — so `setHouseholdStatus` now sets it (`'field'` for the canvasser's
 
 **Known limits.** On a legacy null-pass book the server sends no `surveyedByMe` — the same limit as
 the re-survey confirm's — so only surveys still in this phone's cache or queue are counted there. And
-the undo covers only a result refused live: a queued result whose replay is refused with a 4xx is dropped by
-the flush ([offlineQueue.js](../mobile/lib/offlineQueue.js) `doFlush`) with no `restoreOwnSurveys`,
-so the marks it cleared stay cleared until the door's voters are re-shipped (a full bootstrap
-refetch, or a delta that carries them).
+the undo covers only a result refused live: a queued result whose replay is refused moves to Not saved
+([queueCore.js](../mobile/lib/queueCore.js) `doFlush` → `refuse`) with no `restoreOwnSurveys`; the
+refusal sink in `app/_layout.jsx` refetches the bootstrap once per flush pass, which re-ships the door's
+voters and brings back the marks it cleared.
 
 ### The precise-location gate
 
@@ -1677,6 +1707,90 @@ cached bootstrap (file-backed, so it survives restarts and dead zones):
 - **Older apps** ignore `pace`: an online tap gets the server's refusal in the caller's own alert ("Action
   not saved", "Survey not saved", "Person not added") and the pin turns back; offline taps queue and are
   accepted as replays. OTA only: no native module, no `app.json` change.
+
+## The offline queue: whose an item is, and what happens to a turned-down one
+
+Plan and review history: [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) (§C, §O). Three files:
+[queueRules.js](../mobile/lib/queueRules.js) (pure rules and words), [queueCore.js](../mobile/lib/queueCore.js)
+(the engine; storage, request function, token, kill switch and clock injected, so
+`queueCore.test.js` drives it under plain node) and [offlineQueue.js](../mobile/lib/offlineQueue.js)
+(wires the engine to AsyncStorage, `api()`, `getCurrentToken` and the cached switch; the import every
+caller already used).
+
+**Four stores, one lock** (`withLock` serializes every read-modify-write):
+
+| Key | Holds | Lifetime |
+|---|---|---|
+| `canvass.offlineQueue` | items waiting to upload: `{ id, path, body, orgId, enqueuedAt, v: 2, recordedBy, recorderName, tapAt, householdId, campaignId, heldSince? }`; the body carries `wasOfflineSubmission` and `queueItemId` (the item id, so the server files one row per item however often it's resent) | until sent, refused, its account is deleted, or 30 days of waiting for someone else |
+| `canvass.notSaved` | refused items: `{ id, recordedBy, tapAt, refusedAt, kind, actionType, householdId, status, code, message, sentAsOther }` — **no body** (no answers, no note), no address, no name | 30 days; read only by `recordedBy` |
+| `canvass.deletedAccounts` | `[{ sub, at }]`, accounts the phone learned were deleted | 30 days |
+| `canvass.queueNotices` | the sign-in screen's owed lines: `{ deleted: { count, at }, waited: [{ name, count }] }` | until the next sign-in (`clearNotices` in `login.jsx`) |
+
+No store holds an address: a queued item and a Not saved entry name the house by id, and the sheet looks
+the address up in the cached bootstrap when its recorder still has it (`privacy.html` promises the
+walk-list copy, addresses included, is deleted at sign-out).
+
+**The stamp, at the tap.** `optimisticSubmit` computes `{ recordedBy: tokenSub(getCurrentToken()),
+recorderName: recorderNameOf(bootstrap.user), tapAt, householdId, campaignId }` synchronously at entry,
+before any await, so a sign-out and someone else's sign-in during the GPS wait or a prompt can't change
+it; the GPS alert's Try again passes the same stamp back in (`opts.stamp`). `householdId` comes from the
+path, or a survey's pending mark. With the hold on and no session behind the tap it records nothing
+(`NO_SESSION`, *"Sign in again to record this door."*). If the session's `sub` differs from the stamp by
+the time the gate passes, the save is only queued (held), never patched into this session's map.
+
+**The flush** (`doFlush`, shared by concurrent callers, one extra pass for a call that arrives mid-run):
+
+1. `prepare(hold)` — **one locked write**, reading the session inside the lock: stamp every pre-update
+   item (no `recordedBy`) with the signed-in `sub`; remove items whose recorder is in
+   `canvass.deletedAccounts`; stamp `heldSince` on someone else's items the first time they're seen
+   while another person is signed in, and remove those past 30 days (`heldStale`: from
+   max(`enqueuedAt`, `heldSince`), a future date never stale, so a wrong clock at the tap can't lose a
+   door); prune Not saved and expired deleted accounts. With the hold off only the prunes run.
+2. Then, outside the lock (a send can take 20 s): read the token (none → stop), pick the first item
+   that `isMine`, send it with **that** token and its pinned `orgId`, and take the lock only to remove it.
+   `classify(err)`: `'retry'` (no status, 5xx, 429, or a body that isn't Doorline's JSON — a captive
+   portal) stops the pass; `'hold'` (401, 403 `PASSWORD_CHANGE_REQUIRED`) stops it with `authBlocked`;
+   `'refused'` (any other 4xx from Doorline) moves the item to Not saved and continues.
+3. The refusal sink (`setFlushRefusalSink`, registered in `app/_layout.jsx`): `onItem` clears that door's
+   `clearPendingHousehold` and `clearPendingLocation` marks; `onPass` invalidates `['bootstrap']` **once
+   per pass** (a survey switch can refuse dozens at once, and each refetch is the whole roster).
+
+`submitOrQueue(path, body, stamp)` (the live attempt) queues instead of sending when the session changed
+since the tap, and never queues a 401 whose reason is `deleted` (`shouldQueue`): that save takes the
+hard-fail alert, *"This account was deleted. This door wasn't saved."*
+
+**Counts.** `getPending`/`getPendingCount` return the signed-in person's items plus pre-update items (the
+next flush stamps them theirs) — every badge, `DeleteAccountSheet`, `confirmDoorChange`, `ReauthNotice`.
+`getWaiting` groups the rest by recorder (`groupWaiting`); signed out, pre-update items get their own line.
+
+**Deleted accounts** (§E2 of [PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md)).
+`cleanupDeletedAccount(sub)` remembers the account and removes its items and Not saved entries, adding to
+the sign-in line's count. It runs from `sessionStore.signOutSteps` for reason `deleted` (with the ended
+token's `sub`, via `authState.setDeletedAccountCleanup`), at app start (`startupCleanup`, for every
+remembered account), and in `DeleteAccountSheet` once a self-deletion succeeds; `prepare` removes any of
+that account's items that land later.
+
+**Sign out.** Every manual Sign out (drawer, admin and super-admin More, the map's, `update-required`)
+goes through [signOutFlow.js](../mobile/lib/signOutFlow.js) `confirmSignOut` **before** the caller's cache
+clear: while `hasInFlightActions()` it waits up to 20 s behind `SessionGate`'s *Finishing a save…* cover
+(an Alert can't be taken down from code), then counts own pending items plus `inFlightCount()`; none →
+signs out, otherwise **Sign out** · **Cancel**. The password screen's *Not you?* and other-account paths
+word the same rule (`notYouConfirm`, `otherAccountSignOutLine`). Automatic sign-outs can't ask; their items
+wait for their recorder.
+
+**Where it shows.** `components/NotSaved.jsx`: `NotSavedBanner` (map, its final-error state, Books, its
+error state, select-org, the drawer), `NotSavedSheet`, and `QueueLines` (sign-in screen, drawer, Books
+header) — all fed by `useQueueView`, which re-reads on every queue write, session change and return to the
+app.
+
+**The kill switch.** `MOBILE_QUEUE_HOLD` on `/api/build-status` (`queueHold`; only the literal `off`
+disables), remembered by `cache.js` `saveQueueHoldEnabled` like `MOBILE_ERROR_RECOVERY` and applied in
+`UpdateGate.jsx`. Off: `isMine` is always true (whoever is signed in uploads everything), no `heldSince`,
+no 30-day removal, no deleted-account removal (the account is still remembered, so the flush removes its
+items if the switch comes back on), the waiting lines hide, recording never
+refuses for a missing session, and the copy goes back to *"…upload with the next person who signs in"*.
+Not saved keeps working, filtered by recorder; an item sent under someone else and refused reads *"It
+uploaded while someone else was signed in."* (`sentAsOther`). Runbook: [OPERATIONS.md](OPERATIONS.md).
 
 ## The at-door survey
 

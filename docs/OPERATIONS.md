@@ -1336,6 +1336,54 @@ build.
 4. **Stamp the deploy and the run** in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 52 (and tell the
    owner whether any report was skipped).
 
+### Release: saved-without-signal doors are never lost or misfiled — and its two switches (November 2026)
+
+**What ships:** a door a phone saved without signal now uploads only under the person who recorded it, and
+one the server turns down is never deleted silently: the canvasser sees it in a **Not saved** list on the
+phone, and the campaign's Audit page lists it under **Doors not saved**. Sign out asks first when saves are
+waiting; a deleted account's unsent saves are removed from the phone. What it is:
+[CANVASSER_APP.md](CANVASSER_APP.md) → *Work saved on the phone* and *The offline queue*, [AUDIT.md](AUDIT.md)
+→ *Doors not saved*; the design: [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md); privacy record item 54.
+A server deploy, then one JavaScript-only phone update. No index build (the server builds the new
+collection's indexes itself at boot), no client-version bump.
+
+**Two switches** (**Settings ▸ Reveal Config Vars**; saving one restarts the dynos — no deploy). Both are on
+unless set to `off` (any case):
+
+| Var | `off` does |
+| --- | --- |
+| `MOBILE_QUEUE_HOLD` | Phones go back to the older upload behavior: whoever is signed in uploads every saved item; the waiting lines, the 30-day removal and the deleted-account removal stop, and the sign-out question says items *upload with the next person who signs in*. Turned-down items still go to the canvasser's Not saved list. A phone picks it up when Doorline is opened or brought back to the screen (at most once every 15 minutes) or within four hours on screen, and remembers it. |
+| `REFUSAL_RECORDER` | The server stops filing turned-down doors for the Audit page (rows already filed stay, and expire after 180 days). Read on every request. Phones are unaffected. |
+
+**To release it, in this order:**
+
+1. **Before committing, on the combined working tree:** every suite CI runs, the phone's tests
+   (`cd mobile && node --test lib/*.test.js`), and `npm run audit:mobile-api` with no argument. It flags
+   `routes/mobile/canvass.js` (a `code` added to refusals that had none), `routes/admin/campaigns.js` (two new
+   endpoints) and `routes/public/buildStatus.js` (one added field): all additive. It can't see the new
+   middleware or model, which were read by hand.
+2. **Deploy server and web from `main`** (**Deploy → Manual deploy**). The Audit page starts listing turned-
+   down doors from every phone, old apps included. The Help Center's new and changed articles go live with it,
+   worded for both app versions.
+3. **The privacy policy edits go live** (the owner's: the offline sentence, *"…stored on your device until
+   the app has delivered them or no longer needs them"*, and the local-storage line, *"…to keep you signed in
+   and to let the app work without signal"*) — before step 4, because staging phones are real phones on the
+   production server.
+4. **Staging:** `npm run ota:staging` from `mobile/`. Run the checks in the plan's §J on a TestFlight or
+   Play-internal phone in an internal test organization.
+5. **Production:** from `mobile/` on `main`, `npm run ota:production -- --rollout-percentage=20` (the `--`
+   passes the flag through; without it the update goes to everyone). Then raise it with
+   `eas update:edit <group id> --rollout-percentage 100`, or back it out with
+   `eas update:revert-update-rollout --group <group id>` — the publish prints the group id, and
+   `eas update:list --branch production` lists it. Once per platform if the publish made one group each.
+6. **Stamp the deploy and the update** in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md) item 54.
+
+**If something looks wrong after release:** for the phones, set `MOBILE_QUEUE_HOLD` = `off` first (no deploy);
+to take the phone code back out entirely, back out the rollout (above) or republish the previous update
+([mobile/README.md](../mobile/README.md) → *Undoing an OTA*). For the Audit list, set `REFUSAL_RECORDER` =
+`off`. **If `MOBILE_QUEUE_HOLD` stays off for more than a day,** the Help Center's and the app page's lines
+that saves wait for the person who recorded them stop being true: have them reworded.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.
@@ -2073,6 +2121,23 @@ and `autoCreate` off; checks its arguments before connecting. `--since` is
 `_id >= ObjectId.createFromTime(seconds)` (a Date there wraps to a random year); a day that began before
 `--since` in its zone is skipped as partial. Memory: about 70–85 bytes per visit held. Privacy record:
 the item for this check in [PRIVACY_VERIFICATION.md](PRIVACY_VERIFICATION.md).
+
+### The queue switches (`MOBILE_QUEUE_HOLD`, `REFUSAL_RECORDER`)
+
+**`MOBILE_QUEUE_HOLD`** is served as `queueHold` on `/api/build-status`
+([buildStatus.js](../server/src/routes/public/buildStatus.js) `queueHoldOn`: only `off`, trimmed and any case,
+turns it off). The phone stores only `off` (`mobile/lib/cache.js` `saveQueueHoldEnabled`, applied in
+`UpdateGate.jsx`), so a phone that never heard the answer keeps the hold on. What off changes on the phone is
+listed in [CANVASSER_APP.md](CANVASSER_APP.md) → *The offline queue*.
+
+**`REFUSAL_RECORDER`** is read on every request by
+[refusalRecorder.js](../server/src/middleware/refusalRecorder.js) (`recorderOff`): off, the middleware calls
+`next()` without wrapping anything — no capture, no write, no "saved later" close. The middleware is mounted
+once, on `/mobile` in `routes/index.js`, after `requireAuth` and before `requireEntitlement`. The collection's
+indexes (the Audit list's, a unique partial one per queue item, and the 180-day TTL) are built by
+`syncRefusedUploadIndexes` when the web dyno boots (`server.js`), so it never needs `migrate:build-indexes`;
+SIGTERM waits up to 5 s for writes still running (`drainRefusalWrites`) inside the existing 25 s timer.
+Details: [AUDIT.md](AUDIT.md) → *Doors not saved*.
 
 ## Why `autoIndex` is off in production
 

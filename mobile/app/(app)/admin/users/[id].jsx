@@ -29,6 +29,7 @@ import {
   mayOfferRemove,
   removeConfirm,
   touchedByDeletion,
+  unsyncedDoorsLine,
   viewerHasBillingAccess,
 } from '../../../../lib/memberDeletion';
 import { leaveDeletionNotice } from '../../../../lib/deletionNotice';
@@ -557,9 +558,7 @@ function AdminUserProfile() {
     const shown =
       names.length > 5 ? `${names.slice(0, 5).join(', ')} and ${names.length - 5} more` : names.join(', ');
     const body = user.isActive
-      ? names.length
-        ? `They lose access to this whole organization — including: ${shown}.`
-        : 'They lose access to this whole organization.'
+      ? `${names.length ? `They lose access to this whole organization — including: ${shown}.` : 'They lose access to this whole organization.'}\n\n${unsyncedDoorsLine('deactivate')}`
       : names.length
         ? `Access comes back for the whole organization — they rejoin: ${shown}.`
         : 'Access comes back for the whole organization.';

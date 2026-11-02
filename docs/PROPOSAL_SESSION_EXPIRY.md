@@ -1104,7 +1104,9 @@ retry.
 
 ## J. Found while planning, not in this plan
 
-1. **Saved work picked up by whoever signs in next is misattributed or lost.**
+1. **Saved work picked up by whoever signs in next is misattributed or lost.** *(Fixed 2026-11 by
+   [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md): each item uploads only under the account that
+   recorded it, and a refused one is listed, never deleted silently.)*
    - The server stamps `req.user._id` at upload (canvass.js:338).
    - Same org and assigned, or an admin, who skips the check at canvass.js:110: the work is
      credited to them, which affects pay and billing.

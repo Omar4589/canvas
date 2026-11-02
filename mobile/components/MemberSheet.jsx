@@ -17,7 +17,7 @@ import { loadCurrentUser } from '../lib/cache';
 import ActivityRow from './ActivityRow';
 import PasswordInput from './PasswordInput';
 import { isValidTempPassword, tempPasswordProblem } from '../lib/validators';
-import { DELETED_ACCOUNT_LABEL, deletionLine } from '../lib/memberDeletion';
+import { DELETED_ACCOUNT_LABEL, deletionLine, unsyncedDoorsLine } from '../lib/memberDeletion';
 import { standing } from '../lib/rosterView';
 import {
   STATE_WORDS,
@@ -373,7 +373,7 @@ export default function MemberSheet({
         : `They lose access to this organization everywhere — not just ${campaign?.name || 'this campaign'}.`;
     Alert.alert(
       `Deactivate ${name}?`,
-      `${scope}\n\nTheir books stay theirs and every door they knocked still counts. You can switch them back on from here.`,
+      `${scope}\n\nTheir books stay theirs and every door they knocked still counts. You can switch them back on from here.\n\n${unsyncedDoorsLine('deactivate')}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Deactivate', style: 'destructive', onPress: () => statusMut.mutate('deactivate') },
@@ -401,7 +401,7 @@ export default function MemberSheet({
         : '';
     Alert.alert(
       `Remove ${name} from ${campaign?.name || 'this campaign'}?`,
-      `Any books they hold here go back to the pool. Their work is kept — every door they knocked still counts toward this campaign.${crewLine}`,
+      `Any books they hold here go back to the pool. Their work is kept — every door they knocked still counts toward this campaign.\n\n${unsyncedDoorsLine('remove')}${crewLine}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => unassignMut.mutate() },

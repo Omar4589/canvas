@@ -187,9 +187,9 @@ overstate what Doorline does, so they stay off the site:
 
 | Avoid | Because | Say instead |
 |---|---|---|
-| "never lose data" | a queued item the server later rejects (canvasser removed, door deleted) is dropped | "Doors and surveys save on the phone and send as soon as there's signal again" |
+| "never lose data" | a queued item the server later rejects (canvasser removed, door deleted) isn't saved: since November 2026 it's listed for the canvasser and on the Audit page, but the door is knocked again | "Doors and surveys save on the phone and send as soon as there's signal again" |
 | "the moment it happens" | flags are worked out when the Audit page loads, which refreshes every 20 seconds | "within seconds of syncing" |
-| "syncs automatically", "in the background" | the queue sends on reconnect, app open, the next tap or sign-in — never in the background | "send as soon as there's signal again" |
+| "syncs automatically", "in the background" | the queue sends on reconnect, app open, the next tap or sign-in — never in the background, and only while the person who recorded it is signed in | "send as soon as there's signal again" |
 | "pings", "ping trails" | the app never tracks a canvasser between doors (a privacy-policy promise) | "where each result was recorded from, with a line to its house" |
 | "voter identity stripped" | shared reports leave out names, but a house-level map — an opt-in per report — shows every knocked home's address and answers | name exactly what's left out: "No canvasser or voter names" |
 | "side-by-side comparisons" | there is one sortable table of every canvasser | "one table that ranks every canvasser" |

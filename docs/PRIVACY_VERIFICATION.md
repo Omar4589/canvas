@@ -91,6 +91,8 @@ audit half as *"designed to be recorded"* (correct — the write is best-effort)
     Android backup; a startup migration removes the old Documents copy; sign-out clears every copy),
     and `android.allowBackup: false` landed in `app.json`. **allowBackup is native-build-contingent**
     (no effect via OTA), and on iOS, AsyncStorage — including the offline queue — is still backed up.
+    *[v7 2026-11-01, item 54: so are the queue's three new keys, `canvass.notSaved`,
+    `canvass.deletedAccounts` and `canvass.queueNotices`.]*
 12. **Org-deletion completeness is retry-safe** (was B5 Exc 2): identity satellites are deleted before
     each Person, `personIds` derive from both Voter and Person rows, `PersonEditProposal` now carries a
     required `orgId`, and an exhaustive-sweep test covers every org-scoped collection. Pre-fix orphaned
@@ -1340,7 +1342,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
    not a migration, is what ends these links.]*
 6. **The offline queue**: no TTL, no cap, survives sign-out, and 4xx-failed items are still silently
    dropped (account deletion now flushes the queue first, closing the billable-knock loss). On iOS it
-   rides device backups.
+   rides device backups. *[v7 2026-11-01, item 54: NARROWED, not closed — a refused item now moves to
+   its recorder's Not saved list (no answers, no note, no address; 30 days) and the server files it
+   (`RefusedUpload`, 180 days); an item uploads only under the account that recorded it; items waiting
+   for someone else go after 30 days of waiting; a deleted account's items are removed. A person's own
+   unsent items still have no cap or age limit, and every queue store still rides iOS backups.]*
 7. **The nightly purge loops have no per-org error isolation** — one throwing org halts that night's
    wind-down, dormancy, and deletion-request sweeps (the run receipt is at least honestly red now).
 8. **Retention crons carry no `tz`** — 03:17/04:41 are UTC only because Heroku dynos default to UTC.
@@ -2672,7 +2678,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     available". After **Later**, results — including ones recorded with signal — wait on the phone until
     the password is entered. That is true in substance (an expired session always held them), but the
     sentence no longer says when they leave; candidate wording: "…are saved on your device until they
-    can be delivered to our servers, and each is removed once it has been delivered." The public app
+    can be delivered to our servers, and each is removed once it has been delivered." *[v7 2026-11-01,
+    item 54: CLOSED by the owner's decision 8 in the queue plan — the sentence becomes, under the subject
+    "What you record while offline", "…stored on your device until the app has delivered them or no longer
+    needs them": general on purpose, and true for old and new phones alike. The owner's edit; live before
+    the production phone update (stamp it here when it is).]* The public app
     page (`client/public/app.html`) gained an "Asked to sign in again?" section whose claims (the prompt
     is routine; Later keeps work saved on the phone until the password is entered; sign back in as
     yourself; after a password change a lost phone can't be used without the new password once it next
@@ -3471,6 +3481,8 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       surfaces; until the phone clean-up (plan §E2) ships after Election Day, a deleted account's unsent doors go
       up under whoever signs in next on that phone (the review tells the admin to let the phone sync first); a
       refused deletion can drop a live phone's sync if it lands in the ~100 ms switch-off window.
+      *[v7 2026-11-01, item 54: the phone clean-up is built — a deleted account's unsent items are removed
+      from the phone (the owner's decision 7 in the queue plan), on phones with the November 2026 update.]*
     - **Pinned by** `test/orgAccountDeletion.int.test.js` (32 tests, incl. the crash and race cases a review
       reproduced on 2026-10-24), `test/deletedUserNames.int.test.js` (6) and the updated
       `test/billingAccess.int.test.js` (the Remove door checked with a staff actor).
@@ -4835,6 +4847,69 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       fixtures opted in through the same confirmation; client `clientReportAutoSave`,
       `clientReportRefreshDialog`, `clientReportsRender` and `clientReportsLogic` tests.
 
+54. **[v7 2026-11-01 — Doors saved without signal: each waits on the phone for the person who recorded it,
+    a refused one leaves a line instead of vanishing, and the server files refusals for the Audit page.
+    BUILT 2026-11-01, uncommitted; deploy and phone update pending (stamp both here). Privacy-affecting: a
+    new stored server record (`RefusedUpload`, 180 days, shown to the campaign's Audit-page users, removed
+    with its organization or campaign), three new phone stores and new on-device rules (a hold per
+    recorder, two 30-day limits, a deleted account's items removed). No subprocessor, export, link or new
+    audience outside the customer's organization. Two published sentences change — the owner's edits
+    (the queue plan's decisions 6 and 8), live before the phone update; no customer notice.]**
+    Plan: [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) (§H, §O; owner decisions 1–12). Read from
+    the code:
+    - **(a) The server record.** `models/RefusedUpload.js`: who was signed in (`userId`), the kind of write,
+      the door result, the house, voter, book and survey template as ids, the tap time (`recordedAt`), the
+      refusal's status, code and message (≤ 500 characters), the phone's queue item id (≤ 64 characters),
+      `savedLaterAt`, who reviewed it and when. **No survey answers, notes, names or coordinates.** Written
+      only by `middleware/refusalRecorder.js`, for a queued upload (`wasOfflineSubmission`) refused with a
+      4xx other than 401 and the temp-password 403; filed from server records only (the door or voter in the
+      URL, else the book; every join one organization; never the `X-Org-Id` header or a body campaign id),
+      and only in an organization that carries the person (a membership in any state, or their own work
+      there). At most 500 rows per person per organization per day. Shown by
+      `GET /admin/campaigns/:campaignId/refused-uploads` to org admins and the campaign's leads (the Audit
+      rule), with the signed-in person's name (the kept name for a deleted account, within its window) and
+      the house's address; Doorline staff reach it only through the product under a grant, like any
+      campaign data. Gone after 180 days (a TTL index built at boot) and with its organization
+      (`ORG_SCOPED`) or campaign (`CAMPAIGN_SCOPED`); never written while either is being deleted.
+      `REFUSAL_RECORDER=off` stops the filing.
+    - **(b) The phone.** C9's *Store 1* note and *Store 1b* say what each store holds (no store holds an
+      address). Who sees what on a shared phone: the waiting line shows the recorder's first name and last
+      initial to whoever holds the phone (decision 1), and the 30-day notice the same short name; the
+      deleted-account notice names no one; a Not saved entry shows only to its recorder. Items wait only for
+      their recorder (the pre-update ones are stamped as the account signed in at the next flush or
+      sign-out); someone else's go after 30 days of waiting; a deleted account's are removed (decision 7,
+      which settles item 37's open line); a refused item keeps only its line for 30 days. All ride iOS
+      backups like the queue always has. `MOBILE_QUEUE_HOLD=off` brings back the older behavior (uploads under
+      whoever is signed in, no holds or removals); Not saved keeps working.
+    - **(c) Claims checked.**
+      - privacy.html `:91` (canvassing activity — what was recorded, the record it relates to, the time —
+        reviewed by authorized administrators of the same organization): holds; a refused upload is that
+        kind of record, seen only inside its organization, by role.
+      - `:95`, the offline sentence (*"…saved on your device until a connection is available, and each is
+        removed once it has been delivered to our servers"*): **becomes false with the phone update** — an
+        item now waits for its recorder even with a connection, and a refused one leaves a line for up to 30
+        days. Decision 8's general sentence (*"…stored on your device until the app has delivered them or no
+        longer needs them"*, under *What you record while offline*) is true for old and new phones alike.
+        **The owner's edit; it must be live before `ota:staging`** (staging phones are real phones on the
+        production server).
+      - `:98` (*"We use local storage on your device to keep you signed in"*): already narrower than the
+        queue it never mentioned; decision 6 (*"…to keep you signed in and to let the app work without
+        signal"*) — the owner's edit, with the one above.
+      - `:106` (customer data not visible to other customer organizations): holds; filing never trusts the
+        request's own organization or campaign, and a join across organizations files nothing.
+      - `:113` (staff access only under a grant): holds; no new staff path.
+      - `:123` (deletion removes canvassing records): holds; both cascades remove the rows.
+      - `:129` (a deleted account's name stays on field records 180 days): consistent; the rows show the kept
+        name through the same lookup (`hydrateCanvassers`, `DeletedUserRecord.organizationIds`).
+      - DPA ([DPA.md](DPA.md)) §3(a) (process only to provide the Service): the record serves the customer's
+        own canvass. §3(d) (no combining across customers): filing keeps each row inside one organization.
+        §6: no subprocessor. §9 (retention as the Privacy Policy and Agreement describe): 180 days, and
+        deleted with the organization.
+      - Terms: no sentence about the offline queue or refused uploads.
+    - **(d) Tests.** Server `test/refusedUploads.int.test.js` (17) and `test/refusalRecorder.test.js` (7), and
+      the deletion suites with `RefusedUpload` in their sweeps; phone `lib/queueCore.test.js` (18) and
+      `lib/queueRules.test.js` (10); client `notSaved` and `doorsNotSavedRender` tests.
+
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 
 > **[v3 — 2026-07-16]** v2 is itself now partially historical. Its gap list: **8 is resolved** (the
@@ -5493,6 +5568,26 @@ Two of your own findings conflict here and I am telling you which is right.
 - **It SURVIVES LOGOUT.** `signOut()` (`mobile/lib/authState.js:41-51`) clears the token, cached user, active campaign, bootstrap and selected books. **`canvass.offlineQueue` is not among them, and nothing anywhere clears it.** Un-flushed knocks — each carrying `{lat, lng, accuracy}`, the note, and household/voter ids — remain on the handset after the canvasser signs out, indefinitely.
 
 > **Do NOT write:** *"We hold your location on your device only until it syncs."* The code sets no upper bound. **No maximum retention period for on-device location data can be truthfully stated.**
+
+*[v7 2026-11-01, item 54 — the queue fix ([PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md)).* Store 1 now lives in `mobile/lib/queueCore.js`
+(wired by `offlineQueue.js`): still one key, `canvass.offlineQueue`, plaintext JSON. Each item now also
+holds who recorded it (`recordedBy`, the account id, and `recorderName`, first name and last initial),
+`tapAt`, the house and campaign ids, and `heldSince` — never an address. It already held walk-up contacts
+too (an added person's name, phone and email, in the add-a-person body), which the list above leaves out.
+**"Exactly two ways" no longer holds:** an item now leaves when it's delivered; when the server refuses it
+(it moves to Store 1b); when its account is deleted; or after 30 days of waiting for someone else (counted
+from when the phone first saw it waiting while another person was signed in). A network error, a 5xx or a
+401 still keeps it, now without blocking anyone else's items. **The Do NOT write line above still
+stands**: a person's own items have no upper bound while they wait for that person. Also **do NOT write**
+*"refused items are deleted from the phone"*: they're kept in Store 1b for up to 30 days.*]*
+
+**Store 1b — Not saved (`canvass.notSaved`, item 54).** What the server refused, as
+`{ id, recordedBy, tapAt, refusedAt, kind, actionType, householdId, status, code, message, sentAsOther }` —
+no body, so no survey answers, no note, no coordinates, no address and no name. Shown only to its recorder
+while signed in; pruned at 30 days on every flush and at app start; survives sign-out; rides iOS backups
+like Store 1. Beside it, `canvass.deletedAccounts` (account ids the phone learned were deleted, 30 days)
+and `canvass.queueNotices` (counts and recorders' short names for the sign-in screen, until the next
+sign-in).
 
 **Store 2 — see "THINGS YOU DID NOT ASK ABOUT," item 1.** The bootstrap cache is a bigger disclosure than the queue and nobody asked about it.
 
@@ -6296,6 +6391,8 @@ is not a sign-out: the copy stays — through the prompt, after "Later", and aft
 > out of iOS backups by platform default. **Residual, keep it in the record:** on iOS, AsyncStorage —
 > including `canvass.offlineQueue` with its GPS-stamped queued knocks and survey payloads — still rides
 > device backups. "Excluded from backup" is fully true on Android, bootstrap-file-true on iOS.
+> *[v7 2026-11-01, item 54: and the queue's new keys — Not saved, deleted accounts, notices — ride with it.
+> None holds an address.]*
 
 I grepped `mobile/` (source and `app.json`) for `ExcludedFromBackup`, `NSURLIsExcludedFromBackupKey`, `allowBackup`: **zero hits.** `mobile/app.json` sets no `android.allowBackup: false`.
 
@@ -6381,7 +6478,7 @@ The campaign cascade removes 20 collections + the Voter rows housed in that camp
 9. **Voter names, addresses and public report tokens are written to the Heroku access log in cleartext,** and it is unknown whether a log drain forwards them onward. (G15)
 10. **Legacy report share links are open, unauthenticated and non-expiring.** The remediation left them live on purpose. The code comments refer to "the migration" that sunsets them — **the migration does not exist.** Nobody knows how many are out there. (D11) *[v7 2026-10-28, item 44: closed on the date `RETIRE_ALL_REPORTS_LINKS` is set (pending; stamp it here); `npm run report:all-reports-links` counts them per organization before then.]*
 11. **Legacy links have no `noindex`.** robots.txt does not disallow `/r/`. (D11)
-12. **On-device retention is unbounded.** The offline queue has no TTL, no cap, and **survives logout**, holding GPS coordinates, survey answers and free-text notes. (C9)
+12. **On-device retention is unbounded.** The offline queue has no TTL, no cap, and **survives logout**, holding GPS coordinates, survey answers and free-text notes. (C9) *[v7 2026-11-01, item 54: NARROWED — someone else's items are bounded at 30 days of waiting, a deleted account's are removed, and refused items keep only a line (30 days). A person's own unsent items are still unbounded.]*
 13. **A grant-holding staff member can mint themselves a Membership and become permanently ungated and unlogged.** (E13, Hole 3 — inferred, needs engineering review)
 14. **A customer admin can link another org's user account into their org and reset that person's password**, obtaining a cross-org session. (F14 — inferred, needs engineering review)
 15. **Cross-org Person merge is possible from the staff console** — `mergePersons.js` has zero `organizationId` references. It can also cause org B's deletion to destroy org A's Person records. (F14)

@@ -1104,7 +1104,7 @@ const CampaignHome = ({ campaignId, embedded = false, caption = null, footer = n
           <View style={styles.quickActions}>
             <NavTileGrid
               items={[
-                { label: 'Live map', subtitle: 'Doors & canvasser pings', onPress: goMap },
+                { label: 'Live map', subtitle: 'Doors & where results were recorded', onPress: goMap },
                 // Canvassers paused for review outrank mock-GPS flags on the one badge (docs/PROPOSAL_PACE_PAUSE.md §F.5).
                 campaign?.openPacePauses > 0
                   ? {

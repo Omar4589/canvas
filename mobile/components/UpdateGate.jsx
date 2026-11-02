@@ -7,7 +7,7 @@ import * as Updates from 'expo-updates';
 import { api } from '../lib/api';
 import { useSessionState } from '../lib/authState';
 import { STORE_URL } from '../lib/config';
-import { saveErrorRecoveryEnabled } from '../lib/cache';
+import { saveErrorRecoveryEnabled, saveQueueHoldEnabled } from '../lib/cache';
 import { errorStore } from '../lib/errorRecovery';
 import { useReloadPending } from '../lib/appRestart';
 import { inCanvassFlow } from '../lib/sessionEnd';
@@ -85,6 +85,14 @@ export default function UpdateGate() {
     errorStore.setEnabled(errorRecovery);
     saveErrorRecoveryEnabled(errorRecovery).catch(() => {});
   }, [errorRecovery]);
+
+  // The offline queue's kill switch (MOBILE_QUEUE_HOLD, docs/PROPOSAL_OFFLINE_QUEUE.md) rides it too.
+  // Remembered the same way: lib/offlineQueue.js reads the stored answer on every flush.
+  const queueHold = data?.queueHold;
+  useEffect(() => {
+    if (typeof queueHold !== 'boolean') return;
+    saveQueueHoldEnabled(queueHold).catch(() => {});
+  }, [queueHold]);
 
   if (!data || data.status !== 'outdated' || reloadPending) return null;
 

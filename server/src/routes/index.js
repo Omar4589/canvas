@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { accessLog } from '../middleware/accessLog.js';
 import { blockIfMustChangePassword } from '../middleware/passwordGate.js';
 import { requireEntitlement } from '../middleware/entitlement.js';
+import { refusalRecorder } from '../middleware/refusalRecorder.js';
 import authRouter from './auth.js';
 import adminMembershipsRouter from './admin/memberships.js';
 import adminAssignmentsRouter from './admin/assignments.js';
@@ -90,6 +91,12 @@ router.use('/help', helpRouter);
 // the sub-routers (which re-run requireAuth harmlessly). /auth is excluded above
 // so change-password / me / logout stay reachable while the flag is set.
 router.use(['/super-admin', '/admin', '/mobile'], requireAuth, blockIfMustChangePassword);
+// Doors not saved: a door a phone saved without signal that the server turns down is recorded for the
+// Audit page (middleware/refusalRecorder.js, docs/PROPOSAL_OFFLINE_QUEUE.md §D). Mounted once, HERE —
+// after the sign-in gates above (their 401 and temp-password 403 are held on the phone, never recorded)
+// and before requireEntitlement and the routers' orgContext, so it sees the 402 and the org-context
+// refusals as well as the routes' own.
+router.use('/mobile', refusalRecorder);
 // Billing entitlement gate: reads always pass (suspended = read-only), writes
 // need an entitled org; super-admin surfaces are exempt (account managers).
 router.use(['/admin', '/mobile'], requireEntitlement);

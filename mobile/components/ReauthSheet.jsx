@@ -27,8 +27,9 @@ import {
   collapseReauth,
   touchReauth,
 } from '../lib/authState';
-import { loadCurrentUser, saveCurrentUser, saveMemberships, saveServerMeta } from '../lib/cache';
+import { loadCurrentUser, saveCurrentUser, saveMemberships, saveServerMeta, loadQueueHoldEnabled } from '../lib/cache';
 import { flushQueue, getPendingCount } from '../lib/offlineQueue';
+import { recorderNameOf, otherAccountSignOutLine } from '../lib/queueRules';
 import { REAUTH_TITLE, reauthBody, pendingLine, notYouConfirm, isFieldScreen, tokenSub } from '../lib/sessionEnd';
 import Logo from './Logo';
 import PasswordInput from './PasswordInput';
@@ -60,6 +61,9 @@ const ReauthSheet = ({ reauth, path }) => {
   const [loading, setLoading] = useState(false);
   const [noSignal, setNoSignal] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  // The offline queue's kill switch (docs/PROPOSAL_OFFLINE_QUEUE.md): off, saves go up under whoever
+  // signs in next, and the copy says so.
+  const [holdOn, setHoldOn] = useState(true);
   const titleRef = useRef(null);
 
   const changed = reauth.reason === 'password_changed';
@@ -87,6 +91,11 @@ const ReauthSheet = ({ reauth, path }) => {
     getPendingCount()
       .then((n) => {
         if (alive) setPendingCount(n);
+      })
+      .catch(() => {});
+    loadQueueHoldEnabled()
+      .then((on) => {
+        if (alive) setHoldOn(on);
       })
       .catch(() => {});
     return () => {
@@ -166,7 +175,12 @@ const ReauthSheet = ({ reauth, path }) => {
         discard(res.token);
         const signOutNow = () => signOut();
         if (pendingCount > 0) {
-          Alert.alert('Sign out?', notYouConfirm({ pending: pendingCount }), [
+          // The reader is the OTHER person: name whose saves stay behind (lib/queueRules.js). With the kill
+          // switch off, today's words: they go up under whoever signs in next.
+          const text = holdOn
+            ? otherAccountSignOutLine({ count: pendingCount, name: recorderNameOf(cached) })
+            : notYouConfirm({ pending: pendingCount, holdOn: false });
+          Alert.alert('Sign out?', text, [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Sign out', style: 'destructive', onPress: signOutNow },
           ]);
@@ -213,7 +227,7 @@ const ReauthSheet = ({ reauth, path }) => {
       return;
     }
     // Cancel first: Android shows the buttons in this order.
-    Alert.alert('Sign out?', notYouConfirm({ pending: pendingCount, noSignal }), [
+    Alert.alert('Sign out?', notYouConfirm({ pending: pendingCount, noSignal, holdOn }), [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
     ]);

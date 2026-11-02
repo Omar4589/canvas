@@ -183,7 +183,8 @@ test('the Remove question matches the member sheet’s, with the crew line only 
   assert.equal(plain.title, 'Remove Pat Rivera from Fall Canvass?');
   assert.equal(
     plain.message,
-    'Any books they hold here go back to the pool, so you can hand them to someone else. Books shared with other canvassers stay assigned to them. This doesn’t affect their other campaigns. Their work is kept — every door they knocked still counts toward this campaign.'
+    'Any books they hold here go back to the pool, so you can hand them to someone else. Books shared with other canvassers stay assigned to them. This doesn’t affect their other campaigns. Their work is kept — every door they knocked still counts toward this campaign.' +
+      "\n\nIf they still have doors on their phone that haven't uploaded, let it sync first — after you remove them, those doors can't be saved."
   );
   const lead = removeQuestion({ name: 'Dana Cruz', campaignName: 'Fall Canvass', crewSize: 1 });
   assert.ok(lead.message.endsWith('\n\nDana Cruz runs a crew here: 1 person will have no coordinator. Their past doors stay on Dana Cruz’s team.'));

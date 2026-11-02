@@ -12,8 +12,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../lib/api';
-import { flushQueue, getPendingCount } from '../lib/offlineQueue';
-import { signOut } from '../lib/authState';
+import { flushQueue, getPendingCount, cleanupDeletedAccount } from '../lib/offlineQueue';
+import { signOut, getCurrentToken } from '../lib/authState';
+import { tokenSub } from '../lib/sessionEnd';
 import PasswordInput from './PasswordInput';
 import { radius, spacing } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
@@ -25,10 +26,10 @@ import { useThemedStyles } from '../lib/useThemedStyles';
 //
 // Three things have to happen before the button is even offered:
 //
-//  1. FLUSH THE OFFLINE QUEUE. offlineQueue drops any 4xx so a bad submission can't wedge the
-//     queue forever — which means that the moment the account dies, every unsynced knock 401s
-//     and is silently thrown away. That is real, billable field work. So we flush first and
-//     refuse to delete while anything is still pending.
+//  1. FLUSH THE OFFLINE QUEUE. The moment the account dies its unsent saves can never upload, and
+//     the phone removes them (lib/queueCore.js cleanupDeletedAccount, run below once the delete
+//     succeeds). That is real, billable field work. So we flush first and refuse to delete while
+//     anything of theirs is still pending.
 //  2. ASK THE SERVER WHAT WOULD BREAK. A sole admin deleting themselves would brick their org;
 //     a sole bill-payer would drive it read-only when the subscription lapsed. The server owns
 //     those rules (services/users/deleteAccount.js) — we just render them.
@@ -79,8 +80,14 @@ export default function DeleteAccountSheet({ visible, onClose }) {
   async function onDelete() {
     setError(null);
     setDeleting(true);
+    // Whose account this is, read before the session ends.
+    const sub = tokenSub(getCurrentToken());
     try {
       await api('/auth/account', { method: 'DELETE', body: { currentPassword: password } });
+      // Anything of theirs still on the phone can never upload now (a save queued since the check):
+      // remove it, and remember the account so a restart finishes the job (docs/PROPOSAL_OFFLINE_QUEUE.md
+      // §E2). Never blocks the sign-out.
+      await cleanupDeletedAccount(sub).catch(() => {});
       // The token is dead server-side the moment this returns (requireAuth refuses a deleted
       // user on every request), so drop the local session rather than leaving a zombie one.
       await signOut();

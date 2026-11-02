@@ -1,7 +1,10 @@
 import { Alert, AppState, Linking, Platform } from 'react-native';
 import { getCurrentLocation, getCanvassLocation, promptEnableServices } from './location';
-import { submitOrQueue, flushQueue, getPending } from './offlineQueue';
-import { saveBootstrap, loadActiveOrgId } from './cache';
+import { submitOrQueue, flushQueue, getPending, enqueue } from './offlineQueue';
+import { saveBootstrap, loadActiveOrgId, loadQueueHoldEnabled } from './cache';
+import { getCurrentToken } from './authState';
+import { tokenSub } from './sessionEnd';
+import { recorderNameOf, describePath, NO_SESSION_MESSAGE, DELETED_HARD_FAIL } from './queueRules';
 import { changePrompt, ownSurveysHere, buildChangePrompt, clearOwnSurveysAtDoor, ownSurveyedIds, restoreOwnSurveys } from './doorChange';
 import { ACTION_PATHS, addVoterPath, addVoterBody, doorResultBody, doorTurfId, pendingDoorVerdict } from './doorPaths';
 import { reconcileLocationResponse } from './deltaFold';
@@ -171,6 +174,13 @@ export function clearPendingLocation(id) {
   pendingLocations.delete(String(id));
 }
 
+// Every pending color and pin move at once — at sign-out (app/_layout.jsx): they're the ending person's
+// unsent work, held for them by the offline queue, so the next person's map must show the server's.
+export const clearAllPending = () => {
+  pendingHouseholds.clear();
+  pendingLocations.clear();
+};
+
 export function reconcilePendingLocations(households) {
   if (!pendingLocations.size || !Array.isArray(households)) return households;
   const now = Date.now();
@@ -218,6 +228,8 @@ const inFlightPaths = new Set();
 // confirmed nor queued — the lock is taken at optimisticSubmit entry (before the GPS gate) and
 // released only when the submit settles — so a reload at that instant would lose the knock silently.
 export const hasInFlightActions = () => inFlightPaths.size > 0;
+// How many — a Sign out counts a save still sending with the queued ones (lib/signOutFlow.js).
+export const inFlightCount = () => inFlightPaths.size;
 
 // Native alerts must only be REQUESTED while the app is active. Both platforms
 // mishandle an Alert.alert fired while backgrounded — the exact window a canvasser
@@ -229,8 +241,8 @@ export const hasInFlightActions = () => inFlightPaths.size > 0;
 // skip a deferred alert, however late: for NO_FIX (the common weak-signal block)
 // the LocationBlockedBanner deliberately stays silent, so this alert is the ONLY
 // "nothing was recorded" feedback — a late popup over the still-open door screen
-// beats a silently lost knock.
-const alertWhenActive = (show) => {
+// beats a silently lost knock. Also used by lib/signOutFlow.js for the sign-out question.
+export const alertWhenActive = (show) => {
   if (AppState.currentState === 'active') {
     show();
     return;
@@ -301,6 +313,10 @@ function locationBlockedAlert(err, { onCancel, onRetry }) {
 //   2. Patch the bootstrap cache SYNCHRONOUSLY (the visible feedback: the pin /
 //      unit dot recolors this frame) and fire onAccepted — callers navigate there.
 //   3. In the background: submit — or queue — the action with the stamp from step 1.
+//      Every save is also stamped, at the tap, with WHO recorded it (the session's account id): the
+//      offline queue uploads it only while that person is signed in (lib/queueCore.js;
+//      docs/PROPOSAL_OFFLINE_QUEUE.md). Taken before any await, so a sign-out and someone else's
+//      sign-in during the GPS wait or a prompt can't change it.
 //      On a successful online write, reconcile the cache with the server's
 //      authoritative result. A network failure is queued and retried by flushQueue.
 //      A hard (4xx/5xx) failure won't be retried, so we re-sync to server truth and
@@ -347,6 +363,19 @@ export function optimisticSubmit(qc, opts) {
   // force-close", easiest to hit on weak signal where the first submit hangs ~20s.
   if (inFlightPaths.has(path)) return Promise.resolve({ ok: false, duplicate: true });
   inFlightPaths.add(path);
+  // Who recorded it, at the tap (above). The GPS alert's Try again passes the first tap's stamp back in
+  // (opts.stamp), so a retry after an automatic sign-out still names the person who walked to the door.
+  // The house comes from the path, or a survey's pending mark (its voter's household); never an address
+  // — nothing about the door's address is stored with the save (privacy.html: the walk-list copy is
+  // deleted at sign-out).
+  const tapBootstrap = qc.getQueryData(['bootstrap']);
+  const stamp = opts.stamp || {
+    recordedBy: tokenSub(getCurrentToken()),
+    recorderName: recorderNameOf(tapBootstrap?.user),
+    tapAt: new Date().toISOString(),
+    householdId: describePath(path).householdId || pending[0]?.id || null,
+    campaignId: tapBootstrap?.campaign?.id || null,
+  };
   // Single-release guard: a blocked gate releases the lock so "Try again" can re-enter
   // optimisticSubmit (which re-acquires it) — the outer finally must not free the
   // retry's lock out from under it.
@@ -368,6 +397,16 @@ export function optimisticSubmit(qc, opts) {
       alertWhenActive(() => Alert.alert(PACE_TITLE, PACE_MESSAGE));
       return { ok: false, queued: false, blocked: 'PACE_PAUSED' };
     }
+    // No session behind the tap means no one to file the save under. It can't happen on a working door
+    // screen (memory keeps the token until the very end of a sign-out, and the password screen keeps the
+    // dead one), but if it ever does, record nothing rather than a save no one can upload. With the
+    // queue's kill switch off, saves go up under whoever is signed in anyway, so nothing is refused.
+    const holdOn = await loadQueueHoldEnabled().catch(() => true);
+    if (holdOn && !stamp.recordedBy) {
+      release();
+      alertWhenActive(() => Alert.alert(hardFailTitle, NO_SESSION_MESSAGE));
+      return { ok: false, queued: false, blocked: 'NO_SESSION' };
+    }
     // Step 0 — the optional confirmation. Inside the lock, so hasInFlightActions() also covers the
     // open alert and the OTA restart prompt can't reload the app mid-decision.
     if (confirm && !(await confirm())) {
@@ -386,8 +425,8 @@ export function optimisticSubmit(qc, opts) {
           alertWhenActive(() =>
             locationBlockedAlert(err, {
               onCancel: () => resolve({ ok: false, queued: false, blocked: err.code || 'NO_FIX' }),
-              // `confirm` stripped: the canvasser already answered it for this tap.
-              onRetry: () => resolve(optimisticSubmit(qc, { ...opts, confirm: undefined })),
+              // `confirm` stripped: the canvasser already answered it for this tap. The stamp kept.
+              onRetry: () => resolve(optimisticSubmit(qc, { ...opts, confirm: undefined, stamp })),
             })
           );
         });
@@ -398,6 +437,14 @@ export function optimisticSubmit(qc, opts) {
       } catch {
         location = null; // pin fixes: best-effort stamp, never blocked
       }
+    }
+
+    // Someone else signed in while the gate or a prompt was up: the door is the first person's, so it
+    // never touches this session's map — it's queued, held for them (lib/queueCore.js).
+    if (holdOn && stamp.recordedBy && tokenSub(getCurrentToken()) !== stamp.recordedBy) {
+      await enqueue(path, { ...body, location, timestamp: new Date().toISOString() }, stamp);
+      release();
+      return { ok: false, queued: true, held: true };
     }
 
     // Step 2 — gate passed: register the unconfirmed status(es) BEFORE the patch so any
@@ -415,11 +462,15 @@ export function optimisticSubmit(qc, opts) {
 
     if (onAccepted) onAccepted();
 
-    const result = await submitOrQueue(path, {
-      ...body,
-      location,
-      timestamp: new Date().toISOString(),
-    });
+    const result = await submitOrQueue(
+      path,
+      {
+        ...body,
+        location,
+        timestamp: new Date().toISOString(),
+      },
+      stamp
+    );
     if (result.ok) {
       // The server's result and its pause answer in one cache write (setPace's rules, lib/pace.js).
       const pace = result.response?.pace;
@@ -445,7 +496,11 @@ export function optimisticSubmit(qc, opts) {
       for (const p of pending) clearPendingHousehold(p.id);
       if (rollbackPatch) writeBootstrap(qc, rollbackPatch);
       qc.invalidateQueries({ queryKey: ['bootstrap'] });
-      if (result.error?.data?.code === 'LOCATION_REQUIRED') {
+      if (result.error?.status === 401 && result.error?.reason === 'deleted') {
+        // The account was deleted while this save was in flight: it can never upload under anyone, so it
+        // isn't queued (lib/queueRules.js shouldQueue) and the canvasser hears so here.
+        Alert.alert(hardFailTitle, DELETED_HARD_FAIL);
+      } else if (result.error?.data?.code === 'LOCATION_REQUIRED') {
         // The server backstop for the gate above (an old client, or a gate bypass).
         Alert.alert(
           'Location required',
@@ -623,6 +678,9 @@ export function recordLocationCorrection(qc, householdId, { lat, lng, source, ac
   // duplicate is not a reject — the first drag's submit still owns the overlay.
   p.then((result) => {
     if (result && !result.ok && !result.queued && !result.duplicate) clearPendingLocation(householdId);
+    // Someone else signed in before it was sent: it's held for its recorder and never touched this
+    // session's map, so its overlay goes too.
+    if (result?.held) clearPendingLocation(householdId);
     // The server moved nothing (the pin was still on its shared spot, or back on the spot a placed home
     // left): drop the overlay too, or it would hold the optimistic pin over every delta for its TTL.
     if (result?.ok && result.response?.moved === 0) clearPendingLocation(householdId);

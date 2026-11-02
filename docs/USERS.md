@@ -389,9 +389,11 @@ signal keeps working on its saved houses until it connects. A temporary password
 does **not** sign other devices out.
 
 **Saved work stays on the phone through a password prompt or a sign-out.** It is sent when you sign
-back in **as yourself** — anything saved on a phone goes up under whoever signs in next. Doorline can
-still turn an item down (for example, if you were taken off the campaign meanwhile), and those items
-aren't kept.
+back in **as yourself**: since the app update of November 2026 each saved item uploads only while the
+person who recorded it is signed in (before it, anything saved went up under whoever signed in next).
+Doorline can still turn an item down (for example, if you were taken off the campaign meanwhile); the
+person who recorded it sees it in a **Not saved** list with the reason, and the campaign's Audit page
+lists it under **Doors not saved** ([CANVASSER_APP.md](CANVASSER_APP.md) → *Work saved on the phone*).
 
 **Apps that haven't updated** go straight to a plain sign-in screen when their sign-in runs out (no more
 "Invalid token" with a Retry that never works) and, like any sign-out, that clears the houses saved on
@@ -690,10 +692,13 @@ else an admin first), and offers only **Close**.
   better choice if you'll keep reporting by that team to a client.
 - **Doors still on their phone.** For any account somebody has used, the review asks you to have them open
   the app with signal first, so their phone sends everything it's holding, and warns more strongly if
-  their phone sent doors in the last week. Until the phone fix ships after Election Day, anything left on
-  the phone goes up under whoever signs in on it next. A switched-off (deactivated) person's phone can't
-  send anything: whatever it already tried to send while switched off was refused and thrown away. Switch
-  them back on first if the doors it still holds matter (once billing is sorted, if it's paused).
+  their phone sent doors in the last week. Anything left on the phone can't be credited to anyone: since
+  the app update of November 2026 the phone removes it (once it learns the account is gone, or after 30
+  days of waiting) instead of sending it under whoever signs in next, which older apps still do. A
+  switched-off (deactivated) person's phone can't save anything: whatever it already tried to send while
+  switched off was turned down, not saved (the campaign's Audit page lists those doors under **Doors not
+  saved**). Switch them back on first if the doors it still holds matter (once billing is sorted, if it's
+  paused).
 
 **Their row on the Users list.** If the account was used (they signed in, have anything on your records,
 or ever coordinated a crew), the row stays as **Deleted account**, with who deleted it and when ("Deleted
@@ -1583,20 +1588,23 @@ The billing one matters most: losing the last `billingAccess` admin means nobody
 and the entitlement gate drives the whole org read-only when it lapses — **no deletion, by anyone, may
 financially suspend a customer.**
 
-**The offline queue is a live hazard.** [offlineQueue.js](../mobile/lib/offlineQueue.js) *holds* every 401
-(a session problem, never a verdict on the knock) but *drops* any other 4xx so one bad submission can't wedge
-the queue forever. The moment the account dies, every unsynced knock 401s with reason `deleted` and is
-held on a phone whose account can never sign in again: it can only go up under whoever signs in next on
-that phone, and it is real, billable field work.
+**The offline queue is a live hazard.** The queue ([queueCore.js](../mobile/lib/queueCore.js)) *holds*
+every 401 (a session problem, never a verdict on the knock) and moves any other 4xx to the recorder's Not
+saved list. The moment the account dies, every unsynced knock 401s with reason `deleted`; since the app
+update of November 2026 the phone removes that account's items (`cleanupDeletedAccount`, at the deleted
+sign-out, at app start and after a self-deletion) rather than holding them for someone who can never sign
+in, and an item uploads only under the account that recorded it, so they never go up under the next
+person. Either way it is real, billable field work lost.
 `DeleteAccountSheet` therefore **flushes first and refuses to delete while anything is still pending**. Do
 not weaken that. **Every other door deletes from somebody else's device**, so nothing can flush the
 person's phone first: for any `used` account the org door's review asks the admin to have them open the
-app with signal (the stronger variant when the profile's `lastActivityAt` is within 7 days), and until
-the phone clean-up ships after Election Day
-([PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md) §E2) a deleted account's
-leftover items still go up under the next sign-in on that phone. A **deactivated**
-person's items are not held but dropped: with no active membership their writes answer `403 ORG_CONTEXT`
-([orgContext.js](../server/src/middleware/orgContext.js)), not a 401, and the queue drops any non-401 4xx.
+app with signal (the stronger variant when the profile's `lastActivityAt` is within 7 days). The phone
+clean-up ([PROPOSAL_ADMIN_ACCOUNT_DELETION.md](PROPOSAL_ADMIN_ACCOUNT_DELETION.md) §E2) shipped with
+[PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md): a deleted account's leftover items are removed
+from the phone, never sent under the next sign-in (apps older than that update still send them). A
+**deactivated** person's items are not held but refused: with no active membership their writes answer
+`403 ORG_CONTEXT` ([orgContext.js](../server/src/middleware/orgContext.js)), not a 401; the phone lists
+them in its Not saved list and the server files them on the Audit page (`RefusedUpload`).
 
 **Two `required` traps** worth stating, since both fail *silently* the wrong way:
 `passwordHash` cannot be cleared (a `.save()` throws; a `$set: null` slips past the validator and then makes

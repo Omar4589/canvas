@@ -124,3 +124,8 @@ test('a failed delete is read the same way on both: what happens next, and the n
     if (err) assert.deepEqual(phone.reloadNote(err), web.reloadNote(err), `reloadNote ${at}`);
   }
 });
+
+test('the unsynced-doors warning on Remove and Deactivate reads the same on both', () => {
+  // docs/PROPOSAL_OFFLINE_QUEUE.md §O: the console's and the phone's confirmations say it word for word.
+  for (const verb of ['remove', 'deactivate']) assert.equal(phone.unsyncedDoorsLine(verb), web.unsyncedDoorsLine(verb), verb);
+});

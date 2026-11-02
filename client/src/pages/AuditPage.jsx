@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
@@ -20,6 +20,7 @@ import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
 import { CampaignLoading, CampaignMissing } from '../components/campaigns/CampaignGate.jsx';
 import PausedCanvassers from '../components/audit/PausedCanvassers.jsx';
 import PacePausePanel from '../components/audit/PacePausePanel.jsx';
+import DoorsNotSaved from '../components/audit/DoorsNotSaved.jsx';
 
 function buildQuery(params) {
   const sp = new URLSearchParams();
@@ -134,6 +135,7 @@ export default function AuditPage() {
 
   const [live, setLive] = useState(true);
   const [showResolvedPauses, setShowResolvedPauses] = useState(false);
+  const [notSavedTab, setNotSavedTab] = useState('open'); // Doors not saved: open | reviewed | all
 
   const { campaign: current, resolving, notFound } = useCurrentCampaign(campaignId);
   const tz = current?.timeZone || orgTz;
@@ -154,6 +156,7 @@ export default function AuditPage() {
     setBulkNote('');
     setLive(true);
     setShowResolvedPauses(false);
+    setNotSavedTab('open');
     setDateRange(defaultRange('today', tz));
     rangeTouchedRef.current = false;
   }
@@ -217,6 +220,26 @@ export default function AuditPage() {
     enabled: !!campaignId,
     retry: false,
     ...livePollOptions(live, true),
+  });
+  // Doors not saved (docs/PROPOSAL_OFFLINE_QUEUE.md): offline doors the server turned down. Like the pauses it
+  // is about now, so it polls whatever the date range, but it follows the page's canvasser filter. Capped
+  // like the flag list.
+  const notSavedQ = useQuery({
+    queryKey: ['admin', 'refused-uploads', campaignId, notSavedTab, userId],
+    queryFn: ({ signal }) =>
+      api(
+        `/admin/campaigns/${campaignId}/refused-uploads${buildQuery({ status: notSavedTab, userId: userId || undefined, limit: ENTRY_LIMIT })}`,
+        { signal }
+      ),
+    enabled: !!campaignId,
+    retry: false,
+    placeholderData: keepPreviousData,
+    ...livePollOptions(live, true),
+  });
+  const reviewNotSaved = useMutation({
+    mutationFn: ({ id, reviewed }) =>
+      api(`/admin/campaigns/${campaignId}/refused-uploads/${id}`, { method: 'PATCH', body: { reviewed } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'refused-uploads', campaignId] }),
   });
   const data = flagsQ.data || {};
   const summary = data.summary || null;
@@ -374,7 +397,7 @@ export default function AuditPage() {
         <div className="flex flex-wrap items-center gap-3">
           {includesToday && (
             <LiveStatus
-              {...liveStatusProps([flagsQ, pausesQ], { live, onToggle: () => setLive((v) => !v) })}
+              {...liveStatusProps([flagsQ, pausesQ, notSavedQ], { live, onToggle: () => setLive((v) => !v) })}
             />
           )}
           {data.tzAbbrev && (
@@ -393,6 +416,18 @@ export default function AuditPage() {
         showResolved={showResolvedPauses}
         onToggleResolved={() => setShowResolvedPauses((v) => !v)}
         selectedId={pauseId}
+      />
+      <DoorsNotSaved
+        data={notSavedQ.data}
+        tab={notSavedTab}
+        onTab={setNotSavedTab}
+        tz={tz}
+        loading={notSavedQ.isLoading}
+        error={notSavedQ.error}
+        filteredName={selectedName}
+        busyId={reviewNotSaved.isPending ? reviewNotSaved.variables?.id : null}
+        onReview={(id, reviewed) => reviewNotSaved.mutate({ id, reviewed })}
+        reviewError={reviewNotSaved.error ? `Couldn’t save that: ${reviewNotSaved.error.message}` : ''}
       />
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">

@@ -22,6 +22,7 @@ import {
 } from '../../lib/cache';
 import { refreshSession } from '../../lib/session';
 import CanvasserHeader from '../../components/CanvasserHeader';
+import { NotSavedBanner } from '../../components/NotSaved';
 import { radius, spacing } from '../../lib/theme';
 import { useTheme } from '../../lib/ThemeContext';
 import { useThemedStyles } from '../../lib/useThemedStyles';
@@ -103,6 +104,8 @@ export default function SelectOrgScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <CanvasserHeader variant="solid" />
+      {/* A save turned down because this person left an organization lands them here — say so here too. */}
+      <NotSavedBanner />
 
       <View style={styles.intro}>
         <Text style={styles.title}>Choose an organization</Text>

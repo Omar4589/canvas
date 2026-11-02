@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
-import { signOut } from '../../../lib/authState';
+import { confirmSignOut } from '../../../lib/signOutFlow';
 import {
   loadCurrentUser,
   loadActiveCampaign,
@@ -155,9 +155,9 @@ export default function AdminMore() {
     loadCurrentUser().then(setUser);
   }, []);
 
+  // Asks first when this person has saves still waiting (lib/signOutFlow.js), before anything is cleared.
   async function onLogout() {
-    qc.clear();
-    await signOut();
+    await confirmSignOut({ qc });
   }
 
   async function onSwitchOrg() {

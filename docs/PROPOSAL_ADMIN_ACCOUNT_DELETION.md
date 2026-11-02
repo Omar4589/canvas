@@ -3,7 +3,8 @@
 > **Status: BUILT 2026-10-24 (uncommitted), from revision 7 of this plan. Not yet deployed.** The server,
 > the web profile, the phone's admin profile, the eight name lookups, the email-log scrub and its backfill,
 > the 15-minute sweep, docs, Help Center and PRIVACY_VERIFICATION item 37 are in the working tree. §E2 (the
-> phone clean-up of a deleted account's unsent doors) is not built and ships after Election Day. Release
+> phone clean-up of a deleted account's unsent doors) was built later, with the offline queue plan
+> ([PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md), November 2026), which the owner allowed to ship before Election Day. Release
 > steps: §I2.
 >
 > **Later (2026-10-27, [PROPOSAL_PEOPLE_PAGES.md](PROPOSAL_PEOPLE_PAGES.md)):** on the web, the profile
@@ -73,7 +74,8 @@
 >   customer's admin or lead could put a Doorline staff account on a book or a crew and read its
 >   contact details back. It ships in the same patch (§I1), recorded as PRIVACY_VERIFICATION item 36.
 > - **The phone clean-up of a deleted account's unsent doors (§E2) ships after Election Day** (owner
->   decision 2026-10-24).
+>   decision 2026-10-24). *Superseded 2026-11-01: built with [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md), which may ship before
+>   Election Day.*
 > - **Round 4** (three reviewers): the leak fix's code review found no blocker. The deletion model held
 >   under every race and crash the reviewers built, except one narrow interleaving (R4A-1), now fixed.
 >   The plan's own staging recipe and the leak fix's commit route were fixed (§L round 4).
@@ -786,10 +788,14 @@ window.
   - `MemberSheet` hides temp password, Resend invite, Assign and Reactivate.
   - `[id].jsx` shows only the header and the deletion line.
 
-### E2. A deleted account's unsent doors (designed; ships after Election Day, per the owner 2026-10-24)
+### E2. A deleted account's unsent doors (built with the offline queue plan, November 2026)
 
-This section is the design to carry into the post-Election queue plan. **It is not part of this
-build.** Until it ships, the review's sync-first line is the protection.
+This section was the design carried into the queue plan. **What was built is in
+[PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) §C and §O and [CANVASSER_APP.md](CANVASSER_APP.md) → *The offline
+queue*.** Two differences from the steps below: the kill switch is the queue's `MOBILE_QUEUE_HOLD` (step
+6's separate flag was folded into it), and deleted accounts are remembered on the phone for 30 days, so
+the clean-up survives a restart. The review's sync-first line stays: it is still the only way the doors
+count.
 
 **What it fixes.** After an admin deletes an account, any doors still on that person's phone go up
 under whoever signs in on that phone next. Round 3 showed the ordering is subtle: the phone learns of
@@ -818,7 +824,7 @@ screens. So the design is:
    passes.
 6. **A kill switch, if shipped before Election Day.** A `MOBILE_DELETED_QUEUE_CLEANUP` flag on
    `/api/build-status`, on by default, persisted on the phone as `MOBILE_ERROR_RECOVERY` is. "off"
-   brings back today's behavior.
+   brings back today's behavior. *(As built: folded into the queue's `MOBILE_QUEUE_HOLD`.)*
 7. **Tests:**
    - `shouldQueue` and the notice in `sessionEnd.test.js`;
    - the cleanup decision (only reason `deleted`, only the matching `sub`) in `sessionStore.test.js`;
@@ -1151,7 +1157,7 @@ ships with the server, ahead of the phone update. The owner runs every shipping 
 
 **Residual risks, stated plainly:**
 
-- **Until E2 ships after Election Day:** a deleted account's unsent doors go up under whoever signs in
+- **On phones without the November 2026 update (E2 shipped with [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md)):** a deleted account's unsent doors go up under whoever signs in
   next on that phone. The review's sync-first line is the protection.
 - **About 45 screens** show "Deleted user" at once (§C8).
 - **Deletion-warning and support-notice email rows** keep the recipient's address (§C6).
@@ -1181,7 +1187,7 @@ ships with the server, ahead of the phone update. The owner runs every shipping 
 | `server/src/migrations/scrubDeletedEmailLog.js` (new), `server/package.json`, root `package.json` | the backfill |
 | `client/src/components/UserProfileModal.jsx`, `client/src/components/ui/Modal.jsx`, `client/src/pages/UsersPage.jsx`, `client/src/pages/SuperAdminUserDetailPage.jsx` | §D |
 | `mobile/app/(app)/admin/users/[id].jsx`, `mobile/app/(app)/admin/users.jsx`, `mobile/components/DeleteMemberSheet.jsx` (new), `mobile/components/MemberSheet.jsx` | §E1 |
-| After Election Day (E2): `mobile/lib/recordAction.js`, `mobile/lib/offlineQueue.js`, `mobile/lib/sessionEnd.js` (+ test), `mobile/lib/sessionStore.js` (+ test), `mobile/lib/authState.js`, `mobile/app/_layout.jsx`, `mobile/app/login.jsx`, `mobile/lib/buildStatus.js` | §E2 |
+| E2, as built with PROPOSAL_OFFLINE_QUEUE.md: `mobile/lib/recordAction.js`, `mobile/lib/queueCore.js` (+ test), `mobile/lib/queueRules.js` (+ test), `mobile/lib/offlineQueue.js`, `mobile/lib/sessionStore.js`, `mobile/lib/authState.js`, `mobile/lib/cache.js`, `mobile/app/_layout.jsx`, `mobile/app/login.jsx`, `mobile/components/DeleteAccountSheet.jsx`, `mobile/components/UpdateGate.jsx` | §E2 |
 | Tests, docs, Help Center | §F, §H |
 
 ## K. Decisions for the owner, and calls made on the owner's behalf
@@ -1191,7 +1197,8 @@ ships with the server, ahead of the phone update. The owner runs every shipping 
 1. **The phone part (§E2): DECIDED 2026-10-24, after Election Day.** It ships with the
    post-Election queue plan. That plan still has to settle the trade underneath: thrown away (not
    counted, not billed) versus sent under the wrong person (counted and billed). Until then, the
-   review tells the admin to let the phone sync first.
+   review tells the admin to let the phone sync first. **Settled 2026-11-01** (the queue plan's
+   decision 7): removed from the phone, with a one-line notice; built with [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md).
 2. **The email send log (§C6): DECIDED 2026-10-24, by account only** (the recommendation). You said
    yes to scrubbing; round 3 showed that matching rows by
    address rewrites other people's rows, keep-forever evidence included, and the backfill can't be

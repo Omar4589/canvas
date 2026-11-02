@@ -26,6 +26,13 @@ export const setServerSignOutNotifier = (fn) => {
   serverSignOut = fn;
 };
 
+// Set by app/_layout.jsx for the same reason (lib/offlineQueue.js imports this module): what every
+// sign-out does with the phone's unsent work before the session is cleared (lib/sessionStore.js).
+let sessionEndCleanup = async () => {};
+export const setSessionEndCleanup = (fn) => {
+  sessionEndCleanup = fn;
+};
+
 const store = createSessionStore({
   readToken: getToken,
   persistToken,
@@ -35,6 +42,7 @@ const store = createSessionStore({
   loadEmail: async () => (await loadCurrentUser())?.email ?? null,
   notifyServerSignOut: (token) => serverSignOut(token),
   clearSupportPrompt: clearSupportAccessPrompt,
+  onSessionEnd: (info) => sessionEndCleanup(info),
 });
 
 // Read SecureStore once at module load.

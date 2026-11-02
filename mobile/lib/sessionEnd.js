@@ -139,11 +139,15 @@ export const reauthNotice = (n) => {
   return `Password needed. ${n} items are waiting to send, and your team sees them once you enter your password.`;
 };
 
-// The confirm behind "Not you? Sign out" when signing out would cost something.
-export const notYouConfirm = ({ pending = 0, noSignal = false } = {}) => {
+// The confirm behind "Not you? Sign out" when signing out would cost something. Saved items wait for the
+// person who recorded them (docs/PROPOSAL_OFFLINE_QUEUE.md); with the queue's kill switch off
+// (holdOn: false) they go up under whoever signs in next, as they always used to.
+export const notYouConfirm = ({ pending = 0, noSignal = false, holdOn = true } = {}) => {
   let text = 'Signing out removes your saved houses from this phone.';
-  if (pending === 1) text += ' 1 saved item will go up under whoever signs in next.';
-  else if (pending > 1) text += ` ${pending} saved items will go up under whoever signs in next.`;
+  const items = pending === 1 ? '1 saved item' : `${pending} saved items`;
+  if (pending > 0) {
+    text += holdOn ? ` ${items} will upload when you sign back in on this phone.` : ` ${items} will go up under whoever signs in next.`;
+  }
   if (noSignal) text += " You'll need signal to sign back in.";
   return `${text} Sign out anyway?`;
 };

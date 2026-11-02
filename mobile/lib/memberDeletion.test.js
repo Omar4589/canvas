@@ -26,6 +26,7 @@ import {
   touchedByDeletion,
   mayOfferRemove,
   removeConfirm,
+  unsyncedDoorsLine,
 } from './memberDeletion.js';
 
 // The phone's half of an org admin deleting a member's account (docs/PROPOSAL_ADMIN_ACCOUNT_DELETION.md
@@ -209,7 +210,7 @@ test('a deactivated person is told their phone cannot send until they are switch
   }).callout;
   assert.deepEqual(callout, [
     "Sam's phone sent doors 3 hours ago. Ask them to open the app with signal first, so it sends everything it's still holding.",
-    "Sam is switched off (deactivated), so their phone can't send anything: whatever it already tried to send while switched off was refused and thrown away. Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused).",
+    "Sam is switched off (deactivated), so their phone can't save anything: whatever it already tried to send while switched off was turned down, not saved (see Doors not saved on the web console's Audit page). Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused).",
   ]);
 });
 
@@ -455,9 +456,17 @@ test('Remove from org is offered on the web\'s terms: admins only, never yoursel
 test('the Remove from org confirm reads as the web’s, and never prints a tombstone address', () => {
   assert.deepEqual(removeConfirm({ email: 'sam@example.com' }), {
     title: 'Remove sam@example.com from this organization?',
-    body: 'This also removes their campaign assignments here.',
+    body:
+      "This also removes their campaign assignments here.\n\nIf they still have doors on their phone that haven't uploaded, let it sync first — after you remove them, those doors can't be saved.",
   });
   const gone = removeConfirm({ isDeleted: true, email: 'deleted+abc@deleted.doorline.invalid' });
   assert.deepEqual(gone, { title: 'Remove this deleted account from the organization?', body: 'Nothing on your reports changes.' });
   assert.ok(!JSON.stringify(gone).includes('doorline.invalid'));
+});
+
+test('the unsynced-doors warning names the action, in the web console’s words', () => {
+  assert.equal(
+    unsyncedDoorsLine('deactivate'),
+    "If they still have doors on their phone that haven't uploaded, let it sync first — after you deactivate them, those doors can't be saved."
+  );
 });

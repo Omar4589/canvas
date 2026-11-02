@@ -88,9 +88,17 @@ const syncLine = (first, lastActivityAt, now) =>
     ? `${first ? `${first}'s` : 'Their'} phone sent doors ${agoPhrase(lastActivityAt, now)}. Ask them to open the app with signal first, so it sends everything it's still holding.`
     : `Ask ${first || 'them'} to open the app with signal first, so their phone sends everything it's still holding.`;
 
-// A switched-off phone can't send at all, so the ask alone can't work for them.
+// A switched-off phone's uploads are all turned down, so the ask alone can't work for them. Turned-down
+// doors aren't thrown away unseen any more: the console's Audit page lists them under Doors not saved
+// (docs/PROPOSAL_OFFLINE_QUEUE.md).
 const deactivatedLine = (first) =>
-  `${first ? `${first} is` : "They're"} switched off (deactivated), so their phone can't send anything: whatever it already tried to send while switched off was refused and thrown away. Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused).`;
+  `${first ? `${first} is` : "They're"} switched off (deactivated), so their phone can't save anything: whatever it already tried to send while switched off was turned down, not saved (see Doors not saved on the web console's Audit page). Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused).`;
+
+// Before Remove from org, Deactivate and Remove from this campaign (docs/PROPOSAL_OFFLINE_QUEUE.md §O):
+// doors their phone still holds are turned down once they upload after it. The web console's words
+// (client/src/lib/memberDeletion.js).
+export const unsyncedDoorsLine = (verb) =>
+  `If they still have doors on their phone that haven't uploaded, let it sync first — after you ${verb} them, those doors can't be saved.`;
 
 // What stays. Door results are doorsKnocked + restricted (the profile's stats count restricted
 // doors apart); surveys are surveysSubmitted.
@@ -303,7 +311,7 @@ export const removeConfirm = (user) =>
     ? { title: 'Remove this deleted account from the organization?', body: 'Nothing on your reports changes.' }
     : {
         title: `Remove ${user?.email || 'this person'} from this organization?`,
-        body: 'This also removes their campaign assignments here.',
+        body: `This also removes their campaign assignments here.\n\n${unsyncedDoorsLine('remove')}`,
       };
 
 // The caches a deletion changes, by their second key part: the Users list, the campaign rosters

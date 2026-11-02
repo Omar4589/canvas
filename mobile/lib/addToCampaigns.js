@@ -143,6 +143,9 @@ export const removeQuestion = ({ name, campaignName, crewSize = 0 }) => ({
   title: `Remove ${name} from ${campaignName || 'this campaign'}?`,
   message:
     'Any books they hold here go back to the pool, so you can hand them to someone else. Books shared with other canvassers stay assigned to them. This doesn’t affect their other campaigns. Their work is kept — every door they knocked still counts toward this campaign.' +
+    // Doors their phone still holds are turned down once they upload after it
+    // (docs/PROPOSAL_OFFLINE_QUEUE.md §O); the same words as the Deactivate and Remove from org confirms.
+    "\n\nIf they still have doors on their phone that haven't uploaded, let it sync first — after you remove them, those doors can't be saved." +
     (crewSize > 0
       ? `\n\n${name} runs a crew here: ${count(crewSize, 'person', 'people')} will have no coordinator. Their past doors stay on ${name}’s team.`
       : ''),

@@ -38,6 +38,7 @@ const EXPORT_OPTIONS_KEY = 'canvass.exportOptions';
 const SERVER_META_KEY = 'canvass.serverMeta';
 const THEME_KEY = 'canvass.themePreference';
 const ERROR_RECOVERY_KEY = 'canvass.errorRecovery';
+const QUEUE_HOLD_KEY = 'canvass.queueHold';
 
 // Serialize every bootstrap file op (mirrors offlineQueue's withQueueLock).
 // Three writers interleave — the bootstrap fetch, the 30s changes poll, and
@@ -469,3 +470,14 @@ export const saveErrorRecoveryEnabled = async (enabled) => {
 };
 
 export const loadErrorRecoveryEnabled = async () => (await readItem(ERROR_RECOVERY_KEY)) !== 'off';
+
+// The server's switch for the offline queue's who-recorded-it hold (MOBILE_QUEUE_HOLD on Heroku, served by
+// routes/public/buildStatus.js as `queueHold`; docs/PROPOSAL_OFFLINE_QUEUE.md). Off brings back the old
+// upload behavior on every phone with no update. Remembered the same way as error recovery: stored only
+// when off, so a phone that never heard the answer — or can't read it — keeps the hold on.
+export const saveQueueHoldEnabled = async (enabled) => {
+  if (enabled === false) await AsyncStorage.setItem(QUEUE_HOLD_KEY, 'off');
+  else await AsyncStorage.removeItem(QUEUE_HOLD_KEY);
+};
+
+export const loadQueueHoldEnabled = async () => (await readItem(QUEUE_HOLD_KEY)) !== 'off';

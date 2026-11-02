@@ -401,11 +401,12 @@ Unset = feature off. To flip it, set Heroku config vars — Dashboard → your A
 | `MOBILE_UPDATE_NOTE` | optional one-line custom message shown on the nag |
 | `MOBILE_STORE_URL_IOS` / `_ANDROID` | optional override of where the Update button goes; absent → the app's baked-in `STORE_URL`. **iOS: leave unset** — since the public App Store release the baked-in URL is correct. **Android: set it** while the legacy `com.canvassapp.mobile` fleet still exists, because their baked-in URL points at the app being retired, not at `com.doorline.app`. |
 
-The same answer carries one more switch, unrelated to the nag:
+The same answer carries two more switches, unrelated to the nag:
 
 | Var | Value |
 |---|---|
 | `MOBILE_ERROR_RECOVERY` | `off` = phones stop catching the JavaScript errors that escape a tap or a timer, and those go back to the old behavior (an Android gray screen, an iPhone closing): no banner, no loop takeover. The crash screens for a screen that fails to draw stay. Unset or anything else = **on**. Phones pick it up when Doorline is opened or comes back to the screen (at most once every 15 minutes) and every four hours while it stays on screen, and remember it. See `docs/CANVASSER_APP.md` → *Error recovery*. |
+| `MOBILE_QUEUE_HOLD` | `off` = phones go back to the offline queue's older behavior: whoever is signed in uploads every saved item, the waiting lines and the 30-day removal stop, a deleted account's items are no longer removed, and the sign-out question says items *upload with the next person who signs in*. Turned-down items still go to the recorder's Not saved list. Unset or anything else = **on** (each item uploads only while the person who recorded it is signed in). Same pick-up schedule as above. See `docs/CANVASSER_APP.md` → *The offline queue* and `docs/OPERATIONS.md`. |
 
 Builds whose runtimeVersion isn't listed show the nag; everyone else sees nothing. Everything
 fails open — server unreachable, endpoint erroring, var typo'd to nonsense → **no nag**, never a

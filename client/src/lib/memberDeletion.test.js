@@ -17,6 +17,7 @@ import {
   fullName,
   roleLabel,
   deleteAccountMutationKey,
+  unsyncedDoorsLine,
 } from './memberDeletion.js';
 import { formatDateInTz } from './datetime.js';
 
@@ -163,7 +164,7 @@ test('a switched-off account gets the deactivated line after the sync line', () 
   assert.equal(lines.callout.length, 2);
   assert.equal(
     lines.callout[1],
-    "Sam is switched off (deactivated), so their phone can't send anything: whatever it already tried to send while switched off was refused and thrown away. Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused)."
+    "Sam is switched off (deactivated), so their phone can't save anything: whatever it already tried to send while switched off was turned down, not saved (see Doors not saved on the web console's Audit page). Switch them back on first if the doors it still holds matter (once billing is sorted, if it's paused)."
   );
   const unused = reviewLines({ user: JORDAN, check: unusedCheck({ holding: { membershipActive: false } }), stats: NO_STATS, now: NOW });
   assert.deepEqual(unused.callout, [], 'an account nobody used has no phone queue to warn about');
@@ -356,4 +357,15 @@ test('small pieces', () => {
   assert.equal(roleLabel('lead'), 'Team lead');
   assert.equal(roleLabel('canvasser'), 'Canvasser');
   assert.deepEqual(deleteAccountMutationKey('u7'), ['admin', 'delete-member-account', 'u7']);
+});
+
+test('the unsynced-doors warning on Remove from org, Deactivate and Remove from this campaign', () => {
+  assert.equal(
+    unsyncedDoorsLine('remove'),
+    "If they still have doors on their phone that haven't uploaded, let it sync first — after you remove them, those doors can't be saved."
+  );
+  assert.equal(
+    unsyncedDoorsLine('deactivate'),
+    "If they still have doors on their phone that haven't uploaded, let it sync first — after you deactivate them, those doors can't be saved."
+  );
 });

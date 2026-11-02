@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { connectDb } from './config/db.js';
 import { syncClientReportIndexes } from './services/reports/clientReportIndexes.js';
 import { syncPacePauseIndexes } from './services/audit/pacePause.js';
+import { drainRefusalWrites, syncRefusedUploadIndexes } from './middleware/refusalRecorder.js';
 import { startMemoryWatch } from './middleware/memoryWatch.js';
 import { getSharedRedis } from './queues/connection.js';
 
@@ -19,6 +20,9 @@ async function main() {
   await syncClientReportIndexes('canvass-server');
   // Automatic pause's one-open-pause-per-canvasser index must exist before a door can write a pause.
   await syncPacePauseIndexes('canvass-server');
+  // Doors not saved: the one-row-per-queue-item index and the 180-day expiry, before the first refusal can
+  // be recorded. This dyno is the collection's only writer (middleware/refusalRecorder.js).
+  await syncRefusedUploadIndexes('canvass-server');
   const app = createApp();
   const server = app.listen(PORT, () => {
     console.log(`[canvass-server] listening on http://localhost:${PORT}`);
@@ -39,7 +43,12 @@ async function main() {
     shuttingDown = true;
     stopMemoryWatch();
     console.log(`[canvass-server] ${signal} — draining in-flight requests…`);
-    server.close(() => process.exit(0));
+    // A refused offline door is recorded AFTER its response (middleware/refusalRecorder.js). close() calls
+    // back once every response has finished, so every such write has started by then: wait for those
+    // still running, 5 s at most, inside the 25 s timer below. drainRefusalWrites never rejects.
+    server.close(() => {
+      drainRefusalWrites(5000).finally(() => process.exit(0));
+    });
     server.closeIdleConnections();
     setTimeout(() => {
       console.error('[canvass-server] drain timed out — exiting');

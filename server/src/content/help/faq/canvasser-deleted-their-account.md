@@ -5,7 +5,7 @@ audience: admin
 kind: faq
 order: 39
 sourceDoc: USERS.md
-summary: Nothing is lost, whether they deleted it themselves or an admin did. Their knocks, surveys and GPS trail stay with the campaign and your counts don't move. Their books are handed back, and their name stays on your reports for 180 days.
+summary: Their work stays, whether they deleted it themselves or an admin did. Their knocks, surveys and GPS stamps stay with the campaign and your counts don't move. Their books are handed back, and their name stays on your reports for 180 days.
 tags: delete, deleted, account, canvasser, left, quit, audit, counts, books, gps, fbtime, hours, came back, new account, deleted user, deleted by admin
 ---
 
@@ -13,8 +13,8 @@ tags: delete, deleted, account, canvasser, left, quit, audit, counts, books, gps
 account that belongs only to your organization — see
 [How do I delete someone's account?](delete-an-account)
 
-**Your numbers don't move.** Every door they knocked and every survey they recorded stays with the
-campaign. Those are your organization's records of work performed, not the person's personal content, so
+**Your numbers don't move.** Every door they knocked and every survey they recorded that reached
+Doorline stays with the campaign. Those are your organization's records of work performed, not the person's personal content, so
 deleting an account never changes a campaign's totals, its coverage, or your bill. Nothing needs
 recalculating. If your organization connected **FbTime**, the hours they clocked stay with their account
 too, so their doors-per-hour stays measured.
@@ -48,8 +48,9 @@ numbers, and shows their name for the same 180 days, until you move its people: 
 them, like any crew change.
 
 **Doors left on their phone.** Someone deleting their own account has to let the app send everything
-first. When an admin deletes it, anything still on their phone goes up under whoever signs in on that phone
-next (until a phone update after Election Day).
+first. When an admin deletes it, anything still on their phone can't be credited to anyone. After the app
+update, the phone removes it instead of sending it under whoever signs in next, and the sign-in screen
+says so. On an older version of the app, it still goes up under the next person.
 
 **Your Users list says what happened.** A used account's row stays as **Deleted account**, with who deleted
 it and when — *Deleted their own account*, *Deleted Oct 23, 2026 by Alex Kim*, or *Deleted through

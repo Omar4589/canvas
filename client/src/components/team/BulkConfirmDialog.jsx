@@ -6,6 +6,7 @@ import { RunProgress, RunSummary } from './RunReport.jsx';
 import { useChunkRun } from '../../lib/useChunkRun.js';
 import { runInChunks } from '../../lib/runInChunks.js';
 import { crewsDisbanded, disbandLine } from '../../lib/teamSelection.js';
+import { unsyncedDoorsLine } from '../../lib/memberDeletion.js';
 
 // Resend invites and Remove from campaign on the Team page (docs/PROPOSAL_PEOPLE_PAGES.md §E.4): one
 // confirm naming exactly how many it reaches, then the run (lib/runInChunks.js) — invites one at a
@@ -132,6 +133,8 @@ const BulkConfirmDialog = ({ kind, campaignId, campaignName, people, roster, onC
           {disbands.map((d) => (
             <p key={d.userId}>{disbandLine(d)}</p>
           ))}
+          {/* A door their phones still hold is turned down once it uploads after this (docs/PROPOSAL_OFFLINE_QUEUE.md). */}
+          <p className="text-fg-muted">{unsyncedDoorsLine('remove')}</p>
         </div>
       )}
     </Modal>
