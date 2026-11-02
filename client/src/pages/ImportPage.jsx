@@ -1213,7 +1213,8 @@ export default function ImportPage() {
             <tbody>
               {(data?.jobs || []).map((j) => (
                 <tr key={j._id} className="border-t border-border">
-                  <td className="px-4 py-2 text-fg-muted">{formatInTz(j.createdAt, orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
+                  {/* The campaign's clock, like every page inside a campaign (docs/TIMEZONES.md §F). */}
+                  <td className="px-4 py-2 text-fg-muted">{formatInTz(j.createdAt, campaign?.timeZone || orgTz, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }, true)}</td>
                   <td className="px-4 py-2">
                     {isPinLookupJob(j) ? pinLookupLabel(j) : j.filename || '—'}
                     {(j.geocodedNew > 0 || j.geocodedCached > 0 || j.geocodeUnmatched > 0) && (

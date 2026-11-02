@@ -398,7 +398,7 @@ const drawAddressHeader = (doc, x, y, door, ctx, continued, paint) => {
       const ink = STATUS_INK[door.status] || GRAY;
       const label = STATUS_LABEL[door.status] || String(door.status).toUpperCase();
       const when = door.lastActionAt
-        ? ` · ${new Date(door.lastActionAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}`
+        ? ` · ${new Date(door.lastActionAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...ctx.dateZone }).toUpperCase()}`
         : '';
       const full = `${label}${when}`;
       setFont(doc, TYPE.micro, 'bold', ink);
@@ -828,6 +828,20 @@ const drawScriptPage = (doc, survey, ctx, startY, nextPage) => {
   return y + 14;
 };
 
+// A packet's dates (a door's last result, the printed date, the file name) are the campaign's, never the
+// printing computer's (docs/TIMEZONES.md §F). A payload without the zone, or with one this browser can't
+// read, keeps the old behaviour rather than failing the print.
+const zoneOpt = (payload) => {
+  const timeZone = payload?.campaign?.timeZone;
+  if (!timeZone) return {};
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return { timeZone };
+  } catch {
+    return {};
+  }
+};
+
 // ── the run ──────────────────────────────────────────────────────────────────
 export const renderPacketPdf = async (payload, settings) => {
   const { jsPDF } = await import('jspdf');
@@ -837,16 +851,18 @@ export const renderPacketPdf = async (payload, settings) => {
   const layout = resolveLayout(settings, payload.books.some((b) => b.survey));
   // Only meaningful across a multi-packet run — one packet cannot collide with anything.
   const duplex = settings.duplex !== false && payload.books.length > 1;
+  const dateZone = zoneOpt(payload);
   const ctx = {
     contentW: PAGE.CONTENT_W,
     layout,
     noteLines: settings.noteLines,
     showOutcome: settings.showOutcome,
     showPriorStatus: settings.showPriorStatus,
+    dateZone,
     // Date only. A packet goes stale by DAYS — someone opting out on Thursday is still in a
     // Wednesday printout — so the hour told a volunteer nothing and just added clutter.
     printedAt: new Date(payload.generatedAt).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
+      month: 'short', day: 'numeric', year: 'numeric', ...dateZone,
     }),
     pageRanges: new Map(),
     survey: null,
@@ -1071,7 +1087,7 @@ export const renderManifestPdf = async (payload, settings, pageCountByBook = new
   const ctx = {
     contentW: PAGE.CONTENT_W,
     printedAt: new Date(payload.generatedAt).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
+      month: 'short', day: 'numeric', year: 'numeric', ...zoneOpt(payload),
     }),
     pageRanges: new Map(
       (payload.books || []).map((b) => [b.id, { from: 1, to: pageCountByBook.get(b.id) || 1 }])
@@ -1110,6 +1126,11 @@ export const packetFilename = (payload, settings = {}) => {
   const kind = resolveLayout(settings, books.some((b) => b.survey)) === 'survey'
     ? 'survey-packet'
     : 'field-list';
-  const day = new Date(payload.generatedAt).toISOString().slice(0, 10);
+  // The campaign's calendar day ('en-CA' formats YYYY-MM-DD), not the UTC day, which named a packet printed
+  // in a US evening for the next day.
+  const zone = zoneOpt(payload);
+  const day = zone.timeZone
+    ? new Intl.DateTimeFormat('en-CA', { ...zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(payload.generatedAt))
+    : new Date(payload.generatedAt).toISOString().slice(0, 10);
   return `${which}-${camp}-${kind}-${day}.pdf`.replace(/-+/g, '-').toLowerCase();
 };

@@ -515,6 +515,31 @@ test('the filename is book, campaign, kind, date', () => {
   );
 });
 
+// docs/PROPOSAL_CAMPAIGN_CLOCK.md: a packet's dates are the campaign's, never the printing computer's.
+test("a packet's dates are the campaign's day, not the printing computer's or UTC's", async () => {
+  // Riverside's own zone. 06:30 UTC is still the evening before in Pacific time, and already the next
+  // day in UTC and on every clock east of Pacific, where the old dates landed.
+  const p = makePayload(1, 1);
+  p.campaign.timeZone = 'America/Los_Angeles';
+  p.generatedAt = '2026-08-07T06:30:00.000Z';
+  p.books[0].doors[0].lastActionAt = '2026-07-29T06:30:00.000Z';
+  const text = pageTexts(await renderPacketPdf(p, DEFAULT_SETTINGS)).join('\n');
+  assert.ok(text.includes('Aug 6, 2026'), 'printed on the campaign’s Aug 6');
+  assert.ok(!text.includes('Aug 7, 2026'));
+  assert.ok(text.includes('JUL 28'), 'the last result on the campaign’s Jul 28');
+  assert.ok(!text.includes('JUL 29'));
+  assert.match(packetFilename(p, { layout: 'field' }), /-2026-08-06\.pdf$/, 'named for the campaign’s day');
+});
+
+test('a payload without a readable zone keeps the old dates rather than failing the print', async () => {
+  const p = makePayload(1, 1);
+  p.generatedAt = '2026-08-07T06:30:00.000Z';
+  assert.match(packetFilename(p, { layout: 'field' }), /-2026-08-07\.pdf$/, 'no zone (an older server): the UTC day, as before');
+  p.campaign.timeZone = 'Not/A_Zone';
+  assert.match(packetFilename(p, { layout: 'field' }), /-2026-08-07\.pdf$/, 'an unreadable zone: the same');
+  assert.ok((await renderPacketPdf(p, DEFAULT_SETTINGS)).getNumberOfPages() > 0, 'it still renders');
+});
+
 // ── splitting big books into small packets ───────────────────────────────────
 // splitBooks slices a payload BEFORE the renderer sees it; these tests pin what the renderer
 // does with the parts — separate physical packets, each self-contained. The chunking rules

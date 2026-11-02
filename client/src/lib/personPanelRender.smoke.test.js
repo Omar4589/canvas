@@ -46,8 +46,8 @@ const ENTRY = `
     kind: 'campaign', campaignId: 'c1', campaign: CAMPAIGN, archived: false, coordinators: COORDINATORS,
     roster: rows, pausedIds: new Set(), rosterLines: [], ...over,
   });
-  // A campaign's Team page panel on personId. seed: { preview, pauses } — the current-crew preview the
-  // panel runs on open, and the person's pause list.
+  // A campaign's Team page panel on personId. seed: { preview, pauses, campaigns } — the current-crew
+  // preview the panel runs on open, the person's pause list, and the campaigns list (each one's zone).
   export const render = (auth, { rows, personId, ids, scope = {}, members = {}, seed = {}, loaded = true }) => {
     globalThis.__auth = auth;
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -56,6 +56,7 @@ const ENTRY = `
       qc.setQueryData(['admin', 'coordinator-preview', 'c1', personId, row.coordinatorId || 'none'], seed.preview);
     }
     if (seed.pauses) qc.setQueryData(['admin', 'pace-pauses', 'list', 'user', personId], { pauses: seed.pauses });
+    if (seed.campaigns) qc.setQueryData(['admin', 'campaigns'], { campaigns: seed.campaigns });
     const people = new Map(rows.map((r) => [r.userId, personFromRoster(r, members[r.userId] || null)]));
     return renderToString(
       <QueryClientProvider client={qc}><MemoryRouter>
@@ -221,6 +222,25 @@ test('paused for review: Unpause for a pause the viewer can see; the shipped lin
   assert.match(text(elsewhere), /Paused for review — an org admin can unpause\./);
   assert.ok(!labels(elsewhere).includes('Unpause'));
   assert.ok(labels(elsewhere).includes('Set temporary password'), 'their other fix moves up');
+});
+
+// docs/PROPOSAL_CAMPAIGN_CLOCK.md: a pause happens in a campaign, so it reads on that campaign's clock.
+test("a pause's time is on the clock of the campaign it happened in, not the organization's", async () => {
+  const { render } = await load();
+  // 15:00 UTC is 8:00 AM in the campaign's Pacific zone, 10:00 AM on the stubbed organization's Central clock.
+  const pause = { id: 'p1', campaignId: 'c1', campaignName: 'Fall Canvass', status: 'paused', blocking: true, memberActive: true, firedAt: '2026-10-26T15:00:00Z' };
+  const html = render(ADMIN, {
+    rows: ROWS,
+    personId: 'pia',
+    scope: { pausedIds: new Set(['pia']) },
+    seed: {
+      preview: PREVIEW_OK,
+      pauses: [pause],
+      campaigns: [{ _id: 'c1', name: 'Fall Canvass', type: 'survey', isActive: true, timeZone: 'America/Los_Angeles' }],
+    },
+  });
+  assert.match(text(html), /Paused for review on Fall Canvass since Oct 26, 8:00\sAM PDT/);
+  assert.doesNotMatch(text(html), /\bCDT\b/);
 });
 
 test('Finish it: an unfinished change, and doors still counted for another team; a change still running', async () => {

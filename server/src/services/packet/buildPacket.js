@@ -490,7 +490,9 @@ export const buildPacket = async (campaign, orgName, source, { includePhone = fa
   }
 
   return {
-    campaign: { id: String(campaign._id), name: campaign.name, type: campaign.type },
+    // timeZone: the dates a packet prints (a door's last result, the printed date, the file name) are the
+    // campaign's, never the printing computer's (docs/TIMEZONES.md §F).
+    campaign: { id: String(campaign._id), name: campaign.name, type: campaign.type, timeZone: campaign.timeZone || null },
     organization: { name: orgName || '' },
     generatedAt: new Date().toISOString(),
     books,

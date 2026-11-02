@@ -5,6 +5,7 @@ import { useOrgTimeZone } from '../../auth/AuthContext.jsx';
 import { Badge, Button } from '../ui/index.js';
 import { formatInTz } from '../../lib/datetime.js';
 import { formatDate, formatRelative } from '../../lib/dates.js';
+import { useCurrentCampaign } from '../../lib/useCurrentCampaign.js';
 import { DELETED_ACCOUNT, deletionLine } from '../../lib/memberDeletion.js';
 import { noSignInRecorded, standing as standingOf } from '../../lib/rosterView.js';
 import { ROLE_LABEL, STANDING_LABEL, STANDING_VARIANT, fullNameOf, personAccess } from '../../lib/personAccess.js';
@@ -112,6 +113,9 @@ const PersonBody = ({
   onDeleted,
 }) => {
   const orgTz = useOrgTimeZone();
+  // A pause happens in a campaign, so its times are on that campaign's clock (docs/TIMEZONES.md §F).
+  const { campaigns } = useCurrentCampaign();
+  const pauseZone = (campaignId) => campaigns.find((c) => String(c._id) === String(campaignId))?.timeZone || orgTz;
   const onTeam = scope.kind === 'campaign';
   const userId = person.userId;
   const deleted = person.status === 'deleted';
@@ -220,7 +224,7 @@ const PersonBody = ({
       )}
 
       {!removed && (
-        <PacePauseProfileSection pauses={pauses} tz={orgTz} elsewhere={pausedElsewhere} onLink={onLink} />
+        <PacePauseProfileSection pauses={pauses} zoneOf={pauseZone} elsewhere={pausedElsewhere} onLink={onLink} />
       )}
 
       {onTeam && !removed && !left && (

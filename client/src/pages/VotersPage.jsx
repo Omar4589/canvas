@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 import { useDebouncedValue } from '../lib/useDebouncedValue.js';
 import { shouldRetryDirectory } from '../lib/directoryRetry.js';
 import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
@@ -54,6 +55,10 @@ export default function VotersPage() {
   // The same ['admin','campaigns'] cache the select has always read; in campaign mode it also
   // resolves :campaignId for the header (lib/useCurrentCampaign.js names the three states).
   const { campaigns, campaign: current, resolving, notFound } = useCurrentCampaign(cid);
+  const orgTz = useOrgTimeZone();
+  // A row's date is on its own campaign's clock (docs/TIMEZONES.md §F) — the org list spans campaigns.
+  const zoneOfRow = (v) =>
+    campaigns.find((c) => String(c._id) === String(v.household?.campaignId))?.timeZone || current?.timeZone || orgTz;
 
   // One mounted element serves every campaign (the sidebar switcher changes only the URL): back to
   // page 1 on a switch, or the old skip could sit past the end of the new campaign's list.
@@ -297,7 +302,7 @@ export default function VotersPage() {
                         {v.doorAdded && (
                           <span
                             className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg"
-                            title={`Added at the door${v.doorAdded.at ? ` · ${new Date(v.doorAdded.at).toLocaleDateString()}` : ''}`}
+                            title={`Added at the door${v.doorAdded.at ? ` · ${formatInTz(v.doorAdded.at, zoneOfRow(v), { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}` : ''}`}
                           >
                             Added at the door
                           </span>

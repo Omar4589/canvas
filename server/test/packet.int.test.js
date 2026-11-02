@@ -237,6 +237,13 @@ test('doors print in the BOOK\'s order, not $in order and not Household.walkOrde
   assert.deepEqual(json.books[0].doors.map((d) => d.seq), [1, 2, 3, 4]);
 });
 
+test("the payload names the campaign's zone, so the dates a packet prints are the campaign's", { skip }, async () => {
+  const { status, json } = await packet();
+  assert.equal(status, 200);
+  assert.ok(ctx.camp.timeZone, 'the fixture campaign has a zone (the model default)');
+  assert.equal(json.campaign.timeZone, ctx.camp.timeZone);
+});
+
 test('a restricted door PRINTS — restricted is an outcome, not a suppression', { skip }, async () => {
   const { json } = await packet();
   const ids = json.books[0].doors.map((d) => String(d.id));

@@ -584,8 +584,10 @@ export function AuthProvider({ children }) {
       hasActiveOrg: !!activeOrgId,
       homeCampaignId: activeMembership?.homeCampaignId,
     }) || '/select-org';
-  // Org-wide audit timestamps (imports, walk lists, turf snapshots, user profiles) render
-  // in the active org's timezone so they read the same for every admin.
+  // Org-wide and user-level timestamps (the Overview, user profiles, the do-not-contact lists)
+  // render in the active org's timezone so they read the same for every admin. Anything inside a
+  // campaign reads in that campaign's timeZone instead, with this only as the fallback
+  // (docs/TIMEZONES.md §F).
   const orgTimeZone = activeMembership?.organizationTimeZone || 'America/New_York';
 
   return (

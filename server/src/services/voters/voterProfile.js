@@ -42,7 +42,11 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
 
   const household = voter.householdId ? await Household.findById(voter.householdId).lean() : null;
   const campaignId = household?.campaignId || null;
-  const campaign = campaignId ? await Campaign.findById(campaignId, 'name type').lean() : null;
+  // Falls back to the row's own campaign so a voter with no household still says which clock its
+  // profile reads in (`timeZone` below). `campaign` is only rendered inside `household`, and the voted
+  // lookups keep using the household's campaignId.
+  const campaignRef = campaignId || voter.campaignId;
+  const campaign = campaignRef ? await Campaign.findById(campaignRef, 'name type timeZone').lean() : null;
 
   // Sibling rows — the same person's row in each OTHER campaign of this org (rows are
   // per-campaign). The person-level histories below (surveys, notes) union over them; the
@@ -78,7 +82,7 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
       // hub's doorMatch (routes/admin/reports.js). Sibling rows included — a field note
       // about the person belongs to the person.
       { voterId: { $in: personRowIds }, actionType: { $ne: 'survey_submitted' }, note: { $exists: true, $ne: null, $not: /^\s*$/ } },
-      '_id note timestamp actionType userId'
+      '_id note timestamp actionType userId campaignId'
     )
       .sort({ timestamp: -1 })
       .lean(),
@@ -159,11 +163,13 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
   // Surveyed (services/surveys/restoreGuard.js, the same rule the restore route enforces).
   const restoreByArchiveId = await restoreStates(listedOverwrites);
 
-  // Derived (read-only) voter notes: voter-tagged activity notes + survey notes.
+  // Derived (read-only) voter notes: voter-tagged activity notes + survey notes. Each carries the
+  // campaign it was recorded in, so the profile shows its time on that campaign's clock.
   const fieldNotes = [
     ...voterNotesRaw.map((a) => ({
       source: 'activity',
       id: String(a._id),
+      campaignId: a.campaignId ? String(a.campaignId) : null,
       note: a.note,
       timestamp: a.timestamp,
       actionType: a.actionType,
@@ -174,6 +180,7 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
       .map((s) => ({
         source: 'survey',
         id: String(s._id),
+        campaignId: String(s.campaignId),
         note: s.note,
         timestamp: s.submittedAt,
         actionType: 'survey_submitted',
@@ -206,20 +213,33 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
   if (siblings.length) {
     const sibCamps = await Campaign.find(
       { _id: { $in: [...new Set(siblings.map((s) => String(s.campaignId)))] } },
-      'name'
+      'name timeZone'
     ).lean();
-    const sibCampMap = new Map(sibCamps.map((c) => [String(c._id), c.name]));
+    const sibCampMap = new Map(sibCamps.map((c) => [String(c._id), c]));
     otherCampaigns = siblings.map((s) => ({
       campaignId: String(s.campaignId),
-      name: sibCampMap.get(String(s.campaignId)) || null,
+      name: sibCampMap.get(String(s.campaignId))?.name || null,
+      // That campaign's clock: a survey or note from this row shows its time in this zone.
+      timeZone: sibCampMap.get(String(s.campaignId))?.timeZone || null,
       voterId: String(s._id),
       surveyStatus: s.surveyStatus,
     }));
   }
 
+  // The campaign each of the person's rows is in. An admin note follows the person, so it can sit on a
+  // sibling row; its time shows on that row's campaign's clock.
+  const rowCampaign = new Map([
+    [String(voter._id), voter.campaignId ? String(voter.campaignId) : null],
+    ...siblings.map((s) => [String(s._id), String(s.campaignId)]),
+  ]);
+
   return {
     person,
     otherCampaigns,
+    // The clock this profile reads in: the row's campaign's zone (docs/TIMEZONES.md §F). A survey or note
+    // from a sibling row reads in its own campaign's (`otherCampaigns[].timeZone`). Null only if the
+    // campaign is gone; clients then fall back to the organization's zone.
+    timeZone: campaign?.timeZone || null,
     voter: {
       id: String(voter._id),
       stateVoterId: voter.stateVoterId,
@@ -444,6 +464,7 @@ export async function buildVoterProfile(voterId, { orgId, scopeCampaignId = null
     notes: {
       admin: adminNotes.map((n) => ({
         id: String(n._id),
+        campaignId: rowCampaign.get(String(n.voterId)) || null,
         body: n.body,
         author: who(n.authorId),
         createdAt: n.createdAt,

@@ -51,7 +51,6 @@ import { campaignSummaries } from '../../services/reports/campaignSummaries.js';
 import { computeOverlaps, computeOverlapDoors } from '../../services/reports/overlaps.js';
 import { hydrateCanvassers, orgCarriesUser, campaignsCarryUser } from '../../services/reports/canvasserIdentity.js';
 import { buildKnocksByPassData } from '../../services/reports/knocksByPass.js';
-import { buildKnocksByBookData } from '../../services/reports/knocksByBook.js';
 import { detectFlags } from '../../services/audit/flagDetection.js';
 import { computeFarKpi, farKpiForRows } from '../../services/audit/farKpi.js';
 import { FLAG_THRESHOLDS, SEVERITY_RANK, AUDIT_WINDOW_MAX_DAYS } from '../../services/audit/flagThresholds.js';
@@ -3581,95 +3580,6 @@ router.get('/knocks-by-pass.csv', async (req, res, next) => {
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="knocks-by-pass-${new Date().toISOString().slice(0, 10)}.csv"`
-    );
-    res.send(toCsv(headers, rows));
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// One pass by book ("knocks by book")
-// ─────────────────────────────────────────────────────────────────────────────
-
-// The campaign Home's By book table and its CSV: one pass split by book, through the same pipeline,
-// date window, walk-list filter and crew clause as /knocks-by-pass, so its totals are that pass's By pass
-// row (services/reports/knocksByBook.js). ?passId is required. ?effortId matters even though a pass has
-// one walk list: crewFilter builds "No coordinator" from baseFilter's scope, so without it a lead who runs
-// a crew on another walk list would drop out here and not there.
-async function buildKnocksByBook(req) {
-  if (!req.query.campaignId || !mongoose.isValidObjectId(req.query.campaignId)) {
-    return { error: { status: 400, message: 'campaignId is required' } };
-  }
-  if (!req.query.passId || !mongoose.isValidObjectId(req.query.passId)) {
-    return { error: { status: 400, message: 'passId is required' } };
-  }
-  const windowed = parseDateRange(req, 'timestamp');
-  return buildKnocksByBookData({
-    organizationId: activeOrgId(req),
-    campaignId: req.query.campaignId,
-    passId: req.query.passId,
-    effortId: baseFilter(req).effortId || null,
-    timestampRange: windowed.timestamp || null,
-    team: await crewFilter(req),
-  });
-}
-
-router.get('/knocks-by-book', async (req, res, next) => {
-  try {
-    if (!ensureOrgScoped(req, res)) return;
-    const built = await buildKnocksByBook(req);
-    if (built.error) return res.status(built.error.status).json({ error: built.error.message });
-    res.json({
-      campaignId: String(req.query.campaignId),
-      timeZone: tzOf(req),
-      from: req.query.from || null,
-      to: req.query.to || null,
-      pass: built.pass,
-      books: built.books,
-      notInBook: built.notInBook,
-      totals: built.totals,
-      // The same two switches as /knocks-by-pass: whether billable doors differ from knocks, and
-      // whether the CSV carries the Not a target column.
-      billRestrictedDoors: built.billRestricted,
-      notTargetInUse: built.notTargetInUse,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// The By book download: one row per book (with who is assigned and its doors), the "not in a book"
-// row when there is one, and a TOTAL — the per-round file's columns and its two opt-in column rules.
-router.get('/knocks-by-book.csv', async (req, res, next) => {
-  try {
-    if (!ensureOrgScoped(req, res)) return;
-    const built = await buildKnocksByBook(req);
-    if (built.error) return res.status(built.error.status).json({ error: built.error.message });
-    const doorCols = built.billRestricted ? ['Restricted doors', 'Billable doors'] : [];
-    const doorVals = (r) => (built.billRestricted ? [r.restrictedDoors, r.billableDoors] : []);
-    const ntCols = built.notTargetInUse ? ['Not a target'] : [];
-    const ntVals = (r) => (built.notTargetInUse ? [r.notTargetKnocks] : []);
-    const headers = [
-      'Walk list', 'Pass', 'Pass name', 'Book', 'Canvassers', 'Doors',
-      'Knocks', 'Survey doors', 'Surveys taken', 'Lit knocks', 'Refused', 'No soliciting',
-      ...ntCols, ...doorCols, 'Connection rate %', 'Contact rate %',
-    ];
-    const p = built.pass;
-    const counts = (r) => [
-      r.knocks, r.surveyedKnocks, r.surveysTaken, r.litKnocks, r.refusedKnocks, r.noSolicitingKnocks,
-      ...ntVals(r), ...doorVals(r), r.connectionRate, r.contactRate,
-    ];
-    const rows = built.books.map((b) => [
-      p.effortName || '', p.roundNumber, p.roundName, b.name, b.canvassers.join('; '), b.doors, ...counts(b),
-    ]);
-    if (built.notInBook) rows.push([p.effortName || '', p.roundNumber, p.roundName, 'Not in a book', '', '', ...counts(built.notInBook)]);
-    rows.push(['TOTAL', '', '', '', '', built.totals.doors, ...counts(built.totals)]);
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="knocks-by-book-${new Date().toISOString().slice(0, 10)}.csv"`
     );
     res.send(toCsv(headers, rows));
   } catch (err) {

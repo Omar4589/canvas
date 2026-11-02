@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import { useAuth } from '../auth/AuthContext.jsx';
+import { useAuth, useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { formatInTz } from '../lib/datetime.js';
 import { useCampaignSelection } from '../components/CampaignSelector.jsx';
 import Section from '../components/Section.jsx';
 import DateRangeSelector from '../components/DateRangeSelector.jsx';
@@ -212,6 +213,7 @@ export default function ExportsPage() {
   const { selected: campaign } = useCampaignSelection(campaignId);
   const qc = useQueryClient();
   const tz = campaign?.timeZone;
+  const orgTz = useOrgTimeZone();
 
   const [typeId, setTypeId] = useState('canvass-activity');
   const [dateRange, setDateRange] = useState({ preset: 'all', from: null, to: null });
@@ -639,7 +641,8 @@ export default function ExportsPage() {
                 <option value="">Current data, standard columns</option>
                 {imports.map((j) => (
                   <option key={j._id} value={j._id}>
-                    {`${j.filename || 'import'} — ${new Date(j.createdAt).toLocaleDateString()}`}
+                    {/* The date the Voter Import page shows for this upload: the campaign's clock. */}
+                    {`${j.filename || 'import'} — ${formatInTz(j.createdAt, tz || orgTz, { year: 'numeric', month: 'numeric', day: 'numeric' }, false)}`}
                   </option>
                 ))}
               </Select>

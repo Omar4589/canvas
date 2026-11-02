@@ -22,6 +22,13 @@ function dobInput(d) {
   const dt = new Date(d);
   return Number.isNaN(+dt) ? '' : dt.toISOString().slice(0, 10);
 }
+// A birth date is a calendar date stored at UTC midnight: read in UTC, like dobInput, or a viewer
+// anywhere in the US sees the day before.
+const fmtDob = (d) => {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return Number.isNaN(+dt) ? '—' : dt.toLocaleDateString(undefined, { timeZone: 'UTC' });
+};
 
 // ── Merge dialog: pick the surviving value for each differing identity field ──
 function MergeDialog({ survivor, victimId, onClose, onMerge, busy, error }) {
@@ -81,7 +88,7 @@ function MergeDialog({ survivor, victimId, onClose, onMerge, busy, error }) {
                           <td key={side} className="py-2 pr-2">
                             <label className="flex items-center gap-2">
                               <input type="radio" name={`m-${k}`} checked={choiceFor(k) === side} onChange={() => setChoice((c) => ({ ...c, [k]: side }))} />
-                              <span className={(val ?? null) == null ? 'text-fg-subtle' : 'text-fg'}>{k === 'dateOfBirth' ? fmtDate(val) : (val ?? '—')}</span>
+                              <span className={(val ?? null) == null ? 'text-fg-subtle' : 'text-fg'}>{k === 'dateOfBirth' ? fmtDob(val) : (val ?? '—')}</span>
                             </label>
                           </td>
                         );
@@ -242,7 +249,7 @@ export default function PersonDetailPage() {
                       </button>
                     )}
                   </dt>
-                  <dd className="text-fg">{k === 'dateOfBirth' ? fmtDate(p[k]) : (p[k] || '—')}</dd>
+                  <dd className="text-fg">{k === 'dateOfBirth' ? fmtDob(p[k]) : (p[k] || '—')}</dd>
                   {provLabel(k) && <dd className="text-[11px] text-fg-subtle">{provLabel(k)}</dd>}
                 </div>
               );

@@ -42,7 +42,8 @@ const organizationSchema = new mongoose.Schema(
     // Deleted with the org, so it never lingers.
     platformStatsCaptured: { type: Boolean, default: false },
     // Anchor timezone for ORG-WIDE rollups (multi-campaign), where a single campaign's
-    // zone doesn't apply. Per-campaign views use Campaign.timeZone. Overridable in the UI.
+    // zone doesn't apply. Per-campaign views use Campaign.timeZone. No customer-facing editor:
+    // only migrations/migrateTimeZones.js and the demo seed write it (docs/TIMEZONES.md §E).
     timeZone: { type: String, default: 'America/New_York' },
     // Org-wide DEFAULT for "do restricted (inaccessible) doors count toward the billable door
     // totals we invoice our client from". Campaign.billRestrictedDoors overrides it per campaign

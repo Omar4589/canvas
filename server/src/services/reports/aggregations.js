@@ -203,15 +203,9 @@ export function withTeam(match, team) {
 // to the single-month result: a (household, pass) knocked in two months is one door in each, exactly
 // as two separately-windowed runs would report it. Mutually exclusive with byPass/byCampaign — the
 // outer group can only collapse to one key.
-//
-// `byBook` splits the same dedup by book (turfId) — one row per book, for a `match` that names ONE
-// pass (services/reports/knocksByBook.js). Each (household, pass) goes to the book its LATEST row in the
-// match carries, so a door moved between books mid-pass is still one door, in the book it was last
-// recorded in, and Σ(byBook rows) equals the collapsed total for the same match. A null or missing turfId
-// is its own row (_id: null). Exclusive with the other outer keys, like them.
 export function knocksPipeline(
   match,
-  { byCampaign = false, byPass = false, byBook = false, includeRestricted = false, monthTimeZone = null } = {}
+  { byCampaign = false, byPass = false, includeRestricted = false, monthTimeZone = null } = {}
 ) {
   const inner = { householdId: '$householdId', passId: '$passId' };
   if (byCampaign) inner.campaignId = '$campaignId';
@@ -247,22 +241,11 @@ export function knocksPipeline(
         hasNotTarget: { $max: { $cond: [{ $eq: ['$actionType', 'not_target'] }, 1, 0] } },
         // The contact fold: ONE flag per (door, round), whatever mix of contact rows it holds.
         hasContact: { $max: { $cond: [{ $in: ['$actionType', CONTACT_ACTIONS] }, 1, 0] } },
-        // The book of the latest row: $max over {at, turfId} compares `at` first, so it needs no
-        // sort stage (and no newer-server accumulator).
-        ...(byBook ? { lastBook: { $max: { at: '$timestamp', turfId: '$turfId' } } } : {}),
       },
     },
     {
       $group: {
-        _id: monthTimeZone
-          ? '$_id.month'
-          : byCampaign
-            ? '$_id.campaignId'
-            : byPass
-              ? '$_id.passId'
-              : byBook
-                ? { $ifNull: ['$lastBook.turfId', null] }
-                : null,
+        _id: monthTimeZone ? '$_id.month' : byCampaign ? '$_id.campaignId' : byPass ? '$_id.passId' : null,
         // Unchanged meaning: a door someone actually knocked. Rates read THIS.
         knocks: { $sum: '$hasKnock' },
         // What an opted-in org invoices from. The (household, pass) dedup does the hard part for

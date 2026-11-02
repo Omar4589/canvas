@@ -15,6 +15,7 @@ import { importPinLine } from '../lib/importPins.js';
 import { pinLine } from '../lib/pinBadges.js';
 import { formatInTz } from '../lib/datetime.js';
 import { useOrgTimeZone } from '../auth/AuthContext.jsx';
+import { useCurrentCampaign } from '../lib/useCurrentCampaign.js';
 import {
   registerLayers,
   householdsToGeoJSON,
@@ -262,7 +263,9 @@ const PinFixesPage = () => {
   const { campaignId } = useParams();
   const qc = useQueryClient();
   const orgTz = useOrgTimeZone();
-  const fmtDate = (d) => formatInTz(d, orgTz, { month: 'short', day: 'numeric' }, false);
+  // The campaign's clock, like every page inside a campaign (docs/TIMEZONES.md §F).
+  const { campaign } = useCurrentCampaign(campaignId);
+  const fmtDate = (d) => formatInTz(d, campaign?.timeZone || orgTz, { month: 'short', day: 'numeric' }, false);
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);

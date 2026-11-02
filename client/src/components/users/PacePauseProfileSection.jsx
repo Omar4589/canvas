@@ -9,8 +9,9 @@ import { statusLine } from '../../lib/pacePause.js';
 // lead's own campaigns) and Unpause moved up to the person's state buttons, which ask first
 // (docs/PROPOSAL_PEOPLE_PAGES.md §D.5). `elsewhere` is a lead's canvasser paused on a campaign the lead
 // doesn't manage: the Audit page's line, and nothing about that campaign. `onLink` is the panel's
-// unsaved-changes check, run before Review leaves the page.
-const PacePauseProfileSection = ({ pauses = [], tz, elsewhere = false, onLink }) => {
+// unsaved-changes check, run before Review leaves the page. `zoneOf(campaignId)` is the clock a pause's
+// times read in: the campaign it happened in (docs/TIMEZONES.md §F).
+const PacePauseProfileSection = ({ pauses = [], zoneOf, elsewhere = false, onLink }) => {
   const open = pauses.find((p) => p.status === 'paused' && p.memberActive);
   const past = pauses.filter((p) => p !== open);
   if (!open && !past.length && !elsewhere) return null;
@@ -20,7 +21,7 @@ const PacePauseProfileSection = ({ pauses = [], tz, elsewhere = false, onLink })
       {open && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/30 bg-danger-tint px-3 py-2">
           <p className="text-sm text-danger-fg">
-            Paused for review on {open.campaignName || 'a campaign'} since {formatInTz(open.firedAt, tz)}
+            Paused for review on {open.campaignName || 'a campaign'} since {formatInTz(open.firedAt, zoneOf(open.campaignId))}
             {!open.blocking && ' — not blocking while automatic pause is switched off'}
           </p>
           <Link
@@ -38,8 +39,8 @@ const PacePauseProfileSection = ({ pauses = [], tz, elsewhere = false, onLink })
           {past.map((p) => (
             <li key={p.id} className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-fg">
-                {formatInTz(p.firedAt, tz)} · {p.campaignName || 'a campaign'}
-                <span className="ml-2 text-xs text-fg-muted">{statusLine(p, tz)}</span>
+                {formatInTz(p.firedAt, zoneOf(p.campaignId))} · {p.campaignName || 'a campaign'}
+                <span className="ml-2 text-xs text-fg-muted">{statusLine(p, zoneOf(p.campaignId))}</span>
               </span>
               <Link
                 to={`/campaigns/${p.campaignId}/audit/pauses/${p.id}`}

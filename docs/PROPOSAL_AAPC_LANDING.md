@@ -14,7 +14,7 @@ marked, so later phases build from the same text. What shipped is documented whe
 |---|---|---|
 | 1 | Brief §3–6, and the §7.11 words removed from the current page | **Committed 2026-11-01 (`27e8711`)** — see *Phase 1, as built* |
 | 2 | §7–9 (new page structure, /aapc), the offline-queue fix in §10 | **Website half committed 2026-11-01 (`162feb1`)** — see *Phase 2 (website), as built*; **the queue fix committed 2026-11-01 (`fd7bc5e`)** — [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) §P, release steps in [OPERATIONS.md](OPERATIONS.md) (the owner's two privacy-policy edits go live before its phone update) |
-| Addendum 3 | Website copy and type (no client line, smaller hero top, no "on Android", no names paragraph, "any major vendor", the new founder note, /aapc in the first person); the sample report; the By book table; the iOS fake-GPS check brought forward | **Website changes committed 2026-11-02 (`855cf76`)**; **the By book table built 2026-11-02 (uncommitted)** — see *Addendum 3, as built*. The sample report waits on the owner's Share steps; the iOS check waits until after Election Day (the owner, 2026-11-02) |
+| Addendum 3 | Website copy and type (no client line, smaller hero top, no "on Android", no names paragraph, "any major vendor", the new founder note, /aapc in the first person); the sample report; the By book table; the iOS fake-GPS check brought forward | **Website changes committed 2026-11-02 (`855cf76`)**; the By book table was built and committed (`a3ab0bb`), then **removed** the same day at the owner's request — see *Addendum 3, as built*. The sample report waits on the owner's Share steps; the iOS check waits until after Election Day (the owner, 2026-11-02) |
 | 3 (after AAPC) | The rest of §10: isolation tests before any trust page, later polish (the iOS fake-GPS check moved to addendum 3) | Not started |
 
 ## Owner rulings during the build (2026-11-01)
@@ -318,7 +318,7 @@ staff access. The rest need these words:
 | "fully-voted households drop off every book" | Each campaign takes its own voted list | "…drop off every book in that campaign." |
 | "Export Center: Take your data with you any time." / "Export everything, any time." | Exports work even while paused, but do-not-contact voters, audit flags, survey designs, books and history aren't in any file | "Export your voters, results, survey answers and notes any time, even while your account is paused." / "Export your voters, results and notes any time, even while paused." |
 | "Location is recorded only when a door is recorded, never between doors." | A lead's pin move can store their position as the new pin | "Location is recorded only when you save something at a door, never between doors." (FAQ 5 takes the same words) |
-| "Numbers by pass, book and canvasser" (the printed ad) | Pass and canvasser results exist; a book shows progress only (17/70 and its status) | Decision 7 — *2026-11-02: the By book table on campaign Home backs it in full (addendum 3)* |
+| "Numbers by pass, book and canvasser" (the printed ad) | Pass and canvasser results exist; a book shows progress only (17/70 and its status) | Decision 7 stands: a book's numbers are its progress on Turf Cutting and the phone's Books (a By book table on campaign Home was built and removed on 2026-11-02 — the owner: "that's pollution") |
 | /aapc card: "Live" | The app badges a running pass **Active**; its green **Live** dot is the auto-refresh switch. *Done*, *Progress* and *Connection rate* are the app's own words | Decision 2 |
 | "Doorline puts it all in one place, and makes every door prove itself." | iOS fake GPS isn't detected, and paper results typed in at a desk carry the desk's GPS | "…and checks every door recorded in the app against its house." |
 | "From voter file to knocking, usually the same day" | Never measured (decision 5) | "…often the same day" until the report backs *usually* |
@@ -702,11 +702,12 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
   /aapc's meta description (link previews, search) keeps *"Book 15 minutes with Omar"*: out of context,
   "me" has no one to point to. Words to avoid updated (MARKETING_SITE.md).
 - **Committed as `855cf76`** (the owner, 2026-11-02).
-- **§8 By book table, built 2026-11-02 (uncommitted)** — the owner said yes to the design. On campaign Home
-  under By pass: one pass split by book (Book, Canvassers, Doors, Knocked with the share of the book's
-  doors, Conn %, Surveys taken or Lit drops), a Not in a book row, a TOTAL that is that pass's By pass row,
-  a pass picker, sorting, a fold past ten books and Export CSV. Documented in METRICS.md (*By book*, §C, §E,
-  §G) and the campaign Home Help Center page; privacy record item 56.
+- **§8 By book table: built, committed (`a3ab0bb`), then removed the same day.** The owner, seeing it on
+  campaign Home: *"i also want the 'by book' table removed from the home dashboard that admins and leads see.
+  thats pollution tbh. the by pass is fine. we can see by book technically in the turf page."* The table, its
+  endpoint and CSV, the pipeline option, its tests and docs are all reverted; privacy record item 56 says so.
+  For "by book" in a demo: Turf Cutting's books (knocked/total, status, who's on each) and the phone's Books
+  screen, as decision 7 said.
 - **§3 iOS fake-GPS check: after Election Day** (the owner, 2026-11-02). The queue fix goes out over the air
   first, so the native change can follow in a new app version without stranding it.
 - **Waiting on the owner:** the totals after Election Day; his headshot and signature scan; the sample

@@ -26,8 +26,9 @@ const LIST_KEY = `['admin', 'voters', 'campaign', '${CID}', { search: '', party:
 const PROFILE_KEY = `['admin', 'voter', '${VID}', { campaignId: '${CID}' }]`;
 
 // `seed` is JS run inside the bundle against the QueryClient `qc`, before the render. `isOrgAdmin`
-// is the stubbed session's role: true = org admin, false = a team lead granted CID.
-async function render({ page, routePath, url, isOrgAdmin, seed = '' }) {
+// is the stubbed session's role: true = org admin, false = a team lead granted CID. `orgTz` is the
+// stubbed organization clock, which no time inside a campaign may read in.
+async function render({ page, routePath, url, isOrgAdmin, seed = '', orgTz = 'America/Chicago' }) {
   // Each test gets its OWN temp dir, inside the client tree on purpose: dependencies stay external
   // to the bundle, so node resolves them from the bundle's own location at import time.
   const dir = mkdtempSync(join(here, '../../.smoke-cv-'));
@@ -35,7 +36,7 @@ async function render({ page, routePath, url, isOrgAdmin, seed = '' }) {
     writeFileSync(
       join(dir, 'authStub.jsx'),
       `export const useAuth = () => ({ homePath: '/campaigns', isOrgAdmin: ${isOrgAdmin}, isSuperAdmin: false, isLead: ${!isOrgAdmin}, managedCampaignIds: ${isOrgAdmin ? '[]' : `['${CID}']`}, user: { id: 'u1' } });
-       export const useOrgTimeZone = () => 'America/Chicago';`
+       export const useOrgTimeZone = () => '${orgTz}';`
     );
     writeFileSync(
       join(dir, 'entry.jsx'),
@@ -93,8 +94,8 @@ async function render({ page, routePath, url, isOrgAdmin, seed = '' }) {
 
 const list = (isOrgAdmin, seed) =>
   render({ page: 'VotersPage.jsx', routePath: '/campaigns/:campaignId/voters', url: `/campaigns/${CID}/voters`, isOrgAdmin, seed });
-const profile = (isOrgAdmin, seed) =>
-  render({ page: 'VoterDetailPage.jsx', routePath: '/campaigns/:campaignId/voters/:voterId', url: `/campaigns/${CID}/voters/${VID}`, isOrgAdmin, seed });
+const profile = (isOrgAdmin, seed, orgTz) =>
+  render({ page: 'VoterDetailPage.jsx', routePath: '/campaigns/:campaignId/voters/:voterId', url: `/campaigns/${CID}/voters/${VID}`, isOrgAdmin, seed, orgTz });
 
 // One campaign-scoped directory page, the row shape the server sends (no `campaigns` chips —
 // the dedupe branch never runs for a single campaign).
@@ -229,4 +230,47 @@ test('an org admin on the campaign profile keeps every control, with campaign-re
   assert.match(html, /Also in:/, 'the org-wide union (owner ruling 5)');
   assert.match(html, new RegExp(`href="/campaigns/${OTHER_CID}/voters/v9"`), '"Also in" opens the OTHER campaign’s profile');
   assert.doesNotMatch(html, /href="\/voters\/v9"/);
+});
+
+// docs/PROPOSAL_CAMPAIGN_CLOCK.md. The owner's report: an Omaha voter's visits read 1:30 PM EST and
+// 12:50 PM EDT because the page used the organization's Eastern clock. Fixed instants, so no zone name
+// here depends on today's date. (Intl puts a narrow no-break space before AM/PM, which \s matches.)
+test("every time on the profile is on a campaign's clock, never the organization's; a birth date is the file's date", async () => {
+  const payload = {
+    ...profilePayload([{ campaignId: OTHER_CID, name: 'Panhandle', voterId: 'v9', surveyStatus: 'surveyed', timeZone: 'America/Denver' }]),
+    timeZone: 'America/Chicago',
+  };
+  payload.voter = { ...payload.voter, dateOfBirth: '1980-05-10T00:00:00.000Z' };
+  payload.activity = [
+    { id: 'c1', actionType: 'survey_submitted', timestamp: '2026-11-02T18:30:00.000Z', by: { id: 'u5', name: 'Cornelious Robinson' }, note: null },
+    { id: 'c2', actionType: 'not_home', timestamp: '2026-10-27T16:50:00.000Z', by: { id: 'u6', name: 'Michael Creamer' }, note: null },
+  ];
+  // The same person's survey and admin note from their row in the Mountain-time campaign.
+  payload.surveys = [
+    ...payload.surveys,
+    { ...payload.surveys[0], id: 's2', voterId: 'v9', campaignId: OTHER_CID, templateName: 'Panhandle survey', submittedAt: '2026-11-02T18:30:00.000Z' },
+  ];
+  payload.notes = {
+    ...payload.notes,
+    admin: [
+      ...payload.notes.admin,
+      { id: 'n2', campaignId: OTHER_CID, body: 'Met at the fair', author: { id: 'u9', name: 'Ada Admin' }, createdAt: '2026-11-02T18:30:00.000Z', editedAt: null, editedBy: null },
+    ],
+  };
+  const seed = `qc.setQueryData(${PROFILE_KEY}, ${JSON.stringify(payload)});
+     qc.setQueryData(['voter-staff-access', '${VID}'], { count: 0, entries: [] });`;
+  const html = await profile(true, seed, 'America/New_York');
+  assert.match(html, /11\/2\/2026, 12:30\sPM CST · Cornelious Robinson/, 'the Omaha visit on the campaign’s clock');
+  assert.match(html, /10\/27\/2026, 11:50\sAM CDT · Michael Creamer/, 'labelled with the name its zone had that day');
+  assert.equal((html.match(/11\/2\/2026, 11:30\sAM MST/g) || []).length, 2, 'the Panhandle survey and note, on THAT campaign’s clock');
+  assert.doesNotMatch(html, /\bE[SD]T\b/, 'nothing reads in the organization’s Eastern clock');
+  assert.match(html, /5\/10\/1980/, 'the birth date as the voter file has it');
+  assert.doesNotMatch(html, /5\/9\/1980/, 'read in any US zone it would be the day before');
+});
+
+test("the list's Added at the door date is on that voter's campaign's clock, not the organization's", async () => {
+  // 05:30 UTC on Nov 3 is 12:30 AM on Nov 3 in the campaign's Eastern zone (the list cache), and still
+  // Nov 2 on the stubbed organization's Central clock.
+  const html = await list(true, seedList.replace('doorAdded: null', "doorAdded: { at: '2026-11-03T05:30:00.000Z' }"));
+  assert.match(html, /title="Added at the door · 11\/3\/2026"/);
 });

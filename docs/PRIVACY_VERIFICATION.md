@@ -4958,9 +4958,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       sync builds the index; the Traffic read; super-admins only); client `lib/siteTraffic.test.js` and
       `lib/websiteTrafficRender.smoke.test.js`.
 56. **[v7 2026-11-02 — The campaign Home's By book table and its CSV: one pass split by book, naming each
-    book's assigned canvassers. BUILT 2026-11-02, uncommitted. Nothing new collected, no new recipient, no
-    subprocessor, no policy change: a new route and a new file that name people, for the same people who
-    already see and set those names on Turf Cutting.]**
+    book's assigned canvassers. Committed 2026-11-02 (`a3ab0bb`), then REMOVED the same day before any
+    release, at the owner's request ("that's pollution — we can see by book in the turf page"): the table,
+    `GET /admin/reports/knocks-by-book` and its CSV, and the pipeline option are all gone, so nothing below
+    is in the code any more. Kept as the record of what was reviewed. Nothing new collected, no new
+    recipient, no subprocessor, no policy change.]**
     Plan: the owner's addendum 3 §8 (the printed ad's "Numbers by pass, book and canvasser"), design approved
     2026-11-02. Read from the code:
     - **(a) What it returns.** `GET /admin/reports/knocks-by-book` and `.csv` (`routes/admin/reports.js` →

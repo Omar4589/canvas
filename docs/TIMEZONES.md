@@ -37,7 +37,17 @@ removes that — the data belongs to the campaign, so it is shown in the campaig
   A Tokyo-based admin asking for "Yesterday" on a Texas campaign gets *Texas's* yesterday, not their
   own (which, 14 hours ahead, could already be a different day).
 - **Times** — a knock made at 12:01 PM Central shows as **"12:01 PM CDT"** to everyone, with the
-  zone label so it is never ambiguous.
+  zone label so it is never ambiguous. **Inside a campaign every time is on that campaign's clock**,
+  including a voter's page, Pin Fixes, the Voter Import page's upload times, and the dates printed on
+  walk packets (and in their file name).
+- **A voter's page** — everything on it reads in the voter's campaign's zone: visits, surveys, notes,
+  *Added at the door*, *Last edited*, the do-not-contact flag. An admin also sees the same person's
+  surveys and notes from the organization's other campaigns; each of those reads in **its own**
+  campaign's zone, so a survey shows the same time on every page that lists it (it only looks different
+  when the two campaigns are in different zones, and the label says which).
+- **Birth dates** — shown exactly as in the voter file. A date of birth is a calendar date, not a
+  moment, so no time zone moves it.
+- **People → Automatic pause** — each pause reads in the zone of the campaign it happened in.
 - **Turf Cutting's "Visited in the last N days"** — "since Oct 25" starts at midnight Oct 25 in the
   **campaign's** zone, and "last 7 days" is the campaign's today plus the 6 days before it, like the
   dashboards' **7 days**. The date is stored with the round and read in the campaign's zone each time
@@ -53,8 +63,10 @@ that campaign's own dashboard. The **org's** timezone is the anchor only where n
 - **Which day a relative preset means.** On the org-wide Overview, "Today" / "Yesterday" pick a calendar
   *date* in the **org's** clock; each campaign is then counted for that date *in its own zone* (see the
   heads-up below).
-- **User-level / cross-campaign timestamps** — when someone joined the org, last login, an import job, the
-  cumulative "last activity" — which aren't tied to one campaign's wall clock.
+- **User-level / cross-campaign timestamps** — when someone joined the org, last login, the cumulative
+  "last activity", the do-not-contact and do-not-knock lists — which aren't tied to one campaign's wall
+  clock. (An upload's time used to be on this list; since 2026-11-02 it reads in its campaign's zone,
+  like everything else inside a campaign — [PROPOSAL_CAMPAIGN_CLOCK.md](PROPOSAL_CAMPAIGN_CLOCK.md).)
 
 ### The night-time heads-up
 Because a relative preset's *date* is the org's, there's a ~1-hour window each night where the org and a
@@ -211,6 +223,12 @@ shifts a day in negative-offset zones).
   (replacing the old blanket Eastern default) and sets each org's `timeZone` to its campaigns' most
   common zone. Idempotent.
 
+  > **Never re-run it to fix a display or to change an organization's zone.** With `--apply` it resets
+  > **every** campaign whose zone differs from its state's default, hand-picked ones included (a Nebraska
+  > Panhandle race set to Mountain goes back to Central), moving that campaign's daily numbers. It was a
+  > one-time backfill. Nothing else writes `Organization.timeZone`: there is no customer-facing editor
+  > (the owner chose not to add one on 2026-11-02, [PROPOSAL_CAMPAIGN_CLOCK.md](PROPOSAL_CAMPAIGN_CLOCK.md)).
+
 ## F. Displaying timestamps
 
 A timestamp is shown in the timezone of whatever **owns** it, with a short label, via shared
@@ -230,12 +248,20 @@ Who passes which tz:
 
 | Surface | tz used |
 |---|---|
-| Campaign-scoped web display (dashboard canvasser panels, map house/ping panels, turf snapshots, walk lists, early-voting uploads) | the **campaign** tz, threaded from the page (report-response `timeZone` or the campaigns cache) as a `tz` prop; components fall back to `useOrgTimeZone()` |
-| Org-wide / user-level (Overview card, import jobs, user profile) | `useOrgTimeZone()` |
+| Campaign-scoped web display (dashboard canvasser panels, map house/ping panels, turf snapshots, walk lists, early-voting uploads, Pin Fixes, Voter Import upload times and the Exports upload picker) | the **campaign** tz, threaded from the page (report-response `timeZone` or the campaigns cache) as a `tz` prop; components fall back to `useOrgTimeZone()` |
+| Voter profile (web, both routes) | per item: the profile's `timeZone` (the row's campaign) for the page; a survey, earlier-answers card, field note or admin note from a sibling row in its own campaign's (`otherCampaigns[].timeZone`, by the item's `campaignId`) — `zoneOf` in [VoterDetailPage.jsx](../client/src/pages/VoterDetailPage.jsx) |
+| Rows that span campaigns (the org Voters list's *Added at the door* date; People → Automatic pause) | each row's own campaign's tz, looked up in the campaigns cache by its campaign id, falling back to `useOrgTimeZone()` |
+| Printed walk packets (a door's last-result date, the printed date, the file-name day) | the payload's `campaign.timeZone` (`zoneOpt` in [packetPdf.js](../client/src/lib/packet/packetPdf.js)); a missing or unreadable zone keeps the old behaviour (device clock, UTC file-name day) rather than failing the print |
+| Org-wide / user-level (Overview card, user profile, the do-not-contact and do-not-knock lists) | `useOrgTimeZone()` |
 | Mobile admin screens | the active campaign's `timeZone` (carried on the saved active campaign — see §G) |
 | Mobile personal stats | **device-local** (the deliberate exception) |
 
 `timeAgo` ("5m ago") is relative and tz-agnostic — left as-is everywhere.
+
+**Calendar dates are not instants.** A date of birth is stored at UTC midnight (the import's `parseDob`),
+so formatting it in any US zone shows the day before. It is shown in **UTC**: `fmtDate(…, 'UTC', false)` on
+the voter page, `fmtDob` on the staff person page, and date-only on the import screen's hand-edit panel.
+Never pass a campaign's or the org's zone for one.
 
 ## G. How the campaign tz reaches the clients
 
@@ -248,6 +274,13 @@ Who passes which tz:
   every admin screen reads `campaign?.timeZone` with no extra fetch.
 - **Web** has `Organization.timeZone` in the `/auth/me` membership payload; campaign tz comes from the
   cached `['admin','campaigns']` list (full docs include `timeZone`) or a report response.
+- **The voter profile** ([services/voters/voterProfile.js](../server/src/services/voters/voterProfile.js),
+  all three routes) returns `timeZone` (the row's campaign; the row's own campaign when its household is
+  gone) and `otherCampaigns[].timeZone`, and every survey, earlier-answers card, field note and admin note
+  carries its `campaignId` (an admin note's is the campaign of the row it was added to). Additive: the
+  phone ignores them, and its voter screen already reads in the active campaign's zone.
+- **The packet payload** ([services/packet/buildPacket.js](../server/src/services/packet/buildPacket.js))
+  carries `campaign.timeZone`.
 
 ## H. Invariants & gotchas
 

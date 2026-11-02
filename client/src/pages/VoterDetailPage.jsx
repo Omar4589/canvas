@@ -95,7 +95,9 @@ function VoterFields({ voter, person, onSave, saving, canEdit, tz }) {
             mono={!voter.stateVoterId?.startsWith('manual:')}
           />
           {EDIT_FIELDS.map(([k, label]) => <Detail key={k} label={label} value={voter[k]} />)}
-          <Detail label="Date of birth" value={fmtDate(voter.dateOfBirth, tz, false)} />
+          {/* A birth date is a calendar date stored at UTC midnight: read in any US zone it shows the day
+              before, so it is read in UTC, never on a campaign's clock. */}
+          <Detail label="Date of birth" value={fmtDate(voter.dateOfBirth, 'UTC', false)} />
         </dl>
         {voter.lastEditedAt && (
           <p className="mt-3 text-xs text-fg-subtle">
@@ -752,6 +754,12 @@ export default function VoterDetailPage() {
   const p = profileQ.data;
   const v = p.voter;
   const h = p.household;
+  // Every time here is on a campaign's clock (docs/TIMEZONES.md §F): the voter's own campaign for the
+  // page, and for a survey or note from the person's row in another campaign, that campaign's. The
+  // organization's zone is only the fallback for a profile that names none.
+  const zone = p.timeZone || orgTz;
+  const zones = new Map((p.otherCampaigns || []).filter((c) => c.timeZone).map((c) => [c.campaignId, c.timeZone]));
+  const zoneOf = (campaignId) => (campaignId && zones.get(String(campaignId))) || zone;
 
   return (
     <div className="max-w-4xl">
@@ -763,7 +771,7 @@ export default function VoterDetailPage() {
         )}
         {v.doorAdded && (
           <span className="rounded-full bg-brand-tint px-2 py-0.5 text-xs font-medium text-brand-tint-fg">
-            Added at the door{v.doorAdded.by ? ` by ${v.doorAdded.by.name}` : ''}{v.doorAdded.at ? ` · ${fmtDate(v.doorAdded.at, orgTz, false)}` : ''}
+            Added at the door{v.doorAdded.by ? ` by ${v.doorAdded.by.name}` : ''}{v.doorAdded.at ? ` · ${fmtDate(v.doorAdded.at, zone, false)}` : ''}
           </span>
         )}
         {v.party && <span className="rounded-full bg-sunken px-2 py-0.5 text-xs text-fg-muted">{v.party}</span>}
@@ -782,7 +790,7 @@ export default function VoterDetailPage() {
         saving={saveVoter.isPending}
         onSave={(body, done) => saveVoter.mutate(body, { onSuccess: done })}
         canEdit={canManage}
-        tz={orgTz}
+        tz={zone}
       />
 
       <DncSection
@@ -791,7 +799,7 @@ export default function VoterDetailPage() {
         onFlag={(reason) => flagDnc.mutate(reason)}
         onUnflag={() => { if (window.confirm('Remove the do-not-contact flag from this voter?')) unflagDnc.mutate(); }}
         canEdit={canManage}
-        tz={orgTz}
+        tz={zone}
       />
 
       <Section title="Household & campaign">
@@ -864,7 +872,7 @@ export default function VoterDetailPage() {
                 }
                 onDelete={() => { if (window.confirm('Delete this survey response?')) delSurvey.mutate({ responseId: s.id, rowId: s.voterId }); }}
                 canEdit={canManage}
-                tz={orgTz}
+                tz={zoneOf(s.campaignId)}
               />
             ))}
             {(p.overwrittenSurveys || []).map((s) => (
@@ -878,7 +886,7 @@ export default function VoterDetailPage() {
                     const admin = s.overwrittenBy?.name || 'an admin';
                     if (
                       window.confirm(
-                        `Put back the answers and the note from before ${admin}'s change on ${fmtDate(s.overwrittenAt, orgTz)}? ` +
+                        `Put back the answers and the note from before ${admin}'s change on ${fmtDate(s.overwrittenAt, zoneOf(s.campaignId))}? ` +
                           'The current ones are kept the same way, so you can swap back.'
                       )
                     ) {
@@ -887,7 +895,7 @@ export default function VoterDetailPage() {
                     return;
                   }
                   const loser = s.by?.name || 'the earlier canvasser';
-                  const when = fmtDate(s.submittedAt, orgTz);
+                  const when = fmtDate(s.submittedAt, zoneOf(s.campaignId));
                   if (
                     window.confirm(
                       `Restore ${loser}'s answers from ${when}? This swaps the two responses: ` +
@@ -913,7 +921,7 @@ export default function VoterDetailPage() {
                     eraseSurvey.mutate({ archiveId: s.id, rowId: s.voterId });
                   }
                 }}
-                tz={orgTz}
+                tz={zoneOf(s.campaignId)}
               />
             ))}
           </div>
@@ -947,7 +955,7 @@ export default function VoterDetailPage() {
                     <button onClick={() => delNote.mutate(n.id)} className="shrink-0 text-xs text-danger hover:underline">Delete</button>
                   )}
                 </div>
-                <p className="mt-1 text-xs text-fg-subtle">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt, orgTz)}{n.editedAt ? ' · edited' : ''}</p>
+                <p className="mt-1 text-xs text-fg-subtle">{n.author ? n.author.name : 'Unknown'} · {fmtDate(n.createdAt, zoneOf(n.campaignId))}{n.editedAt ? ' · edited' : ''}</p>
               </li>
             ))}
           </ul>
@@ -959,7 +967,7 @@ export default function VoterDetailPage() {
               {p.notes.field.map((n) => (
                 <li key={`${n.source}-${n.id}`} className="rounded border border-border p-3 text-sm">
                   <p className="whitespace-pre-wrap text-fg">{n.note}</p>
-                  <p className="mt-1 text-xs text-fg-subtle">{n.source === 'survey' ? 'Survey' : actionLabel(n.actionType)} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, orgTz)}</p>
+                  <p className="mt-1 text-xs text-fg-subtle">{n.source === 'survey' ? 'Survey' : actionLabel(n.actionType)} · {n.by ? n.by.name : 'Unknown'} · {fmtDate(n.timestamp, zoneOf(n.campaignId))}</p>
                 </li>
               ))}
             </ul>
@@ -976,7 +984,7 @@ export default function VoterDetailPage() {
               <li key={a.id} className="flex flex-wrap gap-x-2 text-fg-muted">
                 {/* The canonical label (statusColors.js): the slug with an underscore swapped read "not target". */}
                 <span className="font-medium text-fg">{actionLabel(a.actionType)}</span>
-                <span className="text-fg-subtle">· {fmtDate(a.timestamp, orgTz)}{a.by ? ` · ${a.by.name}` : ''}</span>
+                <span className="text-fg-subtle">· {fmtDate(a.timestamp, zone)}{a.by ? ` · ${a.by.name}` : ''}</span>
                 {a.note && <span className="text-fg-muted">— {a.note}</span>}
               </li>
             ))}
@@ -986,7 +994,7 @@ export default function VoterDetailPage() {
 
       {/* Admin-only (owner ruling 2026-09-30): its route is on the org router, which would 403 a
           lead — so the card is not mounted for them, not merely hidden on error. */}
-      {canManage && <StaffAccessCard voterId={voterId} tz={orgTz} />}
+      {canManage && <StaffAccessCard voterId={voterId} tz={zone} />}
 
       {/* Only door-added (walk-up) rows can be deleted — a mistaken or fraudulent entry typed
           at a door. Imported voters leave via re-import/undo-import or campaign deletion. */}
