@@ -4,7 +4,8 @@
 // Platform totals for the numbers strip. Read with `npm run migrate:platform-stats` (a read-only dry run
 // from the Heroku Run console): its "Would set the LIVE bucket to" line counts customer organizations
 // only. The printed AAPC ad says 95,000+ door knocks and 23,000+ surveys, so a refresh must never
-// publish lower than that. "Door knocks", never "doors knocked" (the ad's wording).
+// publish lower than that. "Door knocks", never "doors knocked" (the ad's wording). The owner sends
+// new totals after Election Day: change the numbers and `asOf` together.
 export const PLATFORM_TOTALS = {
   asOf: 'Nov 1, 2026',
   items: [
@@ -14,10 +15,6 @@ export const PLATFORM_TOTALS = {
     { value: '739,000+', label: 'voter records' },
   ],
 };
-
-// Client names shown on the site — each only with the client's written OK. Fox Bryant is listed as a
-// client only, never as who built or owns Doorline (the owner's addendum, Nov 1, 2026).
-export const CLIENTS = ['Fox Bryant'];
 
 // The public sample report: the demo campaign's report link, pinned so its address never changes
 // (SEED_DEMO_SHARE_TOKEN), and its password, printed beside every link to it. Null until the owner

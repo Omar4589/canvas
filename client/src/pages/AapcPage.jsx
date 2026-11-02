@@ -10,8 +10,10 @@ import AapcMockupCard from '../marketing/AapcMockupCard.jsx';
 
 // /aapc — the printed AAPC ad's own page (the owner's addendum 2 §4). The homepage banner links here
 // with ?src=home-banner; a request from this page carries that tag, or 'aapc' when the URL has none
-// (DemoRequestProvider defaultSource). Every control here books a meeting: the form asks When? and
-// offers a mobile number, because there's no table at the event — Omar emails or texts to set a time.
+// (DemoRequestProvider defaultSource). The page speaks in Omar's own voice (addendum 3 §7): its two
+// "Book 15 minutes with me" buttons book a meeting — the form asks When? and offers a mobile number,
+// because there's no table at the event — and Request a demo opens the plain demo form; both in the
+// first person (voice="first"). The homepage's banner and form stay in the third person.
 //
 // Prerendered with its own head and noindex (client/src/entry-prerender.jsx). The founder line
 // switches on Nov 18 by <html data-aapc-event> (marketing/aapc.js) — both lines are in the HTML,
@@ -29,13 +31,13 @@ const AD_BULLETS = [
 const BLOCKS = [
   {
     title: 'Proof',
-    body: "Every door recorded in the app carries a GPS stamp and its distance to the house. Doorline flags the knocks that don't add up — far from the house, seconds after the last door, several from one spot, or a fake-GPS app on Android — on your Audit page within seconds of syncing.",
+    body: "Every door recorded in the app carries a GPS stamp and its distance to the house. Doorline flags the knocks that don't add up — far from the house, seconds after the last door, several from one spot, or a fake-GPS app — on your Audit page within seconds of syncing.",
     href: '/#proof',
     link: 'How Doorline checks a door',
   },
   {
     title: 'Client reports',
-    body: 'Publish a report and the numbers freeze until you refresh. Send it as a password-protected link that expires on its own and can be revoked, or as a PDF. No canvasser or voter names.',
+    body: 'Publish a report and the numbers freeze until you refresh. Send it as a password-protected link that expires on its own and can be revoked, or as a PDF.',
     href: '/#reports',
     link: 'What your client sees',
   },
@@ -69,7 +71,7 @@ const AapcPage = () => {
 
   return (
     <div className="theme-light min-h-screen bg-white text-stone-900">
-      <DemoRequestProvider defaultSource="aapc" askWhen>
+      <DemoRequestProvider defaultSource="aapc" askWhen voice="first">
         <MarketingNav base="/" />
         <main>
           <section className="relative overflow-hidden bg-white">
@@ -116,8 +118,10 @@ const AapcPage = () => {
                   </div>
                 </div>
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-3.5">
-                  <DemoButton className={PRIMARY}>Book 15 minutes with Omar</DemoButton>
-                  <DemoButton className={SECONDARY}>Request a demo</DemoButton>
+                  <DemoButton className={PRIMARY}>Book 15 minutes with me</DemoButton>
+                  <DemoButton options={{ askWhen: false }} className={SECONDARY}>
+                    Request a demo
+                  </DemoButton>
                 </div>
               </div>
               <AapcMockupCard />
@@ -151,7 +155,7 @@ const AapcPage = () => {
               </h2>
               <p className="mt-3 text-base text-stone-600">Every canvasser and feature included.</p>
               <div className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-4 sm:max-w-none">
-                <DemoButton className={PRIMARY}>Book 15 minutes with Omar</DemoButton>
+                <DemoButton className={PRIMARY}>Book 15 minutes with me</DemoButton>
                 <SampleReport className="justify-center" />
               </div>
             </div>

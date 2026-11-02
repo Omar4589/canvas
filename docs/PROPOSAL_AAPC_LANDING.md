@@ -2,9 +2,9 @@
 
 The plan for the doorline.app landing page ahead of the **AAPC Election Post-Mortem (Nov 17, 2026)**:
 live by **Nov 14** for testing. Written 2026-11-01 from a browser review of the site, a claim-by-claim
-check of the page against the code, and the owner's answers; two owner addenda followed the same day.
-The brief and both addenda are kept below **verbatim**, with superseded lines marked, so later phases
-build from the same text. What shipped is documented where it lives: [MARKETING_SITE.md](MARKETING_SITE.md)
+check of the page against the code, and the owner's answers; two owner addenda followed the same day,
+and a third on Nov 2. The brief and the addenda are kept below **verbatim**, with superseded lines
+marked, so later phases build from the same text. What shipped is documented where it lives: [MARKETING_SITE.md](MARKETING_SITE.md)
 (the site, demo requests, prerendering, the banner, visit counts) and [CLIENT_PORTAL.md](CLIENT_PORTAL.md)
 (the shared-report map).
 
@@ -14,7 +14,8 @@ build from the same text. What shipped is documented where it lives: [MARKETING_
 |---|---|---|
 | 1 | Brief §3–6, and the §7.11 words removed from the current page | **Committed 2026-11-01 (`27e8711`)** — see *Phase 1, as built* |
 | 2 | §7–9 (new page structure, /aapc), the offline-queue fix in §10 | **Website half committed 2026-11-01 (`162feb1`)** — see *Phase 2 (website), as built*; **the queue fix committed 2026-11-01 (`fd7bc5e`)** — [PROPOSAL_OFFLINE_QUEUE.md](PROPOSAL_OFFLINE_QUEUE.md) §P, release steps in [OPERATIONS.md](OPERATIONS.md) (the owner's two privacy-policy edits go live before its phone update) |
-| 3 (after AAPC) | The rest of §10: the iOS fake-GPS check, isolation tests before any trust page, later polish | Not started |
+| Addendum 3 | Website copy and type (no client line, smaller hero top, no "on Android", no names paragraph, "any major vendor", the new founder note, /aapc in the first person); the sample report; the By book table; the iOS fake-GPS check brought forward | **Website changes built 2026-11-02 (uncommitted)** — see *Addendum 3, as built*. The sample report waits on the owner's Share steps; the By book table and the iOS check wait on his answers there |
+| 3 (after AAPC) | The rest of §10: isolation tests before any trust page, later polish (the iOS fake-GPS check moved to addendum 3) | Not started |
 
 ## Owner rulings during the build (2026-11-01)
 
@@ -579,8 +580,8 @@ f. Sample report: use the demo org, area map, door taps disabled, link expiry 36
 
 ## Addendum 1 (Omar, Nov 1) — verbatim
 
-1. Fox Bryant can be listed as a client: in the client names row (7.2) and on /aapc. Present it as a client only, not as who built or owns Doorline. This replaces the Fox Bryant line in section 1. Other client names still need written permission.
-2. Fox Bryant still publicly endorses i360, so nothing on the site should knock other platforms. Replace the founder note in 7.8 with:
+1. *(Superseded by addendum 3 §1: no client line.)* Fox Bryant can be listed as a client: in the client names row (7.2) and on /aapc. Present it as a client only, not as who built or owns Doorline. This replaces the Fox Bryant line in section 1. Other client names still need written permission.
+2. *(The quote is superseded by addendum 3 §6.)* Fox Bryant still publicly endorses i360, so nothing on the site should knock other platforms. Replace the founder note in 7.8 with:
    "I'm Omar. I run paid door programs, and I built Doorline because a door count shouldn't run on trust. Doorline checks every knock against the house it's for, and it's simple enough that canvassers are knocking minutes after the invite email." — Omar [last name], [title]
 3. Section 10: drop the trial-lock email. Omar activates accounts by hand.
 
@@ -617,7 +618,7 @@ f. Sample report: use the demo org, area map, door taps disabled, link expiry 36
    - Subhead: Simple for your canvassers. Total visibility for you.
    - Below that: the ad's three bullets, word for word, and a version of the ad's mockup card with the same example numbers, so the page reads as the ad's page.
    - Omar's photo with: "I'll be at the Post-Mortem in person. Grab 15 minutes, or book a demo for after the event." From Nov 18: "Missed me at AAPC? Book 15 minutes and I'll walk you through it."
-   - Buttons: [Book 15 minutes with Omar] [Request a demo]. Both open the same form. The "When?" select offers "At AAPC, Nov 17" only through Nov 17.
+   - Buttons: [Book 15 minutes with Omar] [Request a demo]. Both open the same form. *(Addendum 3 §7: "Book 15 minutes with me", and Request a demo opens the demo form, both in the first person.)* The "When?" select offers "At AAPC, Nov 17" only through Nov 17.
    - Then: the numbers strip, the three short blocks, the sample report link and the price line.
    - Requests keep their src: home-banner, or aapc when there's none.
 5. **Measuring the ad** (QR scans carry no tag).
@@ -629,3 +630,77 @@ f. Sample report: use the demo org, area map, door taps disabled, link expiry 36
    - On a 390×844 phone, the banner and the hero's "Request a demo" are both visible without scrolling.
    - A demo request started from the banner arrives with src=home-banner.
    - No page says "doors knocked" for platform totals.
+
+## Addendum 3 (Omar, Nov 2) — verbatim
+
+ADDENDUM 3 (Omar, Nov 2). Changes to the live site, building on your Nov 1 breakdown. Make the same change on /aapc wherever the same text appears.
+
+1. Numbers strip (homepage and /aapc)
+- Remove the client line ("Clients include Fox Bryant.") entirely.
+- Move "Doorline platform totals as of Nov 1, 2026." into that spot: right-aligned and smaller (text-xs, stone-400 or stone-500). Keep the date in the same constant.
+- Omar will send updated totals after Election Day; update the constant and the date then.
+
+2. Hero top padding
+- Less space above "FOR CANVASSING FIRMS AND CAMPAIGNS". On tablet and desktop, cut the hero's top padding about in half (sm:py-24 → sm:pt-12 sm:pb-24). Phones are fine as they are (pt-8). Check that the banner, header and eyebrow still have room at 1280 and 1440.
+
+3. Fake-GPS wording (Omar's decision: drop "on Android" now)
+- Proof bullet: "Catches fake-GPS apps".
+- FAQ "How do you catch canvassers who don't actually knock?": end the list with "plus fake-GPS apps".
+- /aapc Proof block: "or a fake-GPS app".
+- Update the "Words to avoid" doc so it no longer requires naming Android.
+- Still build iPhone detection: on iOS 15+, read CLLocation.sourceInformation.isSimulatedBySoftware through a small native module, since expo-location only reports `mocked` on Android. Send it with each result the same way the Android flag is sent, so it raises the same Audit flag and the same publish warning.
+- If the offline-queue fix (fd7bc5e) hasn't gone out in an app release yet, ship both in the same release. Tell Omar how long the iPhone update will take.
+
+4. Client reports section
+- Remove the paragraph that starts "No canvasser or voter names." (both sentences).
+- On /aapc, remove "No canvasser or voter names." from the Client reports block.
+- Leave the FAQ answer "What's in a shared report?" as it is.
+
+5. Voter file sources
+Replace "i360, L2, Data Trust, the state or your client" with "any major vendor" everywhere it appears:
+- Setup: "Upload the CSV or Excel file from any major vendor."
+- FAQ: "A voter file with addresses and state voter IDs, as CSV or Excel, from any major vendor."
+
+6. Founder note (homepage)
+- Replace the quote with this text (Omar may still edit it):
+  "I run door-to-door programs, and I couldn't always tell which numbers were real. Some canvassers mark doors they never knocked. Some fill in surveys just to hit a goal. I got tired of guessing, so I built Doorline. Now I see every knock on a map, I know exactly what's being counted, and my canvassers get set up from one email. If you run doors, I'd love to show you how it works."
+- Typography: it should read like a personal note, not a headline.
+  - Set it in a warm serif at regular weight, not semibold. Self-host Source Serif 4 (or Newsreader), Latin subset, loaded only for this block.
+  - About 22px on desktop and 19px on phones, line-height ~1.6, stone-800.
+  - No curly quote marks.
+- Name: "Omar Zumaya, Founder, Doorline" is confirmed (no longer a placeholder), in the site's sans. If Omar sends a photo of his signature (black pen on white paper), add it above his name as a small image.
+- Photo: when Omar sends a headshot, replace the "OZ" monogram here and on /aapc.
+
+7. /aapc in first person
+- Both buttons: "Book 15 minutes with me". The homepage banner keeps "with Omar".
+- Booking form intro (opened from those buttons): "Book 15 minutes with me, at the event or after. I'll email or text you to set a time."
+- Demo form intro when opened from the /aapc "Request a demo" button: "Tell me about your team and I'll reply within one business day to set up a 20-minute walkthrough."
+- On the homepage, the form stays in third person.
+
+8. Before Nov 17 (these matter most for people coming from the ad)
+- Sample report: set up the sample report link from the demo campaign (area map, 365-day expiry, password shown beside the button). Then switch the hero, Reports and final buttons from "See how it works" to "Open a sample report". If Omar has to create the link in the console, give him the exact steps.
+- By-book table: the printed ad promises "Numbers by pass, book and canvasser", and people coming from the ad will ask to see it in demos. Move the By-book table ahead of AAPC if it fits. If it doesn't, tell Omar what he can show for "by book" today.
+
+9. Checks
+- Neither the homepage nor /aapc mentions Fox Bryant, and the date sits small on the right of the numbers strip.
+- "on Android" no longer appears anywhere on the site.
+- "No canvasser or voter names." appears only in the FAQ.
+- The page copy no longer names i360, L2 or Data Trust.
+- /aapc buttons and both form intros are in first person, before and after Nov 18.
+- The sample report opens on a phone with the password shown on the page.
+
+## Addendum 3, as built — 2026-11-02
+
+- **§1–§7 (website), built:** the numbers strip's client line is gone (`CLIENTS` deleted) and the totals'
+  date sits small on the right; the hero's top padding is `sm:pt-12` (phones keep `pt-8`); no platform is
+  named for fake-GPS apps; the Client reports band's names paragraph and /aapc's sentence are gone (the
+  FAQ keeps it); "any major vendor" in Setup and the FAQ; the new founder note in Source Serif 4 (Latin,
+  400, self-hosted via `@fontsource/source-serif-4`, imported by `FounderNote.jsx` alone), 19 px / 22 px,
+  line-height 1.6, stone-800, no quote marks; /aapc's two buttons read *Book 15 minutes with me*, its
+  Request a demo opens the demo form (`askWhen: false`), and the dialog speaks in the first person there
+  (`DemoRequestProvider voice="first"`) — title, intro and thank-you, so the voice never switches midway.
+  /aapc's meta description (link previews, search) keeps *"Book 15 minutes with Omar"*: out of context,
+  "me" has no one to point to. Words to avoid updated (MARKETING_SITE.md).
+- **Waiting on the owner:** the totals after Election Day; his headshot and signature scan; the sample
+  report's Share steps (then its link and password go into `siteFacts.js`, and every "See how it works"
+  becomes "Open a sample report"); his answers on the By book table and the iOS release.

@@ -8,7 +8,8 @@ import shotPortal from '../assets/marketing/shot-portal.webp';
 //
 // What a shared report contains is a published privacy claim (privacy.html, "report pages"), so this
 // copy names only what the share link really returns — no "identity stripped" shorthand. The PDF is
-// real (lib/reportPdf.js; it leaves the map out). The sample report link appears once it exists.
+// real (lib/reportPdf.js; it leaves the map out). The sample report link appears once it exists. What a
+// report leaves out is the FAQ's to say ("What's in a shared report?"), not this band's (addendum 3).
 export default function PortalSpotlight() {
   return (
     <section id="reports" className="scroll-mt-16 border-y border-brand-100 bg-brand-50">
@@ -25,11 +26,6 @@ export default function PortalSpotlight() {
             a map of the doors you&apos;ve covered. They change only when you refresh, and the report
             says when. Send it as a password-protected link that expires on its own and can be revoked,
             or as a PDF. No accounts, no logins, no &ldquo;can you re-send the file&rdquo;.
-          </p>
-          <p className="mt-3 max-w-[54ch] text-base text-stone-600">
-            <span className="font-semibold text-stone-900">No canvasser or voter names.</span> The map
-            shows results by area — or, when you turn it on for a report, every home you&apos;ve knocked,
-            with its address and answers, for the candidate or campaign manager who asks.
           </p>
           <SampleReport className="mt-6" />
         </div>

@@ -29,7 +29,8 @@ const DemoRequestContext = createContext(null);
  *   · source: an attribution tag for this one control. The page's own ?src= tag always wins over it,
  *     and it wins over the provider's defaultSource ('aapc' on /aapc).
  *   · askWhen: also ask "When?" (and offer a mobile number) — /aapc's "15 minutes at the event or
- *     after". Defaults to the provider's askWhen, so every control on /aapc asks.
+ *     after". Defaults to the provider's askWhen, so /aapc's controls ask unless one says otherwise
+ *     (its Request a demo passes askWhen: false).
  */
 export const useDemoRequest = () => {
   const ctx = useContext(DemoRequestContext);
@@ -46,6 +47,25 @@ const SCHEDULING_URL = null;
 // A booking (any dialog that asks When?) is a 15-minute meeting, at the event or after. There's no
 // table at AAPC, so Omar emails or texts to set the time — hence the optional mobile number.
 const MEETING = '15 minutes';
+
+// The dialog's words, in two voices: about Omar on the homepage, and Omar's own on /aapc, whose page he
+// signs (the provider's voice="first"; the owner's addendum 3 §7).
+const WORDS = {
+  third: {
+    bookTitle: `Book ${MEETING} with ${OWNER}`,
+    bookIntro: `Book ${MEETING} with ${OWNER}, at the event or after. He'll email or text you to set a time.`,
+    demoIntro: `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
+    bookThanks: `${OWNER} will email or text you to set a time.`,
+    demoThanks: `${OWNER} will email you ${REPLY_WINDOW}.`,
+  },
+  first: {
+    bookTitle: `Book ${MEETING} with me`,
+    bookIntro: `Book ${MEETING} with me, at the event or after. I'll email or text you to set a time.`,
+    demoIntro: `Tell me about your team and I'll reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
+    bookThanks: `I'll email or text you to set a time.`,
+    demoThanks: `I'll email you ${REPLY_WINDOW}.`,
+  },
+};
 
 // Neutral focus on the fields: a red ring reads as an error on a form. Buttons keep the brand ring.
 const FIELD_CLASS =
@@ -114,6 +134,7 @@ const DemoDialog = ({ options, onClose }) => {
   // window (marketing/aapc.js aapcEventPhase).
   const whenOptions = aapcEventPhase() === 'before' ? [WHEN_AT_AAPC, WHEN_AFTER] : [WHEN_AFTER];
   const booking = options.askWhen;
+  const words = WORDS[options.voice] || WORDS.third;
 
   const set = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
@@ -248,7 +269,7 @@ const DemoDialog = ({ options, onClose }) => {
               Thanks, {firstName}.
             </h2>
             <p className="mt-3 text-[15px] text-stone-600">
-              {booking ? `${OWNER} will email or text you to set a time.` : `${OWNER} will email you ${REPLY_WINDOW}.`}
+              {booking ? words.bookThanks : words.demoThanks}
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
               {SCHEDULING_URL && (
@@ -277,12 +298,10 @@ const DemoDialog = ({ options, onClose }) => {
         ) : (
           <>
             <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
-              {booking ? `Book ${MEETING} with ${OWNER}` : 'See Doorline run your next canvass'}
+              {booking ? words.bookTitle : 'See Doorline run your next canvass'}
             </h2>
             <p className="mt-2 text-[15px] text-stone-600">
-              {booking
-                ? `Book ${MEETING} with ${OWNER}, at the event or after. He'll email or text you to set a time.`
-                : `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`}
+              {booking ? words.bookIntro : words.demoIntro}
             </p>
 
             <form onSubmit={onSubmit} noValidate className="mt-5 space-y-4">
@@ -439,8 +458,9 @@ const DemoDialog = ({ options, onClose }) => {
 };
 
 // defaultSource: the tag a request from this page carries when its URL has none ('aapc' on /aapc).
-// askWhen: whether every control on the page books a meeting (When? + mobile number) — /aapc.
-export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = false }) => {
+// askWhen: whether the page's controls book a meeting (When? + mobile number) unless one says otherwise —
+// /aapc. voice: 'third' (about Omar, the homepage) or 'first' (Omar's own words, /aapc).
+export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = false, voice = 'third' }) => {
   // null = closed; otherwise the options open() was called with.
   const [openWith, setOpenWith] = useState(null);
   // The control that opened the dialog, so focus goes back where it came from on close —
@@ -453,9 +473,9 @@ export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = 
     (opts) => {
       invoker.current = document.activeElement;
       const o = opts && typeof opts === 'object' && !('nativeEvent' in opts) ? opts : {};
-      setOpenWith({ source: o.source || null, defaultSource, askWhen: o.askWhen ?? askWhen });
+      setOpenWith({ source: o.source || null, defaultSource, askWhen: o.askWhen ?? askWhen, voice });
     },
-    [defaultSource, askWhen]
+    [defaultSource, askWhen, voice]
   );
 
   const closeDialog = useCallback(() => {

@@ -8,14 +8,15 @@ import shotLocations from '../assets/marketing/shot-locations.webp';
 //
 // Every line is checked against the code (docs/PROPOSAL_AAPC_LANDING.md → "Claim check"). Watch:
 //   · "every LIVE count" — a published client report keeps its numbers until someone refreshes it;
-//   · fake-GPS detection is Android only (iOS reports nothing);
+//   · fake-GPS apps: no platform named (the owner's addendum 3). Android reports them today; the iPhone
+//     check (iOS 15+) comes with the next app build;
 //   · the publish warning counts open fake-GPS flags only;
 //   · billing counts by month, hence "each month".
 // `#oversight` stays as an alias: the static pages (privacy, terms, app, delete-account, 404) link to
 // it from before this section existed.
 const BULLETS = [
   'Flags doors recorded far from the house, seconds after the last door, or several houses from one spot',
-  'Catches fake-GPS apps on Android',
+  'Catches fake-GPS apps',
   'Warns you before you publish a client report with fake-GPS flags still open',
   'Hour-by-hour knocks per canvasser, with overlapping knocks counted once',
   'Shows where each result was recorded from, with a line to its house',

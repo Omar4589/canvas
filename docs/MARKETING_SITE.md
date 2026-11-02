@@ -46,10 +46,15 @@ where they say "this is a real, published app" rather than "install this now."
 ## What's on the homepage
 
 Top to bottom (the AAPC brief's §7, Nov 2026): the AAPC banner (while it runs), the header, the hero,
-the **numbers** (platform totals and the client line), **the problem** (four ways a door program goes
+the **numbers** (platform totals, dated small on the right — no client names since the owner's addendum
+3), **the problem** (four ways a door program goes
 wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit page and the map),
 **Client reports**, **Setup** (from the voter file to the first knock), the feature cards, the founder's
-note with the **Your data** list, the FAQ, and the closing band. The section links in the header are
+note with the **Your data** list, the FAQ, and the closing band. The founder's note is Omar's own words,
+set like a personal note: a warm serif (Source Serif 4, self-hosted, used by this block alone) at regular
+weight, about 22 px on a computer and 19 px on a phone, with no quote marks, signed *Omar Zumaya,
+Founder, Doorline* in the site's usual type. A monogram stands in for his photo until he sends one, and a
+scan of his signature will sit above his name when he sends that. The section links in the header are
 Proof · Reports · Setup · FAQ.
 
 ## Requesting a demo
@@ -61,10 +66,14 @@ firm, campaign, party or committee, advocacy group), team size, **how they heard
 event, referral, search, other — the printed AAPC ad's QR code carries no tag, so this question is
 the only way to tie a scan to a lead), and anything else.
 
-On `/aapc` every button books a meeting instead: the form reads *"Book 15 minutes with Omar, at the
-event or after. He'll email or text you to set a time."*, asks **when** (*"At AAPC, Nov 17"* is
-offered through Nov 17 itself), and offers an optional **mobile number** — there's no table at the
-event, so Omar texts or emails to set the time. The thank-you says the same.
+On `/aapc` the page speaks in Omar's own voice. Its two **Book 15 minutes with me** buttons book a
+meeting: the form reads *"Book 15 minutes with me, at the event or after. I'll email or text you to set a
+time."*, asks **when** (*"At AAPC, Nov 17"* is offered through Nov 17 itself), and offers an optional
+**mobile number** — there's no table at the event, so Omar texts or emails to set the time. Its **Request
+a demo** opens the demo form, also in the first person: *"Tell me about your team and I'll reply within
+one business day to set up a 20-minute walkthrough."* The thank-you follows the same voice. On the
+homepage the form, the banner (*"…Book 15 minutes with Omar"*) and the thank-you stay in the third
+person.
 
 The buttons work even before the page has finished loading: until then a tap opens an email to
 `hello@doorline.app`; once the page is ready, the same tap opens the form.
@@ -109,7 +118,7 @@ days.
 `doorline.app/aapc` is the printed AAPC ad's own page: the ad's headline (*Every door. Every pass.
 Every number.*), its subhead and its three bullets word for word, a copy of its "Beaverdale · Pass 2"
 card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem in
-person…"*, switching on Nov 18 to *"Missed me at AAPC?…"*), **Book 15 minutes with Omar** and
+person…"*, switching on Nov 18 to *"Missed me at AAPC?…"*), **Book 15 minutes with me** and
 **Request a demo**, the numbers, three short blocks (Proof, Client reports, Many campaigns) and the
 price. It stays up after the event with the after-event line. Search engines are asked not to list it
 (it's an event page), and a link shared from it previews as Doorline's.
@@ -223,10 +232,11 @@ overstate what Doorline does, so they stay off the site:
 | "the moment it happens" | flags are worked out when the Audit page loads, which refreshes every 20 seconds | "within seconds of syncing" |
 | "syncs automatically", "in the background" | the queue sends on reconnect, app open, the next tap or sign-in — never in the background, and only while the person who recorded it is signed in | "send as soon as there's signal again" |
 | "pings", "ping trails" | the app never tracks a canvasser between doors (a privacy-policy promise) | "where each result was recorded from, with a line to its house" |
-| "voter identity stripped" | shared reports leave out names, but a house-level map — an opt-in per report — shows every knocked home's address and answers | name exactly what's left out: "No canvasser or voter names" |
+| "voter identity stripped" | shared reports leave out names, but a house-level map — an opt-in per report — shows every knocked home's address and answers | name exactly what's left out, and only in the FAQ's *What's in a shared report?*: "No canvasser or voter names" (the owner's addendum 3 took it out of the Client reports band and /aapc) |
 | "side-by-side comparisons" | there is one sortable table of every canvasser | "one table that ranks every canvasser" |
 | "optimized walk order" | the order is a straight-line route, not a street route | "every book comes with a walk order" |
-| "dedicated fake-GPS alert" | fake-GPS detection works on Android only | "fake-GPS apps on Android" |
+| "dedicated fake-GPS alert" | it's one flag among the Audit page's flags, not a separate alert | "Catches fake-GPS apps" — no platform named (the owner's decision, addendum 3: Android reports them today, and the iPhone check, iOS 15 and later, comes with the next app build) |
+| a vendor list ("i360, L2, Data Trust…") | naming vendors invites "do you work with mine?"; the import reads any vendor's columns | "any major vendor" |
 | "coverage" as a share of the universe | reports carry no such percentage | doors knocked, contact rate |
 | "Nothing bad" | glib, and not quite true (see the first row) | "They keep knocking" |
 
@@ -424,8 +434,8 @@ plain `#proof` — a `/#proof` would reload a tagged `/?src=…` and lose the ta
   (customer organizations only; the Control Room's overview cards count demo campaigns, and its
   lifetime panel banks deleted test campaigns). Round down, and date the caption. The printed ad says
   95,000+ door knocks and 23,000+ surveys, so never publish lower.
-- **Client names** (`CLIENTS`): each only with the client's written OK. Fox Bryant is a client, never
-  presented as who built or owns Doorline.
+- **Client names**: none on the site since the owner's addendum 3 (the numbers strip's client line is
+  gone). Any that come back need the client's written OK.
 - **The sample report** (`SAMPLE_REPORT`): `/r/<token>` and its password, set after the four steps in
   Part 1. `routes/public/share.js` `isPublicSample` exempts exactly that token, and only while its link
   belongs to an internal organization, from the per-link wrong-password budget, and raises its

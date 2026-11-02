@@ -19,6 +19,9 @@ export default {
         // InterVariable is self-hosted via @fontsource-variable/inter (main.jsx);
         // the system stack is the graceful fallback if it ever fails to load.
         sans: ['InterVariable', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        // The homepage founder's note only. Source Serif 4 is self-hosted via @fontsource/source-serif-4,
+        // its Latin face imported by marketing/FounderNote.jsx alone, so no other page loads it.
+        serif: ['"Source Serif 4"', 'Georgia', 'serif'],
       },
       colors: {
         brand: {

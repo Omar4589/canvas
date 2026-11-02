@@ -11,7 +11,7 @@ const ITEMS = [
   {
     q: 'What do we need to get started?',
     // Advice only: Doorline connects them with a vendor and never obtains or handles the file itself.
-    a: "A voter file with addresses and state voter IDs, as CSV or Excel, from i360, L2, Data Trust, the state or your client. Don't have one? We'll connect you with a vendor.",
+    a: "A voter file with addresses and state voter IDs, as CSV or Excel, from any major vendor. Don't have one? We'll connect you with a vendor.",
   },
   {
     q: 'What happens when a canvasser loses signal?',
@@ -19,7 +19,7 @@ const ITEMS = [
   },
   {
     q: "How do you catch canvassers who don't actually knock?",
-    a: 'Every door is GPS-stamped with its distance to the house. Doorline flags doors recorded far from the house, seconds after the last door, or several from one spot, plus fake-GPS apps on Android. Flags land on your Audit page within seconds of syncing, and Doorline warns you before you publish a client report with fake-GPS flags still open.',
+    a: 'Every door is GPS-stamped with its distance to the house. Doorline flags doors recorded far from the house, seconds after the last door, or several from one spot, plus fake-GPS apps. Flags land on your Audit page within seconds of syncing, and Doorline warns you before you publish a client report with fake-GPS flags still open.',
   },
   {
     // The answer to a live-tracking assumption, and a published promise (privacy.html: location is

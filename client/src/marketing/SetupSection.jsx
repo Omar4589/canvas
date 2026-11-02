@@ -23,8 +23,7 @@ const SetupSection = () => (
         <div className="flex flex-col">
           <h3 className="text-[22px] font-bold tracking-tight text-stone-900">Bring any voter file</h3>
           <p className="mt-3 max-w-[56ch] text-base text-stone-600">
-            Upload the CSV or Excel file from i360, L2, Data Trust, the state or your client. Doorline
-            recognizes their columns, shows what will change before anything is written, and maps every
+            Upload the CSV or Excel file from any major vendor. Doorline recognizes their columns, shows what will change before anything is written, and maps every
             address it can match; the rest wait for you to place by hand. Cut balanced books to the size
             you want, by precinct or district, or draw them by hand. Re-cut between passes without losing
             knock history.
