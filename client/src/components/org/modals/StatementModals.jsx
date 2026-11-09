@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Badge, Button, Input, Modal, Textarea } from '../../ui/index.js';
 import { fmtUsd } from '../../../lib/billingStatus.jsx';
-import { monthLabel } from '../../../lib/months.js';
+import { campaignDayLabel, monthLabel, renewalGraceEnd } from '../../../lib/months.js';
 import { formatDate } from '../../../lib/dates.js';
+import { todayInTz } from '../../../lib/datePresets.js';
 
 // The four irreversible billing actions, each as a real dialog that states its consequence.
 //
@@ -12,6 +13,27 @@ import { formatDate } from '../../../lib/dates.js';
 
 const errText = (err) => err?.message || 'Something went wrong.';
 
+// A billed monthly-renewal line whose renewal can still turn free: the campaign is still running, and
+// on its own calendar today is before the renewal (archive first and it never happens) or within its
+// 3 days (archive with nobody out and it's free — billingMonths.js 'renewal-grace'). Either would make
+// the issued invoice show drift (§E of docs/PROPOSAL_BILLING_CYCLES.md). Never the campaign's FIRST
+// month: that renewal is the first visit, which always bills. The "month has ended" gate reads UTC, so
+// a US campaign's month can be issued on the evening of its last day, and an ordinary issue on the 1st
+// can land inside a 30th or 31st renewal's window — closed months that still have a renewal to settle.
+const openRenewal = (l) => {
+  if (!l?.billable || l.billingRule !== 'cycle' || !l.isActive || !l.renewalDay) return null;
+  if (l.renewalDay === l.firstVisitDay) return null;
+  const until = renewalGraceEnd(l.renewalDay);
+  let today;
+  try {
+    today = todayInTz(l.timeZone || 'America/New_York');
+  } catch {
+    today = todayInTz();
+  }
+  if (!until || until < today) return null;
+  return { name: l.name, renewalDay: l.renewalDay, until, upcoming: l.renewalDay > today };
+};
+
 // ---- Issue -------------------------------------------------------------------
 
 export function IssueStatementModal({ months, orgName, termsDays, currentMonth, onClose, onIssue, pending, error, results }) {
@@ -19,6 +41,9 @@ export function IssueStatementModal({ months, orgName, termsDays, currentMonth, 
   const [forceAck, setForceAck] = useState(false);
   const open = months.filter((m) => m.month >= currentMonth);
   const needsForce = open.length > 0;
+  // Closed and open months alike: a closed month can still hold a renewal inside its 3 days, and an
+  // open one (issued early) can hold one that hasn't happened yet.
+  const renewals = months.flatMap((m) => (m.lines || []).map(openRenewal).filter(Boolean));
   const total = months.reduce((n, m) => n + (m.totalCents || 0), 0);
   const one = months.length === 1;
 
@@ -98,6 +123,23 @@ export function IssueStatementModal({ months, orgName, termsDays, currentMonth, 
               <input type="checkbox" checked={forceAck} onChange={(e) => setForceAck(e.target.checked)} />
               Issue anyway
             </label>
+          </div>
+        )}
+
+        {renewals.length > 0 && (
+          <div className="rounded-md border border-warning/30 bg-warning-tint px-3 py-2.5 text-sm text-warning-fg">
+            <p className="font-semibold">
+              {renewals.length === 1
+                ? `${renewals[0].name}’s renewal on ${campaignDayLabel(renewals[0].renewalDay)} can still turn free.`
+                : `${renewals.length} renewals in ${one ? 'this month' : 'these months'} can still turn free.`}
+            </p>
+            <p className="mt-1">
+              {renewals.length !== 1
+                ? 'Each is free if its campaign is archived before its renewal date, or on that day or the two after it with nobody out since, and this invoice would then show it as drift.'
+                : renewals[0].upcoming
+                  ? `If the campaign is archived before then, or by ${campaignDayLabel(renewals[0].until)} with nobody out since, that renewal is free, and this invoice will show it as drift.`
+                  : `If the campaign is archived by ${campaignDayLabel(renewals[0].until)} with nobody out since, that renewal is free, and this invoice will show it as drift.`}
+            </p>
           </div>
         )}
 

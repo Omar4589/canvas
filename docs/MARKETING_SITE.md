@@ -46,14 +46,13 @@ where they say "this is a real, published app" rather than "install this now."
 ## What's on the homepage
 
 Top to bottom (the AAPC brief's §7, Nov 2026): the AAPC banner (while it runs), the header, the hero,
-the **numbers** (platform totals, dated small on the right — no client names since the owner's addendum
-3), **the problem** (four ways a door program goes
+the **numbers** (three platform totals in red — door knocks, surveys, campaigns — dated small on the
+right; no client names since the owner's addendum 3, no voter-record count since Nov 2), **the problem** (four ways a door program goes
 wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit page and the map),
 **Client reports**, **Setup** (from the voter file to the first knock), the feature cards, the founder's
 note with the **Your data** list, the FAQ, and the closing band. The founder's note is Omar's own words,
-set like a personal note: a warm serif (Source Serif 4, self-hosted, used by this block alone) at regular
-weight, about 22 px on a computer and 19 px on a phone, with no quote marks, signed *Omar Zumaya,
-Founder, Doorline* in the site's usual type. A monogram stands in for his photo until he sends one, and a
+set as a quote in the site's usual type — semibold, inside quotation marks (a serif without them was tried
+on Nov 2 and dropped the next day) — signed *Omar Zumaya, Founder, Doorline*. A monogram stands in for his photo until he sends one, and a
 scan of his signature will sit above his name when he sends that. The section links in the header are
 Proof · Reports · Setup · FAQ.
 
@@ -419,8 +418,8 @@ Single sources of truth, and CTAs must read from them rather than hard-coding:
   Wi-Fi); once live, its click opens the dialog. The provider wraps each page; `/aapc` passes
   `defaultSource="aapc"` and `askWhen`, so every control there books a meeting. The source a request
   sends is `pageSource() || options.source || defaultSource` — a tagged URL always wins.
-- [`siteFacts.js`](../client/src/marketing/siteFacts.js) — the platform totals, the client names and
-  the sample report's link and password (*The facts the pages state* below).
+- [`siteFacts.js`](../client/src/marketing/siteFacts.js) — the three platform totals and the sample
+  report's link and password (*The facts the pages state* below).
 - [`SampleReport.jsx`](../client/src/marketing/SampleReport.jsx) — every "Open a sample report",
   always with its password; the hero's falls back to "See how it works" until the link exists.
 

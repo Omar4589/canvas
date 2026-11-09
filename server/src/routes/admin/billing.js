@@ -2,11 +2,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireOrgRole } from '../../middleware/auth.js';
 import { orgContext } from '../../middleware/orgContext.js';
+import { requireBillingAccess } from '../../middleware/billingAccess.js';
 import { Campaign } from '../../models/Campaign.js';
 import { Organization } from '../../models/Organization.js';
 import { Subscription } from '../../models/Subscription.js';
 import { recomputeCampaignStats } from '../../services/reports/campaignCounters.js';
 import { entitlementFor } from '../../services/billing/entitlement.js';
+import { cycleBillingFrom } from '../../services/billing/billingMonths.js';
 import {
   BILLING_HISTORY_MAX_MONTHS,
   currentUsage,
@@ -22,12 +24,10 @@ import {
 const router = Router();
 router.use(requireAuth, orgContext, requireOrgRole('admin'));
 // Billing is restricted to the bill-payer admins (Membership.billingAccess) — not
-// every org admin. Super admins always pass.
-router.use((req, res, next) => {
-  if (req.user?.isSuperAdmin) return next();
-  if (req.activeMembership?.billingAccess) return next();
-  return res.status(403).json({ error: 'Billing is restricted to billing admins.', code: 'billing-access-required' });
-});
+// every org admin. Super admins always pass. The predicate is shared with the archive reminder's
+// renewal dates (routes/admin/billingRenewals.js), which live on a sibling prefix so that
+// everything on THIS router stays billing-gated.
+router.use(requireBillingAccess);
 
 // No rate here, deliberately. Pricing is negotiated per client and per race, so it belongs in a
 // conversation with the account manager rather than on the customer's dashboard — see
@@ -58,6 +58,9 @@ router.get('/', async (req, res, next) => {
       // (services/reports/billRestricted.js). Affects only the org's own door totals — never
       // what Doorline charges, which is flat per campaign per month.
       billRestrictedDoors: Boolean(org?.billRestrictedDoors),
+      // The day campaigns started renewing monthly from their first visit ('YYYY-MM-DD'), so the
+      // page can name it without a second copy of the constant (services/billing/billingMonths.js).
+      cycleBillingFrom: cycleBillingFrom(),
     });
   } catch (err) {
     next(err);

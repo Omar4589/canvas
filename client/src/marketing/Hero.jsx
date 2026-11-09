@@ -89,7 +89,7 @@ export default function Hero() {
       />
       <DoorDots />
       <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 items-center gap-10 pb-16 pt-8 sm:gap-12 sm:pb-24 sm:pt-12 lg:grid-cols-[5fr_7fr]">
+        <div className="grid grid-cols-1 items-center gap-10 pb-16 pt-12 sm:gap-12 sm:pb-24 lg:grid-cols-[5fr_7fr]">
           <div>
             {/* One line from lg up: the copy column is ~380px at 1024 and ~433px from 1280. */}
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-brand-600 lg:text-[13px]">

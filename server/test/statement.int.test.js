@@ -24,7 +24,7 @@ const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { Subscription } = await import('../src/models/Subscription.js');
 const { SubscriptionEvent } = await import('../src/models/SubscriptionEvent.js');
 const { Statement } = await import('../src/models/Statement.js');
-const { monthlyStatement } = await import('../src/services/billing/statement.js');
+const { monthlyStatement, RULES_VERSION } = await import('../src/services/billing/statement.js');
 
 const URI = process.env.MONGODB_URI_TEST;
 const skip = URI ? false : 'set MONGODB_URI_TEST to run (needs a throwaway mongod)';
@@ -166,15 +166,16 @@ test('start-grace boundary: day 24 bills, day 25 does not (31-day month)', { ski
   assert.strictEqual((await verdict(free, '2026-01')).reason, 'start-grace');
 });
 
-test('start grace is leap-aware: Feb 2026 (28d) vs Feb 2028 (29d)', { skip }, async () => {
+test('start grace is leap-aware: Feb 2026 (28d) vs Feb 2024 (29d)', { skip }, async () => {
   // 28-day Feb → threshold 21: day 22 is graced.
   const short = await makeCampaign({ name: 'Feb 2026' });
   await visit(short, '2026-02-22T15:00:00Z');
   assert.strictEqual((await verdict(short, '2026-02')).reason, 'start-grace');
-  // 29-day Feb → threshold 22: the SAME day 22 bills.
-  const leap = await makeCampaign({ name: 'Feb 2028' });
-  await visit(leap, '2028-02-22T15:00:00Z');
-  assert.strictEqual((await verdict(leap, '2028-02')).reason, 'billable');
+  // 29-day Feb → threshold 22: the SAME day 22 bills. A leap year BEFORE the switch day: Feb 2028
+  // would renew monthly (rules v4), which bills its first month whatever the day, and prove nothing.
+  const leap = await makeCampaign({ name: 'Feb 2024' });
+  await visit(leap, '2024-02-22T15:00:00Z');
+  assert.strictEqual((await verdict(leap, '2024-02')).reason, 'billable');
 });
 
 test('grace is evaluated in the CAMPAIGN timezone, not UTC', { skip }, async () => {
@@ -370,7 +371,7 @@ test('issuing freezes a month; reissuing is a 409', { skip }, async () => {
   });
   assert.strictEqual(r.status, 201);
   assert.strictEqual(r.json.statement.month, '2026-02');
-  assert.strictEqual(r.json.statement.rulesVersion, 3);
+  assert.strictEqual(r.json.statement.rulesVersion, RULES_VERSION);
   assert.strictEqual(r.json.statement.externalRef, 'INV-1001');
   assert.ok(r.json.statement.lines.length > 0, 'campaign lines are frozen into the row');
 
@@ -687,4 +688,122 @@ test('deleting an organization takes its statements with it', { skip }, async ()
   const { deleteOrganization } = await import('../src/services/platform/deleteOrganization.js');
   await deleteOrganization(doomed);
   assert.strictEqual(await Statement.countDocuments({ organizationId: doomed._id }), 0);
+});
+
+// ---- monthly renewals (rules v4) ---------------------------------------------------------
+//
+// A campaign first out on or after the switch day (billingMonths.CYCLE_BILLING_FROM, 2026-11-05)
+// renews monthly from that visit; billingMonths.test.js owns the rule at every boundary. These use
+// real dates either side of the switch day, so they prove the constant too. They run LAST: each adds
+// campaigns to the org, which would read as added lines on statements the tests above issued.
+
+test('the switch is per campaign, by its first visit on its own calendar', { skip }, async () => {
+  const dayBefore = await makeCampaign({ name: 'Out Nov 4' });
+  await visit(dayBefore, '2026-11-04T15:00:00Z');
+  const onTheDay = await makeCampaign({ name: 'Out Nov 5' });
+  await visit(onTheDay, '2026-11-05T15:00:00Z');
+  // 10pm Nov 4 in Denver is 5am Nov 5 UTC: a November 4 visit there, so calendar months.
+  const denver = await makeCampaign({ name: 'Out Nov 4 Denver', tz: 'America/Denver' });
+  await visit(denver, '2026-11-05T05:00:00Z');
+  const s = await monthlyStatement(ctx.org._id, '2026-11');
+  const line = (c) => s.lines.find((l) => l.campaignId === String(c._id));
+  assert.strictEqual(line(dayBefore).billingRule, 'calendar');
+  assert.strictEqual(line(onTheDay).billingRule, 'cycle');
+  assert.strictEqual(line(onTheDay).renewalDay, '2026-11-05');
+  assert.strictEqual(line(denver).billingRule, 'calendar', 'judged on the campaign calendar, not UTC');
+  assert.strictEqual(line(denver).firstVisitDay, '2026-11-04');
+  assert.strictEqual(line(denver).renewalDay, null, 'calendar lines carry no renewal');
+});
+
+test('the September 15 campaign: two renewals bill, and November never renews', { skip }, async () => {
+  // 6pm EDT Nov 3 (DST ends Nov 7, 2027).
+  const c = await makeCampaign({ name: 'Sep 15 renewals', archivedAt: new Date('2027-11-03T22:00:00Z') });
+  await visit(c, '2027-09-15T15:00:00Z');
+  await visit(c, '2027-11-01T15:00:00Z');
+  await visit(c, '2027-11-03T15:00:00Z');
+  assert.deepStrictEqual(
+    await billedMonths(c, ['2027-08', '2027-09', '2027-10', '2027-11', '2027-12']),
+    ['2027-09', '2027-10']
+  );
+  const nov = await monthlyStatement(ctx.org._id, '2027-11');
+  const line = nov.lines.find((l) => l.campaignId === String(c._id));
+  assert.strictEqual(line.reason, 'archived-before-renewal');
+  assert.strictEqual(line.amountCents, 0);
+  assert.strictEqual(line.renewalDay, '2027-11-15', 'names the renewal that never happened');
+  assert.strictEqual(line.billingRule, 'cycle');
+  assert.strictEqual(line.billingStartMonth, '2027-09');
+  assert.strictEqual(line.firstVisitDay, '2027-09-15');
+  assert.strictEqual(line.archivedDay, '2027-11-03');
+  assert.strictEqual(line.timeZone, 'America/New_York');
+});
+
+test('the 3-day rule: nobody out since the renewal → free; one visit since → bills', { skip }, async () => {
+  const quiet = await makeCampaign({ name: 'Quiet renewal', archivedAt: new Date('2027-03-16T15:00:00Z') });
+  await visit(quiet, '2027-01-15T15:00:00Z');
+  // The day BEFORE the renewal: real work in March, but not since the renewal. (Calendar months
+  // would deny their end grace for it; renewals only ask about the days since.)
+  await visit(quiet, '2027-03-14T15:00:00Z');
+  const worked = await makeCampaign({ name: 'Worked renewal', archivedAt: new Date('2027-03-16T15:00:00Z') });
+  await visit(worked, '2027-01-15T15:00:00Z');
+  await visit(worked, '2027-03-15T15:00:00Z'); // on the renewal day itself
+  assert.strictEqual((await verdict(quiet, '2027-03')).reason, 'renewal-grace');
+  assert.strictEqual((await verdict(quiet, '2027-03')).amountCents, 0);
+  assert.strictEqual((await verdict(worked, '2027-03')).reason, 'billable');
+  assert.strictEqual((await verdict(quiet, '2027-02')).reason, 'billable', 'earlier renewals are untouched');
+});
+
+test('a renewal window that crosses a month end is read on the campaign calendar', { skip }, async () => {
+  // Anchor 30: March's renewal is Mar 30 and its window runs through Apr 1.
+  const c = await makeCampaign({ name: 'Window into April', archivedAt: new Date('2027-04-01T15:00:00Z') });
+  await visit(c, '2027-01-30T15:00:00Z');
+  assert.strictEqual((await verdict(c, '2027-03')).reason, 'renewal-grace');
+  assert.strictEqual((await verdict(c, '2027-04')).reason, 'archived-before-renewal');
+  // 11:30pm Mar 29 in Denver (5:30am Mar 30 UTC) is the day BEFORE the renewal there.
+  const d = await makeCampaign({ name: 'Window Denver', tz: 'America/Denver', archivedAt: new Date('2027-04-01T18:00:00Z') });
+  await visit(d, '2027-01-30T18:00:00Z');
+  await visit(d, '2027-03-30T05:30:00Z');
+  assert.strictEqual((await verdict(d, '2027-03')).reason, 'renewal-grace', 'Mar 29 is not since the Mar 30 renewal');
+  await visit(d, '2027-03-31T17:00:00Z'); // Mar 31, inside the window
+  assert.strictEqual((await verdict(d, '2027-03')).reason, 'billable');
+});
+
+test('a statement issued under the calendar rules shows no drift against the new code', { skip }, async () => {
+  const c = await makeCampaign({ name: 'Issued under v3' });
+  await visit(c, '2025-08-12T15:00:00Z');
+  const issued = await call('POST', `/super-admin/organizations/${ctx.org._id}/billing/statement/2025-08/issue`, {
+    token: ctx.superTok, body: {},
+  });
+  assert.strictEqual(issued.status, 201);
+  // The new line fields are frozen with the statement.
+  const frozen = await Statement.findById(issued.json.statement._id).lean();
+  const frozenLine = frozen.lines.find((l) => String(l.campaignId) === String(c._id));
+  assert.strictEqual(frozenLine.billingRule, 'calendar');
+  assert.strictEqual(frozenLine.firstVisitDay, '2025-08-12');
+  assert.strictEqual(frozenLine.timeZone, 'America/New_York');
+  assert.strictEqual(frozenLine.renewalDay, null);
+
+  // Now make it look exactly like a row issued before this change: rules v3, no new keys on any
+  // line, and the never-filled timeZone default.
+  await Statement.collection.updateOne(
+    { _id: frozen._id },
+    {
+      $set: { rulesVersion: 3, 'lines.$[].timeZone': '' },
+      $unset: {
+        'lines.$[].billingRule': '',
+        'lines.$[].renewalDay': '',
+        'lines.$[].firstVisitDay': '',
+        'lines.$[].archivedDay': '',
+      },
+    }
+  );
+  const legacy = await Statement.findById(frozen._id).lean();
+  assert.strictEqual(legacy.rulesVersion, 3);
+  assert.ok(!('billingRule' in legacy.lines[0]), 'a lean read of a legacy row has no key at all');
+
+  const read = await call('GET', `/super-admin/organizations/${ctx.org._id}/billing/statement?month=2025-08`, {
+    token: ctx.superTok,
+  });
+  assert.strictEqual(read.status, 200);
+  assert.strictEqual(read.json.rulesVersion, RULES_VERSION, 'the live recompute is on the new rules');
+  assert.strictEqual(read.json.drift, null, 'a rules bump and missing new keys are not drift');
 });

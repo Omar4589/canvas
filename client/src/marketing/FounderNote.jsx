@@ -1,10 +1,7 @@
-import '@fontsource/source-serif-4/latin-400.css';
-
 // The founder's note and the trust list. The note is the owner's own words (addendum 3, Nov 2, 2026;
-// he may still edit it), set like a personal note rather than a headline: a warm serif at regular
-// weight, no quote marks, the name in the site's sans. The serif's Latin face is imported here and only
-// here (tailwind `font-serif`). The monogram stands in for a photo until there is one — never a stock
-// face; a scan of his signature, when he sends one, goes above his name.
+// he may still edit it), set as a quote in the site's own type, inside quotation marks — he tried a
+// serif without them and asked for this look back (Nov 3). The monogram stands in for a photo until there
+// is one — never a stock face; a scan of his signature, when he sends one, goes above his name.
 //
 // Each trust line is a published promise, checked against the code and the privacy policy:
 // exports work even while an account is paused (do-not-contact voters are left out of every file);
@@ -22,12 +19,12 @@ const FounderNote = () => (
   <section className="bg-white">
     <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-12 px-4 py-16 sm:gap-14 sm:px-6 sm:py-24 lg:grid-cols-[7fr_5fr] lg:gap-20 lg:px-8">
       <figure>
-        <blockquote className="font-serif text-[19px] font-normal leading-[1.6] text-stone-800 [text-wrap:pretty] sm:text-[22px]">
-          I run door-to-door programs, and I couldn&apos;t always tell which numbers were real. Some
+        <blockquote className="text-xl font-semibold leading-relaxed text-stone-900 [text-wrap:pretty] sm:text-2xl sm:leading-relaxed">
+          &ldquo;I run door-to-door programs, and I couldn&apos;t always tell which numbers were real. Some
           canvassers mark doors they never knocked. Some fill in surveys just to hit a goal. I got tired of
           guessing, so I built Doorline. Now I see every knock on a map, I know exactly what&apos;s being
           counted, and my canvassers get set up from one email. If you run doors, I&apos;d love to show you
-          how it works.
+          how it works.&rdquo;
         </blockquote>
         <figcaption className="mt-6 flex items-center gap-3.5">
           <span

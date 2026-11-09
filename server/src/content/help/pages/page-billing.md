@@ -15,16 +15,16 @@ tags: billing, page, account, history, doors, invoice
 
 The card at the top shows your account state (Trial, Active, Past due, and so on) and what it means for your team right now. On a trial, it also shows the end date and days remaining.
 
-Below that is a reminder of when the meter starts and stops: a campaign starts billing the month of its first field visit, and keeps billing until you archive it.
+Below that is a reminder of when the meter starts and stops: a campaign starts billing with its first field visit, and keeps billing until you archive it. It also says how a month is counted — campaigns first out on or after November 5, 2026 renew monthly on the date of their first visit, and earlier ones bill by calendar month (see [Billing and your account](billing)).
 
 ## This month
 
-How many campaigns are canvassing this month, with each one listed underneath — the campaign name, the date its billing started, and the doors it's covered so far this month.
+How many campaigns are canvassing this month, with each one listed underneath — the campaign name, the date its billing started, the day it renews on (for a running campaign that renews monthly), and the doors it's covered so far this month.
 
 Two extra lines appear when they apply:
 
 - **Campaigns in setup** — created but nobody's been out yet. Free until the first knock.
-- **Campaigns that started in the last week of the month** — free for this month; billing begins on the 1st.
+- **Campaigns that started in the last week of the month** — free for this month; billing begins on the 1st. (Only campaigns first out before November 5, 2026 — newer ones renew from their first visit instead.)
 
 ## Month by month
 
@@ -37,7 +37,7 @@ The history table, newest month first. Each row gives you:
 | **Doors** | The number to invoice from — see *Doors vs knocks* below |
 | **Knocks** | Doors a canvasser actually knocked |
 
-Opening a month lists its campaigns with the date each started billing, its doors and knocks, and a short note on any that were free — *not billing yet*, *free — started in the last week*, *free — archived with no knocks*, or *minimum one month*.
+Opening a month lists its campaigns with the date each started billing, its doors and knocks, and a short note on any that were free — *not billing yet*, *free — started in the last week*, *free — archived with no knocks*, *minimum one month*, or, for a campaign that renews monthly, *free — archived before its renewal* or *free — archived within 3 days of its renewal*.
 
 It shows 12 months by default. **Show 24 months** extends it.
 

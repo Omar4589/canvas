@@ -58,9 +58,11 @@ export function statementDrift(issued, live) {
   const top = {};
   if (issued.totalCents !== live.totalCents) top.totalCents = { issued: issued.totalCents, live: live.totalCents };
   if (issued.rateCents !== live.rateCents) top.rateCents = { issued: issued.rateCents, live: live.rateCents };
-  if (issued.rulesVersion !== live.rulesVersion) {
-    top.rulesVersion = { issued: issued.rulesVersion, live: live.rulesVersion };
-  }
+  // `rulesVersion` is deliberately NOT compared. It says how a statement was computed, not that
+  // anything changed, and it is already printed on every statement. Reported alone it would flag
+  // every invoice issued before a rules bump (v3 → v4, Nov 2026) as changed; attached to real drift
+  // it would suggest the rule change caused it. A retroactive rule change still shows, through the
+  // line and total differences below.
 
   if (!lines.length && !added.length && !removed.length && !Object.keys(top).length) return null;
 

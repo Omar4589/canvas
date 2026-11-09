@@ -110,3 +110,38 @@ test('file names carry the org, the months and the provenance', () => {
 test('an empty selection produces no sheet rather than a header with nothing under it', () => {
   assert.deepStrictEqual(combinedCsvRows({ months: [], orgName: 'Acme' }), []);
 });
+
+test('rules v4: first visit and archive print the campaign day, and two columns go on the end', () => {
+  const rows = statementCsvRows({
+    month: '2026-12',
+    view: {
+      lines: [
+        // 10pm Nov 28 in New York is Nov 29 in UTC; the sheet must say the 28th.
+        line({ name: 'Renews', firstKnockAt: '2026-11-29T03:00:00Z', firstVisitDay: '2026-11-28', billingStartMonth: '2026-11',
+          billingRule: 'cycle', renewalDay: '2026-12-28', archivedAt: '2026-12-31T04:00:00Z', archivedDay: '2026-12-30' }),
+        // A line frozen before rules v4: no day fields, no rule.
+        line({ name: 'Old line' }),
+        line({ name: 'Setup', firstKnockAt: null, billingStartMonth: null, billable: false, reason: 'no-field-visit', amountCents: 0, billingRule: null }),
+      ],
+      totalCents: 60000,
+    },
+    statement: null,
+    orgName: 'Acme',
+  });
+  const header = rows[3];
+  assert.deepStrictEqual(header.slice(-2), ['Billing rule', 'Renewal date'], 'appended last');
+  assert.strictEqual(header[11], 'Amount', 'every existing column keeps its place');
+  const at = (name) => rows.find((r) => r[0] === name);
+  const col = (name) => header.indexOf(name);
+  assert.strictEqual(at('Renews')[col('First visit')], '2026-11-28');
+  assert.strictEqual(at('Renews')[col('Archived')], '2026-12-30');
+  assert.strictEqual(at('Renews')[col('Billing rule')], 'Monthly from first visit');
+  assert.strictEqual(at('Renews')[col('Renewal date')], '2026-12-28');
+  assert.strictEqual(at('Renews')[col('Reason')], 'billable', 'the Reason column still prints the code');
+  assert.strictEqual(at('Old line')[col('First visit')], '2026-06-14', 'the UTC day, as old sheets printed it');
+  assert.strictEqual(at('Old line')[col('Billing rule')], 'Calendar month');
+  assert.strictEqual(at('Old line')[col('Renewal date')], '');
+  assert.strictEqual(at('Setup')[col('Billing rule')], '');
+  assert.strictEqual(rows[rows.length - 1][11], '600.00', 'the total still lands under Amount');
+  for (const r of rows) for (const cell of r) assert.notStrictEqual(cell, undefined);
+});

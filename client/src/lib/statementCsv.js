@@ -1,4 +1,5 @@
 import { formatDate } from './dates.js';
+import { lineBillingRule } from './months.js';
 
 // THE TWO STATEMENT EXPORTS, as pure row builders.
 //
@@ -12,16 +13,23 @@ import { formatDate } from './dates.js';
 const day = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 const money = (cents) => ((cents ?? 0) / 100).toFixed(2);
 
+// The campaign-calendar day the server computed (rules v4 lines), else the instant's UTC day, as
+// sheets always printed it. So a combined sheet spanning the change can show an older line's
+// evening visit on the next day; the line's own reason and month are unaffected.
+const lineDay = (dayStr, instant) => dayStr || day(instant);
+
+const RULE_CELL = { calendar: 'Calendar month', cycle: 'Monthly from first visit' };
+
 // One line's shared cells, so the single-month and combined sheets can never describe a campaign
 // differently.
 const lineCells = (l) => [
   l.name,
   l.households,
-  day(l.firstKnockAt),
+  lineDay(l.firstVisitDay, l.firstKnockAt),
   // The month the campaign bills FROM — the start grace can put it one after the first visit, and
   // that gap is the single most asked-about thing on an invoice.
   l.billingStartMonth || '',
-  day(l.archivedAt),
+  lineDay(l.archivedDay, l.archivedAt),
   l.knocksThisMonth,
   l.restrictedDoorsThisMonth,
   // The org's own invoice figure; equals knocks when it doesn't bill restricted doors.
@@ -30,11 +38,16 @@ const lineCells = (l) => [
   l.reason || '',
   money(l.rateCents),
   money(l.amountCents),
+  // Appended LAST (rules v4) so every column above keeps its place, and the Total rows still land
+  // under Amount.
+  RULE_CELL[lineBillingRule(l)] || '',
+  l.renewalDay || '',
 ];
 
 const LINE_HEADERS = [
   'Campaign', 'Households', 'First visit', 'Bills from', 'Archived', 'Knocks',
   'Restricted doors', 'Billable doors', 'Billable', 'Reason', 'Rate', 'Amount',
+  'Billing rule', 'Renewal date',
 ];
 
 // Where a figure came from, in one cell.

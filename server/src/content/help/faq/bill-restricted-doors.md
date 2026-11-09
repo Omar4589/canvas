@@ -39,4 +39,4 @@ Two homes are deliberately left out:
 
 No. Doorline charges a flat rate per active campaign per month and never counts your doors at all. This setting only affects the numbers you report to *your* client. See [How billing works](billing).
 
-> One related change: a restricted home **does** start a campaign's billing month, the same as a knock would, because it means someone was out in the field. Marking a book — or a single home — restricted from your desk doesn't.
+> One related point: a restricted home **does** start a campaign's billing, the same as a knock would, because it means someone was out in the field. Marking a book — or a single home — restricted from your desk doesn't.

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Badge, Button, Card, DataTable, EmptyState, Segmented } from '../ui/index.js';
 import { fmtUsd } from '../../lib/billingStatus.jsx';
 import { formatDate, formatRelative } from '../../lib/dates.js';
-import { monthLabel, shortMonthLabel } from '../../lib/months.js';
+import { campaignDayLabel, monthLabel, renewsOnLabel, shortMonthLabel } from '../../lib/months.js';
 import { campaignRows, campaignNeedsAttention, CAMPAIGN_FILTERS, reasonLabel, stateMeta } from '../../lib/invoicing.js';
 
 // "Which campaigns are active, which have started, which need invoicing" — the owner's question,
@@ -97,8 +97,13 @@ export default function CampaignsTab({
           <>
             <th className="px-3 py-2.5 w-8" />
             <th className="px-3 py-2.5">Campaign</th>
-            <th className="px-3 py-2.5" title="A knock, or a home a canvasser walked to and couldn't get into">First visit</th>
-            <th className="px-3 py-2.5" title="The first month this campaign could bill — the start grace can push it one later">Bills from</th>
+            <th className="px-3 py-2.5" title="A knock, or a home a canvasser walked to and couldn't get into — on the campaign's own calendar">First visit</th>
+            <th
+              className="px-3 py-2.5"
+              title="The first month this campaign could bill. On monthly renewals: its first-visit month, renewing on that date each month. On calendar months: the start grace can push it one later."
+            >
+              Bills from
+            </th>
             <th className="px-3 py-2.5">This month</th>
             <th className="px-3 py-2.5">Invoiced</th>
             <th className="px-3 py-2.5 text-right">Months · billed</th>
@@ -110,7 +115,12 @@ export default function CampaignsTab({
       >
         {shown.map((r) => {
           const open = expanded.has(r.campaignId);
-          const graceShift = r.billingStartMonth && r.firstVisitDay && r.billingStartMonth !== String(r.firstVisitDay).slice(0, 7);
+          // Only calendar campaigns have a start grace; a monthly-renewal one bills from its first-visit month.
+          const graceShift =
+            r.billingRule !== 'cycle' &&
+            r.billingStartMonth &&
+            r.firstVisitDay &&
+            r.billingStartMonth !== String(r.firstVisitDay).slice(0, 7);
           return (
             <tr key={r.campaignId} className={r.isActive ? '' : 'text-fg-muted'}>
               <td className="px-3 py-2.5 align-top">
@@ -131,7 +141,7 @@ export default function CampaignsTab({
                 <div className="font-medium text-fg">{r.name}</div>
                 <div className="text-xs text-fg-subtle">
                   created {formatDate(r.createdAt)}
-                  {!r.isActive && r.archivedAt ? ` · archived ${formatDate(r.archivedAt)}` : ''}
+                  {!r.isActive && r.archivedAt ? ` · archived ${campaignDayLabel(r.archivedDay, r.archivedAt)}` : ''}
                 </div>
                 {open && (
                   <div className="mt-2 max-w-md">
@@ -140,12 +150,20 @@ export default function CampaignsTab({
                 )}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 align-top">
-                {r.firstKnockAt ? formatDate(r.firstKnockAt) : <span className="text-fg-subtle">Not started</span>}
+                {r.firstKnockAt ? (
+                  campaignDayLabel(r.firstVisitDay, r.firstKnockAt)
+                ) : (
+                  <span className="text-fg-subtle">Not started</span>
+                )}
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 align-top">
                 {r.billingStartMonth ? (
                   <span className="inline-flex items-center gap-1.5">
                     {monthLabel(r.billingStartMonth)}
+                    {/* A running monthly-renewal campaign says when; archived, it renews no more. */}
+                    {r.billingRule === 'cycle' && r.isActive && (
+                      <span className="text-fg-muted">· {renewsOnLabel(r.firstVisitDay)}</span>
+                    )}
                     {graceShift && (
                       <Badge variant="neutral" title="The first knock landed in the last week of a month, so that month was free">
                         start grace

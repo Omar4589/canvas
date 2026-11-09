@@ -13,9 +13,11 @@ Related: [CAMPAIGNS.md](CAMPAIGNS.md) (archiving — it ends a campaign's billin
 per organization, and — for a firm running races of very different sizes — **per campaign**. A
 governor's race and a school-board race inside one client can carry different numbers.
 
-A campaign starts billing in the calendar month of its **first field visit** — a knock, or a
-restricted home a canvasser walked to and couldn't get into — and keeps billing through the month
-it's **archived**. Setup months — created, imported, turf cut, but nobody in the field yet — are
+A campaign starts billing with its **first field visit** — a knock, or a restricted home a canvasser
+walked to and couldn't get into — and keeps billing until it's **archived**. How the months are
+counted depends on when that first visit was: a campaign first out on or after **November 5, 2026**
+renews monthly on the date of that visit; one first out before then bills by **calendar month**
+(both below). Setup months — created, imported, turf cut, but nobody in the field yet — are
 free. Marking a book — or a single home — restricted from your desk is not a field visit and doesn't
 start anything.
 Every billing surface shows **Billing started** per campaign so you can see the date it began (or
@@ -38,16 +40,62 @@ paying is a conversation with the account manager, not a dashboard number.
 > (District, Federal) is an account-manager document, negotiated org and per-campaign rates stay
 > private, and the in-app surfaces stay dollar-free.
 
-### The month is a calendar month, and it is never prorated
+### Never prorated, and two ways to count a month
 
-"Per month" means the **calendar month** — not a 30-day cycle, and not an anniversary date counted
-from your first knock. February costs the same as March. Nothing is ever billed by the day.
+Nothing is ever billed by the day. Proration was considered and deliberately rejected. A two-week
+GOTV blitz is the common shape of this work, and day-counting would bill the most intense fortnight
+we ever serve at half price. The market agrees: i360 requires a "one-month minimum payment" on
+add-ons, and state-party VoteBuilder states flatly that "fees will not be prorated."
 
-Proration was considered and deliberately rejected. A two-week GOTV blitz is the common shape of
-this work, and day-counting would bill the most intense fortnight we ever serve at half price. The
-market agrees: i360 requires a "one-month minimum payment" on add-ons, and state-party VoteBuilder
-states flatly that "fees will not be prorated." Instead, two **grace rules** handle the edges, and a
-**floor** keeps them honest.
+What a "month" is depends on the campaign, by the day of its **first field visit** on its own
+calendar (owner decision, 2026-11-03,
+[PROPOSAL_BILLING_CYCLES.md](PROPOSAL_BILLING_CYCLES.md)). The switch is per campaign, so one
+organization can have both kinds. A campaign doesn't change kind partway, except in rare corrections
+(an unknocked first visit, a phone uploading an earlier visit late, or a time-zone edit near the
+switch day), which show as drift on any issued month they touch.
+
+### Campaigns first out on or after November 5, 2026: monthly from the first visit
+
+A client argued that a campaign out from September 15 to Election Day should pay two months, not
+three: September 15 to October 15, then October 15 to November 3. The owner agreed, for campaigns
+from November 5, 2026 on:
+
+1. **Billing starts on the day of the first field visit**, and **renews on that same date every
+   month**. A campaign that starts on the 29th, 30th or 31st renews on the last day of shorter months
+   (January 31, February 28, March 31, April 30). Each renewal is one month's charge at the
+   campaign's rate.
+2. **Archive before the next renewal date and that renewal never happens.** Archiving is still the
+   only thing that stops billing.
+3. **The 3-day rule:** archive on a renewal day or in the two days after it, with nobody out since
+   that renewal, and that renewal is free.
+4. **The first month always bills** — it starts with a knock, so no floor is needed.
+5. **Still one statement per client per calendar month.** Each renewal goes on the statement for the
+   month it falls in, so a running campaign shows its rate on every monthly statement, and closing the
+   month works as before.
+6. **Every renewal bills, knocks or not**, until the archive. There is still no pause.
+
+There is **no last-week rule** for these campaigns: when billing renews from the first knock, nobody
+pays for a partial month. That is also the one way these rules can cost more: a campaign that starts
+in the last week of a month pays for the month it started in, which calendar months usually make
+free.
+
+How campaigns on these rules bill (the dates are illustrations: a real campaign first out before
+November 5, 2026, like this fall's September 15 one, is on calendar months and pays three):
+
+| First knock | Archived | Renewals that bill | Months | Calendar months |
+|---|---|---|---|---|
+| Sep 15 | Nov 3, knocking Nov 1–3 | Sep 15, Oct 15 | 2 | 3 |
+| Sep 1 | Nov 3, knocking Nov 1–3 | Sep 1, Oct 1, Nov 1 | 3 | 3 |
+| Sep 1 | Nov 2, nobody out in November | Sep 1, Oct 1 (Nov 1 is free on the 3-day rule) | 2 | 2 |
+| Sep 28 | Nov 1, nobody out in November | Sep 28, Oct 28 | 2 | 1 |
+| Jan 31 | still running | Jan 31, Feb 28, Mar 31, Apr 30, … | every month | every month from February |
+
+### Campaigns first out before November 5, 2026: the calendar month
+
+These keep calendar months, under the rules below, for good — even if archived and reactivated
+later. This fall's campaigns finish this way. "Per month" here means the **calendar month** — not a
+30-day cycle, and not an anniversary date counted from the first knock. February costs the same as
+March. Two **grace rules** handle the edges, and a **floor** keeps them honest.
 
 **Start grace — the last week of a month is free.** A first field visit in the **last 7 days** of a
 month makes that month free; billing starts on the 1st of the next one. Knock your first door on
@@ -62,11 +110,13 @@ on the same short campaign (first knock Oct 29, archived Nov 2, nobody out in No
 otherwise net to free. The first-visit month bills instead. There is no such thing as a free
 campaign that knocked a door.
 
-Everything else is unchanged:
+For both kinds of campaign:
 
-- Month boundaries follow **the campaign's own timezone**, so a 9pm knock on Jan 31 in Denver is a
-  January knock, not a February one.
-- A campaign archived on **March 20th** still bills the full month of March.
+- Months and renewal dates follow **the campaign's own timezone**, so a 9pm knock on Jan 31 in
+  Denver is a January knock, not a February one — and, for a new campaign, the 31st is its renewal
+  day.
+- On calendar months, a campaign archived on **March 20th** still bills the full month of March. On
+  monthly renewals, it bills the renewal it passed (March 15, say) and never reaches the next.
 - **Between the start and the archive, a campaign bills every month — whether or not anyone
   knocked.** A quiet month still costs full price; there is no "pause". A campaign that went quiet
   in June and was left alone until December bills for all seven months. **Archiving is the only
@@ -82,9 +132,10 @@ conversation and, if agreed, a negotiated rate — nothing in the app blocks the
 Two different dates, and the difference matters when someone asks why an invoice starts where it
 does.
 
-A **campaign** shows its **first field visit** and the month it **bills from**. They are usually
-the same month; the start grace separates them when the first knock lands in the last week (first
-knock September 28 means the campaign bills from October).
+A **campaign** shows its **first field visit** and the month it **bills from**. On monthly renewals
+they are always the same month, and a running campaign also shows the day it renews on (*renews on
+the 15th*). On calendar months they are usually the same month; the start grace separates them when the
+first knock lands in the last week (first knock September 28 means the campaign bills from October).
 
 An **organization** shows **billing since**: the first month that actually carried a billable
 campaign. That is almost always the earliest campaign's bills-from month, with one corner where it
@@ -94,7 +145,9 @@ month is November. Billing since reads **October**, because October is where the
 the campaign row still says it bills from November. Both are true, and both are shown.
 
 Neither date is stored. They are derived from the ledger each time, which is why a correction to
-the underlying activity moves them rather than leaving a stale field behind.
+the underlying activity moves them rather than leaving a stale field behind. Every first-visit and
+archive date on the billing screens and in the statement CSV is the day on the **campaign's own
+calendar**, the same day its renewals count from.
 
 ### Issued statements — what you actually invoiced
 
@@ -106,7 +159,10 @@ rather than quietly rewriting the past. Statements are never edited — a wrong 
 reason** and reissued, and both rows survive.
 
 Only closed months can be issued (with a deliberate `force` override for a prepay or an early
-close-out), and internal orgs never can. **Close the month** at `/super-admin/billing` shows every
+close-out), and internal orgs never can. One case is new with monthly renewals: a renewal on a
+month's last days still has its 3 days to run when the month closes, so archiving inside them can
+make that renewal free after the invoice went out. It shows as **drifted**, and the issue dialog
+warns ahead of time when a selected month has a renewal that can still turn free. **Close the month** at `/super-admin/billing` shows every
 org's issued / not-issued / drifting state — for one month, or across a **range** when you are
 closing several at once.
 
@@ -127,7 +183,9 @@ batch, and the result says per month what happened.
 
 The org's own Billing page shows the same months — **without any money**. For each month: which
 campaigns were in the field, when each started billing, how many doors, and why any free ones were
-free. That last column is the useful one for a firm that invoices *its* client per door, and it
+free (on monthly renewals: *archived before its renewal* or *archived within 3 days of its
+renewal*). The running month's list shows each running campaign on monthly renewals with the day it renews
+on, and the page explains both kinds of campaign, naming the switch day. That last column is the useful one for a firm that invoices *its* client per door, and it
 moves with the **Count restricted homes as billable doors** setting on that same page.
 
 Prices are still absent by design (see above), and not merely hidden — the server strips every
@@ -192,8 +250,9 @@ a billable campaign, which can be months later), the rate, and the payment terms
 
 - **Overview** — *Next up*: every open item in the order to deal with them, then the running month,
   the invoice backlog and what is still unpaid.
-- **Campaigns** — one row per campaign: first field visit, the month it **bills from** (the start
-  grace can put that one month later), what it is doing this month or why it is free, and chips for
+- **Campaigns** — one row per campaign: first field visit, the month it **bills from** (on calendar
+  months the start grace can put that one month later; on monthly renewals it reads *December 2026 ·
+  renews on the 15th* while running), what it is doing this month or why it is free, and chips for
   how many of its months are awaiting, overdue, issued or paid. Expand a row for a month-by-month
   strip. Per-campaign rates are set here.
 - **Statements** — the month ledger and the invoicing work. Below.
@@ -278,9 +337,9 @@ changes, and statements are deliberately not theirs to see or touch.
 |---|---|---|
 | `Subscription` | [models/Subscription.js](../server/src/models/Subscription.js) | One per org (`organizationId` unique). `status` (`trial`/`active`/`past_due`/`suspended`/`canceled`/`internal`), `statusChangedAt` (the offline-grace boundary), `trialEndsAt`, `pricePerCampaignCents` (default 30000 — per-org override), `paymentTermsDays` (default 30, 0..365 — net-N, read only at ISSUE time), `billingContact{name,email}`, `notes` (internal, super-admin-only), `source` (`manual`/`stripe` — webhooks may only write when `stripe`, so manual wins), `stripeCustomerId` (dormant). |
 | `SubscriptionEvent` | [models/SubscriptionEvent.js](../server/src/models/SubscriptionEvent.js) | Append-only audit: `fromStatus`/`toStatus` or `changes` (Mixed), `byUserId`, `reason` (required by the route for suspend/cancel). Indexed `{organizationId, createdAt}`. |
-| `Campaign.archivedAt` | [models/Campaign.js](../server/src/models/Campaign.js) | Set when `isActive` flips false (route: [admin/campaigns.js](../server/src/routes/admin/campaigns.js)), cleared on reactivate. The statement's "bills through the archive month" boundary. `migrate:billing` backfills `updatedAt` for legacy archived campaigns. |
+| `Campaign.archivedAt` | [models/Campaign.js](../server/src/models/Campaign.js) | Set when `isActive` flips false (route: [admin/campaigns.js](../server/src/routes/admin/campaigns.js)), cleared on reactivate. The statement's archive boundary: on calendar months the campaign bills through the archive month; on monthly renewals, through the last renewal more than two days before the archive, plus one 0–2 days before it if anyone was out since. `migrate:billing` backfills `updatedAt` for legacy archived campaigns. |
 | `Campaign.pricePerCampaignCents` | [models/Campaign.js](../server/src/models/Campaign.js) | Tri-state per-campaign rate: `null` = inherit the org rate, a number = negotiated override, **`0` is legal** (a comped campaign). **`select: false`** — see the privilege note below. |
-| `Statement` | [models/Statement.js](../server/src/models/Statement.js) | A **frozen** issued month. `organizationId` + `month` + `status` (`issued`/`void`), frozen `rateCents` / `rulesVersion` / `totalCents` / `lines[]`, `issuedAt`/`issuedByUserId`, `externalRef`, `termsDays`/`dueAt` (frozen at issue), the payment trio `paidAt`/`paidByUserId`/`paymentRef`, `voidedAt`/`voidedByUserId`/`voidReason`, `supersededByStatementId`. Each line also carries `billingStartMonth`. **Paid is orthogonal to `status`**, not a status value: the partial unique index filters on `status:'issued'`, and a paid invoice is still an issued one. The model's "rows are never edited" rule has three sanctioned exceptions, listed in its header — the superseded back-stamp, the payment trio, and the one-shot due-date backfill; `lines`/`totalCents`/`rateCents`/`rulesVersion` are never touched. Indexes: `{organizationId, month}` **unique with `partialFilterExpression: {status:'issued'}`** (one live issued row per org-month, unlimited voids) and `{organizationId, month:-1}`. |
+| `Statement` | [models/Statement.js](../server/src/models/Statement.js) | A **frozen** issued month. `organizationId` + `month` + `status` (`issued`/`void`), frozen `rateCents` / `rulesVersion` / `totalCents` / `lines[]`, `issuedAt`/`issuedByUserId`, `externalRef`, `termsDays`/`dueAt` (frozen at issue), the payment trio `paidAt`/`paidByUserId`/`paymentRef`, `voidedAt`/`voidedByUserId`/`voidReason`, `supersededByStatementId`. Each line also carries `billingStartMonth` and, from rules v4, `billingRule` (`'calendar'`/`'cycle'`/null), `renewalDay`, `firstVisitDay` and `archivedDay` (campaign-tz `'YYYY-MM-DD'`), and fills its long-empty `timeZone`. Legacy rows lack those keys entirely (billing reads are lean); readers take a missing `billingRule` on a line with a first visit as `'calendar'`. **Paid is orthogonal to `status`**, not a status value: the partial unique index filters on `status:'issued'`, and a paid invoice is still an issued one. The model's "rows are never edited" rule has three sanctioned exceptions, listed in its header — the superseded back-stamp, the payment trio, and the one-shot due-date backfill; `lines`/`totalCents`/`rateCents`/`rulesVersion` are never touched. Indexes: `{organizationId, month}` **unique with `partialFilterExpression: {status:'issued'}`** (one live issued row per org-month, unlimited voids) and `{organizationId, month:-1}`. |
 
 ### Billing rules — `billingMonths.js`
 
@@ -292,7 +351,7 @@ every calendar boundary unit-testable without a database
 ([test/billingMonths.test.js](../server/test/billingMonths.test.js)).
 
 `START_GRACE_DAYS = 7`, `END_GRACE_DAYS = 3`. `decideMonth(facts)` returns `{billable, reason,
-startMonth, floorMonth}` where `reason` is one of:
+startMonth, floorMonth, billingRule, renewalDay}` where `reason` is one of:
 
 | Reason | Meaning |
 |---|---|
@@ -303,6 +362,8 @@ startMonth, floorMonth}` where `reason` is one of:
 | `end-grace` | archived in the first 3 days with zero visits this month → free |
 | `floor` | both graces fired; this is the one month that bills anyway |
 | `archived-earlier` | archived before this month began |
+| `archived-before-renewal` | monthly renewals: archived in this month, before its renewal date → free |
+| `renewal-grace` | monthly renewals: archived within 3 days of this month's renewal, nobody out since → free |
 
 Two things that look like details and are not:
 
@@ -317,14 +378,41 @@ Two things that look like details and are not:
   rule module stays DB-free. It fires only for a campaign that got a start grace *and* was archived
   within the first 3 days of the very next month.
 
-`RULES_VERSION` (in `statement.js`) is **3**: v1 = first knock → archive month; v2 = a non-bulk
-`restricted` mark also starts the clock (Jul 2026); v3 = grace + floor. Bump it when billing
-*semantics* change, not when code moves — it's frozen into every issued statement so an old invoice
-can still explain itself.
+**Monthly renewals (rules v4, Nov 2026).** `decideMonth` first asks `billingRuleFor(firstVisitDay,
+cycleFrom)`: a first visit on or after `CYCLE_BILLING_FROM` (`'2026-11-05'`, a code constant compared
+in the campaign's timezone) is `'cycle'` and goes to `decideCycleMonth`; anything earlier runs the
+calendar body above unchanged (`'calendar'`); no first visit returns null. The cycle regime, in
+order: a month before the first-visit month is `before-start`; the first-visit month always bills
+(its renewal **is** the first visit, so no floor); otherwise `R = renewalDayIn(month, firstVisitDay)`
+(the anchor day, clamped to the month's last day) — archived before `R` is `archived-before-renewal`
+when the archive is in this month, else `archived-earlier`; archived on `R` through `R + 2` with zero
+visits since the renewal is `renewal-grace`; anything else bills, with `renewalDay: R`. There is no
+start grace and no floor. The 3-day window can cross a month end (a renewal on the 30th of a 31-day month runs to the
+1st), which is why its one extra fact is a **day range**:
+`needsRenewalVisitCount({month, firstVisitDay, archivedDay, cycleFrom})` returns `{from: R, to:
+archivedDay}` when the archive landed inside that month's window (at most one month per campaign,
+since renewals are 28+ days apart), and `decideMonth` throws without `visitsSinceRenewal` there, as it
+does for the floor's fact. `needsStartMonthVisitCount` returns null for cycle campaigns. Also
+exported for the screens and the reminder route: `startMonthFor` (the first-visit month for cycle,
+`billingStartMonth` for calendar), `renewalsAround` / `reminderDates` (the next renewal, and the last
+one only inside its window — never the first, which always bills), `addDays`, `renewalGraceEnd`.
+Every server caller reads the switch day through `cycleBillingFrom()`; integration suites move it
+with `setCycleBillingFromForTests()`, which refuses when `NODE_ENV` is `production`.
+
+`RULES_VERSION` (in `statement.js`) is **4**: v1 = first knock → archive month; v2 = a non-bulk
+`restricted` mark also starts the clock (Jul 2026); v3 = grace + floor; v4 = a campaign first out on
+or after `CYCLE_BILLING_FROM` renews monthly from that visit, earlier ones keep v3 (Nov 2026). Bump it
+when billing *semantics* change, not when code moves — it's frozen into every issued statement so an
+old invoice can still explain itself.
 
 **The two grace constants are duplicated client-side** in
-[components/ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx) (`END_GRACE_DAYS`), because
-this repo has no shared client/server module. If either constant moves, both call sites move.
+[components/ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx) (`END_GRACE_DAYS`) and, for
+the 3-day renewal window, [lib/months.js](../client/src/lib/months.js) (`renewalGraceEnd`, the
+issue dialog's warning), because this repo has no shared client/server module. If either constant
+moves, every call site moves. The switch day itself is **not** copied into the client: the Billing
+page reads it from `GET /admin/billing` (`cycleBillingFrom`). Its other copies are the Help Center
+articles that name it ([billing.md](../server/src/content/help/guides/billing.md) and
+[page-billing.md](../server/src/content/help/pages/page-billing.md)) and these docs.
 
 ### Rate resolution — `rate.js`
 
@@ -374,11 +462,21 @@ spread at the top level so existing consumers are untouched.
 [services/billing/statementDrift.js](../server/src/services/billing/statementDrift.js) is a pure
 diff used by **both** the org panel and the month-close board, so the two can never disagree about
 what "drifting" means. `drift.material` is true only when `totalCents` moved; a late offline flush
-that shifts `knocksThisMonth` is reported but doesn't raise an alarm. An **unknock run**
+that shifts `knocksThisMonth` is reported but doesn't raise an alarm. **`rulesVersion` is not
+compared** (dropped with rules v4): it says how a statement was computed, not that anything changed,
+and reported alone it would flag every invoice issued before the bump. A real retroactive rule change
+still shows, through line and total differences. The v4 line fields stay out of `LINE_FIELDS` too —
+they derive from facts already compared, and a legacy row's missing key against a live null would be
+phantom drift on every old line. Monthly renewals add one ordinary drift source: a renewal on a
+month's last three days (or any renewal in a month issued early) can turn free after issue if the
+campaign is archived inside its window. It shows on the org page's *Drifted* badge and the month-close
+board's live check; the desk's *Drifting* chip doesn't see it, because the desk scan skips issued
+months. An **unknock run**
 (docs/CAMPAIGNS.md §Unknock, 2026-08-26) is the other known drift source — it deletes activity
-rows, so an issued month it reaches back into will read differently live; deletion can only
-*reduce* what a month would bill (grace months are free, the floor only bills a month that billed
-anyway), and void-vs-reissue stays an account-manager call.
+rows, so an issued month it reaches back into will read differently live. Deletion can move a charge
+to another month — an unknocked first visit moves a monthly campaign's renewal day, and on calendar
+months it can move the floor — so an issued month can read higher live as well as lower; void-vs-reissue
+stays an account-manager call.
 
 `GET /super-admin/billing/statements?month=&live=0|1`
 ([superAdmin/statements.js](../server/src/routes/superAdmin/statements.js), mounted **before** the
@@ -559,8 +657,13 @@ when suspended/canceled, alive through `past_due`.
 [billingMonths.js](../server/src/services/billing/billingMonths.js) (above) owns the **rule**. Per
 campaign, in the **campaign's own timezone** (`zonedDayRange`, [TIMEZONES.md](TIMEZONES.md)), it
 resolves `firstVisitDay` / `archivedDay` / `visitsThisMonth`, runs the conditional F+1 probe when
-`needsStartMonthVisitCount` asks, and hands the facts to `decideMonth`. Each line carries the
-resulting `reason` and its own `rateCents`. `knocksThisMonth` reuses `knocksPipeline` — the same
+`needsStartMonthVisitCount` asks and the renewal probe when `needsRenewalVisitCount` asks (both one
+`fieldVisitMatch` existence `findOne` over `zonedDayRange`, via `visitsInDayRange`), and hands the
+facts — plus the switch day, read once per statement — to `decideMonth`. Each line carries the
+resulting `reason`, `billingRule`, `renewalDay`, the campaign-tz `firstVisitDay`/`archivedDay`, its
+`timeZone`, and its own `rateCents`. The range path makes the renewal probe per campaign before
+building its months (its month buckets can't answer a day range), through the same predicate, so the
+two paths agree month by month (`statementRange.int`). `knocksThisMonth` reuses `knocksPipeline` — the same
 distinct (household, pass) counting as everywhere else ([METRICS.md](METRICS.md)); `households` is
 reported for visibility, never priced.
 
@@ -663,8 +766,12 @@ flat rate):
 - **No proration, either edge.** `monthDayBounds` only produces the month's first/last day; no code
   path divides by days elapsed. The grace rules move whole months in or out; they never split one.
 - **Activity is not required to re-bill.** Once past the start month, the decision never consults
-  `knocksThisMonth` except for the end grace. A started campaign bills every subsequent month until
-  `archivedAt` lands before the month began.
+  `knocksThisMonth` except for the end grace. On calendar months a started campaign bills every
+  subsequent month until `archivedAt` lands before the month began; on monthly renewals, until it lands
+  before that month's renewal date (or inside its 3 days with nobody out since).
+- **Monthly renewals add no job either.** A renewal is computed when a statement is read, exactly as
+  a billable month is: `decideCycleMonth` decides each calendar month by the renewal date inside it.
+  Nothing is scheduled, stored or rolled over.
 
 ⚠️ Un-issued months are computed **live**, so a rule change is retroactive: a past month can flip.
 Before deploying a change here, diff `GET /super-admin/organizations/billing-rollup` — and check the
@@ -688,9 +795,12 @@ absorbing it silently.
 [drift](#issuing-voiding-drift) against it rather than quietly changing what you invoiced. Months
 you never issued still have no snapshot to reconcile against — issue the ones you bill from.
 
-`firstKnockAt` is surfaced as the **"First visit"** indicator on both billing surfaces (the
+The first visit is surfaced as the **"First visit"** indicator on both billing surfaces (the
 super-admin org page's Campaigns and Statements tabs, and the org admin's own Billing page),
-reading "Not started" when null. Beside it, `billingStartMonth` — the month that visit actually
+reading "Not started" when null. Since rules v4 they print the line's campaign-tz `firstVisitDay`
+(and `archivedDay` for archive dates) with `campaignDayLabel` ([lib/months.js](../client/src/lib/months.js)),
+never the instant in the viewer's zone or UTC, which could read a day off beside a renewal date; a
+statement frozen before v4 falls back to `firstKnockAt` as it always read. Beside it, `billingStartMonth` — the month that visit actually
 starts billing, which the start grace can push one later — is now frozen onto each statement line
 rather than left for the reader to derive from the rule.
 
@@ -736,8 +846,9 @@ pricing stays flat per campaign per month.
 | `GET …/billing/campaigns` · `PATCH …/billing/campaigns/:campaignId` | Per-campaign negotiated rate. `pricePerCampaignCents` is `.nullable()` — **`null` restores "inherit the org rate"**, `0` is a legal comped rate. Org-scoped lookup (a foreign `campaignId` 404s). Super-admin only, by design: this must never be reachable from `admin/campaigns.js`. |
 | `GET /super-admin/billing/statements?month=&live=0\|1` | **The month-close board.** `month` is now optional and defaults to the **last closed month** server-side; the response carries `currentMonth` and `asOf`, and each row gains `{dueAt, paidAt, paidBy, paymentRef, paymentState, state}`, with the header gaining `paidCount`/`overdueCount` and `zeroCount`. `unissuedCount` counts the ALARM, not the absence — it excludes `zero` months, because folding thirty $0 setup months into it told an operator to chase 35 invoices when there were 5. In live mode a closed $0 month reports `state: 'zero'` instead of reading as an unissued alarm; without `live` an unissued month's `state` is **null**, because without a live total there is no way to tell "owes $600" from "owes nothing". Every non-internal org's issued / not-issued state for one month + issued totals. `live=1` also recomputes each org and reports drift — `O(orgs × campaigns)` round-trips, so it is opt-in behind a button. Mounted **before** the `/super-admin` catch-all. |
 | `GET /super-admin/billing/statements?from=&to=` | **Range mode** on the same board — "who still owes me an invoice for July *and* August". Each org row keeps its single-month fields at the top level (additive, so the existing board is unaffected) and gains `months[]` plus `rangeTotalCents` (frozen where issued, live where not) and `unissuedMonths[]`. `live=1` costs **one** `monthlyStatementRange` per org rather than one statement walk per org per month. Inverted or malformed ranges 400. |
-| `GET /admin/billing/history?months=N` | The customer month ledger, same bill-payer gate. `publicMonthHistory` output: per month `{month, billableCampaigns, setupCount, graceCount, knocks, doors, campaigns[]}`, newest first, plus `maxMonths`. `months` is clamped to 1..`BILLING_HISTORY_MAX_MONTHS` (garbage falls back to 12) rather than trusted. **No dollar figure at any depth** — asserted by walking the response body. |
-| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, **`usage`** via `publicUsage` (billable-campaign count, `setupCount`, `graceCount`, and the campaign breakdown), and the org's `billRestrictedDoors` default. **No dollar amounts at all** — no rate, no total, no per-campaign amount — and no billing contact / notes / source / Stripe ids. |
+| `GET /admin/billing/history?months=N` | The customer month ledger, same bill-payer gate. `publicMonthHistory` output: per month `{month, billableCampaigns, setupCount, graceCount, knocks, doors, campaigns[]}` (each campaign row with `firstVisitDay` and `archivedDay` since rules v4, and listed for the two free-renewal reasons as for the graces), newest first, plus `maxMonths`. `months` is clamped to 1..`BILLING_HISTORY_MAX_MONTHS` (garbage falls back to 12) rather than trusted. **No dollar figure at any depth** — asserted by walking the response body. |
+| `GET /admin/billing` | Bill-payer-admin view (gated `requireOrgRole('admin')` **+ `Membership.billingAccess`** — super admins pass): status, entitlement, trial end, **`usage`** via `publicUsage` (billable-campaign count, `setupCount`, `graceCount`, and the campaign breakdown, each row with `billingRule`, `firstVisitDay` and `archivedDay` since rules v4), the org's `billRestrictedDoors` default, and **`cycleBillingFrom`** (the switch day, so the page names it without a copy of the constant). **No dollar amounts at all** — no rate, no total, no per-campaign amount — and no billing contact / notes / source / Stripe ids. |
+| `GET /admin/billing-renewals?ids=a,b,c` | **Which rules each campaign bills under**, for the election-day archive reminder ([billingRenewals.js](../server/src/routes/admin/billingRenewals.js), rules v4). `requireAuth, orgContext, requireOrgRole('admin')` — a lead gets `403 FORBIDDEN_ROLE`. Every org admin gets `{campaigns: [{campaignId, billingRule}]}`, exactly those keys; for a **billing admin** (the shared `hasBillingAccess`), an active `'cycle'` campaign also carries `reminderDates()` — `{nextRenewalDay, lastRenewalDay, graceUntilDay}` on its own calendar. 400 without an active org, for a malformed id, or for more than 50 ids (`MAX_RENEWAL_IDS`); another org's ids, and campaigns mid-delete, are left out. A **sibling prefix** of `/admin/billing` on purpose: Express never routes it into that router, which stays billing-gated throughout. No phone screen calls it. |
 | `PATCH /admin/billing/settings` `{billRestrictedDoors}` | Sets the org-wide default for counting restricted doors as billable doors. Same bill-payer gate as the GET. Exists here rather than on an org-settings page because there isn't one — every other org mutation is super-admin-only — and because it is a billing-counting policy. Per-campaign overrides go through `PATCH /admin/campaigns/:id` (org-admin only; a lead is refused). |
 | `POST /super-admin/organizations` | Create a client: org + trial (`trialDays`, default 7) + optional **first admin** (`admin{firstName,lastName,email,password?}` → uses the typed `password` or auto-generates a temp one, `mustChangePassword`, `billingAccess:true`; returns `tempPassword` once). A taken admin email 409s **before** the org is created. |
 | `PATCH /admin/memberships/:userId` `{billingAccess}` | Grant/revoke the Billing surface for an admin — only a caller who already has `billingAccess` (or a super admin) may change it (else 403). |
@@ -771,7 +882,13 @@ never invoiced.)
 
 - **`Membership.billingAccess`** (Boolean, default `false`) gates the whole org billing surface —
   the `/billing` nav item + route, the page, and the client cost view — plus the
-  `/admin/billing` endpoints. Client-side, `useAuth()` exposes
+  `/admin/billing` endpoints. The billing router's gate and `GET /admin/billing-renewals` share one
+  predicate, [middleware/billingAccess.js](../server/src/middleware/billingAccess.js)
+  `hasBillingAccess(req)` (`isSuperAdmin || activeMembership.billingAccess`, behind
+  `requireOrgRole('admin')`); other billing-access checks (memberships, automatic-pause settings,
+  account deletion) stay inline. The renewals route gives the archive reminder each campaign's rule
+  for **every** org admin but the renewal **dates** only to billing admins (owner decision 9,
+  2026-11-03). Client-side, `useAuth()` exposes
   `canViewBilling = isSuperAdmin || (isOrgAdmin && activeMembership.billingAccess)`; the flag rides
   the login/me membership payload and the `GET /admin/memberships` list.
 - **An org can never lose its LAST billing admin through the console** (`LAST_BILLING_ADMIN`,
@@ -844,7 +961,31 @@ Added with the month-ledger work (Sep 2026):
   [CampaignsPage.jsx](../client/src/pages/CampaignsPage.jsx) (aggregate, org-admin only, archives via
   the existing mutation) and [DashboardPage.jsx](../client/src/pages/DashboardPage.jsx)
   (single, org-admin only since 2026-10-13 — a team lead sees neither; links to Campaigns). Fires when `electionDay` has passed and the campaign is still active;
-  escalates tone inside the end-grace window. **Holds the client copy of `END_GRACE_DAYS`.**
+  escalates tone inside the end-grace window. **Holds the client copy of `END_GRACE_DAYS`.** Since
+  rules v4 it words each campaign by its rule: `hasCanvassed: false` (from `/admin/campaigns`) means
+  never out, and every other stale campaign's rule comes from `GET /admin/billing-renewals`. One
+  campaign — never out: *It hasn't been out, so it isn't billing*; calendar: the wording above,
+  unchanged; monthly with dates (billing admins): *Archive before {next} and it won't renew*, or inside
+  a renewal's window *It renewed on {last}. Archive by {until} and, if nobody's been out since, that
+  renewal is free* (warning); monthly without dates: *Archiving stops the billing — otherwise it renews
+  every month, knocks or not*. Several — never a date: none out, all out on calendar months (the old
+  wording), or mixed. While the rules load it shows the title alone; on an error, more than 50 to ask
+  about, or a campaign missing from the answer, *Archiving stops any billing*. The dated wording keys
+  on whether the answer **has** dates, never on `canViewBilling` (memberships refresh only at sign-in).
+- **Monthly renewals elsewhere (rules v4).** [BillingPage.jsx](../client/src/pages/BillingPage.jsx):
+  *billing since Dec 15, 2026 · renews on the 15th* for a running monthly campaign (`renewsOnLabel`;
+  a 29th–31st start reads, e.g., *renews on the 31st (or the month's last day)*), the two free-renewal labels
+  in the month history, and a status sentence covering both kinds that names the switch day from the
+  server. The org page's Campaigns tab reads *December 2026 · renews on the 15th* in *Bills from* and
+  keeps the *start grace* chip for calendar rows only; the Statements tab names a monthly line's
+  renewal under *Bills from*. [statementCsv.js](../client/src/lib/statementCsv.js) prints *First
+  visit* and *Archived* from the campaign-tz days and appends *Billing rule* and *Renewal date* as
+  the last two columns (*Reason* still prints the code). The issue dialog
+  ([StatementModals.jsx](../client/src/components/org/modals/StatementModals.jsx)) warns when a
+  selected month has a running monthly campaign whose renewal can still turn free on the campaign's
+  calendar — still ahead (an open month issued early) or inside its 3 days — never a campaign's first
+  month, which always bills. Render tests:
+  [billingCyclesRender.smoke.test.js](../client/src/lib/billingCyclesRender.smoke.test.js).
 
 Mobile: `entitlement` rides the bootstrap; [EntitlementBanner.jsx](../mobile/components/EntitlementBanner.jsx)
 renders on the map (under the context card) and the campaign picker. It is **role-aware** (reads the
@@ -922,6 +1063,32 @@ simply never render the banners. New orgs self-provision (`trial`, +7 days) in t
 `seed:demo` upserts its org to `internal`. Tests:
 [test/billing.int.test.js](../server/test/billing.int.test.js) (status × method matrix, trial
 expiry, grace, super-admin bypass, statement windows) — run with `MONGODB_URI_TEST`.
+
+### Monthly renewals (Nov 2026)
+
+Order: **server deploy** (the web console and the Help Center ship with it). No migration, no index,
+no config var, nothing for phones (no phone screen calls a billing route; `npm run audit:mobile-api`
+flags only the two billing routers, which mobile calls 0 endpoints on), and **no client-version
+gate** — every change is additive except `drift.rulesVersion`, which nothing read.
+
+**The switch day is `CYCLE_BILLING_FROM = '2026-11-05'`** in
+[billingMonths.js](../server/src/services/billing/billingMonths.js), a frozen business fact with
+`RULES_VERSION` 4 as its audit trail. Change it only before it has passed, and move the Help Center
+articles that name it (guides/billing.md, pages/page-billing.md) in the same change. Live by the switch day, no campaign on the new rules ever
+shows the old wording. **The hard gate is November 24, 2026:** until the update is live, a campaign
+first out from November 5 is computed under v3, which agrees with v4 about November unless the first
+visit is in November's last week, where v3 makes November free and v4 bills it. Invoices already sent
+(October and earlier) can't change either way: a campaign first out from November 5 has nothing to
+bill before November.
+
+**After the deploy:** on Close the month, run the live check on October; nothing should be newly
+*Drifted* (drift no longer compares `rulesVersion`). Tests:
+[billingMonths.test.js](../server/test/billingMonths.test.js) (every boundary, plus a by-renewal
+simulation), [statement.int.test.js](../server/test/statement.int.test.js),
+[statementRange.int.test.js](../server/test/statementRange.int.test.js),
+[billingRenewals.int.test.js](../server/test/billingRenewals.int.test.js);
+[billingAccess.int.test.js](../server/test/billingAccess.int.test.js) pins the switch day far away so
+its now-relative fixtures keep testing calendar months.
 
 ### The invoicing desk + payment records (Sep 2026)
 

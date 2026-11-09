@@ -67,6 +67,9 @@ export const REASON_LABEL = {
   floor: 'Bills once — a campaign that knocked always bills a month',
   'before-start': 'Before billing started',
   'archived-earlier': 'Archived before this month',
+  // Monthly-renewal campaigns (rules v4, first out on or after the switch day).
+  'archived-before-renewal': 'Free — archived before its renewal',
+  'renewal-grace': 'Free — archived within 3 days of its renewal, nobody out since',
 };
 
 export const reasonLabel = (reason) => REASON_LABEL[reason] || reason || '—';

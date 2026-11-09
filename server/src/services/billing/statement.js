@@ -6,7 +6,15 @@ import { Organization } from '../../models/Organization.js';
 import { knocksPipeline, billableDoorsOf, fieldVisitMatch } from '../reports/aggregations.js';
 import { resolveBillRestricted } from '../reports/billRestricted.js';
 import { zonedDayRange, zonedDayStr } from '../../utils/timezone.js';
-import { addMonths, billingStartMonth, decideMonth, needsStartMonthVisitCount } from './billingMonths.js';
+import {
+  addMonths,
+  billingRuleFor,
+  cycleBillingFrom,
+  decideMonth,
+  needsRenewalVisitCount,
+  needsStartMonthVisitCount,
+  startMonthFor,
+} from './billingMonths.js';
 import { resolveRateCents } from './rate.js';
 
 // Which generation of the billing rules produced a statement. Frozen into every issued Statement
@@ -15,8 +23,10 @@ import { resolveRateCents } from './rate.js';
 //   v2  (Jul 2026) a non-bulk `restricted` mark also starts the clock — a canvasser who walked to
 //       a gated community made the trip.
 //   v3  (Jul 2026) start grace / end grace / floor — see services/billing/billingMonths.js.
+//   v4  (Nov 2026) a campaign first out on or after CYCLE_BILLING_FROM renews monthly from that
+//       visit (billingMonths.js); earlier campaigns keep v3.
 // Bump this whenever billing SEMANTICS change, not when the code merely moves.
-export const RULES_VERSION = 3;
+export const RULES_VERSION = 4;
 
 // 'YYYY-MM' → { first: 'YYYY-MM-01', last: 'YYYY-MM-<lastDay>' } or null when malformed.
 export function monthDayBounds(month) {
@@ -32,6 +42,19 @@ export function monthDayBounds(month) {
 // clock — now lives beside BILLABLE_WITH_RESTRICTED in reports/aggregations.js, because the
 // Results by voter export defines its universe with the same sentence, and a second copy would
 // be a second definition of when a customer starts being charged.
+
+// Did anyone go out from the start of `from` through the end of `to` (campaign-tz days, both
+// included)? The one fact a monthly-renewal campaign archived inside a renewal's 3-day window needs
+// (billingMonths.needsRenewalVisitCount). Existence is enough, so this probes rather than counts —
+// the same probe the floor uses — and both statement paths make it, because the window is a DAY
+// range that can cross a month end, which the range path's month buckets can't answer.
+async function visitsInDayRange(campaignId, { from, to }, tz) {
+  const probe = await CanvassActivity.findOne(
+    { ...fieldVisitMatch(campaignId), timestamp: zonedDayRange(from, to, tz) },
+    { _id: 1 }
+  ).lean();
+  return probe ? 1 : 0;
+}
 
 // ONE owner for a statement line, shared by the single-month path (monthlyStatement) and the range
 // path (monthlyStatementRange) so the two can never drift into different SHAPES — the range view and
@@ -50,27 +73,41 @@ function statementLine({
   lineRate,
   agg,
   visitsInStartMonth,
+  visitsSinceRenewal,
+  cycleFrom,
+  timeZone,
 }) {
   // "Did anyone go out this month" must be FLAG-INDEPENDENT, so it reads `billableDoors` (every
   // distinct (household, pass) group, restricted marks included) rather than billableDoorsOf(),
   // which collapses to the knock count when the org hasn't opted in. A month whose only activity
   // was non-bulk restricted marks is a month someone walked, and must not win the end grace.
   const visitsThisMonth = agg?.billableDoors || 0;
-  const { billable, reason, startMonth } = decideMonth({
+  // Every fact forwarded by name: decideMonth throws on a missing one it needs rather than guess.
+  const { billable, reason, startMonth, billingRule, renewalDay } = decideMonth({
     month,
     firstVisitDay,
     archivedDay,
     visitsThisMonth,
     visitsInStartMonth,
+    visitsSinceRenewal,
+    cycleFrom,
   });
   return {
     campaignId: String(campaign._id),
     name: campaign.name,
+    // The campaign's zone, which every day below is in. Frozen with the line, so an issued month
+    // can still explain its days after someone edits the campaign's time zone.
+    timeZone,
     isActive: campaign.isActive,
     archivedAt,
     // Renders as the "Billing started <date>" indicator on both billing surfaces; null means
     // "not started — no field activity yet", which is a real, useful state to show.
     firstKnockAt,
+    // The same two facts as civil days in the campaign's zone ('YYYY-MM-DD' | null). Screens and
+    // the CSV print these rather than formatting the instants in the viewer's zone or UTC, which
+    // can read a day off beside a renewal date (docs/PROPOSAL_BILLING_CYCLES.md, decisions 14, 17).
+    firstVisitDay,
+    archivedDay,
     households,
     knocksThisMonth: agg?.knocks || 0, // distinct (household, pass), same as billing everywhere
     // The org's OWN invoice figure when it bills for restricted doors. Equals knocksThisMonth
@@ -80,12 +117,19 @@ function statementLine({
     billRestrictedDoors: billRestricted,
     billable,
     // WHY this line is (or isn't) on the invoice — 'billable' | 'start-grace' | 'end-grace' |
-    // 'floor' | 'before-start' | 'archived-earlier' | 'no-field-visit'. See billingMonths.js.
+    // 'floor' | 'before-start' | 'archived-earlier' | 'no-field-visit' | 'archived-before-renewal' |
+    // 'renewal-grace'. See billingMonths.js.
     reason,
+    // 'calendar' (v3) | 'cycle' (renews monthly from the first visit) | null (never out).
+    billingRule,
+    // A 'cycle' line's renewal date this month ('YYYY-MM-DD'); null for calendar lines and for
+    // months with no renewal to speak of (before the start, long after the archive).
+    renewalDay,
     // The first month this campaign COULD bill — the first-visit month, or the next one when the
     // start grace applied. decideMonth has always computed it; this line used to discard it, which
     // left "first knock Sep 28 but the invoice starts in October" for the reader to derive from the
-    // grace rule. Null until the campaign has been to the field.
+    // grace rule. Null until the campaign has been to the field. The first-visit month on the new
+    // rules, which have no start grace.
     billingStartMonth: startMonth,
     // This campaign's resolved rate, which may differ from the statement's `rateCents`.
     rateCents: lineRate,
@@ -96,10 +140,12 @@ function statementLine({
 }
 
 // The monthly statement an account manager invoices from. WHICH months a campaign bills is decided
-// by services/billing/billingMonths.js — the first-visit month through the archive month, minus a
-// start grace (first visit in the last 7 days of a month → that month is free), minus an end grace
-// (archived in the first 3 days with nobody out that month → free), plus a floor that guarantees a
-// campaign which went to the field always bills at least one month. That module owns the rule and
+// by services/billing/billingMonths.js. A campaign first out before the switch day bills calendar
+// months — the first-visit month through the archive month, minus a start grace (first visit in the
+// last 7 days of a month → that month is free), minus an end grace (archived in the first 3 days with
+// nobody out that month → free), plus a floor that guarantees a campaign which went to the field
+// always bills at least one month. One first out on or after it renews monthly on the date of its
+// first visit, each renewal on the bill for the month it falls in. That module owns the rule and
 // its own unit tests; this file owns the QUERIES that feed it. Month boundaries use each campaign's
 // own timezone (docs/TIMEZONES.md). Universe size (households) is reported for visibility but NEVER
 // priced or enforced — the soft cap is a contract-level guideline only.
@@ -135,6 +181,8 @@ export async function monthlyStatement(organizationId, month) {
   // "rate". Individual lines may carry their own (services/billing/rate.js), so nothing may assume
   // totalCents === billableCount × this number.
   const rateCents = resolveRateCents(null, sub);
+  // Read once per statement, so every line in it is decided against the same switch day.
+  const cycleFrom = cycleBillingFrom();
 
   const lines = [];
   for (const c of campaigns) {
@@ -166,16 +214,16 @@ export async function monthlyStatement(organizationId, month) {
     // The floor occasionally needs the visit count of a DIFFERENT month than this one (see
     // needsStartMonthVisitCount). Existence is enough — any qualifying row means at least one
     // door — so this probes rather than counts, and only in that one narrow corner.
-    const needMonth = needsStartMonthVisitCount({ month, firstVisitDay, archivedDay });
+    const needMonth = needsStartMonthVisitCount({ month, firstVisitDay, archivedDay, cycleFrom });
     let visitsInStartMonth;
     if (needMonth) {
       const nb = monthDayBounds(needMonth);
-      const probe = await CanvassActivity.findOne(
-        { ...fieldVisitMatch(c._id), timestamp: zonedDayRange(nb.first, nb.last, tz) },
-        { _id: 1 }
-      ).lean();
-      visitsInStartMonth = probe ? 1 : 0;
+      visitsInStartMonth = await visitsInDayRange(c._id, { from: nb.first, to: nb.last }, tz);
     }
+    // The monthly-renewal counterpart: an archive inside this month's renewal window needs to know
+    // whether anyone went out since that renewal. Asked the same narrow way.
+    const needRenewal = needsRenewalVisitCount({ month, firstVisitDay, archivedDay, cycleFrom });
+    const visitsSinceRenewal = needRenewal ? await visitsInDayRange(c._id, needRenewal, tz) : undefined;
 
     lines.push(
       statementLine({
@@ -190,6 +238,9 @@ export async function monthlyStatement(organizationId, month) {
         lineRate,
         agg: knockAgg?.[0],
         visitsInStartMonth,
+        visitsSinceRenewal,
+        cycleFrom,
+        timeZone: tz,
       })
     );
   }
@@ -264,6 +315,7 @@ export async function monthlyStatementRange(organizationId, { from, to, maxMonth
     Organization.findById(organizationId, { billRestrictedDoors: 1 }).lean(),
   ]);
   const rateCents = resolveRateCents(null, sub);
+  const cycleFrom = cycleBillingFrom();
 
   // The floor can need the visit count of the month AFTER the first-visit month (see
   // needsStartMonthVisitCount). When the first-visit month is the LAST month of the range, that
@@ -286,15 +338,28 @@ export async function monthlyStatementRange(organizationId, { from, to, maxMonth
     ]);
     const firstKnockAt = firstKnock?.timestamp || null;
     const archivedAt = c.isActive ? null : c.archivedAt || c.updatedAt || null;
+    const firstVisitDay = firstKnockAt ? zonedDayStr(firstKnockAt, tz) : null;
+    const archivedDay = archivedAt ? zonedDayStr(archivedAt, tz) : null;
+    // The renewal probe can't read the month buckets (its window is a day range that can cross a
+    // month end), so it runs here, through the same predicate monthlyStatement asks, for each
+    // requested month. At most one month per campaign asks: renewals are 28+ days apart.
+    const visitsSinceRenewal = new Map();
+    for (const month of months) {
+      const need = needsRenewalVisitCount({ month, firstVisitDay, archivedDay, cycleFrom });
+      if (need) visitsSinceRenewal.set(month, await visitsInDayRange(c._id, need, tz));
+    }
     perCampaign.push({
       campaign: c,
+      timeZone: tz,
       lineRate: resolveRateCents(c, sub),
       billRestricted: resolveBillRestricted(c, org),
       households,
       firstKnockAt,
       archivedAt,
-      firstVisitDay: firstKnockAt ? zonedDayStr(firstKnockAt, tz) : null,
-      archivedDay: archivedAt ? zonedDayStr(archivedAt, tz) : null,
+      firstVisitDay,
+      archivedDay,
+      // Keyed by 'YYYY-MM', only for the months that asked; undefined everywhere else.
+      visitsSinceRenewal,
       // Keyed by 'YYYY-MM'. Drive lookups off the REQUESTED month list, never off these keys: the
       // map holds whatever months had activity, which is neither the range nor a subset of it (the
       // window deliberately overruns by a month, and a campaign-tz bucket at the window edge can
@@ -324,10 +389,14 @@ export async function monthlyStatementRange(organizationId, { from, to, maxMonth
             month,
             firstVisitDay: pc.firstVisitDay,
             archivedDay: pc.archivedDay,
+            cycleFrom,
           });
           if (!need) return undefined;
           return pc.byMonth.get(need)?.billableDoors ? 1 : 0;
         })(),
+        visitsSinceRenewal: pc.visitsSinceRenewal.get(month),
+        cycleFrom,
+        timeZone: pc.timeZone,
       })
     );
     return {
@@ -348,13 +417,17 @@ export async function monthlyStatementRange(organizationId, { from, to, maxMonth
     isActive: pc.campaign.isActive,
     createdAt: pc.campaign.createdAt,
     archivedAt: pc.archivedAt,
-    timeZone: pc.campaign.timeZone || 'America/New_York',
+    timeZone: pc.timeZone,
     firstKnockAt: pc.firstKnockAt,
     firstVisitDay: pc.firstVisitDay,
-    // Null until the campaign has been to the field; the month AFTER the first visit when the
-    // start grace applied. The floor can still make the first-visit month bill — that shows up as
-    // a line with reason 'floor', which is why the org-level "billing since" reads the LINES.
-    billingStartMonth: billingStartMonth(pc.firstVisitDay),
+    archivedDay: pc.archivedDay,
+    // 'calendar' | 'cycle' | null — which rules this campaign bills under (billingMonths.js).
+    billingRule: billingRuleFor(pc.firstVisitDay, cycleFrom),
+    // Null until the campaign has been to the field. On calendar months, the month AFTER the first
+    // visit when the start grace applied (the floor can still make the first-visit month bill — that
+    // shows up as a line with reason 'floor', which is why the org-level "billing since" reads the
+    // LINES); on monthly renewals, always the first-visit month.
+    billingStartMonth: startMonthFor(pc.firstVisitDay, cycleFrom),
     households: pc.households,
     rateCents: pc.lineRate,
     pricePerCampaignCents: pc.campaign.pricePerCampaignCents ?? null,
@@ -387,6 +460,11 @@ export function publicUsage(usage) {
       archivedAt: b.archivedAt,
       firstKnockAt: b.firstKnockAt,
       knocksThisMonth: b.knocksThisMonth,
+      // Which rules it bills under, and its first-visit and archive days on its own calendar, so
+      // the Billing page can say "renews on the 15th" without re-deriving anything.
+      billingRule: b.billingRule,
+      firstVisitDay: b.firstVisitDay,
+      archivedDay: b.archivedDay,
     })),
   };
 }
@@ -414,7 +492,7 @@ export function historyRange(months, now = new Date()) {
 // had door activity, or a grace/floor rule made it free. The silent states (never been to the field,
 // archived long ago) would otherwise repeat every campaign on every row for years and bury the
 // months that matter; their counts still surface as `setupCount`.
-const HISTORY_INTERESTING_REASONS = ['start-grace', 'end-grace', 'floor'];
+const HISTORY_INTERESTING_REASONS = ['start-grace', 'end-grace', 'floor', 'archived-before-renewal', 'renewal-grace'];
 
 export function publicMonthHistory(range) {
   return {
@@ -436,6 +514,8 @@ export function publicMonthHistory(range) {
             isActive: l.isActive,
             archivedAt: l.archivedAt,
             firstKnockAt: l.firstKnockAt,
+            firstVisitDay: l.firstVisitDay,
+            archivedDay: l.archivedDay,
             billable: l.billable,
             reason: l.reason,
             households: l.households,
@@ -480,6 +560,9 @@ export async function currentUsage(organizationId, now = new Date()) {
       // multiplied the org rate by the campaign count would be wrong (services/billing/rate.js).
       rateCents: l.rateCents,
       knocksThisMonth: l.knocksThisMonth,
+      billingRule: l.billingRule,
+      firstVisitDay: l.firstVisitDay,
+      archivedDay: l.archivedDay,
     }));
   return {
     month,

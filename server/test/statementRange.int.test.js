@@ -306,3 +306,99 @@ test('a graced month still LISTS the campaign, so the client can see why it was 
   assert.strictEqual(late.reason, 'start-grace');
   assert.strictEqual(march.graceCount, 1);
 });
+
+// ---- monthly renewals (rules v4) ---------------------------------------------------------
+//
+// Campaigns first out on or after the switch day (2026-11-05) renew monthly from that visit, and the
+// range path has to answer for them exactly what monthlyStatement does — including the one fact it
+// can't read from its month buckets: whether anyone went out since a renewal, over a DAY range that
+// can cross a month end. Appended after every test above so its campaigns, all dated after the
+// switch day, can't touch the 2026 months those tests count.
+
+test('fixture: campaigns on monthly renewals, either side of the switch day', { skip }, async () => {
+  const running = await makeCampaign({ name: 'Renews 15th' });
+  await visit(running, '2027-01-15T18:00:00Z');
+  await visit(running, '2027-02-03T18:00:00Z');
+
+  // Archived the day after March's renewal with nobody out since: March is free (the probe says 0).
+  const quiet = await makeCampaign({ name: 'Renewal grace', archivedAt: new Date('2027-03-16T15:00:00Z') });
+  await visit(quiet, '2027-01-15T18:00:00Z');
+  await visit(quiet, '2027-03-14T18:00:00Z'); // the day before the renewal: not "since"
+
+  // The same dates with a knock ON the renewal day: March bills (the probe says 1).
+  const worked = await makeCampaign({ name: 'Renewal billed', archivedAt: new Date('2027-03-16T15:00:00Z') });
+  await visit(worked, '2027-01-15T18:00:00Z');
+  await visit(worked, '2027-03-15T18:00:00Z');
+
+  // Anchor 30: March's window is Mar 30 to Apr 1, so the probe crosses into April.
+  const across = await makeCampaign({ name: 'Window across', archivedAt: new Date('2027-04-01T15:00:00Z') });
+  await visit(across, '2027-01-30T18:00:00Z');
+
+  // The same in Denver, with a knock at 11:30pm Mar 29 local (5:30am Mar 30 UTC): before the renewal
+  // day on the campaign's calendar, so not "since".
+  const denver = await makeCampaign({ name: 'Window Denver', tz: 'America/Denver', archivedAt: new Date('2027-04-01T18:00:00Z') });
+  await visit(denver, '2027-01-30T18:00:00Z');
+  await visit(denver, '2027-03-30T05:30:00Z');
+
+  // Archived before March's renewal.
+  const early = await makeCampaign({ name: 'Archived before renewal', archivedAt: new Date('2027-03-10T15:00:00Z') });
+  await visit(early, '2027-01-20T18:00:00Z');
+
+  // A 31st start: renews Feb 28, Mar 31, Apr 30.
+  const anchor31 = await makeCampaign({ name: 'Anchor 31' });
+  await visit(anchor31, '2027-01-31T18:00:00Z');
+
+  // The switch day itself and the day before; and a late-month start, which gets no start grace.
+  const onTheDay = await makeCampaign({ name: 'Out Nov 5' });
+  await visit(onTheDay, '2026-11-05T18:00:00Z');
+  const dayBefore = await makeCampaign({ name: 'Out Nov 4' });
+  await visit(dayBefore, '2026-11-04T18:00:00Z');
+  const lateMonth = await makeCampaign({ name: 'Out Nov 28' });
+  await visit(lateMonth, '2026-11-28T18:00:00Z');
+});
+
+test('monthly renewals: every month in the range is identical to its single-month statement', { skip }, async () => {
+  await assertParity('2026-10', '2027-05', 'renewals across the switch day');
+  await assertParity('2027-03', '2027-03', 'one month whose renewal windows need the probe');
+});
+
+test('monthly renewals: the range path decides each renewal right', { skip }, async () => {
+  const range = await monthlyStatementRange(ctx.org._id, { from: '2026-11', to: '2027-04' });
+  const line = (month, name) => range.statements.find((s) => s.month === month).lines.find((l) => l.name === name);
+  assert.strictEqual(line('2027-03', 'Renewal grace').reason, 'renewal-grace');
+  assert.strictEqual(line('2027-03', 'Renewal billed').reason, 'billable');
+  assert.strictEqual(line('2027-03', 'Window across').reason, 'renewal-grace');
+  assert.strictEqual(line('2027-04', 'Window across').reason, 'archived-before-renewal');
+  assert.strictEqual(line('2027-03', 'Window Denver').reason, 'renewal-grace');
+  assert.strictEqual(line('2027-03', 'Archived before renewal').reason, 'archived-before-renewal');
+  assert.strictEqual(line('2027-03', 'Archived before renewal').renewalDay, '2027-03-20');
+  assert.deepStrictEqual(
+    ['2027-01', '2027-02', '2027-03', '2027-04'].map((m) => line(m, 'Anchor 31').renewalDay),
+    ['2027-01-31', '2027-02-28', '2027-03-31', '2027-04-30']
+  );
+  assert.strictEqual(line('2026-11', 'Out Nov 5').billingRule, 'cycle');
+  assert.strictEqual(line('2026-11', 'Out Nov 4').billingRule, 'calendar');
+  assert.strictEqual(line('2026-11', 'Out Nov 28').reason, 'billable', 'no start grace on the new rules');
+
+  // The org page's Campaigns tab reads these facts: the first-visit month, never a start-grace month.
+  const facts = new Map(range.campaigns.map((c) => [c.name, c]));
+  assert.strictEqual(facts.get('Out Nov 28').billingStartMonth, '2026-11');
+  assert.strictEqual(facts.get('Out Nov 28').billingRule, 'cycle');
+  assert.strictEqual(facts.get('Late start').billingStartMonth, '2026-04', 'a calendar campaign keeps its start grace');
+  assert.strictEqual(facts.get('Late start').billingRule, 'calendar');
+  assert.strictEqual(facts.get('Setup only').billingRule, null);
+  assert.strictEqual(facts.get('Window Denver').archivedDay, '2027-04-01');
+});
+
+test('monthly renewals: the customer history lists a free renewal and carries the campaign days', { skip }, async () => {
+  const range = await monthlyStatementRange(ctx.org._id, { from: '2027-03', to: '2027-03' });
+  const march = publicMonthHistory(range).months[0];
+  const quiet = march.campaigns.find((c) => c.name === 'Renewal grace');
+  assert.ok(quiet, 'listed, so the client can see why it was free');
+  assert.strictEqual(quiet.reason, 'renewal-grace');
+  assert.strictEqual(quiet.firstVisitDay, '2027-01-15');
+  assert.strictEqual(quiet.archivedDay, '2027-03-16');
+  const early = march.campaigns.find((c) => c.name === 'Archived before renewal');
+  assert.ok(early, 'an archive before the renewal is listed too');
+  assert.strictEqual(early.reason, 'archived-before-renewal');
+});

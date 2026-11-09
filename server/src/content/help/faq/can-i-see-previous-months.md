@@ -11,7 +11,7 @@ tags: billing, history, months, invoice, doors
 
 Yes. The **Month by month** table on your [Billing page](page-billing) goes back 12 months by default, and **Show 24 months** takes it to two years.
 
-Each row is one month: how many campaigns were billing, how many doors were covered, and how many were knocked. Click a month to open the campaigns behind it — when each started billing, its own doors and knocks, and a short note on any that were free that month (still in setup, started in the last week, archived with nobody out).
+Each row is one month: how many campaigns were billing, how many doors were covered, and how many were knocked. Click a month to open the campaigns behind it — when each started billing, its own doors and knocks, and a short note on any that were free that month (still in setup, started in the last week, archived with nobody out, or — for a campaign that renews monthly — archived before its renewal or within 3 days of it).
 
 That's the place to look when you're preparing your own invoice for a past month, or checking one you've already been sent.
 

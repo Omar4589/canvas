@@ -692,7 +692,7 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
 ## Addendum 3, as built — 2026-11-02
 
 - **§1–§7 (website), built:** the numbers strip's client line is gone (`CLIENTS` deleted) and the totals'
-  date sits small on the right; the hero's top padding is `sm:pt-12` (phones keep `pt-8`); no platform is
+  date sits small on the right; the hero's top padding is `sm:pt-12` (phones keep `pt-8`, raised to `pt-12` on Nov 2 so every width gets 48 px); no platform is
   named for fake-GPS apps; the Client reports band's names paragraph and /aapc's sentence are gone (the
   FAQ keeps it); "any major vendor" in Setup and the FAQ; the new founder note in Source Serif 4 (Latin,
   400, self-hosted via `@fontsource/source-serif-4`, imported by `FounderNote.jsx` alone), 19 px / 22 px,
@@ -713,3 +713,10 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
 - **Waiting on the owner:** the totals after Election Day; his headshot and signature scan; the sample
   report's Share steps (then its link and password go into `siteFacts.js`, and every "See how it works"
   becomes "Open a sample report").
+- **Follow-ups, Nov 2 (the owner):** the numbers strip shows three totals — door knocks, surveys, campaigns —
+  in the brand red, on one row at every width (smaller on a phone); voter records came out. The hero gets
+  48 px above it on phones too (`pt-12`; the phone's 32 px had never been removed — it simply felt tight).
+- **Founder note, Nov 3 (the owner):** *"change the font back on my quote … and add quotation marks so it's
+  more like a quote"* — §6's serif typography is undone: the note is back in the site's sans, semibold, inside
+  quotation marks, with the new words kept; Source Serif 4 and its package are removed.
+

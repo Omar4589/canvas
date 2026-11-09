@@ -36,6 +36,7 @@ import adminLeadCrewRouter from './admin/leadCrew.js';
 import superAdminOrganizationsRouter from './superAdmin/organizations.js';
 import superAdminBillingRouter from './superAdmin/billing.js';
 import adminBillingRouter from './admin/billing.js';
+import adminBillingRenewalsRouter from './admin/billingRenewals.js';
 import adminIntegrationsRouter from './admin/integrations.js';
 import superAdminUsersRouter from './superAdmin/users.js';
 import superAdminPersonsRouter from './superAdmin/persons.js';
@@ -123,6 +124,10 @@ router.use('/super-admin/billing', superAdminStatementsRouter);
 router.use('/super-admin', superAdminPlatformRouter);
 
 router.use('/admin/billing', adminBillingRouter);
+// Which rules each campaign bills under, for the election-day archive reminder: every org admin,
+// with renewal dates for billing admins only. A SIBLING prefix on purpose — Express never routes
+// /admin/billing-renewals into the router above, so that one stays billing-gated throughout.
+router.use('/admin/billing-renewals', adminBillingRenewalsRouter);
 // The FbTime integration (opt-in measured hours). Admin-only, org-wide; after
 // accessLog like everything above, so support-grant reads of it are recorded.
 router.use('/admin/integrations', adminIntegrationsRouter);

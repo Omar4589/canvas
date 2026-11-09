@@ -60,8 +60,20 @@ const lineSchema = new mongoose.Schema(
     billRestrictedDoors: { type: Boolean, default: false },
     billable: { type: Boolean, default: false },
     // Why — 'billable' | 'start-grace' | 'end-grace' | 'floor' | 'before-start' |
-    // 'archived-earlier' | 'no-field-visit' (services/billing/billingMonths.js).
+    // 'archived-earlier' | 'no-field-visit' | 'archived-before-renewal' | 'renewal-grace'
+    // (services/billing/billingMonths.js).
     reason: { type: String, default: '' },
+    // Which rules decided the line: 'calendar' (v3) | 'cycle' (renews monthly from the first visit,
+    // rules v4) | null (never out). Legacy rows lack the key entirely (billing reads are lean), and
+    // readers take a missing value on a line with a first visit as 'calendar'.
+    billingRule: { type: String, default: null },
+    // A 'cycle' line's renewal date this month, and the first-visit and archive days, all
+    // 'YYYY-MM-DD' in the line's `timeZone`. Derived from facts the line already freezes, which is
+    // why statementDrift's explicit field list leaves them out: a legacy row's MISSING key against a
+    // live null would otherwise read as drift on every old line.
+    renewalDay: { type: String, default: null },
+    firstVisitDay: { type: String, default: null },
+    archivedDay: { type: String, default: null },
     // The first month this campaign could bill: the first-visit month, or the one after it when the
     // start grace applied (billingMonths.billingStartMonth). decideMonth has always returned it and
     // statementLine used to drop it, so "first knock Sep 28, bills from October" needed the reader

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getActiveOrgId } from '../api/client.js';
 import { BillingPill } from '../lib/billingStatus.jsx';
+import { campaignDayLabel, renewsOnLabel } from '../lib/months.js';
 import { Badge, Card, DataTable, EmptyState } from '../components/ui/index.js';
 
 const CONTACT = 'mailto:hello@doorline.app?subject=Doorline%20account';
@@ -25,6 +26,9 @@ const REASON_LABEL = {
   floor: 'minimum one month',
   'archived-earlier': 'archived',
   'before-start': 'before billing began',
+  // Monthly-renewal campaigns (first out on or after the switch day).
+  'archived-before-renewal': 'free — archived before its renewal',
+  'renewal-grace': 'free — archived within 3 days of its renewal',
 };
 
 // 'YYYY-MM' → a friendly month label (e.g. 'July 2026').
@@ -35,7 +39,6 @@ function monthLabel(ym) {
   return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
-const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '—');
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 // One month in the history table: a summary row that expands to the campaigns behind it.
@@ -86,12 +89,16 @@ function MonthRow({ m, open, onToggle }) {
                     <tr key={c.campaignId} className={c.billable ? '' : 'text-fg-muted'}>
                       <td className="py-1.5 pr-3">
                         <span className={c.billable ? 'text-fg' : ''}>{c.name}</span>
-                        {!c.isActive && <span className="ml-1 text-xs text-fg-subtle">(archived {fmtDate(c.archivedAt)})</span>}
+                        {!c.isActive && (
+                          <span className="ml-1 text-xs text-fg-subtle">(archived {campaignDayLabel(c.archivedDay, c.archivedAt)})</span>
+                        )}
                         {REASON_LABEL[c.reason] && (
                           <span className="ml-1 text-xs text-fg-subtle">— {REASON_LABEL[c.reason]}</span>
                         )}
                       </td>
-                      <td className="py-1.5 pr-3 text-xs">{c.firstKnockAt ? fmtDate(c.firstKnockAt) : 'Not started'}</td>
+                      <td className="py-1.5 pr-3 text-xs">
+                        {c.firstVisitDay || c.firstKnockAt ? campaignDayLabel(c.firstVisitDay, c.firstKnockAt) : 'Not started'}
+                      </td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">
                         {c.doors.toLocaleString()}
                         {/* Only meaningful once the org bills restricted homes — otherwise this
@@ -195,12 +202,22 @@ export default function BillingPage() {
                 server strips it too (services/billing/statement.js → publicUsage) — this is not a
                 hidden field. What DOES belong here is when the meter starts and stops, because
                 that is the part customers act on. */}
+            {/* Both kinds of campaign, because an org can have both: the switch is per campaign, by
+                its first field visit (services/billing/billingMonths.js). The day comes from the
+                server, so it is never a second copy of the constant. */}
             <p className="mt-3 text-sm text-fg-muted">
-              A campaign starts billing the month of its first field visit — a knock, or a restricted
-              home a canvasser walked to. Start in the <span className="font-medium text-fg">last
-              week of a month</span> and that month is on us. Billing then runs every month until you{' '}
-              <span className="font-medium text-fg">archive</span> the campaign, whether or not anyone
-              knocks, so archiving a finished race is what stops it.
+              A campaign starts billing with its first field visit — a knock, or a restricted home a
+              canvasser walked to — and bills every month until you{' '}
+              <span className="font-medium text-fg">archive</span> it, whether or not anyone knocks, so
+              archiving a finished race is what stops it.
+              {data.cycleBillingFrom && (
+                <>
+                  {' '}A campaign first out on or after {campaignDayLabel(data.cycleBillingFrom)} renews on
+                  the date of that visit each month, and archiving before a renewal means that renewal
+                  never happens. One first out earlier bills by calendar month, and starting in the{' '}
+                  <span className="font-medium text-fg">last week of a month</span> makes that month free.
+                </>
+              )}
             </p>
             {data.usage && (
               <div className="mt-3 rounded-lg border border-border bg-sunken px-3 py-2.5">
@@ -225,11 +242,16 @@ export default function BillingPage() {
                         <span className="text-fg">
                           {b.name}
                           {!b.isActive && (
-                            <span className="ml-1 text-fg-subtle">(archived {fmtDate(b.archivedAt)})</span>
+                            <span className="ml-1 text-fg-subtle">(archived {campaignDayLabel(b.archivedDay, b.archivedAt)})</span>
                           )}
                         </span>
                         <span className="text-fg-muted">
-                          billing since {fmtDate(b.firstKnockAt)} · {plural(b.knocksThisMonth, 'door', 'doors')} this month
+                          billing since {campaignDayLabel(b.firstVisitDay, b.firstKnockAt)}
+                          {/* A running campaign on monthly renewals says when it renews; once archived
+                              it renews no more, and the archive date beside its name says so. */}
+                          {b.billingRule === 'cycle' && b.isActive && ` · ${renewsOnLabel(b.firstVisitDay)}`}
+                          {' · '}
+                          {plural(b.knocksThisMonth, 'door', 'doors')} this month
                         </span>
                       </li>
                     ))}

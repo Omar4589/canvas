@@ -101,8 +101,9 @@ so "signed out then in" and "session expired then in" landed in different places
   Room cards) is five tabs, with the tab and month in the URL:
 
   - **Overview** — *Next up*, then the running month, the backlog and what is unpaid.
-  - **Campaigns** — first field visit, the month each **bills from**, what it is doing this month
-    or why it is free, and how many of its months are awaiting / overdue / issued / paid.
+  - **Campaigns** — first field visit, the month each **bills from** (with *renews on the 15th* for
+    a running campaign on monthly renewals, first out on or after Nov 5, 2026), what it is doing this
+    month or why it is free, and how many of its months are awaiting / overdue / issued / paid.
   - **Statements** — the month ledger: issue, void, mark paid, unmark, export, and the paper trail
     including voided rows.
   - **Members** — the **member roster**, the one thing that previously required burning a logged
@@ -396,8 +397,11 @@ customer owns.
 - **`billing-rollup` / `at-risk`** ([organizations.js](../server/src/routes/superAdmin/organizations.js))
   are N+1 walks over orgs (one statement/entitlement evaluation each — same tradeoff as idle-orgs);
   fine at platform scale, revisit past the low hundreds. Count contract: **billable = statement lines
-  where `l.billable === true`** (first knock before the month ended AND not archived before it began —
-  [services/billing/statement.js](../server/src/services/billing/statement.js)); internal orgs are
+  where `l.billable === true`**, as decided by
+  [services/billing/billingMonths.js](../server/src/services/billing/billingMonths.js) (calendar
+  months with the grace rules, or monthly renewals for a campaign first out on or after the switch
+  day — see [BILLING.md](BILLING.md)) and fed by
+  [services/billing/statement.js](../server/src/services/billing/statement.js); internal orgs are
   excluded from both. At-risk = trials expiring within `days` (default 7), `past_due`, `suspended`,
   `canceled` in wind-down (`windDownEndsAt`), plus the idle $0 zombies from `idleZeroDollarOrgs`.
 - **Lockout read** (`GET /users/:userId/lockout` → `loginLockoutStatus`,

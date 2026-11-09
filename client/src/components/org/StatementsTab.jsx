@@ -3,7 +3,7 @@ import { Badge, Button, Card, DataTable, EmptyState, Segmented } from '../ui/ind
 import RowMenu from '../RowMenu.jsx';
 import { fmtUsd } from '../../lib/billingStatus.jsx';
 import { formatDate } from '../../lib/dates.js';
-import { monthLabel } from '../../lib/months.js';
+import { campaignDayLabel, monthLabel } from '../../lib/months.js';
 import { ledgerFilter, pickedSummary, stateMeta, reasonLabel } from '../../lib/invoicing.js';
 import { DriftBadge } from './modals/StatementModals.jsx';
 import { statementCsvRows, statementCsvName, combinedCsvRows, combinedCsvName } from '../../lib/statementCsv.js';
@@ -76,8 +76,16 @@ const MonthDetail = ({ row, asOf, internal, onSetRate }) => {
               <tr key={l.campaignId} className={l.billable ? '' : 'text-fg-muted'}>
                 <td className="py-1.5 pr-3 font-medium text-fg">{l.name}</td>
                 <td className="py-1.5 pr-3">{l.households}</td>
-                <td className="whitespace-nowrap py-1.5 pr-3">{l.firstKnockAt ? formatDate(l.firstKnockAt) : '—'}</td>
-                <td className="whitespace-nowrap py-1.5 pr-3">{l.billingStartMonth ? monthLabel(l.billingStartMonth) : '—'}</td>
+                {/* The campaign-calendar day where the line has one (rules v4); a line frozen
+                    before that falls back to the instant, as it always read. */}
+                <td className="whitespace-nowrap py-1.5 pr-3">{l.firstKnockAt ? campaignDayLabel(l.firstVisitDay, l.firstKnockAt) : '—'}</td>
+                <td className="whitespace-nowrap py-1.5 pr-3">
+                  {l.billingStartMonth ? monthLabel(l.billingStartMonth) : '—'}
+                  {/* A monthly-renewal line names the renewal this month's charge is about. */}
+                  {l.billingRule === 'cycle' && l.renewalDay && (
+                    <span className="block text-xs text-fg-subtle">renewal {campaignDayLabel(l.renewalDay)}</span>
+                  )}
+                </td>
                 <td className="py-1.5 pr-3 text-right tabular-nums">{l.knocksThisMonth}</td>
                 <td className="py-1.5 pr-3 text-right tabular-nums">
                   {l.billRestrictedDoors ? l.billableDoorsThisMonth : l.knocksThisMonth}

@@ -17,6 +17,7 @@ const { Subscription } = await import('../src/models/Subscription.js');
 const { Campaign } = await import('../src/models/Campaign.js');
 const { CanvassActivity } = await import('../src/models/CanvassActivity.js');
 const { currentUsage } = await import('../src/services/billing/statement.js');
+const { setCycleBillingFromForTests } = await import('../src/services/billing/billingMonths.js');
 const { SupportAccessGrant } = await import('../src/models/SupportAccessGrant.js');
 
 const URI = process.env.MONGODB_URI_TEST;
@@ -38,6 +39,10 @@ before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
   for (const M of [Organization, User, Membership, Subscription, Campaign, CanvassActivity]) await M.deleteMany({});
+  // This suite's first visits are relative to today, and it means to test calendar months (its
+  // start-grace note below): pin the switch day far away so it does, whenever it runs. Monthly
+  // renewals have their own suites (billingRenewals.int, statement.int, statementRange.int).
+  setCycleBillingFromForTests('9999-12-31');
 
   const org = await Organization.create({ name: 'Acme', slug: 'acme', isActive: true });
   await Subscription.create({ organizationId: org._id, status: 'active' });
@@ -62,6 +67,7 @@ before(async () => {
 });
 
 after(async () => {
+  setCycleBillingFromForTests(null);
   if (server) await new Promise((r) => server.close(r));
   if (URI) await mongoose.disconnect();
 });
@@ -130,6 +136,10 @@ test('usage meter counts only first-knock-started campaigns', { skip }, async ()
   assert.strictEqual(u.billableCampaigns, u.billing.length, 'count matches the breakdown');
   assert.strictEqual(u.billing[0].name, 'Fall');
   assert.ok(u.billing[0].firstKnockAt, 'the billing line carries its first-knock date');
+  // …and its rule and days on the campaign's calendar, for "renews on the 15th" (rules v4).
+  assert.strictEqual(u.billing[0].billingRule, 'calendar', 'pinned to calendar months above');
+  assert.match(u.billing[0].firstVisitDay, /^\d{4}-\d{2}-01$/, 'the first visit, on the campaign calendar');
+  assert.strictEqual(u.billing[0].archivedDay, null);
   assert.strictEqual(u.setupCount, 0, 'Fall is now billing, not setup');
 
   // …but NO DOLLAR FIGURE may reach the CUSTOMER. Pricing is negotiated per client and per race,

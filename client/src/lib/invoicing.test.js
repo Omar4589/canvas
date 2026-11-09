@@ -66,7 +66,7 @@ test('dueLabel flips at the due date', () => {
 });
 
 test('reasonLabel explains every rule code in plain words', () => {
-  for (const code of ['billable', 'no-field-visit', 'start-grace', 'end-grace', 'floor', 'before-start', 'archived-earlier']) {
+  for (const code of ['billable', 'no-field-visit', 'start-grace', 'end-grace', 'floor', 'before-start', 'archived-earlier', 'archived-before-renewal', 'renewal-grace']) {
     const label = reasonLabel(code);
     assert.ok(label && label !== code, `${code} is explained, not echoed`);
   }
@@ -207,4 +207,10 @@ test('campaigns sort by what needs attention, not alphabetically', () => {
     { name: 'Gamma', isActive: false, overdueMonths: 0, awaitingMonths: 0 },
   ].sort(campaignNeedsAttention);
   assert.deepStrictEqual(rows.map((r) => r.name), ['Beta', 'Alpha', 'Zeta', 'Gamma']);
+});
+
+test('the monthly-renewal reasons say which renewal went free, never "first days" or "no knocks"', () => {
+  assert.match(reasonLabel('archived-before-renewal'), /before its renewal/);
+  assert.match(reasonLabel('renewal-grace'), /within 3 days of its renewal/);
+  assert.doesNotMatch(reasonLabel('renewal-grace'), /first days|no knocks/);
 });

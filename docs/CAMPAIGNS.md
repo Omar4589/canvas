@@ -814,9 +814,19 @@ builder's internal note ([CLIENT_PORTAL.md](CLIENT_PORTAL.md) → *The numbers*)
   anyone knocks, so a finished race left un-archived quietly keeps costing money. Once a campaign's
   `electionDay` has passed and it is still active, the Campaigns page and the campaign dashboard show
   org admins an **archive nudge** ([ArchiveNudge.jsx](../client/src/components/ArchiveNudge.jsx));
-  a team lead sees neither (they can't archive, and the subscription isn't theirs to read); archiving in
-  the first 3 days of a month with no field activity that month also makes that month free. Full
-  rules in [BILLING.md](BILLING.md). Note that **reactivating clears `archivedAt`**, which makes the
+  a team lead sees neither (they can't archive, and the subscription isn't theirs to read). What it says
+  depends on how the campaign bills: a campaign first out **before November 5, 2026** bills by calendar
+  month, and archiving in the first 3 days of a month with no field activity that month also makes that
+  month free — the reminder keeps that wording for everyone. One first out **on or after** it renews
+  monthly on the date of its first visit: archive before the next renewal and that renewal never
+  happens, or on a renewal day or the two days after it with nobody out since and that renewal is free.
+  Admins with billing access see its dates (*Archive before Dec 15 and it won't renew*; inside a
+  renewal's 3 days, *It renewed on Dec 15. Archive by Dec 17 and, if nobody's been out since, that
+  renewal is free*); other admins see *Archiving stops the billing — otherwise it renews every month,
+  knocks or not.* A campaign that has never been out says it isn't billing, and the reminder for
+  several campaigns never shows a date. Every admin's reminder knows how each campaign bills; only
+  admins with billing access see its dates. Full rules, the wording matrix and the endpoint behind it
+  in [BILLING.md](BILLING.md). Note that **reactivating clears `archivedAt`**, which makes the
   skipped months billable again on any statement that hasn't been issued — which is why **Reactivate
   confirms before it fires** (a modal on the Campaigns page saying exactly that: billing resumes,
   archived months included, and an archived campaign is already fully readable if you only want the
