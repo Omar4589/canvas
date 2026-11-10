@@ -23,7 +23,7 @@ import {
   activityFileNames,
 } from './exportBuilders.js';
 import { ACTION_TYPES, NOTE_SOURCES } from '../notes/notesQuery.js';
-import { BILLABLE_WITH_RESTRICTED } from '../reports/aggregations.js';
+import { BILLABLE_WITH_RESTRICTED, KNOCK_ACTIONS } from '../reports/aggregations.js';
 import { EXPORT_ESTIMATES } from './exportEstimates.js';
 import { outcomeInUse } from '../canvass/outcomeToggles.js';
 
@@ -94,7 +94,7 @@ const backupNotes = (notTargetInUse) => [
   'voterfile-current.csv is a RECONSTRUCTION from the data currently in Doorline, not the originally uploaded file: unmapped vendor columns were never stored, rows that failed import are absent, and edits made since the upload are reflected.',
   'Counting units (never sum across them): "Survey doors" counts doors (one per household per pass), "Voters surveyed" counts distinct people, "Surveys taken" counts survey submissions. activity-log.csv rows are individual door events, finer than all three.',
   'knocks-by-round.csv is the invoice-grade per-round summary; doors-by-round.csv is its per-door detail — rows with a Round status other than unknocked/restricted reconcile to that round’s Knocks.',
-  `activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (${plainKnocks(notTargetInUse)}) leave the voter columns blank — doors-by-round.csv is the per-door file. The bundle\u2019s activity-log.csv is ALWAYS one row per door event; repeating a door-level knock once per registered voter is an opt-in on a standalone Canvassing activity export (activity-log-by-voter).`,
+  `activity-log.csv identifies a voter only on rows where the event named one (a survey at the door); door-level knocks (${plainKnocks(notTargetInUse)}) leave the voter columns blank — doors-by-round.csv is the per-door file. The bundle\u2019s activity-log.csv is ALWAYS one row per door event; one row per knock (each door once per round, as Knocks counts it) and repeating a door-level knock once per registered voter are opt-ins on a standalone Canvassing activity export (activity-log-per-knock, activity-log-by-voter).`,
   'notes.csv carries every note in one file, one row per note; voter-profile notes therefore appear in BOTH notes.csv and voter-notes.csv. The bundle\u2019s notes.csv never lists the voters registered at a door \u2014 that is an opt-in column on a standalone Notes export.',
   'The survey files here use the default columns (name, party, address). For phone, date of birth, districts, precinct and coordinates beside each answer, queue Survey results on its own with "Include contact & demographic details" — voterfile-current.csv in this bundle already carries all of those, keyed by State Voter ID.',
 ];
@@ -193,7 +193,7 @@ const buildFullBackup = async (ctx, sink) => {
 // The two descriptions that name Not a target voter, built once per form so the two can never
 // drift apart (see plainKnocks above).
 const activityDesc = (notTargetInUse) =>
-  `Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (${plainKnocks(notTargetInUse)}) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file named activity-log-by-voter, so its rows are never counted as knocks. Tick "Include survey answers" and every survey row gains the answers that were recorded, one column per question \u2014 plus a row for each survey the knock ledger cannot show, because surveying three people at one door in one round is ONE knock and three surveys. Those rows say Row source: survey and carry no Activity DB id; never count them as knocks either.`;
+  `Every door result: who knocked, when, the outcome, and the voter at that door. Voter columns (State voter ID, UID, name, party) fill in only when the event named a voter — a survey at the door; plain knocks (${plainKnocks(notTargetInUse)}) are door-level records and leave them blank. Tick "One row per voter at the door" and those door-level knocks repeat once per registered voter at that address — same columns, more rows, the same outcome on each (a refused belongs to the door, not to each person) — in a file whose name includes -by-voter, so its rows are never counted as knocks. Tick "Include survey answers" and every survey row gains the answers that were recorded, one column per question \u2014 plus a row for each survey the knock ledger cannot show, because surveying three people at one door in one round is ONE knock and three surveys. Those rows say Row source: survey and carry no Activity DB id; never count them as knocks either.`;
 const resultsByVoterDesc = (notTargetInUse) =>
   `The file to send a client: one row per person at the doors you worked, with what happened at their address and what they said. Every registered voter at a door with a field visit gets a row — plus anyone you surveyed, even if they have since moved to a door nobody knocked. The Address columns describe the DOOR, not the person: "Refused" on a three-voter house means somebody there declined, not that all three did${notTargetInUse ? ', and "Not a target voter" means the person who answered was not on the list' : ''}. Answers are grouped by round, so a voter surveyed twice shows both sets side by side. Outcomes are spelled in plain English here, unlike every other export, because this is the one built to be read rather than re-imported.`;
 
@@ -210,7 +210,9 @@ export const EXPORT_TYPES = {
     // actionTypes param below — a narrowing filter, so canvassActivityQuery applies it and the
     // estimate follows for free. Leaving Restricted / Wrong address unticked is how a client
     // drops desk marks and bad addresses from the file.
-    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows', 'surveyAnswers'],
+    // `onePerKnock` (docs/PROPOSAL_ONE_ROW_PER_KNOCK.md) is advertised here and nowhere in `desc`:
+    // /types serves desc to every phone, and one without the update would describe a switch it lacks.
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'onePerKnock', 'perVoterRows', 'surveyAnswers'],
     adminOnly: false,
     requiresCampaign: true,
     subjectType: 'voter',
@@ -232,6 +234,17 @@ export const EXPORT_TYPES = {
         if (params.actionTypes.length) out.actionTypes = params.actionTypes;
       }
       if (params.excludeBulk) out.excludeBulk = true;
+      // A ROW option like perVoterRows: one row per door per round, the door's knock result (knockPlan).
+      // Frozen into ExportJob.params, so the history is the record of which files were per knock. Its
+      // universe is knocks, so a chip outside them can only mean a mistake — refused with the reason,
+      // the results-by-voter precedent (both clients hide those chips while it is ticked).
+      if (params.onePerKnock) {
+        out.onePerKnock = true;
+        const outside = (out.actionTypes || []).filter((a) => !KNOCK_ACTIONS.includes(a));
+        if (outside.length) {
+          throw new ExportUserError('One row per knock lists knocks only, so it can’t include Restricted or Note added.');
+        }
+      }
       // Frozen into ExportJob.params like includeVoterDetail/includeDoorVoters — the history row
       // is the permanent record of which downloads carried a knock attached to people nobody
       // named. Unlike those two this is a ROW option, so the estimate reads it (exportEstimates).

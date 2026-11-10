@@ -82,6 +82,10 @@ before(async () => {
   if (!URI) return;
   await mongoose.connect(URI);
   await mongoose.connection.db.dropDatabase();
+  // The per-knock file HINTS the {campaignId: 1} index (exportBuilders knockRowsAggregate), and a hint
+  // naming a missing index fails the query — so the ledger's indexes exist before any fixture, as in
+  // production, rather than whenever Mongoose's background build happens to land (the 77fb703 lesson).
+  await CanvassActivity.createIndexes();
 
   ctx.org = await Organization.create({ name: 'Builder Org', slug: 'builder-org', isActive: true });
   ctx.uAda = await User.create({ firstName: 'Ada', lastName: 'Knocks', email: 'ada@b.test', passwordHash: 'h', isActive: true });
@@ -313,8 +317,16 @@ test('EVERY export type: no DNC voter identity, no select:false price, in any ar
   // canvass-activity assertions below keep reading the default file.
   const runs = Object.keys(EXPORT_TYPES).map((type) => [type, type]);
   runs.push(['canvass-activity', 'canvass-activity:fanned']);
+  // One row per knock re-reads every entry through a new aggregation (the kept row carried whole):
+  // swept as a THIRD keyed artifact, with the fan and the answer layer on, so every identity path it
+  // touches is under the same guarantee.
+  runs.push(['canvass-activity', 'canvass-activity:perKnock']);
+  const sweepParams = {
+    'canvass-activity:fanned': { perVoterRows: true },
+    'canvass-activity:perKnock': { onePerKnock: true, perVoterRows: true, includeSurveyAnswers: true },
+  };
   for (const [type, key] of runs) {
-    const params = key === 'canvass-activity:fanned' ? { perVoterRows: true } : await paramsFor(type);
+    const params = sweepParams[key] || (await paramsFor(type));
     const { doc, text } = await runExport(type, params);
     ctx.artifacts[key] = { doc, text };
     for (const leak of [
@@ -727,6 +739,14 @@ test('estimates match filtered builds (estimate==build under params)', { skip },
     ['canvass-activity', { perVoterRows: true, passId: 'legacy' }],
     // The `outcome` chips' everyday use: everything except Restricted and Wrong address.
     ['canvass-activity', { actionTypes: ['not_home', 'refused', 'survey_submitted', 'lit_dropped', 'no_soliciting'] }],
+    // One row per knock on this fixture (h1 and h2 each hold two entries in one round; h5's desk mark is
+    // not a knock), alone and composed with the fan, the answer layer, a canvasser and legacy.
+    ['canvass-activity', { onePerKnock: true }],
+    ['canvass-activity', { onePerKnock: true, perVoterRows: true }],
+    ['canvass-activity', { onePerKnock: true, includeSurveyAnswers: true }],
+    ['canvass-activity', { onePerKnock: true, perVoterRows: true, includeSurveyAnswers: true, actionTypes: ['not_home', 'survey_submitted'] }],
+    ['canvass-activity', { onePerKnock: true, userId: String(ctx.uAda._id) }],
+    ['canvass-activity', { onePerKnock: true, passId: 'legacy' }],
   ];
   for (const [type, params] of cases) {
     const validated = await EXPORT_TYPES[type].validateParams(params, { organizationId: ctx.org._id, campaignId: ctx.camp._id });

@@ -38,6 +38,12 @@ export const createCsvWriter = (stream) => {
 
   const writeChunk = (str) => {
     const chunk = Buffer.from(str, 'utf8');
+    // A stream that already failed (a GridFS chunk insert that errored between batches, with nobody
+    // waiting on 'drain') is destroyed: write() on it returns false and never emits 'drain' or 'error',
+    // so the build would hang forever, holding the worker's single export slot. Fail instead.
+    if (stream.errored || stream.destroyed) {
+      return Promise.reject(stream.errored || new Error('export upload stream closed'));
+    }
     bytesWritten += chunk.length;
     if (stream.write(chunk)) return Promise.resolve();
     return new Promise((resolve, reject) => {

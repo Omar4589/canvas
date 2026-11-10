@@ -215,6 +215,27 @@ test('POST /estimate: counts with the builder’s numbers, same scoping as creat
   assert.strictEqual(adminOnly.status, 403);
 });
 
+test('POST /estimate: one row per knock answers with its survey rows, and refuses non-knock chips', { skip }, async () => {
+  const r = await call('POST', '/admin/exports/estimate', {
+    token: ctx.leadTok, orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.c1._id), params: { onePerKnock: true, includeSurveyAnswers: true } },
+  });
+  assert.strictEqual(r.status, 200, 'a lead (often the client) gets the option too');
+  assert.strictEqual(typeof r.json.rows, 'number');
+  assert.strictEqual(typeof r.json.surveyRows, 'number', 'the split the phone shows rides the response');
+  assert.strictEqual(r.json.rowsUnavailable, undefined);
+  const plain = await call('POST', '/admin/exports/estimate', {
+    token: ctx.leadTok, orgId: ctx.org._id, body: { type: 'canvass-activity', campaignId: String(ctx.c1._id) },
+  });
+  assert.strictEqual(plain.json.surveyRows, undefined, 'the plain file’s response is unchanged');
+  const refused = await call('POST', '/admin/exports/estimate', {
+    token: ctx.adminTok, orgId: ctx.org._id,
+    body: { type: 'canvass-activity', campaignId: String(ctx.c1._id), params: { onePerKnock: true, actionTypes: ['not_home', 'restricted'] } },
+  });
+  assert.strictEqual(refused.status, 400);
+  assert.match(refused.json.error, /One row per knock lists knocks only/);
+});
+
 test('POST /estimate: unknown type / previewless type / bad params are 400s', { skip }, async () => {
   const unknown = await call('POST', '/admin/exports/estimate', {
     token: ctx.adminTok, orgId: ctx.org._id, body: { type: 'nope', campaignId: String(ctx.c1._id) },
@@ -275,9 +296,12 @@ test('GET /types: registry metadata, role-filtered, unified labels', { skip }, a
   assert.strictEqual(byId['voter-file'].descNotTargetInUse, null, 'a type whose copy never names it ships null');
   // perVoterRows is the Center's first ROW option; both clients take their filter tokens from
   // this list, so the token shipping here is what makes the checkbox/switch render at all.
+  // onePerKnock rides ONLY here (the phone keeps it out of its local fallback, so the switch shows
+  // only where the server advertises it), and never in desc, which every phone renders.
   assert.deepStrictEqual(byId['canvass-activity'].filters, [
-    'date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows', 'surveyAnswers',
+    'date', 'effort', 'pass', 'canvasser', 'outcome', 'onePerKnock', 'perVoterRows', 'surveyAnswers',
   ]);
+  assert.doesNotMatch(byId['canvass-activity'].desc, /per knock/i);
   // The tenth type is lead-visible ON PURPOSE (owner ruling 2026-09-23: a lead is sometimes the
   // client), and its own tokens ship the same way — including surveyNote, whose absence would leave
   // the checkbox unrendered on both clients.

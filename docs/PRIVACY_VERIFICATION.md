@@ -4986,6 +4986,67 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
     - **(f) Tests.** `test/knocksByBook.int.test.js` (the counting contract, the CSV, passId required, another
       campaign's pass 404, a lead's campaign gate); client `lib/byBook.test.js` and
       `lib/byBookTableRender.smoke.test.js`.
+57. **[v7 2026-11-09 — One row per knock on the Canvassing activity export: each door once per round,
+    keeping the door's knock result, so a file's knocks match the Home page's Knocks. BUILT 2026-11-09,
+    uncommitted. It holds only what the plain file already holds (a subset of its entries; a few surveys
+    get a row of their own instead of riding a dropped entry): nothing newly collected, kept, shown or
+    shared; no new recipient,
+    no subprocessor, no customer notice; no Privacy Policy, Terms or DPA change.]**
+    Plan: [PROPOSAL_ONE_ROW_PER_KNOCK.md](PROPOSAL_ONE_ROW_PER_KNOCK.md) v3, after two review rounds, with
+    the owner's decisions of 2026-11-09 (D1 the other way from the plan: the option is NOT remembered).
+    Read from the code:
+    - **(a) What the file holds.** `params.onePerKnock` on `canvass-activity` (`exportTypes.js`
+      `validateParams`; `knockPlan`, `knockRowsAggregate` and `buildCanvassActivity` in `exportBuilders.js`):
+      the same columns as the plain file over a SUBSET of its rows — one entry per door per round, picked by
+      the client report's rule — with Restricted marks and Note added entries left out. Every kept row is a
+      whole ledger entry the plain file already writes, through the same row writer. The `Row source:
+      survey` rows are the plain file's own kind; they move to the end of the file, and a survey whose only
+      covering row in the plain file was a dropped duplicate becomes one. No new column, no new join, no
+      field the plain file doesn't already carry. The full backup composes the builders with `params: {}`,
+      so the bundle never uses it.
+    - **(b) Who can queue it.** The same people as the rest of this export: org admins, and team leads for
+      the campaigns they manage (`canvass-activity` is `adminOnly: false`; `requireOrgRole('admin','lead')`
+      and `canManageCampaign`, unchanged); staff only under the existing support-access rules. The download
+      keeps its access-log classification (`exports`) and its `addAuditSubjects` tagging from the job's
+      persisted post-DNC ids. No new route; `POST /estimate` gains a count (`surveyRows`) and a flag
+      (`rowsUnavailable`), no data.
+    - **(c) Do-not-contact, unchanged.** The same `exportScope.js` injection and the same per-row rules: a
+      kept knock row naming a flagged voter keeps the row with the identity, the answers and a survey note
+      blanked, and is counted; a flagged voter's survey-source row is dropped whole and counted; the
+      per-voter fan reads the roster through `DNC_FILTER` as before. The one difference is arithmetic: on a
+      per-knock file `excludedDncCount` counts only rows in the file (a duplicate the option drops is
+      neither written nor counted), and the estimate's `dncWithheld` (`countActivityPerKnock`) counts the
+      same set, so estimate == build. Still a count of rows withheld from the file, never a per-address or
+      per-person figure.
+    - **(d) What is stored.** `ExportJob.surveyRowCount` (new, `models/ExportJob.js`): a number — the `Row
+      source: survey` rows inside `rowCount`, written for per-knock files only and 0 otherwise — with no
+      personal data, kept with the job like `rowCount` (the TTL sweep expires the artifact and keeps the
+      history row; organization and campaign deletion remove the job). `onePerKnock: true` is frozen into
+      `ExportJob.params` beside the other options, so the history says which files were per knock. **The
+      option is not remembered** (owner ruling 2026-11-09), so there is no new browser or device storage:
+      the web's `lib/exportOptions.js` and the phone's `saveExportOptions` still hold only
+      `includeSurveyAnswers`, and item 23(e) stands as written. The phone fix that rides along
+      (`optionsToRemember` in `mobile/lib/exportTypes.js`) only stops a queue of another export type from
+      overwriting that one boolean.
+    - **(e) Claims checked.**
+      - privacy.html `:91` (a do-not-contact request is used "to exclude that person from the organization's
+        future canvassing lists and exports"; authorized administrators within the same organization may
+        review this activity): holds — the exclusion is the plain file's (c), and the audience is the same
+        (b).
+      - privacy.html `:106` (an organization may report on its own canvassing to its own clients, including
+        by exporting records and sending them on): holds; this file is fewer records of the same kind.
+      - DPA ([DPA.md](DPA.md)) §3(a) (process only to provide the Service): the file serves the customer's own
+        reporting. §3(d) (no combining across customers): every query stays organization- and campaign-scoped
+        (`canvassActivityQuery`). §6: no subprocessor. §9: no retention change.
+      - terms.html `:106` (the Customer exporting its own data through features we provide): holds; nothing
+        to edit.
+    - **(f) Tests.** `test/activityPerKnock.int.test.js` (new; among its cases, a kept row naming a flagged
+      voter blanked and counted once, a flagged voter's survey dropped and counted, `dncWithheld` ==
+      `excludedDncCount` across 26 combinations, and `surveyRowCount` for per-knock files only, zeroed on a
+      retry); `test/exportBuilders.int.test.js` (the registry DNC sweep's third canvass-activity artifact,
+      `canvass-activity:perKnock`, with the fan and the answer layer on, held to the same no-leak
+      assertions); `test/exports.int.test.js` (a lead's `/estimate`, the token list, the refusal of
+      Restricted and Note added).
 
 # COUNSEL BRIEF v2 — post-remediation, verified against the fixed tree
 

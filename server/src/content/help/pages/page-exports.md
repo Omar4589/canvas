@@ -7,7 +7,7 @@ order: 115
 sourceDoc: EXPORTS.md
 
 summary: What each control on the campaign Exports page does — the type picker, the filters, the options dialog, and the export history.
-tags: exports, page, download, csv, results by voter, survey answers, not a target voter, answers edited
+tags: exports, page, download, csv, results by voter, survey answers, not a target voter, answers edited, one row per knock, per knock
 ---
 
 Open a campaign and pick **Exports** in the sidebar.
@@ -35,7 +35,18 @@ Open a campaign and pick **Exports** in the sidebar.
 
 - **The options dialog** — on **Canvassing activity** and **Results by voter**, **Queue export**
   opens a dialog before anything is queued, holding the choices that change what the file *is*
-  rather than narrowing it. Confirm there to queue.
+  rather than narrowing it. A line under its title names what the file will cover: the dates, walk
+  list, round and canvasser. Confirm there to queue.
+  - **One row per knock** *(Canvassing activity, at the top)* — unticked each time the options
+    open, and not remembered; tick it and each door appears once per round, the way your Knocks count it,
+    so with no outcome boxes ticked the file's knocks match the Knocks on your Home page for the
+    same dates and walk list. Where two canvassers recorded the same door in a round, the file keeps
+    one entry — the door's result (Surveyed if anyone surveyed there, or on a lit-drop campaign Lit
+    dropped if anyone dropped literature; otherwise the later visit), under that canvasser's name —
+    so don't total it by canvasser. Restricted marks and Note added
+    entries are left out, and the file name includes `-per-knock`. While it's ticked, the outcome
+    chips pick door results and the *Restricted* and *Note added* chips disappear. See [Why does my
+    Canvassing activity export have more rows than my Knocks?](export-more-rows-than-knocks)
   - The **Door outcome** chips (tick the outcomes you want; nothing ticked means all; leave
     *Restricted* or *Wrong address* unticked to drop them). On **Results by voter** they choose
     which *doors* are in the file, never how a door's outcome column reads — and there is no
@@ -43,14 +54,15 @@ Open a campaign and pick **Exports** in the sidebar.
   - **One row per voter at the door** *(Canvassing activity)* — off by default; tick it and every
     knock that named nobody (not home, refused, lit drop, and so on) repeats once per voter
     registered at that address, same outcome and note on each. That adds **rows**, not columns,
-    and the file is named `activity-log-by-voter` so its rows are never mistaken for knocks.
+    and the file name includes `-by-voter` so its rows are never mistaken for knocks.
   - **Include survey answers** *(Canvassing activity)* — off by default; tick it and every survey
     row gains what was recorded, one column per question, plus which survey it was, when, who
     took it, whether an admin typed it at a desk, and — in a last **Answers edited** column —
     whether an admin changed its answers afterwards. It also adds a row for each survey the file
     cannot otherwise show, because surveying three people at one door in one round is *one* knock
     and three surveys: those rows say **Row source: survey**, carry no Activity DB id, and must
-    never be counted as knocks. Whenever it adds rows the file is named `activity-log-with-surveys` to say so. Tick
+    never be counted as knocks. Whenever it adds rows the file name includes `-with-surveys` to
+    say so, and with One row per knock on, those rows come after all the knock rows. Tick
     *Not home* only and the option goes quiet — no survey rows to attach to, so no columns
     either. This is the one option the page remembers for the campaign, and it is still recorded
     on every export in the history.
@@ -74,7 +86,12 @@ scope, a Canvassing activity export queued with one row per voter says **one row
 the door** and one queued with the answers says **survey answers**, a **Results by voter** export
 that carried the canvassers' notes says **survey notes**, and a Notes export that listed the
 voters at each door says **voters listed at each door** — so the history is a lasting record of
-which files carried them.
+which files carried them. A Canvassing activity export queued with **One row per knock** says
+**one row per knock**, and when some of its rows are other people surveyed (survey answers on), its
+row count has the split under it — for example **4,683 knocks + 14 more people surveyed**, or
+**includes 14 more people surveyed** with one row per voter — with an (i) explaining that each extra row
+is another person surveyed at a door already listed, at the end of the file. A date range with only
+one end reads **through 2026-11-08** or **from 2026-11-01**.
 
 - **Download** — saves the file. Ready rows only.
 - **Retry** — re-queues a failed export with the same scope.
@@ -89,10 +106,14 @@ Exports work on an **archived** campaign too, on the web and on the phone. Archi
 On the phone, Admin → **More → Exports** queues the four everyday types with the same filters
 and a live row-count preview: tap a type, and a sheet explains what one row of the file is,
 what's in it, and roughly how many rows your filters will produce before you queue. Canvassing
-
 activity has the same **Door outcome** chips, the same **One row per voter at the door** switch
-(under **Rows**) and the same **Include survey answers** switch, and the row count follows all
-three. A **Notes** export is queued from the phone's own **Notes** screen instead, carrying the
+(under **Rows**) and the same **Include survey answers** switch — and, on a phone with the latest
+update, the **One row per knock** switch in its own **Knocks** block above **Door outcome**, off each
+time you open the sheet — and the row count follows all four. With One row per knock on, a line under
+the chips says they pick door results, and the row count reads, for example, **≈ 4,683 knocks + 14
+more people surveyed**; on a very big campaign it can say **Row count not available for this one —
+you can still queue**. The history line says **per knock** on those files, with the same split. A
+**Notes** export is queued from the phone's own **Notes** screen instead, carrying the
 filters you have on screen. The remaining types — **Results by voter**, detailed survey answers,
 filtered voters, voter profile notes, and the full backup — stay on the web dashboard, and the
 phone's history list names them properly when somebody queues one there. Downloads open the share

@@ -4,8 +4,9 @@ import { Popover } from './ui/Popover.jsx';
 // shared Popover (outside-click + Esc dismiss), token-themed.
 //   <InfoHint label="What is X?">Some explanation…</InfoHint>
 // `width` is the Popover's Tailwind width class — widen it for structured, multi-row content
-// (the map's door-count breakdown uses w-80).
-export default function InfoHint({ children, label = 'More info', className = '', width = 'w-64' }) {
+// (the map's door-count breakdown uses w-80). `align="right"` anchors the panel at the button's right
+// edge, for an (i) at the right of a row (the Exports history's Rows cell) so it opens inward.
+export default function InfoHint({ children, label = 'More info', className = '', width = 'w-64', align = 'left' }) {
   const trigger = (
     <span
       aria-label={label}
@@ -16,7 +17,7 @@ export default function InfoHint({ children, label = 'More info', className = ''
   );
   return (
     <span className={`inline-flex ${className}`}>
-      <Popover trigger={trigger} width={width} className="text-xs font-normal leading-relaxed text-fg-muted">
+      <Popover trigger={trigger} width={width} align={align} className="text-xs font-normal leading-relaxed text-fg-muted">
         {children}
       </Popover>
     </span>

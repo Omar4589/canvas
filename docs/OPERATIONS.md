@@ -1384,6 +1384,28 @@ to take the phone code back out entirely, back out the rollout (above) or republ
 `off`. **If `MOBILE_QUEUE_HOLD` stays off for more than a day,** the Help Center's and the app page's lines
 that saves wait for the person who recorded them stop being true: have them reworded.
 
+### Release: One row per knock on the Canvassing activity export (November 2026)
+
+**What ships:** an opt-in **One row per knock** on Canvassing activity: each door once per round, so with
+no outcome boxes ticked a file's knocks match the Home page's Knocks for the same dates and walk list, and
+the history says *4,683 knocks + 14 more people surveyed*. What it is: [EXPORTS.md](EXPORTS.md) → *One row
+per knock*; the design and its release steps: [PROPOSAL_ONE_ROW_PER_KNOCK.md](PROPOSAL_ONE_ROW_PER_KNOCK.md)
+§L; privacy record item 57. A server deploy, then one JavaScript-only phone update. No config var, no
+migration, no client-version bump.
+
+1. **Run console** (**More ▸ Run console**): `npm run migrate:build-indexes`. If it lists
+   `CanvassActivity (canvassactivities)` with `+ {"campaignId":1}`, run `npm run migrate:build-indexes --
+   --apply` before deploying (it builds every index the list shows). The per-knock file names that index;
+   if it were missing, every per-knock export would fail with *a database index it needs is missing*.
+2. **Deploy `main`** (server, web and Help Center together). A deploy ships everything on `main` that
+   isn't live yet: the billing renewals in `aed00e6` carry their own post-deploy check. Then run the dry
+   run once more, and `-- --apply` in a quiet moment if it lists anything.
+3. **The phone**, from `mobile/` with `git status --short .` printing nothing: first check what else is
+   unreleased under `mobile/`. The offline-queue update above has its own gate (its Privacy Policy edits
+   live first, production at 20% first); until it is out, hold this update, since the web has the whole
+   feature. Then `npm run ota:staging`, check the Exports sheet on a staging phone in a test organization
+   (staging talks to production), then `npm run ota:production`.
+
 ### Build database indexes (after a deploy that added one)
 
 **Not routine.** Run it when a release adds or changes a database index — the release notes will say so.

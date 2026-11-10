@@ -207,6 +207,11 @@ router.post('/estimate', async (req, res, next) => {
       ...(est.files ? { files: est.files } : {}),
       // The fanned canvass-activity count hit its time cap and `rows` is a floor (≥ truth never).
       ...(est.rowsAreFloor ? { rowsAreFloor: true } : {}),
+      // One row per knock only (sent only by a phone that offers the switch): the survey rows inside
+      // `rows`, for the "N knocks + M more people surveyed" split, or — when either count pass hit its
+      // time cap — no number at all.
+      ...(est.surveyRows != null ? { surveyRows: est.surveyRows } : {}),
+      ...(est.rowsUnavailable ? { rowsUnavailable: true } : {}),
     });
   } catch (err) {
     next(err);

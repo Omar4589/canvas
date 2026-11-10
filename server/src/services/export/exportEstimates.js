@@ -12,6 +12,7 @@ import {
   canvassActivityQuery,
   countCanvassActivityRows,
   countActivityRowsWithLayer,
+  countActivityPerKnock,
   countUncoveredResponses,
   canvassActivityFloorRows,
   surveyBaseQuery,
@@ -66,6 +67,19 @@ const flaggedOids = (ctx) => [...ctx.dnc].map(oid);
 // not move this number. includeSurveyAnswers DOES: an uncovered response is a voter-unit row, so a
 // flagged voter's survey row is dropped WHOLE rather than blanked, and that drop is counted here.
 const estimateCanvassActivity = async (ctx) => {
+  // One row per knock: one function computes rows, survey rows and the withheld figure in two capped
+  // passes — the same function the builder uses as its progress denominator. On a timeout there is no
+  // honest floor (a plain count is an upper bound for a per-knock file), so the answer is
+  // rowsUnavailable with no number; the phone says so and still lets you queue.
+  if (ctx.params.onePerKnock) {
+    try {
+      const c = await countActivityPerKnock(ctx, { maxTimeMS: Number(process.env.EXPORT_ESTIMATE_MAX_MS || 8000) });
+      return { rows: c.rows, dncWithheld: c.dncWithheld, surveyRows: c.surveyRows, approx: false };
+    } catch (err) {
+      if (!err?.isEstimateTimeout) throw err;
+      return { rows: null, dncWithheld: null, approx: false, rowsUnavailable: true };
+    }
+  }
   const q = canvassActivityQuery(ctx);
   const flagged = flaggedOids(ctx);
   const dncWithheld = flagged.length

@@ -174,7 +174,7 @@ export async function processExportJob(job) {
       $set: {
         status: 'running', startedAt: new Date(), queueJobId: String(job.id),
         progress: 0, processedRows: 0, rowCount: 0, bytes: 0, files: [],
-        excludedDncCount: 0, orphanedRows: 0, error: null,
+        excludedDncCount: 0, orphanedRows: 0, surveyRowCount: 0, error: null,
         audit: { subjectType: type.subjectType, subjectIds: [], subjectsTruncated: false, subjectsTotal: 0 },
       },
     }
@@ -255,6 +255,11 @@ export async function processExportJob(job) {
       upload.on('finish', resolve);
       upload.on('error', reject);
     });
+    // On a failed build the catch below aborts the upload, which rejects uploadDone with nobody awaiting
+    // it, and the worker logged an unhandledRejection for every failed export. Handled here — and LOGGED,
+    // so a failing upload stays visible in the worker log. The success path still awaits (and throws on)
+    // the original promise.
+    uploadDone.catch((e) => console.error(`[export] job ${doc._id} upload failed:`, e?.message || e));
     const sink = kind === 'zip' ? zipSink(upload) : csvSink(upload);
 
     const result = await type.build(ctx, sink);
@@ -270,6 +275,7 @@ export async function processExportJob(job) {
           status: 'completed', completedAt: new Date(), progress: 100,
           processedRows: rowCount, rowCount,
           files: result.files || [],
+          surveyRowCount: result.surveyRows || 0,
           bytes: stats?.bytes || 0,
           excludedDncCount: counters.excludedDnc,
           orphanedRows: counters.orphaned,

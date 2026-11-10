@@ -7,7 +7,7 @@ order: 24
 sourceDoc: EXPORTS.md
 
 summary: Queue background CSV exports — canvassing activity, doors by round, survey results, results by voter (the file you send a client), your voter file, or a filtered subset — and download them from the Exports page.
-tags: export, csv, download, voter file, backup, data, results by voter, client file, survey answers, not a target voter, contact rate, by pass, per-round, timeline
+tags: export, csv, download, voter file, backup, data, results by voter, client file, survey answers, not a target voter, contact rate, by pass, per-round, timeline, one row per knock, per knock, knocks
 ---
 
 Your data is yours. The **Exports** page (open a campaign, then **Exports** in the sidebar — on
@@ -22,15 +22,15 @@ keep, open in Excel or Google Sheets, or load into another tool.
 
 2. Press **Queue export**. For **Canvassing activity** and **Results by voter** a dialog opens
    first, holding the choices that change what the file *is* rather than narrowing it: the door
-   outcome chips, and — on Canvassing activity — the one-row-per-voter box and **Include survey
-   answers**. Confirm there. The file is built in the background — big exports can take a minute
-   or two, and the list below updates as it goes.
+   outcome chips, and — on Canvassing activity — **One row per knock** at the top, the
+   one-row-per-voter box and **Include survey answers**. Confirm there. The file is built in the
+   background — big exports can take a minute or two, and the list below updates as it goes.
 3. When the row says **Ready**, press **Download**. Files are kept for **7 days**, then deleted
    automatically — you can queue a fresh one any time.
 
 ## What you can export
 
-- **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at that door. The complete field record. Voter name and IDs fill in only when a survey named the voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter columns are blank on purpose. Pressing **Queue export** on this type opens a dialog with three choices: **Door outcome** chips that narrow the file to the outcomes you tick (leave *Restricted* and *Wrong address* unticked to drop them, or tick only *Not home* for a re-knock list with the full detail), **One row per voter at the door**, which repeats those knocks once per registered voter at the address instead, and **Include survey answers**, which puts what each survey recorded beside the knock that took it — both explained below. **Not a target voter** — an optional door button that stays off until an org admin turns it on — is offered as a chip only on a campaign that has had it turned on.
+- **Canvassing activity** — every door result: who knocked, when, the outcome, and the voter at that door. The complete field record. Voter name and IDs fill in only when a survey named the voter — plain knocks like *not home* or *lit dropped* are about the door, so their voter columns are blank on purpose. Pressing **Queue export** on this type opens a dialog with four choices: **One row per knock**, at the top, which lists each door once per round, so with no outcome boxes ticked the file's knocks match your Knocks for the same dates and walk list, **Door outcome** chips that narrow the file to the outcomes you tick (leave *Restricted* and *Wrong address* unticked to drop them, or tick only *Not home* for a re-knock list with the full detail), **One row per voter at the door**, which repeats those knocks once per registered voter at the address instead, and **Include survey answers**, which puts what each survey recorded beside the knock that took it — all three explained below. **Not a target voter** — an optional door button that stays off until an org admin turns it on — is offered as a chip only on a campaign that has had it turned on.
 - **Doors by round** — one row per door per round with its status. Filter it to *Not home* and you have a re-knock list. Its status filter offers **Not a target voter** under the same rule as the chips — and, like a chip, a status you picked before switching to a campaign that doesn't offer it is dropped when you queue, so the file matches what's on screen.
 - **Survey results** — one row per survey taken, one column per question. If the campaign ran
   more than one survey, you get one file per survey.
@@ -92,10 +92,13 @@ UID, name and party filled in. Surveys, which already name the person, are uncha
 Three things to know:
 
 - **The outcome is repeated, not attributed.** A *refused* on three rows means someone at that address declined — not that each of the three did. *Not a target voter* on three rows means whoever answered wasn't one of the voters on your list for that address, so it describes none of the three. *No soliciting* is a sign on the property. None of these is a request not to be contacted. *Restricted* rows repeat too, and many of those are desk marks over a whole book rather than a visit — the **Via** column says which, and unticking *Restricted* under **Door outcome** leaves them out altogether.
-- **Its rows are not knocks.** The columns are the same but the row count isn't, so the file
-  arrives named **activity-log-by-voter** — never count its rows for an invoice. Every row of one
-  knock shares the same **Activity DB id**, so counting distinct values there gets you back to
-  knocks. The per-round exports remain the invoice-grade files.
+- **Its rows are not knocks.** The columns are the same but the row count isn't, so the file's
+  name includes **-by-voter** — never count its rows for an invoice. Every row repeated from one
+  entry shares the same **Activity DB id**, so counting distinct values there gets you back to the
+  plain file's entries — and entries aren't knocks either: a Restricted mark, a note, and a second
+  canvasser's entry at the same door in the same round each have an id of their own. Tick **One row
+  per knock** as well, with no outcome boxes ticked, and the distinct ids are your knocks. The
+  per-round exports remain the invoice-grade files.
 - **Nobody to list keeps one row.** An address with no registered voters keeps its single row
   with the voter columns blank, just like the normal file. People who have asked not to be
   contacted are never listed. The people are the ones registered at the address *today*, so the
@@ -118,8 +121,8 @@ It also adds rows, and that is the point. Surveying three people at one door in 
 **one** knock and **three** surveys, so two of those surveys have no knock row to sit on. Each one
 becomes its own row instead, marked **Row source: survey** with no Activity DB id; the ordinary
 ledger rows say **Row source: knock**. Never count a *survey* row as a knock — the per-round
-exports remain the invoice-grade files. The finished file is named **activity-log-with-surveys**
-(or **activity-log-by-voter-with-surveys**) so nobody has to guess.
+exports remain the invoice-grade files. The finished file's name includes **-with-surveys** so
+nobody has to guess.
 
 Three more things:
 
@@ -131,7 +134,8 @@ Three more things:
   rather than somebody else's work being invented for them.
 - **Two canvassers who surveyed the same person in one round both keep the answers.** What stands
   is the later submission, and both rows carry it, with **Survey taken by** saying whose survey it
-  is. Blanking the earlier row would read as "no survey taken", which isn't true.
+  is. Blanking the earlier row would read as "no survey taken", which isn't true. (With **One row
+  per knock** ticked, the door has one row: the later survey's.)
 
 With **One row per voter at the door** on as well, the repeated neighbour rows carry no answers —
 attaching one person's survey to everyone at the address would attribute it to people who never
@@ -139,6 +143,45 @@ gave it.
 
 Your choice is remembered for this campaign, on the device you queued from — it is the only export
 option that is — and every export still records it in the history.
+
+### One row per knock (Canvassing activity)
+
+A plain Canvassing activity file is a list of entries, so it rarely adds up to the **Knocks** on
+your Home page, which count each door once per round: two canvassers who both recorded the same
+door in a round are two rows, Restricted marks and notes are rows, and with survey answers on, a
+second person surveyed at a door is a row too. For a file that adds up, tick **One row per knock**
+at the top of the dialog (on a phone with the latest update, the **One row per knock** switch, above
+**Door outcome**):
+
+- **Each door appears once per round.** With no outcome boxes ticked, the file's knocks match your
+  Knocks for the same dates and walk list.
+- **Two canvassers at one door in one round: one row**, showing the door's result for the round:
+  **Surveyed** if anyone surveyed there (on a lit-drop campaign, **Lit dropped** if anyone dropped
+  literature), otherwise the later visit. It's the same rule your client reports use. That row is
+  one canvasser's whole entry (name, time, GPS and note); the other entry isn't in this file — it
+  stays on the **Overlaps** page, and in the file without this option. **So don't total this file by
+  canvasser.** For each canvasser's numbers, pick them in the canvasser filter or use the canvasser
+  table on the Home page, which credit both.
+- **Restricted marks and Note added entries are left out**, because they aren't knocks. A knock's
+  own note stays.
+- **The file name includes -per-knock**, and the history's scope says **one row per knock**.
+
+While it's ticked, the **Door outcome** boxes pick door results: tick *Not home* and you get the
+doors whose result for the round was Not home, so a door one canvasser marked Not home and another
+surveyed isn't in it. The *Restricted* and *Note added* boxes disappear. With a canvasser picked,
+the boxes work as usual.
+
+With **Include survey answers** on too, every survey still gets a row: a second person surveyed at
+a door already listed gets a **Row source: survey** row, and in this file those rows come after all
+the knock rows, at the end. The history row then shows the split, for example **4,683 knocks + 14
+more people surveyed**. With **One row per voter at the door** on too, each knock comes once and
+then repeats per registered voter, as that option does.
+
+To compare with the Home page, set the same dates on both (the Exports page starts on *All time*,
+a live campaign's Home page on *Today*) and leave the Home page on *All coordinators*. For client reports, team
+reports and the other cases, see [Why does my Canvassing activity export have more rows than my
+Knocks?](export-more-rows-than-knocks). The option isn't remembered: you tick it for every export (the box
+is unticked each time the options open). The full backup never uses it.
 
 ### Results by voter — the file you send a client
 
@@ -241,7 +284,8 @@ withheld, so the difference is never a mystery.
 How they drop out depends on what a row *is*. On **Results by voter** they are dropped whole — the
 export is a list of people, so there is no row left to keep. On **Canvassing activity** the knock
 stays, because it is a record of work that was done and billed, and it is their name, their survey
-answers and the note from that survey that come out blank.
+answers and the note from that survey that come out blank. With **One row per knock** ticked, the
+withheld figure counts only rows that are in the file.
 
 ## The per-round and Timeline downloads
 

@@ -6,7 +6,7 @@ kind: faq
 order: 46
 sourceDoc: METRICS.md
 summary: Download the per-pass knock breakdown from the campaign Home's By pass section — the TOTAL row always matches the campaign's knock count.
-tags: export, csv, invoice, billing, passes, knocks, download, contact rate, not a target voter, late knocks, offline, legacy
+tags: export, csv, invoice, billing, passes, knocks, download, contact rate, not a target voter, late knocks, offline, legacy, one row per knock
 ---
 
 Open the campaign's **Home** and find the **By pass** section — one row per walk list and pass (Pass 1, Pass 2, …) for the selected date range. Click **Export CSV** to download the same table as a spreadsheet. On screen a long table folds — passes with nothing in the range, and the overflow of a long list, collapse into one line — but the CSV always has every pass.
@@ -38,17 +38,20 @@ canvasser's own contact rate. The per-round numbers in a full backup follow the 
 **Doors by round** file that reconciles to this table door by door — and exports keep working
 during the read-only wind-down after a subscription ends. See [Exporting your data](exports).
 
-One caution, and it now has two halves: **never invoice from a Canvassing activity export**, and
-check its name before you use it for anything. Two opt-ins move what its rows are, and the file
-name is the tell. **One row per voter at the door** repeats each knock once per registered voter
-at the address (`activity-log-by-voter`). **Include survey answers** adds rows that are not knocks
-at all (`activity-log-with-surveys`): surveying three people at one door in one round is one knock
-and three surveys, so the surveys with no knock row of their own arrive as extra rows marked **Row
-source: survey** with no **Activity DB id** — see [My export says a survey was submitted but not
-what they said](survey-answers-in-my-export). With both on it is
-`activity-log-by-voter-with-surveys`. Even a plain `activity-log` is finer than a billable door:
-it is one row per door event, and billing counts a door once per round however many times it was
-visited.
+One caution: **invoice from this CSV, not from a Canvassing activity export**, and check an
+activity file's name before you use it for anything — three opt-ins change what its rows are, and
+the name is the tell. A plain `activity-log` lists **entries**, which is finer than knocks: billing
+counts a door once per round, while a door two canvassers recorded in the same round is two rows in
+the file, and every Restricted mark and note is a row too. **One row per voter at the door** repeats
+each knock once per registered voter at the address (the name includes `-by-voter`). **Include
+survey answers** adds rows that are not knocks at all (`-with-surveys`): surveying three people at
+one door in one round is one knock and three surveys, so the surveys with no knock row of their own
+arrive as extra rows marked **Row source: survey** with no **Activity DB id** — see [My export says a
+survey was submitted but not what they said](survey-answers-in-my-export). **One row per knock**
+(`-per-knock`) goes the other way: each door once per round, so with no outcome boxes ticked its
+knocks equal your Knocks for the same dates and walk list — see [Why does my Canvassing activity
+export have more rows than my Knocks?](export-more-rows-than-knocks). Still invoice from the By pass
+CSV: it carries **Billable doors** on campaigns that bill restricted homes.
 
 And if a client asks why **Results by voter** doesn't agree with your invoice: its **Address
 visits** counts visits, not billable doors, and it has no row for a visited door with nobody

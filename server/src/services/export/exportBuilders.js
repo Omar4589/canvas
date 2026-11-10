@@ -11,12 +11,13 @@ import { VoterNote } from '../../models/VoterNote.js';
 import { ImportJob } from '../../models/ImportJob.js';
 import { SavedSearch } from '../../models/SavedSearch.js';
 import { CANONICAL_FIELDS } from '../import/canonicalFields.js';
-import { NOT_BULK, BILLABLE_WITH_RESTRICTED, NOT_DESK_MARK, fieldVisitActionTypes } from '../reports/aggregations.js';
+import { NOT_BULK, BILLABLE_WITH_RESTRICTED, NOT_DESK_MARK, KNOCK_ACTIONS, fieldVisitActionTypes } from '../reports/aggregations.js';
 import { getPassStatusMap } from '../passes/passStatus.js';
 import {
   ACTION_TO_STATUS,
   STATUS_ROW_MATCH,
   DOOR_STATUS_LABELS,
+  completionFor,
   resolveStatusFromSummary,
 } from '../../utils/statusPrecedence.js';
 import { hydrateCanvassers } from '../reports/canvasserIdentity.js';
@@ -198,6 +199,66 @@ export const fanPlan = (ctx) => {
   };
 };
 
+// The opt-in knock grain (params.onePerKnock), resolved ONCE — fanPlan's pattern. One row per door per
+// round, so the file's knock rows ARE the dashboard's Knocks (docs/PROPOSAL_ONE_ROW_PER_KNOCK.md).
+//
+// The kept entry is the door's knock result for the round — the client report's rule
+// (buildReportSnapshot.js: KNOCK_ACTIONS rows sorted {timestamp:1, _id:1}, resolveStatus per household
+// and round). The campaign's completion action is sticky; otherwise the latest entry wins; at an exact
+// tie the LOWER _id wins, as resolveStatus's strict `>` keeps the earlier row. As a $min composite
+// (overlaps.js's idiom; BSON compares field by field, and id is unique, so a/v/d ride along and are
+// never compared): completion → 0, a later time → a smaller negative number, then _id ascending.
+// Restricted marks and notes are not knocks and never compete. The group key is knocksPipeline's own,
+// so a missing and a null passId stay apart exactly as there — pinned by activityPerKnock.int.test.js
+// against buildKnocksByPassData rather than by sharing code, which keeps the billing pipeline untouched.
+//
+// `stages` is what every consumer prefixes (the builder's rows, the row count, the uncovered-survey
+// count, the withheld count), so they cannot disagree. The chips run AFTER the group: dedupe over every
+// knock in scope, then keep the doors whose RESULT is ticked.
+export const knockPlan = (ctx, { withRow = false } = {}) => {
+  if (!ctx.params.onePerKnock) return { on: false };
+  // The processor tolerates a missing campaign row; this grain cannot (its type picks the completion).
+  if (!ctx.campaign) throw new ExportUserError('This campaign no longer exists, so the file can’t be built.');
+  // The plain file's scope (window, walk list, round, canvasser + NOT_BULK, excludeBulk, crew) without
+  // its chips, which apply to each door's result below.
+  const scope = canvassActivityQuery(ctx);
+  delete scope.actionType;
+  // Every consumer of these stages is an aggregation, which never Mongoose-casts: pin the ids (fanPlan's
+  // rule) so a caller passing strings can't get a 'completed' file with no knock rows.
+  scope.organizationId = oid(scope.organizationId);
+  scope.campaignId = oid(scope.campaignId);
+  const chips = ctx.params.actionTypes || [];
+  const completion = completionFor(ctx.campaign.type).action; // 'survey_submitted' | 'lit_dropped' | null
+  const group = (match) => [
+    { $match: match },
+    {
+      $group: {
+        _id: { householdId: '$householdId', passId: '$passId' },
+        k: {
+          $min: {
+            c: completion ? { $cond: [{ $eq: ['$actionType', completion] }, 0, 1] } : 1,
+            t: { $subtract: [0, { $toLong: '$timestamp' }] },
+            id: '$_id',
+            a: '$actionType',
+            v: { $ifNull: ['$voterId', null] },
+            ...(withRow ? { d: '$$ROOT' } : {}),
+          },
+        },
+      },
+    },
+    ...(chips.length ? [{ $match: { 'k.a': { $in: chips } } }] : []),
+  ];
+  return {
+    on: true,
+    completion,
+    stages: group({ ...scope, actionType: { $in: KNOCK_ACTIONS } }),
+    // The coverage branch's input on a survey campaign: only survey entries, through the SAME group, so
+    // it is equivalent by construction (completion is sticky, so a door-round's kept row is its latest
+    // survey) and much smaller. Gated: on a lit-drop campaign the kept row is a lit drop, not a survey.
+    surveyStages: completion === 'survey_submitted' ? group({ ...scope, actionType: completion }) : null,
+  };
+};
+
 // Per-batch roster prefetch for the fan: Map<householdId, Voter[]> over the batch's voter-less
 // doors (≤ BATCH doors), empty when the plan is off. DNC_FILTER lives inside plan.rosterMatch:
 // a flagged voter is structurally incapable of producing a row here, blank or otherwise. Do NOT
@@ -297,7 +358,8 @@ const ANSWER_HEADERS = ['Row source', 'Survey', 'Survey version', 'Survey submit
 // Responses in scope for the layer. NOT surveyBaseQuery: that one applies params.userId, which would
 // defeat the ruling above by hiding the very row whose answers belong to somebody else.
 const activityResponseQuery = (ctx) => {
-  const q = { organizationId: ctx.organizationId, campaignId: oid(ctx.campaignId) };
+  // Both ids pinned: this match also feeds aggregations (countUncoveredResponses, countActivityPerKnock).
+  const q = { organizationId: oid(ctx.organizationId), campaignId: oid(ctx.campaignId) };
   const range = dayRangeOf(ctx.params, ctx.anchorTz);
   if (range) q.submittedAt = range;
   if (ctx.params.effortId) q.effortId = oid(ctx.params.effortId);
@@ -382,15 +444,18 @@ export const countUncoveredResponses = async (ctx, { onlyFlagged = false } = {})
     : flagged.length
       ? { ...rq, voterId: { $nin: flagged } }
       : rq;
+  // The round is normalized with $ifNull on BOTH branches: the builder's respKey treats a missing and a
+  // null passId alike, so without it a legacy survey whose entry lacks the field while its response has
+  // null was counted here as a row the builder writes as covered (estimate != build).
   const agg = await SurveyResponse.aggregate([
     { $match: match },
-    { $group: { _id: { v: '$voterId', p: '$passId' }, r: { $sum: 1 } } },
+    { $group: { _id: { v: '$voterId', p: { $ifNull: ['$passId', null] } }, r: { $sum: 1 } } },
     {
       $unionWith: {
         coll: CanvassActivity.collection.name,
         pipeline: [
           { $match: { ...canvassActivityQuery(ctx), actionType: 'survey_submitted', voterId: { $ne: null } } },
-          { $group: { _id: { v: '$voterId', p: '$passId' }, a: { $sum: 1 } } },
+          { $group: { _id: { v: '$voterId', p: { $ifNull: ['$passId', null] } }, a: { $sum: 1 } } },
         ],
       },
     },
@@ -403,15 +468,138 @@ export const countUncoveredResponses = async (ctx, { onlyFlagged = false } = {})
   return agg[0]?.n || 0;
 };
 
-// BOTH names for this file, from ONE function. The two options are independent, so there are four
+// BOTH names for this file, from ONE function. The three options are independent, so there are eight
 // combinations — and the pair must never disagree: csvSink discards sink.file()'s name
 // (exportProcessor.js) and neither client renders ExportJob.files[].name, so the DOWNLOAD name is the
 // only one a human sees, while the entry name is what the backup bundle lists.
 export const activityFileNames = (params = {}) => {
   // `-with-surveys` tracks addRows, not the raw tick: columns never rename a file (includeVoterDetail
   // does not), and a name that claimed a moved grain the file does not have would be worse than none.
-  const suffix = `${params.perVoterRows ? '-by-voter' : ''}${answerLayerPlan(params).addRows ? '-with-surveys' : ''}`;
+  // `-per-knock` comes first: it is the grain the other two then build on.
+  const suffix = `${params.onePerKnock ? '-per-knock' : ''}${params.perVoterRows ? '-by-voter' : ''}${answerLayerPlan(params).addRows ? '-with-surveys' : ''}`;
   return { file: `activity-log${suffix}`, slug: `canvass-activity${suffix}` };
+};
+
+// A per-knock file's knock rows, exactly as the builder streams them (exported so a test can explain()
+// the plan). ONE aggregation: each door-round's kept entry, carried whole in the $min composite, so the
+// rows are fixed once its blocking $group has read the ledger — no kept-id set, no retry. The read is
+// not a snapshot (it yields), and on {campaignId, timestamp} a re-tap's new entry sorts AHEAD of the old
+// one, so a re-tap mid-scan could delete the old entry before the scan reached it and write the new one
+// behind it: the door in neither, silently. {campaignId: 1} scans in saved order and a replacement is
+// always saved later, so the scan returns the old entry or the new one, never neither. The index is
+// declared on the model (CanvassActivity.js: campaignId, index: true); a hint naming a missing index
+// fails the query, which is why the release checks it exists (docs/PROPOSAL_ONE_ROW_PER_KNOCK.md §L).
+export const knockRowsAggregate = (ctx) =>
+  CanvassActivity.aggregate([
+    ...knockPlan(ctx, { withRow: true }).stages,
+    { $replaceRoot: { newRoot: '$k.d' } },
+    { $sort: { timestamp: 1, _id: 1 } },
+  ])
+    .hint({ campaignId: 1 })
+    .allowDiskUse(true);
+
+// Everything a per-knock file counts, each quantity computed ONCE (onePerKnock only — the plain file
+// keeps countActivityRowsWithLayer). The estimate when the option is on AND the builder's progress
+// denominator, so the two cannot disagree. Returns { rows, surveyRows, dncWithheld } with
+// rows = knock rows + surveyRows.
+//   Pass 1 (the knocks): knockPlan's groups into one $facet — the kept count, the kept rows naming a
+//     flagged voter (blanked and counted by the builder), and with the per-voter fan the rows that name
+//     a voter plus countCanvassActivityRows's roster join over the kept voter-less rows.
+//   Pass 2 (the survey rows, only when the answer layer adds rows): countUncoveredResponses's shape with
+//     its activity branch replaced by the KEPT survey rows — a dropped duplicate covers nothing — ending
+//     in a $facet that splits clean from flagged, so withheld surveys need no second pass.
+// opts.maxTimeMS caps both passes (the estimate runs inline in the web dyno behind a 30 s router, and an
+// aborted request does not stop a running aggregation); on expiry → EstimateTimeout. A per-knock count
+// has no honest floor to fall back on (a plain count is an upper bound), so the estimate answers
+// rowsUnavailable instead. opts.fenceAt (the builder) keeps out responses saved after the build began,
+// exactly as the builder's survey stream does.
+export const countActivityPerKnock = async (ctx, opts = {}) => {
+  const kp = knockPlan(ctx);
+  const plan = fanPlan(ctx);
+  const layer = answerLayerPlan(ctx.params);
+  const flagged = [...ctx.dnc].map(oid);
+  const capped = (agg) => {
+    agg.allowDiskUse(true);
+    if (opts.maxTimeMS) agg.option({ maxTimeMS: opts.maxTimeMS });
+    return agg;
+  };
+  const sumOf = (facetRows, key) => facetRows?.[0]?.[key]?.[0]?.n || 0;
+  try {
+    const knockFacet = {
+      kept: [{ $count: 'n' }],
+      // A query-style $match: an expression $in inside a $group is linear per document.
+      ...(flagged.length ? { flagged: [{ $match: { 'k.v': { $in: flagged } } }, { $count: 'n' }] } : {}),
+      ...(plan.on
+        ? {
+            named: [{ $match: { 'k.v': { $ne: null } } }, { $count: 'n' }],
+            fanned: [
+              { $match: { 'k.v': null } },
+              { $group: { _id: '$_id.householdId', k: { $sum: 1 }, r: { $sum: 0 } } },
+              {
+                $unionWith: {
+                  coll: Voter.collection.name,
+                  pipeline: [
+                    { $match: plan.rosterMatch },
+                    { $group: { _id: '$householdId', k: { $sum: 0 }, r: { $sum: 1 } } },
+                  ],
+                },
+              },
+              { $group: { _id: '$_id', k: { $sum: '$k' }, r: { $sum: '$r' } } },
+              { $match: { k: { $gt: 0 } } },
+              { $group: { _id: null, n: { $sum: { $multiply: ['$k', { $max: [1, '$r'] }] } } } },
+            ],
+          }
+        : {}),
+    };
+    const knocks = await capped(CanvassActivity.aggregate([...kp.stages, { $facet: knockFacet }]));
+    const knockRows = plan.on ? sumOf(knocks, 'named') + sumOf(knocks, 'fanned') : sumOf(knocks, 'kept');
+    let surveyRows = 0;
+    let withheldSurveys = 0;
+    if (layer.addRows) {
+      const rq = activityResponseQuery(ctx);
+      if (opts.fenceAt) rq.createdAt = { $not: { $gt: opts.fenceAt } };
+      const surveys = await capped(
+        SurveyResponse.aggregate([
+          { $match: rq },
+          { $group: { _id: { v: '$voterId', p: { $ifNull: ['$passId', null] } }, r: { $sum: 1 } } },
+          {
+            $unionWith: {
+              coll: CanvassActivity.collection.name,
+              pipeline: [
+                ...(kp.surveyStages || kp.stages),
+                { $match: { 'k.a': 'survey_submitted', 'k.v': { $ne: null } } },
+                // After the group the round lives at _id.passId.
+                { $group: { _id: { v: '$k.v', p: { $ifNull: ['$_id.passId', null] } }, a: { $sum: 1 } } },
+              ],
+            },
+          },
+          { $group: { _id: '$_id', r: { $sum: '$r' }, a: { $sum: '$a' } } },
+          { $match: { a: 0 } },
+          {
+            $facet: {
+              clean: [
+                ...(flagged.length ? [{ $match: { '_id.v': { $nin: flagged } } }] : []),
+                { $group: { _id: null, n: { $sum: '$r' } } },
+              ],
+              ...(flagged.length
+                ? { flagged: [{ $match: { '_id.v': { $in: flagged } } }, { $group: { _id: null, n: { $sum: '$r' } } }] }
+                : {}),
+            },
+          },
+        ])
+      );
+      surveyRows = sumOf(surveys, 'clean');
+      withheldSurveys = sumOf(surveys, 'flagged');
+    }
+    return {
+      rows: knockRows + surveyRows,
+      surveyRows,
+      dncWithheld: sumOf(knocks, 'flagged') + withheldSurveys,
+    };
+  } catch (err) {
+    if (err?.codeName === 'MaxTimeMSExpired' || err?.code === 50) throw new EstimateTimeout();
+    throw err;
+  }
 };
 
 // Rows this FILE contains: the ledger rows (fan-aware) plus the responses the ledger cannot
@@ -429,6 +617,10 @@ export const buildCanvassActivity = async (ctx, sink) => {
   const layer = answerLayerPlan(ctx.params);
   const rq = layer.on ? activityResponseQuery(ctx) : null;
   const answers = layer.on ? await loadAnswerColumns(ctx, rq) : { plans: new Map(), cols: [] };
+  // One row per knock (opt-in). fenceAt is taken BEFORE the count, so the time the count takes covers
+  // the ordinary gap between a survey's response and its entry being saved (docs/PROPOSAL_ONE_ROW_PER_KNOCK.md §M).
+  const kp = knockPlan(ctx);
+  const fenceAt = kp.on ? new Date() : null;
 
   // The progress denominator is the SAME counter the estimate returns — under the fan or the answer
   // layer a plain countDocuments would pin the bar at 99% for the whole run.
@@ -439,7 +631,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
     // The canvasser who took a survey may be nobody the ledger scope names — that is the whole point
     // of the disclosure columns — so hydrate them too or 'Survey taken by' exports blank.
     layer.on ? SurveyResponse.distinct('userId', rq) : [],
-    countActivityRowsWithLayer(ctx),
+    kp.on ? countActivityPerKnock(ctx, { fenceAt }).then((c) => c.rows) : countActivityRowsWithLayer(ctx),
   ]);
   const people = await hydrateCanvassers(
     [...userIds, ...coordIds, ...respUserIds].filter(Boolean).map(String),
@@ -491,14 +683,28 @@ export const buildCanvassActivity = async (ctx, sink) => {
   const tagged = async function* (cursor, source, tsField) {
     for await (const d of cursor) yield { ...d, _source: source, _t: d[tsField] };
   };
-  const streams = [
-    tagged(CanvassActivity.find(q).sort({ timestamp: 1 }).lean().cursor({ batchSize: BATCH }), 'knock', 'timestamp'),
-  ];
-  if (layer.addRows) {
-    streams.push(
-      tagged(SurveyResponse.find(rq).sort({ submittedAt: 1 }).lean().cursor({ batchSize: BATCH }), 'survey', 'submittedAt')
+  const knockCursor = kp.on
+    ? knockRowsAggregate(ctx).cursor({ batchSize: BATCH })
+    : CanvassActivity.find(q).sort({ timestamp: 1 }).lean().cursor({ batchSize: BATCH });
+  // Per knock: surveys saved after the build began are fenced out (the client report's fence form, which
+  // keeps rows with no createdAt) — otherwise a door first surveyed mid-build would surface as a survey
+  // row for a door the file doesn't list. A factory, so on the per-knock path the cursor opens only once
+  // the knock rows are done instead of idling (and timing out) through a long build.
+  const surveyStream = () =>
+    tagged(
+      SurveyResponse.find(kp.on ? { ...rq, createdAt: { $not: { $gt: fenceAt } } } : rq)
+        .sort({ submittedAt: 1 })
+        .lean()
+        .cursor({ batchSize: BATCH }),
+      'survey',
+      'submittedAt'
     );
-  }
+  // Per knock, coverage comes from the knock rows actually WRITTEN (their stored voter, DNC-blanked rows
+  // included, as today's coverage reads the stored id): the survey rows follow every knock row, so the
+  // set is complete before the first survey is judged, and a survey can never be double-printed or lost
+  // against the rows in the file. A dropped duplicate covers nothing.
+  const coveredKeys = new Set();
+  let surveyRowsWritten = 0;
 
   let batch = [];
   const flush = async () => {
@@ -529,7 +735,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
       // survey_submitted row in the file's scope name their (voter, pass)? Deciding it from the
       // activity side instead double-prints answers at BATCH=500, because a covering row can sit in a
       // different batch than the response it covers.
-      layer.addRows && respVoterIds.length
+      layer.addRows && respVoterIds.length && !kp.on
         ? CanvassActivity.find(
             { ...q, actionType: 'survey_submitted', voterId: { $in: respVoterIds } },
             'voterId passId',
@@ -539,7 +745,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
     const homeById = new Map(homes.map((h) => [String(h._id), h]));
     const voterById = new Map(voters.map((v) => [String(v._id), v]));
     const joinedByKey = new Map(joined.map((r) => [respKey(String(r.voterId), r.passId), r]));
-    const covered = new Set(coveredRows.map((a) => respKey(String(a.voterId), a.passId)));
+    const covered = kp.on ? coveredKeys : new Set(coveredRows.map((a) => respKey(String(a.voterId), a.passId)));
 
     for (const doc of batch) {
       if (doc._source === 'survey') {
@@ -590,6 +796,7 @@ export const buildCanvassActivity = async (ctx, sink) => {
           String(r._id),
           r.editedAt ? 'yes' : '',
         ]);
+        surveyRowsWritten += 1;
         continue;
       }
 
@@ -644,17 +851,42 @@ export const buildCanvassActivity = async (ctx, sink) => {
           ...(layer.on ? [rowResp ? String(rowResp._id) : '', rowResp?.editedAt ? 'yes' : ''] : []),
         ]);
       }
+      // Per knock: this written row covers its stored voter's survey for the round (once per entry, not
+      // per fanned copy).
+      if (kp.on && vid && a.actionType === 'survey_submitted') coveredKeys.add(respKey(vid, a.passId));
     }
     ctx.progress(writer.rowsWritten);
     batch = [];
   };
 
-  for await (const doc of mergeByTime(streams)) {
-    batch.push(doc);
-    if (batch.length >= BATCH) await flush();
+  const drain = async (source) => {
+    for await (const doc of source) {
+      batch.push(doc);
+      if (batch.length >= BATCH) await flush();
+    }
+    await flush();
+  };
+  const knockStream = tagged(knockCursor, 'knock', 'timestamp');
+  if (kp.on) {
+    // Every knock row first, then the survey rows: their coverage is decided from the rows written.
+    try {
+      await drain(knockStream);
+    } catch (err) {
+      // The {campaignId: 1} index missing in production (the release's build-indexes dry run is the
+      // guard): fail ONCE with the reason, instead of three retries ending in "try again, or narrow the
+      // filters", neither of which helps.
+      if (err?.code === 2 && /hint provided does not correspond/i.test(err?.message || '')) {
+        throw new ExportUserError('One row per knock can\u2019t be built yet: a database index it needs is missing. Please tell Doorline support.');
+      }
+      throw err;
+    }
+    if (layer.addRows) await drain(surveyStream());
+  } else {
+    await drain(mergeByTime(layer.addRows ? [knockStream, surveyStream()] : [knockStream]));
   }
-  await flush();
-  return { files: [{ name: names.file, rows: writer.rowsWritten }] };
+  // surveyRows is reported for per-knock files only, so ExportJob.surveyRowCount means one thing: the
+  // "N knocks + M more people surveyed" split (a plain file's rows are entries, not knocks).
+  return { files: [{ name: names.file, rows: writer.rowsWritten }], surveyRows: kp.on ? surveyRowsWritten : 0 };
 };
 
 // ---------------------------------------------------------------------------------------

@@ -98,6 +98,13 @@ Knocks honor the date filter. We bill **per knock**, not per house. Field: `knoc
 > not, and neither is a knock (see **Restricted access** below). **Doors by round**'s *Door visits
 > this round* is a third number again: per-round, and with no desk-mark guard at all. Three honest
 > columns answering three different questions; only `knocksPipeline` answers "what do we bill".
+> One export's rows *are* knocks: the **Canvassing activity** file with **One row per knock** ticked
+> keeps each door once per round, the door's knock result for the round (`knockPlan` in
+> [exportBuilders.js](../server/src/services/export/exportBuilders.js) groups on `knocksPipeline`'s own
+> `{householdId, passId}` key), so with no outcome boxes ticked its knock rows equal **Knocks** for the
+> same dates, walk list and round — pinned against `buildKnocksByPassData` by
+> `test/activityPerKnock.int.test.js`. Invoice from the By pass CSV all the same: it carries **Billable
+> doors** on campaigns that bill restricted homes.
 
 ### Surveys
 Total survey responses submitted — one per voter per pass. A **volume** number: a house with
@@ -126,9 +133,13 @@ Field: `surveysSubmitted`.
 > **one** `survey_submitted` row and **three** `SurveyResponse` documents — so the Canvassing
 > activity export's **Include survey answers** option emits a row for every response that no knock
 > row in the file names. Those rows say **Row source: survey**, carry no **Activity DB id**, and must
-> never be counted as knocks; the file is renamed `activity-log-with-surveys` whenever they can
+> never be counted as knocks; the file's name includes `-with-surveys` whenever they can
 > appear (not when the option is merely ticked — a canvasser filter keeps the answer columns and adds
-> no rows). See [EXPORTS.md](EXPORTS.md).
+> no rows). With **One row per knock** ticked as well (and no outcome boxes), the knock rows equal **Knocks** for the same dates, walk list and round, and the survey
+> rows come after them, at the end of the file, so the history can read *4,683 knocks + 14 more people
+> surveyed*: the second number is this surplus — the extra people surveyed at a door already listed,
+> including a different person a second canvasser surveyed at a door whose one row is the other
+> canvasser's survey. See [EXPORTS.md](EXPORTS.md).
 
 ### Surveyed voters
 Distinct voters who have a survey — i.e. **how many people we actually reached** (not how many

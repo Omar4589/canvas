@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
@@ -17,6 +17,8 @@ import { loadExportOptions, saveExportOptions } from '../lib/exportOptions.js';
 import { useCampaignTeam } from '../lib/useCampaignTeam.js';
 import { roundOptionRows } from '../lib/useRoundOptions.js';
 import { walkListLabel, walkListOptions } from '../lib/walkListOptions.js';
+import { labelForRange } from '../lib/datePresets.js';
+import { knockSplitLine, KNOCK_SPLIT_HINT } from '../lib/exportSplit.js';
 
 // The Export Center: queue background CSV/ZIP exports (built on the worker dyno), then
 // download them from the history below until they expire. Admins see every type; leads see
@@ -40,7 +42,8 @@ const TYPES = [
     id: 'canvass-activity',
     label: 'Canvassing activity',
     desc: 'Every door result: who knocked, when, the outcome, and the voter at that door.',
-    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'perVoterRows'],
+    // The web queues only against the deploy that served it, so its fallback can carry every token.
+    filters: ['date', 'effort', 'pass', 'canvasser', 'outcome', 'onePerKnock', 'perVoterRows', 'surveyAnswers'],
   },
   {
     id: 'doors-by-round',
@@ -115,9 +118,14 @@ const OUTCOME_OPTIONS = Object.keys(ACTION_LABELS);
 
 // Tokens that are OPTIONS — choices that change what the file IS — as opposed to the narrowing
 // filters. A type carrying one gets a dialog between the Queue button and the POST (today
-// canvass-activity: the outcome chips and the per-voter checkbox), so those choices are made
-// deliberately on their own screen rather than scrolled past among the pickers.
-const OPTION_TOKENS = ['outcome', 'perVoterRows', 'surveyAnswers'];
+// canvass-activity: one row per knock, the outcome chips, the per-voter checkbox and survey
+// answers), so those choices are made deliberately on their own screen rather than scrolled past
+// among the pickers.
+const OPTION_TOKENS = ['outcome', 'onePerKnock', 'perVoterRows', 'surveyAnswers'];
+
+// Not knocks: a desk/field Restricted mark and a note. One row per knock lists knocks only, so their
+// chips leave the row while it is ticked (and the server refuses them, docs/PROPOSAL_ONE_ROW_PER_KNOCK.md).
+const NOT_KNOCK_OUTCOMES = ['restricted', 'note_added'];
 
 // not_target (the off-by-default outcome) is appended per campaign — offered only where it has been
 // used — like the outcome chips below.
@@ -194,13 +202,17 @@ function scopeLabel(job, { effortName, passName, canvasserName }) {
   if (p.userId) bits.push(canvasserName(p.userId) || 'Canvasser');
   if (p.roundStatuses?.length) bits.push(`Status: ${p.roundStatuses.join(', ')}`);
   if (p.actionTypes?.length) bits.push(`Outcomes: ${p.actionTypes.map((a) => ACTION_LABELS[a] || a).join(', ')}`);
-  if (p.from || p.to) bits.push([p.from, p.to].filter(Boolean).join(' → '));
+  // A one-sided range says which side: a bare date read the same for "through" and "from".
+  if (p.from && p.to) bits.push(`${p.from} → ${p.to}`);
+  else if (p.to) bits.push(`through ${p.to}`);
+  else if (p.from) bits.push(`from ${p.from}`);
   // Surfaced deliberately: the history is the record of which exports carried contact and
   // date-of-birth columns, so it has to say so on the row.
   if (p.includeVoterDetail) bits.push('contact & demographic details');
   // Same reason, same rule: a door roster beside a note, and a knock repeated against every name
   // at the door, are both linkages the row has to own up to.
   if (p.includeDoorVoters) bits.push('voters listed at each door');
+  if (p.onePerKnock) bits.push('one row per knock');
   if (p.perVoterRows) bits.push('one row per voter at the door');
   if (p.includeSurveyNote) bits.push('survey notes');
   if (p.includeSurveyAnswers) bits.push('survey answers');
@@ -242,14 +254,33 @@ export default function ExportsPage() {
   // them. Still frozen onto every job row, so the history remains the record.
   const [includeSurveyAnswers, setIncludeSurveyAnswers] = useState(() => loadExportOptions(campaignId).includeSurveyAnswers);
   const [perVoterRows, setPerVoterRows] = useState(false);
-  // Re-seed when the campaign changes: this page does not remount on a route param change, so
-  // without it a remembered choice would follow you into another campaign. Synchronous read, nothing
-  // started, nothing to tear down.
-  useEffect(() => {
-    setIncludeSurveyAnswers(loadExportOptions(campaignId).includeSurveyAnswers);
-  }, [campaignId]);
-
+  // One row per knock (services/export/exportBuilders.js knockPlan). A row option, so NOT remembered:
+  // the owner's ruling (2026-11-09) is that it is ticked deliberately for every export, so it is also
+  // cleared each time the options dialog opens (the Queue export button). Frozen into ExportJob.params,
+  // and the file name includes -per-knock.
+  const [onePerKnock, setOnePerKnock] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  // Re-seed when the campaign changes: this page does not remount on a route-param change (the switcher
+  // pushes a new /campaigns/:id/exports entry, so Back and Forward change it too). Done DURING render
+  // (React's "storing information from previous renders" pattern, as the phone's exports screen does) so
+  // the first render for the new campaign already has clean state — an effect ran one commit late and
+  // fired a passes request for the new campaign with the old walk list.
+  //   - the remembered Include survey answers is per campaign;
+  //   - the walk list, round, canvasser, import and saved search belong to ONE campaign: carried over they
+  //     would ride the next export while the selects read "All …" (a stale canvasser quietly emptied the
+  //     file; a stale import or saved search came back as a 400), and the dialog's "For:" line named them;
+  //   - an open options dialog closes, so its choices never queue against the other campaign.
+  const [seededFor, setSeededFor] = useState(campaignId);
+  if (seededFor !== campaignId) {
+    setSeededFor(campaignId);
+    setIncludeSurveyAnswers(loadExportOptions(campaignId).includeSurveyAnswers);
+    setEffortId('');
+    setPassId('');
+    setUserId('');
+    setImportJobId('');
+    setSavedSearchId('');
+    setOptionsOpen(false);
+  }
   const [backupScope, setBackupScope] = useState('campaign');
   const [skip, setSkip] = useState(0);
   const [rowBusy, setRowBusy] = useState(null); // jobId of an in-flight download/delete
@@ -408,6 +439,7 @@ export default function ExportsPage() {
     if (wants('surveyNote') && includeSurveyNote) p.includeSurveyNote = true;
     if (wants('surveyAnswers') && includeSurveyAnswers) p.includeSurveyAnswers = true;
     if (wants('perVoterRows') && perVoterRows) p.perVoterRows = true;
+    if (wants('onePerKnock') && onePerKnock) p.onePerKnock = true;
     return p;
   }
 
@@ -433,9 +465,29 @@ export default function ExportsPage() {
   // A note is not a visit, so Results by voter — whose universe IS field visits — never offers that
   // chip. The server refuses it outright rather than intersecting to an empty file, and presenting a
   // choice that 400s is worse than not presenting it. Not a target voter: see notTargetInUse.
-  const chipOutcomes = (type.id === 'results-by-voter' ? OUTCOME_OPTIONS.filter((a) => a !== 'note_added') : OUTCOME_OPTIONS).filter(
-    (a) => a !== 'not_target' || notTargetInUse
-  );
+  // With One row per knock ticked, Restricted and Note added leave the row: they aren't knocks. A chip
+  // ticked before stays in state and rides nowhere (paramsForCreate narrows to these), coming back if
+  // the box is unticked.
+  const perKnockOn = wants('onePerKnock') && onePerKnock;
+  const chipOutcomes = (type.id === 'results-by-voter' ? OUTCOME_OPTIONS.filter((a) => a !== 'note_added') : OUTCOME_OPTIONS)
+    .filter((a) => a !== 'not_target' || notTargetInUse)
+    .filter((a) => !perKnockOn || !NOT_KNOCK_OUTCOMES.includes(a));
+  const isLitDrop = campaign?.type === 'lit_drop';
+  // The dialog covers the pickers, so it names what the file will match (a round picked on another
+  // type carries over: only a walk-list change resets it).
+  const roundLabel = passId === 'legacy' ? 'Legacy / no pass' : roundChoices.find((r) => String(r.id) === String(passId))?.label;
+  const scopeLine = [
+    // "through" / "from" for a one-sided range, as the history's Scope column says it (the To date is
+    // inclusive, which "Until" left open).
+    wants('date') ? labelForRange(dateRange).replace(/^Until /, 'through ').replace(/^Since /, 'from ') : null,
+    // A round's label already names its walk list ("North · Pass 2 · Re-knock"), so with a round picked
+    // the walk-list part would contradict it ("all walk lists · North · …") or repeat it.
+    wants('effort') && !(wants('pass') && passId && passId !== 'legacy' && roundLabel)
+      ? (effortId ? effortName(effortId) || 'one walk list' : 'all walk lists')
+      : null,
+    wants('pass') ? (passId ? roundLabel || 'one round' : 'all rounds') : null,
+    wants('canvasser') ? (userId ? canvasserName(userId) || 'one canvasser' : 'all canvassers') : null,
+  ].filter(Boolean).join(' · ');
   const roundStatuses = notTargetInUse ? [...ROUND_STATUSES, 'not_target'] : ROUND_STATUSES;
 
   const outcomeChipRow = (
@@ -721,7 +773,16 @@ export default function ExportsPage() {
             </div>
           )}
           <Button
-            onClick={() => (hasOptionsDialog ? setOptionsOpen(true) : queueExport())}
+            onClick={() => {
+              if (!hasOptionsDialog) return queueExport();
+              // One row per knock is ticked deliberately for EVERY export (the owner's ruling,
+              // 2026-11-09): the page keeps its state between exports and across a campaign switch,
+              // so the box is cleared each time the options open rather than once per page load.
+              setOnePerKnock(false);
+              // And the last attempt's error never greets the next dialog.
+              createMut.reset();
+              return setOptionsOpen(true);
+            }}
             loading={createMut.isPending && !optionsOpen}
             disabled={createDisabled}
           >
@@ -751,14 +812,56 @@ export default function ExportsPage() {
             }
           >
             <div className="space-y-4">
+              {scopeLine && <p className="text-xs text-fg-muted">For: {scopeLine}</p>}
+              {/* One row per knock: the file a client compares with the Home page's Knocks. First, because
+                  it changes what the outcome chips below mean (door results) and which ones there are. */}
+              {wants('onePerKnock') && (
+                <label className="flex items-start gap-2 rounded-md border border-border bg-sunken px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={onePerKnock}
+                    onChange={(e) => setOnePerKnock(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-fg">One row per knock</span>
+                    <span className="block text-xs text-fg-muted">
+                      Each door once per round, the way your Knocks count it: with no outcome boxes
+                      ticked, the knocks match the Knocks on your Home page for the same dates and walk
+                      list. Where two canvassers recorded the same door in a round, the file keeps one
+                      entry: the door&rsquo;s knock result (
+                      {isLitDrop
+                        ? 'Lit dropped if anyone dropped literature there'
+                        : 'Surveyed if anyone surveyed there'}
+                      , otherwise the later visit), under that canvasser&rsquo;s name, so don&rsquo;t total
+                      this file by canvasser. Restricted marks and Note added entries aren&rsquo;t knocks, so
+                      they&rsquo;re left out; a knock&rsquo;s own note stays. The file name includes -per-knock.
+                    </span>
+                  </span>
+                </label>
+              )}
               {wants('outcome') && (
                 <div>
                   <div className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-muted">Door outcome</div>
                   {outcomeChipRow}
                   <p className="mt-1.5 text-xs text-fg-muted">
-                    Tick the outcomes you want; nothing ticked means every outcome. Leave Restricted
-                    and Wrong address unticked to drop desk marks and bad addresses, or tick only Not
-                    home for a re-knock list with the full detail behind it.
+                    {!perKnockOn ? (
+                      <>
+                        Tick the outcomes you want; nothing ticked means every outcome. Leave Restricted
+                        and Wrong address unticked to drop desk marks and bad addresses, or tick only Not
+                        home for a re-knock list with the full detail behind it.
+                      </>
+                    ) : userId ? (
+                      // A canvasser never has two entries at one door in a round, so there is no
+                      // door result to pick between: the chips work as they always have.
+                      'Tick the outcomes you want; nothing ticked means every knock.'
+                    ) : (
+                      <>
+                        Leave these all unticked for every knock. Tick some and you get only the doors
+                        whose knock result for the round is one of those: a door one canvasser marked Not
+                        home and another {isLitDrop ? 'dropped literature at is a Lit dropped' : 'surveyed is a Surveyed'} door.
+                      </>
+                    )}
                   </p>
                 </div>
               )}
@@ -777,13 +880,15 @@ export default function ExportsPage() {
                     <span className="font-medium text-fg">One row per voter at the door</span>
                     <span className="block text-xs text-fg-muted">
                       A knock that named nobody — not home, wrong address, refused,{' '}
-                      {notTargetInUse ? 'not a target voter, ' : ''}lit drop, no soliciting, restricted — is one
+                      {notTargetInUse ? 'not a target voter, ' : ''}lit drop, no soliciting
+                      {/* A per-knock file has no Restricted marks to repeat. */}
+                      {perKnockOn ? '' : ', restricted'} — is one
                       row about the door. Tick this and it repeats once
                       per registered voter at that address, each row carrying the same outcome, time,
                       canvasser, GPS and note. The outcome is repeated, not attributed: a refused on
                       three rows means someone at that address declined, not that each person did. The
-                      columns are the same but the row count is not, so the file is named
-                      activity-log-by-voter — never count its rows as knocks. Do-not-contact voters are
+                      columns are the same but the row count is not, so the file name includes
+                      -by-voter — never count its rows as knocks. Do-not-contact voters are
                       never listed, and an address with nobody to list keeps its single blank row.
                     </span>
                   </span>
@@ -805,7 +910,7 @@ export default function ExportsPage() {
                       surveying three people at one door in one round is <em>one</em> knock and three
                       surveys, so two of them have no knock row of their own. Those rows say{' '}
                       <strong>Row source: survey</strong> and carry no Activity DB id — never count
-                      them as knocks. The file is named activity-log-with-surveys to say so. Your
+                      them as knocks. The file name includes -with-surveys to say so. Your
                       choice is remembered for this campaign, and recorded on every export in the
                       history below.
                     </span>
@@ -895,7 +1000,19 @@ export default function ExportsPage() {
                           {job.requestedBy ? `${job.requestedBy.firstName || ''} ${job.requestedBy.lastName || ''}`.trim() : ''}
                           <div className="text-xs text-fg-subtle">{new Date(job.createdAt).toLocaleString()}</div>
                         </td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{job.rowCount || ''}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {job.rowCount ? Number(job.rowCount).toLocaleString() : ''}
+                          {(() => {
+                            // One row per knock: the sentence an owner sends a client, not the raw total.
+                            const split = knockSplitLine(job.params, { rows: job.rowCount, surveyRows: job.surveyRowCount });
+                            return split ? (
+                              <div className="flex items-center justify-end gap-1 text-xs text-fg-subtle">
+                                <span>{split}</span>
+                                <InfoHint label="What these rows are" align="right">{KNOCK_SPLIT_HINT}</InfoHint>
+                              </div>
+                            ) : null;
+                          })()}
+                        </td>
                         <td className="py-2 pr-3 text-right tabular-nums">{fmtBytes(job.bytes)}</td>
                         <td className="py-2 pr-3 text-fg-muted">
                           {job.status === 'completed' && dl !== null ? (dl > 0 ? `in ${dl} day${dl === 1 ? '' : 's'}` : 'expired') : ''}

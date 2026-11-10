@@ -90,3 +90,16 @@ test('writer: end-to-end — a hostile voter name survives quoted and neutralize
   const dataLine = text.split('\r\n')[1];
   assert.strictEqual(dataLine, `'=2+2,"said ""no thanks"", left"`);
 });
+
+test('createCsvWriter: a write to a stream that already failed rejects instead of hanging', async () => {
+  // A GridFS chunk insert that errored between batches leaves the upload destroyed with nobody waiting on
+  // 'drain'; write() then returns false and never emits 'drain' or 'error', so the build waited forever.
+  const pt = new PassThrough();
+  pt.on('error', () => {}); // the upload's own listener, as the processor's uploadDone has
+  pt.destroy(new Error('chunk insert failed'));
+  const writer = createCsvWriter(pt);
+  await assert.rejects(writer.writeHeader(['a', 'b']), /chunk insert failed/);
+  const closed = new PassThrough();
+  closed.destroy();
+  await assert.rejects(createCsvWriter(closed).writeRow(['x']), /export upload stream closed/);
+});

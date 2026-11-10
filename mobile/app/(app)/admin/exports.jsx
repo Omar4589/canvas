@@ -11,7 +11,7 @@ import { deviceTimezone } from '../../../lib/dateRanges';
 import { spacing, radius } from '../../../lib/theme';
 import { useThemedStyles } from '../../../lib/useThemedStyles';
 import { useConsoleRoleLabel } from '../../../lib/useConsoleRole';
-import { mergeTypeMeta } from '../../../lib/exportTypes';
+import { mergeTypeMeta, optionsToRemember, perKnockJobBits } from '../../../lib/exportTypes';
 import CampaignChip from '../../../components/CampaignChip';
 import ArchivedCampaignBanner from '../../../components/ArchivedCampaignBanner';
 import SectionHeader from '../../../components/SectionHeader';
@@ -226,7 +226,9 @@ export default function AdminExports() {
   const jobSub = (job) => {
     const bits = [new Date(job.createdAt).toLocaleDateString()];
     if (isFiltered(job)) bits.push('filtered');
-    if (job.rowCount) bits.push(`${job.rowCount} rows`);
+    if (job.rowCount) bits.push(`${Number(job.rowCount).toLocaleString()} rows`);
+    // One row per knock: say so, and the knocks + surveys split (docs/PROPOSAL_ONE_ROW_PER_KNOCK.md).
+    bits.push(...perKnockJobBits(job));
     if (job.bytes) bits.push(fmtBytes(job.bytes));
     if (job.status === 'completed') {
       const dl = daysLeft(job.expiresAt);
@@ -322,6 +324,7 @@ export default function AdminExports() {
         <ExportSheet
           meta={sheetMeta}
           campaignId={cId}
+          campaignType={campaign?.type}
           tz={tz}
           queueing={createMut.isPending}
           onQueue={(params) =>
@@ -330,9 +333,13 @@ export default function AdminExports() {
               {
                 // Remembered from THIS path only. The retry button below re-posts an OLD job's
                 // frozen params through the same mutation, so persisting inside the mutation would
-                // adopt somebody else's choice as the default for this phone.
-                onSuccess: () =>
-                  saveExportOptions(cId, { includeSurveyAnswers: !!params.includeSurveyAnswers }),
+                // adopt somebody else's choice as the default for this phone. And only for a type
+                // that carries the option: one sheet serves four types, and saving after any of them
+                // used to wipe a remembered Include survey answers.
+                onSuccess: () => {
+                  const remember = optionsToRemember(sheetMeta, params);
+                  if (remember) saveExportOptions(cId, remember);
+                },
               }
             )
           }

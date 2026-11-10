@@ -6,7 +6,7 @@ kind: faq
 order: 48
 sourceDoc: EXPORTS.md
 summary: Yes — tick One row per voter at the door when you queue it, and every not-home (or refused, lit drop…) repeats once per registered voter at that address; the file is renamed so its rows are never counted as knocks.
-tags: export, csv, activity, not home, voters, rows, download, not a target voter
+tags: export, csv, activity, not home, voters, rows, download, not a target voter, one row per knock
 ---
 
 Yes. By default the **Canvassing activity** export is one row per door event, and a knock that
@@ -24,21 +24,30 @@ matching every household member touched by a not-home — not for counting.
 Two things to keep straight:
 
 - **Repeated, not attributed.** A *refused* on three rows means someone at that address declined, not that each of the three did; *not a target voter* on three rows means whoever answered wasn't one of the voters on your list for that address, so it describes none of the three; *no soliciting* is a sign on the property. None of these is a do-not-contact request.
-- **Rows are not knocks.** The columns are identical but the row count isn't, so the file is
-  named **activity-log-by-voter** — never use it for an invoice — an admin can pull the
-  per-round knock totals for that. Every row of one knock shares the same
+- **Rows are not knocks.** The columns are identical but the row count isn't, so the file's
+  name includes **-by-voter** — never use it for an invoice — an admin can pull the
+  per-round knock totals for that. Every row repeated from one entry shares the same
   **Activity DB id**.
 
 Want to drop restricted-access or wrong-address entries at the same time? The same dialog has
 the **Door outcome** chips — leave those two unticked and they stay out of the file, fanned or
 not.
 
+Tick **One row per knock** too, at the top of the same dialog, and each door comes once per round
+before the knocks that named nobody repeat per voter: where two canvassers recorded the same door in
+a round, only the door's result is kept (Surveyed if anyone surveyed there, or on a lit-drop
+campaign Lit dropped if anyone dropped literature; otherwise the later visit), and Restricted marks
+and Note added entries are left out. It is the per-voter file without the doubled
+doors, its name includes both **-per-knock** and **-by-voter**, and with no outcome boxes ticked,
+counting its distinct **Activity DB id** values gives your knocks. See [Why does my Canvassing
+activity export have more rows than my Knocks?](export-more-rows-than-knocks)
+
 Ticking **Include survey answers** at the same time is fine, and the two options don't overlap. A
 survey row already names the person it surveyed, so it is never repeated; a repeated row never
 carries the named voter's answers, because attaching them would credit one person's survey to
 everyone at the address; and the rows that option adds — the surveys a door-level knock row can't
-show, marked **Row source: survey** — aren't repeated either. With both on the file is named
-`activity-log-by-voter-with-surveys` and the history row says both. See [My export says a survey
+show, marked **Row source: survey** — aren't repeated either. With both on the file's name includes
+`-by-voter-with-surveys` and the history row says both. See [My export says a survey
 was submitted but not what they said](survey-answers-in-my-export).
 
 People who have asked not to be contacted are never listed, and an address with nobody to list

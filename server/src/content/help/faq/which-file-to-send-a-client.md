@@ -6,7 +6,7 @@ kind: faq
 order: 73
 sourceDoc: EXPORTS.md
 summary: Results by voter — one row per person at the doors you worked, with the door's outcome in plain English and their answers by round. It is not an accounting of doors, and its visit counts are not invoice lines.
-tags: export, csv, client, results by voter, deliverable, survey, download, not a target voter
+tags: export, csv, client, results by voter, deliverable, survey, download, not a target voter, one row per knock, knocks
 ---
 
 **Results by voter**, from the campaign's **Exports** page. Queue it on the web — the phone's
@@ -41,6 +41,15 @@ Four things to be straight about before you send it:
 People who have asked not to be contacted are not in this file at all: here the row *is* the
 person, so they are dropped whole and counted in the withheld figure. Row counts can therefore sit
 below what the dashboard shows.
+
+**If the client wants to check your knocks door by door**, send **Canvassing activity** with **One
+row per knock** ticked (at the top of the dialog **Queue export** opens). It is the knock-level file:
+each door once per round, with who knocked, when and the result, so with no outcome boxes ticked its
+knocks match your Knocks for the same dates and walk list. Where two canvassers recorded the same
+door in a round it keeps one entry, the door's result, so it shouldn't be totalled by canvasser.
+With survey answers on, the extra people surveyed at a door come after the knock rows, and the
+history says, for example, *4,683 knocks + 14 more people surveyed*. See [Why does my Canvassing
+activity export have more rows than my Knocks?](export-more-rows-than-knocks)
 
 If what the client actually wants is the weekly picture rather than a spreadsheet, publish a
 **client report** instead — headline numbers, breakdowns, your written observations and a coverage

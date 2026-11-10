@@ -70,6 +70,10 @@ const canvassActivitySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Campaign',
       required: true,
+      // HINTED by the One row per knock export (services/export/exportBuilders.js knockRowsAggregate): it
+      // scans in saved order so a door re-tapped mid-build can't drop out, and a hint naming a missing
+      // index fails the query. It is a prefix of three compound campaignId indexes below — do NOT drop it
+      // as redundant (activityPerKnock.int.test.js pins this declaration).
       index: true,
     },
     householdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Household', required: true, index: true },

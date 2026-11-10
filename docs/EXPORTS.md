@@ -23,7 +23,9 @@ entry this feature is bound by), [CAMPAIGNS.md](CAMPAIGNS.md) (the Door Outcomes
 [PROPOSAL_NOT_TARGET_OUTCOME.md](PROPOSAL_NOT_TARGET_OUTCOME.md) (the opt-in Not a target voter
 outcome, its columns, and the once-per-door Contact rate %),
 [PROPOSAL_SURVEY_SCRIPT_FLOW.md](PROPOSAL_SURVEY_SCRIPT_FLOW.md) (scripted surveys, whose read-aloud
-statements and closings are never a column or a row).
+statements and closings are never a column or a row),
+[PROPOSAL_ONE_ROW_PER_KNOCK.md](PROPOSAL_ONE_ROW_PER_KNOCK.md) (One row per knock: the plan, its two
+review rounds and the owner's decisions).
 
 ---
 
@@ -37,7 +39,9 @@ describes itself before anything queues — what it is, what one row of the file
 phone, tapping a type opens a sheet that goes further: what's in the file, the same filters the
 web offers for that type, and a **live row count** for exactly the filters you've set. The
 file is built in the background — big exports take a minute — and appears in the
-history below with a Download button when ready. Files are kept for **7 days**, then deleted
+history below with a Download button when ready. On the web, each history row's **Scope** column says
+what the file was narrowed to and which options it carried; a date range with only one end reads
+*through 2026-11-08* or *from 2026-11-01*, so the two can't be confused. Files are kept for **7 days**, then deleted
 automatically; queue a fresh one any time (on the phone, touch and hold a row to delete it
 sooner). Everything is CSV (opens in Excel/Sheets and re-imports cleanly into other tools); the
 full backup is a ZIP of CSVs.
@@ -50,7 +54,7 @@ still works** — that window exists precisely so you can take your data with yo
 
 | Type | One row is… | Use it for |
 |---|---|---|
-| **Canvassing activity** | one door event (who knocked, when, the outcome, the voter at that door, GPS, note) — or, with **One row per voter at the door** ticked, one voter at that door for every knock that named nobody | the full field record; audits; "what happened at this address"; a voter-keyed file when every person at a not-home address needs a row |
+| **Canvassing activity** | one door event (who knocked, when, the outcome, the voter at that door, GPS, note) — or, with **One row per knock** ticked, one knock: each door once per round, the way your Knocks count it; with **One row per voter at the door** ticked, one voter at that door for every knock that named nobody | the full field record; audits; "what happened at this address"; a file whose knocks match your Knocks (no outcome boxes ticked, same dates and walk list); a voter-keyed file when every person at a not-home address needs a row |
 | **Doors by round** | one door in one round, with its round status and visit count | re-knock lists; per-round door detail that adds up to the invoice numbers |
 | **Survey results** | one survey taken, one column per question | analysis in a spreadsheet; one file per survey when a campaign ran several; opt-in contact/demographic columns for matching back |
 | **Survey answers (detailed)** | one recorded answer, as it stands now — as captured at the door unless an admin has since edited it | the audit-grade record — survives question re-wording; takes the same opt-in columns |
@@ -89,9 +93,12 @@ this file fit to hand the customer" (owner ruling 2026-09-23, recorded in the sa
 chips; tick the outcomes you want, and nothing ticked means every outcome. Leave *Restricted*
 and *Wrong address* unticked to drop desk marks and bad addresses from the file, or tick only
 *Not home* for a re-knock list with the full event detail behind it. On the web, Canvassing
-activity's chips live in the dialog that **Queue export** opens for that type (beside the
-one-row-per-voter box); the Notes chips sit inline with the other filters. The phone's row-count
-preview follows it, and the export history lists the outcomes a file was narrowed to.
+activity's chips live in the dialog that **Queue export** opens for that type (under the One row per
+knock box, above the one-row-per-voter box); the Notes chips sit inline with the other filters. The
+phone's row-count preview follows it, and the export history lists the outcomes a file was narrowed to.
+With **One row per knock** ticked on Canvassing activity, the chips pick *door results* instead of
+entries, and the *Restricted* and *Note added* chips disappear, since those aren't knocks (see that
+section below).
 **Not a target voter** — a door outcome that stays off until an org admin turns it on for a
 campaign — is offered as a chip only on a campaign that has had it turned on at some point, and the
 same goes for the statuses **Doors by round** can be narrowed to (*Only doors with status*). A chip
@@ -150,10 +157,13 @@ Four things to know before you rely on the file:
   are desk marks, filtering to one canvasser leaves them out, and unticking *Restricted* under
   **Door outcome** drops them altogether.
 - **Its rows are not knocks.** The columns are identical to the normal file but the row count is
-  not, so the file is named **`activity-log-by-voter`** (and the download
+  not, so the file name includes **`-by-voter`** (`activity-log-by-voter`, and the download
   `…-canvass-activity-by-voter-<date>.csv`) — never sum its rows for an invoice; the invoice-grade
-  files are still the per-round ones. To recover the knock count, count distinct **Activity DB
-  id** values, which every row of one knock shares.
+  files are still the per-round ones. Every row repeated from one entry shares its **Activity DB
+  id**, so counting distinct values gets you back to the normal file's **entries** — door events,
+  which are not knocks either: a Restricted mark, a Note added entry and the second canvasser's entry
+  at a door two people recorded in the same round each carry an id of their own. Tick **One row per
+  knock** as well (below), with no outcome boxes ticked, and the distinct ids are your knocks.
 - **It is today's roster.** The people listed are the voters registered at that address *now* —
   someone imported after the knock appears, someone moved out since does not — so the row count
   on screen and the finished file can differ by a row if the roster changed in between.
@@ -182,19 +192,25 @@ It adds **rows** as well as columns, which is the part to understand before coun
   of those three surveys have no knock row to sit on. Each becomes its own row, and a new **Row
   source** column says where every row came from: `knock` for a door event, `survey` for a row that
   exists because a survey does. A `survey` row has no **Activity DB id**. **Never count those as
-  knocks** — for the knock count, count distinct **Activity DB id** values and ignore the blanks.
-- **The file is renamed to say so** — **`activity-log-with-surveys`** (download
-  `…-canvass-activity-with-surveys-<date>.csv`), and `activity-log-by-voter-with-surveys` with both
-  options on. The suffix tracks whether rows were actually added: filter to one canvasser and you get
-  the answer columns with **no** extra rows — that filter has already removed the covering knock
-  rows, and adding the uncovered surveys would fill one canvasser's file with other people's work —
-  so the name stays `activity-log`.
+  knocks.** Counting distinct **Activity DB id** values (ignoring the blanks) gives the file's
+  entries, and entries are not knocks: Restricted marks, Note added entries and the second
+  canvasser's entry at a door two people recorded in the same round all carry ids. For the knock
+  count, tick **One row per knock** and leave the outcome boxes unticked (the next section), or use
+  **Doors by round**.
+- **The file's name says so** — it includes **`-with-surveys`** (`activity-log-with-surveys`,
+  download `…-canvass-activity-with-surveys-<date>.csv`; `activity-log-by-voter-with-surveys` with
+  one row per voter on too, and `-per-knock` in front with One row per knock). The suffix tracks
+  whether rows were actually added: filter to one canvasser and you get the answer columns with
+  **no** extra rows — that filter has already removed the covering knock rows, and adding the
+  uncovered surveys would fill one canvasser's file with other people's work — so the name carries no
+  `-with-surveys`.
 - **Unticking *Surveyed* under Door outcome switches the whole layer off.** A file narrowed to *Not
   home* has nothing to attach answers to, so it comes out with no answer columns at all rather than
   as a re-knock list padded with surveys.
-- **Two canvassers who surveyed the same person in one round keep a row each.** Only the later survey
-  is the live record, and both rows carry it, with **Survey taken by** naming whose survey it is —
-  blanking the first canvasser's row would make their knock look like it recorded nothing.
+- **Two canvassers who surveyed the same person in one round keep a row each**, unless **One row per
+  knock** is ticked (then the door has one row, the later survey's). Only the later survey is the live
+  record, and both rows carry it, with **Survey taken by** naming whose survey it is — blanking the
+  first canvasser's row would make their knock look like it recorded nothing.
 - **The answers are the answers as they stand now.** When an org admin has changed a survey's answers
   since it was recorded (Door Outcomes → **Edit answers…**, or the voter profile's Edit), the row
   carries the edited answers and the file's **last column, Answers edited**, reads *yes*. It is
@@ -206,7 +222,108 @@ The choice is remembered for that campaign in the browser you queued from, so wa
 once means having them next time; unticking it and queueing is remembered too. It is frozen into the
 export job either way and the history's scope line says *survey answers*, so which activity files
 carried political opinions is answerable later. Retrying an old export re-runs *its* options, never
-your remembered one.
+your remembered one. The phone remembers it too, for the campaign you last queued a Canvassing
+activity export on, and only that queue changes what it remembers: queueing Doors by round, Survey
+results or Voter file there used to reset it to unticked, and no longer does.
+
+On campaigns with very old entries (from before rounds existed), the phone's row count for a file with
+survey answers could read a little high — a row for each such survey; it now matches the file.
+
+## One row per knock (the Canvassing activity export)
+
+The Canvassing activity file is a list of **entries**, and **Knocks** counts each door **once per
+round**, so the two rarely agree. A client's file through November 8 had 4,707 rows while the Home
+page said 4,683 knocks: 14 rows were surveys of a second person at a door already listed (Include
+survey answers adds those), and 10 were second entries at doors two canvassers both recorded in the
+same round. What was left was exactly the Knocks number. Press **Queue export** on a Canvassing
+activity export and tick **One row per knock**, the first box in the dialog that opens (on a phone
+with the latest update, the **One row per knock** switch in its own **Knocks** block, above *Door
+outcome*), and the file is built the way Knocks counts:
+
+- **Each door appears once per round.** With no outcome boxes ticked, the file's knocks match the
+  **Knocks** on your Home page for the same dates and walk list.
+- **Two canvassers at one door in one round: one row**, showing the door's knock result for the
+  round — **Surveyed** if anyone surveyed there (on a lit-drop campaign, **Lit dropped** if anyone
+  dropped literature there), otherwise **the later visit** (of two recorded at the exact same instant,
+  the one saved first). It is the same rule your client reports use for their outcome breakdown.
+  Restricted marks never count toward it.
+- **That row is one canvasser's whole entry**: their name, time, GPS and note. The other canvasser's
+  entry isn't in this file; it stays on the **Overlaps** page, and in the file without this option.
+  **So don't total this file by canvasser**: a shared door would count for only one of them. For each
+  canvasser's numbers, use the canvasser filter or the Home page's canvasser table, which credit both.
+- **Restricted marks and Note added entries aren't knocks, so they're left out.** A knock's own note
+  stays.
+- **The file name includes `-per-knock`**, for example
+  `…-canvass-activity-per-knock-with-surveys-2026-11-09.csv`. The date in a download's name is the
+  day the file was built.
+
+On the web the dialog also names what the file will cover, on a line under its title — the dates,
+the walk list, the round and the canvasser — because a round picked for another export type stays
+picked when you switch to this one.
+
+**The Door outcome boxes pick door results while it is ticked.** Leave them all unticked for every
+knock. Tick *Not home* and you get the doors whose knock result for the round was Not home: a door
+one canvasser marked Not home and another surveyed is a Surveyed door, so it isn't in a Not home
+file. That makes a better re-knock list than the plain file (which includes doors a partner
+surveyed). The *Restricted* and *Note added* boxes disappear while the option is ticked. With a
+canvasser picked the boxes work as before: a canvasser never has two entries at one door in a round.
+
+**With Include survey answers.** Every survey still gets a row. A second person surveyed at a door
+that's already listed can't share the door's row, so their survey is a row of its own, marked **Row
+source: survey**, and in this file those rows come **after all the knock rows, at the end** (the
+plain file mixes them in by time). When two canvassers surveyed *different* people at one door in the
+same round, the door's row carries one of those surveys and the other person's becomes one of the
+rows at the end, so this file can have a few more of them than the plain file. Doorline shows the
+split beside the row count on the export's history row, web and phone: **4,683 knocks + 14 more
+people surveyed** (*1 more person surveyed* for one). On the web an (i) beside it says *Each of those
+rows is another person surveyed at a door already listed: one knock, two surveys. They're at the end
+of the file, marked Row source: survey.* The phone shows the same split in its row count before you
+queue.
+With a canvasser picked no survey rows are added, as in the plain file.
+
+**With One row per voter at the door.** Each knock once, then a knock that named nobody repeats once
+per registered voter, as that option does: the per-voter file without the doubled doors. The split
+then reads *includes 14 more people surveyed*, since the knock rows repeat.
+
+**Matching your other numbers.**
+
+- **The Home page.** Set the same dates on both: the Exports page opens on *All time*, the Home page
+  of a live campaign on *Today*. If you picked a crew on the Home page, compare with *All
+  coordinators*: exports have no crew filter. On *All time* with nothing picked, the Home page reads a
+  running total Doorline re-checks every night; if it's ever a door off, pick *Custom* on the Home
+  page from the campaign's first day through today, which forces a fresh count.
+- **A walk list or a round.** Pick it on both: the file matches that walk list's Knocks, or that
+  round's row in the **By pass** table.
+- **A canvasser.** The file is that canvasser's own knocks, matching their **Doors** on the Timeline
+  and in the canvasser table. A canvasser never has two entries at one door in a round, so here the
+  option only leaves out their Restricted marks and notes.
+- **A client report.** For a whole-campaign report's "doors knocked so far", leave *From* empty and
+  set *To* to the report's last day; for its "+N this week", use the report's own dates; for a
+  walk-list report, the same with that walk list picked. **A team's report can't be matched from this
+  file**, because exports have no crew filter: read those numbers on the report, or on the Home page
+  with that crew picked. A file built later can be a few doors higher: phones that were offline send
+  their doors late, and a published report keeps the numbers it was built with until you press
+  *Refresh numbers*.
+- **Do-not-contact.** A knock at the door of someone who asked not to be contacted stays, with the
+  name blank, so the knocks still match. "Withheld" counts the blanked names and the survey rows left
+  out, and on this file only rows that are in it: a second entry the option leaves out isn't counted.
+
+**A file is a snapshot.** A door re-tapped, unknocked or converted on Door Outcomes while the file is
+being built shows up in the next file.
+
+**It isn't remembered**, unlike Include survey answers: you tick it for every export. The box is
+unticked each time **Queue export** opens the options, and the phone's switch is off each time you open
+its sheet. The history's Scope column
+says **one row per knock** on any file that carried it, and the phone's history line says *per
+knock*. On a very big campaign the phone's row count can read *Row count not available for this one —
+you can still queue*. Team leads (your clients) get the option too, as they get the rest of this
+export.
+
+**What doesn't change.** Unticked, the file is exactly the plain one. No number in the app moves —
+Knocks, the By pass table, invoices and statements, each canvasser's counts: the option only changes
+what goes into a file, and it removes nothing from the record (doubled doors stay on the Overlaps page
+and the map, where you coach them). The full backup never uses it: its activity log is always every
+entry. A phone without the latest update has no switch, and the files it queues are the plain ones.
 
 ## Results by voter (the file you send a client)
 
@@ -311,7 +428,9 @@ an export can trail the screen it mirrors. Every export records how many rows we
 knock records keep the knock itself (the work happened and is billable) with the person's
 identity blanked. One deliberate exception to the counting: with **One row per voter at the
 door** on, a do-not-contact voter is simply absent from the address's rows and is *not* added to
-the withheld figure — a per-address count of who was left out would itself say who asked.
+the withheld figure — a per-address count of who was left out would itself say who asked. With
+**One row per knock** on, the figure counts only rows that are in the file: a second entry the option
+leaves out isn't counted, whoever it named.
 Two related details: a survey's note is written to both ledgers, so a do-not-contact person's survey
 note used to print on their otherwise-blanked knock row beside their full address — it is now blanked
 with the rest of their identity, whether or not the answers option is on. And on **Results by voter**
@@ -330,11 +449,16 @@ the same as any other door record), and the per-round files deliberately do not 
 The survey files carry the three units from [METRICS.md](METRICS.md): **Survey doors** counts
 doors (one per household per round), **Voters surveyed** counts distinct people, **Surveys
 taken** counts submissions — never sum across them. The activity log is finer than all three
-(one row per event) — and **`activity-log-by-voter.csv`**, its opt-in one-row-per-voter form, is
+(one row per event) — and its opt-in one-row-per-voter form (a file name with **`-by-voter`**) is
 
 finer still and is *not* a count of anything: dedupe on **Activity DB id** to get back to events.
 With **Include survey answers** on it also carries rows that are not events at all, so count distinct
-**Activity DB id** and ignore the blanks. **Results by voter** reconciles to nothing on purpose: its
+**Activity DB id** and ignore the blanks — that gives events, which are not knocks (Restricted marks,
+Note added entries and doubled doors each have their own). The one activity file that counts knocks is
+its opt-in **One row per knock** form (a file name with **`-per-knock`**): each door once per round,
+so with no outcome boxes ticked its knock rows — every row but the `Row source: survey` ones, or with
+one row per voter as well, its distinct **Activity DB id** values — equal **Knocks** for the same
+dates, walk list and round. **Results by voter** reconciles to nothing on purpose: its
 unit is a person, its *Address visits* counts events rather than billable doors, and doors with no
 listable voters are absent from it altogether.
 **Doors by round** reconciles to the invoice: for any round, its rows with
@@ -373,7 +497,9 @@ offline and synced later, and is blank otherwise.
 null = org-wide, admin-only), `type` (enum `EXPORT_TYPE_KEYS`, the registry's key list), frozen
 `params` (validated whitelist + `anchorTz` resolved at POST — the worker has no `req`), status
 `pending → running → completed | failed | canceled | expired`, honest counters (`rowCount`,
-`bytes`, `excludedDncCount`, `orphanedRows`, per-file `files[]`), `artifact{gridFsId, filename,
+`bytes`, `excludedDncCount`, `orphanedRows`, `surveyRowCount` — the `Row source: survey` rows inside
+`rowCount`, written for One row per knock files only and 0 for every other file, see *The opt-in knock
+grain* below — per-file `files[]`), `artifact{gridFsId, filename,
 contentType}`, capped `audit.subjectIds` (post-DNC ids actually written, for the download's
 `addAuditSubjects`), `expiresAt` (NOT a Mongo TTL index — the sweeper expires so the history row
 survives). Indexes: `{organizationId, createdAt}`, `{organizationId, status}`,
@@ -452,9 +578,11 @@ statement row is never stored (`normalizeAndFilterAnswers` drops one for every w
 `dropHidden` modes — including the empty row an older phone bundle or an offline replay posts), so
 `$size(answers)` still counts exactly the rows the builder writes, and no estimate needs to know
 statements exist. All estimates are countDocuments-class and run
-inline in the web dyno — with three aggregation-class exceptions, all still inline: canvass-activity
+inline in the web dyno — with four aggregation-class exceptions, all still inline: canvass-activity
 under `perVoterRows` (the FIRST row-multiplying option, see *The opt-in row grain* below), the same
-type under `includeSurveyAnswers` (the second — `countUncoveredResponses`), and `results-by-voter`
+type under `includeSurveyAnswers` (the second — `countUncoveredResponses`), the same type under
+`onePerKnock` (the third ROW option, the first that removes rows — `countActivityPerKnock`, two capped
+`$facet` passes, see *The opt-in knock grain* below), and `results-by-voter`
 (an aggregation cursor over worked doors plus chunked roster counts); `full-backup` alone has no
 estimate (the endpoint 400s). Builders live in
 [`services/export/exportBuilders.js`](../server/src/services/export/exportBuilders.js); the
@@ -476,7 +604,8 @@ the same DNC-guarded object every other identity cell reads; `geoDetailCells` (C
 Longitude, then Precinct + the three districts) mixes household geography with the
 file-authoritative district/precinct fields on the voter. **Projections widen only when the
 toggle is on** — an export that is not printing a phone number does not read one out of Mongo.
-It is a COLUMN option, never a filter (contrast `perVoterRows` below, the one ROW option): row
+It is a COLUMN option, never a filter (contrast the three ROW options below, all on
+canvass-activity: `perVoterRows`, `includeSurveyAnswers` and `onePerKnock`): row
 counts, `excludedDncCount` and therefore every
 estimate are untouched, which is why `exportEstimates.js` needs no knowledge of it (pinned:
 `exportBuilders.int.test.js` asserts equal `rowCount`/`excludedDncCount` across both settings,
@@ -587,18 +716,143 @@ their `(voter, pass)`? Deciding it from the activity side double-prints answers 
 because a covering row can sit in a different batch than the response it covers. The two ledgers
 stream as two cursors through `mergeByTime`, with the ACTIVITY stream at index **0** deliberately —
 the equal-instant tie-break is emergent (strict `<` keeps the lowest index) and equal instants are the
-NORM here, because a field submit writes one `ts` to both ledgers.
+NORM here, because a field submit writes one `ts` to both ledgers. A One row per knock file is the
+exception to both rules: every knock row first, then the survey rows, with coverage decided from the
+knock rows actually written (*The opt-in knock grain* below).
 
 **A dangling response** (its `Voter` removed by an import undo) is KEPT with blank identity and
 counted into `orphanedRows` — the same door-unit habit this file already has for a dangling knock
 row, and the reason `approx` can stay `false` here rather than following survey-results into
 drop-and-count.
 
-**Both file names come from ONE function**, `activityFileNames(params)`: `activity-log`,
-`activity-log-by-voter`, `activity-log-with-surveys`, `activity-log-by-voter-with-surveys`, and the
-same four for the download slug (`canvass-activity…`). The `-with-surveys` suffix tracks **`addRows`**,
+**Both file names come from ONE function**, `activityFileNames(params)`: `activity-log`, then
+`-per-knock` (`onePerKnock`, first because it is the grain the other two build on), `-by-voter`
+(`perVoterRows`) and `-with-surveys` — eight distinct names, from `activity-log` to
+`activity-log-per-knock-by-voter-with-surveys`, and the same eight for the download slug
+(`canvass-activity…`, followed by the build date). The `-with-surveys` suffix tracks **`addRows`**,
 not the raw tick — columns never rename a file (`includeVoterDetail` does not), and a name claiming a
-moved grain the file does not have is worse than no name.
+moved grain the file does not have is worse than no name. The in-app copy that names these files —
+the registry's `desc`, the phone's local fallback `desc`, and both clients' checkbox and switch copy —
+now says "the file name includes -by-voter" (or `-with-surveys`, `-per-knock`) instead of naming one
+file, since each suffix can sit beside the others.
+
+**The opt-in knock grain (`params.onePerKnock`)** — the Center's THIRD row option, on
+`canvass-activity` only, and the first that REMOVES rows (2026-11-09,
+[PROPOSAL_ONE_ROW_PER_KNOCK.md](PROPOSAL_ONE_ROW_PER_KNOCK.md)): one row per door per round, so the
+file's knock rows ARE the dashboard's Knocks. The token `onePerKnock` is advertised in the registry's
+`filters` and **never in `desc`**: `GET /types` serves `desc` to every phone, and one without the
+update would describe a switch it doesn't have (both pinned in `exports.int.test.js`). `validateParams`
+whitelists the boolean and, with it on, refuses any chip outside `KNOCK_ACTIONS` with an
+`ExportUserError` — 400, *"One row per knock lists knocks only, so it can't include Restricted or Note
+added."* — the results-by-voter precedent; both clients hide those chips while it is on, so normal use
+never reaches it. Frozen into `ExportJob.params`, so the history is the record of which files were per
+knock. Additive in both directions: an old phone never sends it, and an old server would drop it
+silently through the whitelist — which is why the phone shows the switch only when the server's
+`/types` carries the token (its local fallback deliberately leaves it out). No `CLIENT_API_VERSION`
+bump.
+
+**One owner for "which entry is the knock": `knockPlan(ctx)`**, beside `fanPlan` and
+`answerLayerPlan`, returns the stages every per-knock consumer prefixes — the builder's rows, the row
+count, the uncovered-survey count, the withheld count — so they cannot disagree. Its scope is
+`canvassActivityQuery(ctx)` without the chips (window, walk list, round, canvasser + `NOT_BULK`,
+`excludeBulk`, crew); it matches `KNOCK_ACTIONS` and groups on `{householdId, passId}` —
+`knocksPipeline`'s own key, so a missing and a null `passId` stay apart exactly as there (one rare,
+known consequence: a legacy door holding one survey entry stored `passId: null` and another with no
+`passId` field, both naming the same voter, is two knocks and two rows, and both rows join that voter's
+one legacy response — the plain file does the same; counts are unaffected, and the turf-tag migration
+back-filled nulls, so it needs data from before it) — keeping ONE
+`$min` composite per group: `c` (0 for the campaign's completion action from
+`completionFor(campaign.type)` — `survey_submitted` or `lit_dropped` — else 1, so completion is sticky),
+`t` (`0 − timestamp`, so the latest wins), `id` (`_id`, so an exact tie keeps the LOWER id), then
+`a` / `v` / `d` (the action, the voter, and with `withRow` the whole row) riding along, never compared
+because `id` is unique — the `overlaps.js` composite idiom. That is the client report's rule exactly
+(`buildReportSnapshot.js`: knock rows sorted `{timestamp: 1, _id: 1}`, then `resolveStatus`, whose strict
+`>` keeps the earlier row at a tie). The chips run AFTER the group: dedupe over every knock in scope,
+then keep the doors whose RESULT is ticked. `surveyStages` is the same group fed only survey entries,
+for the coverage count on a survey campaign (equivalent by construction, since completion is sticky;
+`null` elsewhere). A missing campaign row is an `ExportUserError`, because the grain needs its type.
+Pinned against `buildKnocksByPassData` by a test rather than by sharing code, which keeps the billing
+pipeline untouched.
+
+**The knock rows: `knockRowsAggregate(ctx)`** — ONE aggregation, `[...knockPlan(ctx, { withRow: true
+}).stages, { $replaceRoot: { newRoot: '$k.d' } }, { $sort: { timestamp: 1, _id: 1 } }]`,
+`.hint({ campaignId: 1 })`, `.allowDiskUse(true)`, streamed as a cursor. The `$group` is blocking, so
+the rows are fixed once it has read the ledger — no kept-id set, no retry; a re-tap, an Unknock or a
+conversion after that moment shows up in the next file. **Why the hint:** the read is not a snapshot (it
+yields), and on `{campaignId: 1, timestamp: -1}` — the planner's pick for a dated window — a re-tap's new
+entry sorts AHEAD of the old one, so a re-tap mid-scan could delete the old entry before the scan reached
+it and write the new one where the scan had already been: the door in neither, silently (reproduced in
+review at 300,000 knocks). `{campaignId: 1}` scans in saved order and a replacement is always saved
+later, so the scan returns the old entry or the new one, never neither. Cost: none on whole-campaign
+files; a small window on a big campaign reads the whole campaign. What remains is a window as long as
+the route's gap between its delete and its insert, for the very newest entries only. The index is
+declared on the model (`CanvassActivity.js`, `campaignId`, `index: true`), and **a hint naming a missing
+index fails the query**, so the release runs `npm run migrate:build-indexes` (a dry run) first and
+applies it if `canvassactivities { campaignId: 1 }` is listed. If it is ever missing anyway, the builder
+turns the hint error (code 2, *hint provided does not correspond to an existing index*) into an
+`ExportUserError` — *One row per knock can't be built yet: a database index it needs is missing. Please
+tell Doorline support.* — so the job fails once with the reason instead of three retries ending in
+"try again, or narrow the filters"; the plain file never names the index. The int suites build the
+ledger's indexes before their fixtures, and `scripts/testIndexPreload.mjs` lists `{campaignId: 1}` among
+the HINTED indexes it rebuilds after every database drop, for the same reason. **At an exact-millisecond
+tie** the per-knock file keeps the lower `_id` (the client report's rule), while the per-round status the
+map and Doors by round read (`passStatus.js`, `$sort: {timestamp: -1}` then `$first`, no `_id`
+tie-break) picks either — a pre-existing nondeterminism there, not changed here.
+
+**The builder.** `buildCanvassActivity` takes `fenceAt = new Date()` BEFORE the progress count (the
+count's own time covers the ordinary gap between a survey's response and its entry being saved), then
+streams every knock row, then — only when the answer layer adds rows — the survey rows:
+`SurveyResponse.find({ ...activityResponseQuery(ctx), createdAt: { $not: { $gt: fenceAt } } })` (the
+client report's fence form, which keeps rows with no `createdAt`), a cursor opened only once the knock
+rows are done. **Coverage comes from the knock rows actually WRITTEN**: `respKey(storedVoterId, passId)`
+for every written `survey_submitted` row that stores a voter, DNC-blanked rows included (today's
+coverage reads the stored id too), so the set is complete before the first survey is judged, a survey is
+never double-printed or lost against the rows in the file, and a dropped duplicate covers nothing —
+which is why a per-knock file can carry a few more survey rows than the plain one. The answer join, the
+fan (kept voter-less rows only), DNC blanking and counting per written row, and orphan counting are
+unchanged; off, the builder is byte-for-byte the plain file. It returns `{ files: [{ name, rows }],
+surveyRows }`, with `surveyRows` the survey rows written **only when the option is on** (0 otherwise, so
+`files[]` keeps its strict shape and the job field means one thing), stored by the processor as
+`ExportJob.surveyRowCount` (zeroed in the retry reset with the other counters; no index; older jobs read
+`undefined`, so readers check `> 0`). The fence compares two clocks (the worker's and the saving
+dyno's), so a survey in flight across the build start can still give a survey row at a door the file
+doesn't list; a response whose knock falls outside the file's dates (a desk conversion keeps the
+original knock time) is written too, as in the plain file.
+
+**The counts: `countActivityPerKnock(ctx, { maxTimeMS, fenceAt })`** returns `{ rows, surveyRows,
+dncWithheld }` with **rows = knock rows + surveyRows**. It is the estimate when the option is on AND the
+builder's progress denominator (uncapped there, and fenced like the survey stream), so estimate == build
+by construction. Pass 1 (`CanvassActivity.aggregate`): `knockPlan`'s stages into one `$facet` — `kept`,
+`flagged` (kept rows naming a flagged voter, a query-style `$in`), and with the fan `named` plus
+`countCanvassActivityRows`'s roster `$unionWith` over the kept voter-less rows; knock rows = `kept`, or
+`named + fanned`. Pass 2 (`SurveyResponse.aggregate`, only when the layer adds rows):
+`countUncoveredResponses`'s shape with its activity branch replaced by the KEPT survey rows
+(`surveyStages || stages`, the round read from `_id.passId` after the group), ending in a `$facet` that
+splits `clean` from `flagged`, so withheld surveys need no third pass. Every aggregation gets
+`allowDiskUse`; in the estimate both passes carry `maxTimeMS` (`EXPORT_ESTIMATE_MAX_MS`, default 8,000),
+and on expiry the estimate answers `rowsUnavailable: true` with **no number** — a plain count is an upper
+bound for a per-knock file, not a floor, so there is no `rowsAreFloor` here. No hint on the counts: a
+write during an estimate moves the preview by a door at most, and the planner's own choice is faster for
+small windows.
+
+**A coverage-key fix both paths share.** `countUncoveredResponses` (the plain file with answers) now
+normalizes the round with `$ifNull: ['$passId', null]` on both branches, as `countActivityPerKnock`
+does: the builder's `respKey` treats a missing and a null `passId` alike, so a legacy survey whose entry
+lacks the field while its response has `null` was counted by the estimate as a row the builder writes as
+covered (the estimate one row high per such survey; files unchanged). **Two upload fixes, every CSV
+export:** `exportProcessor.js` handles `uploadDone`'s rejection with a `catch` that LOGS it
+(`[export] job … upload failed: …`), because a failed build aborts the upload and the rejected promise had
+nobody awaiting it, so the worker logged a bare `unhandledRejection` for every failed export (the success
+path still awaits, and throws on, the original promise). And `csvWriter.js`'s `writeChunk` refuses a
+stream that already failed (`stream.errored || stream.destroyed`): a GridFS chunk insert that errored
+between batches, with nobody waiting on `drain`, destroyed the upload, and the next `write()` returned
+false and never emitted `drain` or `error`, so the build hung for good, holding the worker's single export
+slot (`EXPORT_JOB_CONCURRENCY=1`) until a restart; it now fails at once (pinned in `exportCsv.test.js`).
+ZIP entries (archiver into a PassThrough) are not covered by that check, a gap that predates this.
+
+**The full backup** composes the builders with `params: {}`, so its `activity-log.csv` is always every
+entry. Its README note now says one row per knock and one row per voter are opt-ins on a standalone
+Canvassing activity export (`activity-log-per-knock`, `activity-log-by-voter`).
 
 **The `outcome` filter token** on the same type is the notes export's Door-outcome chip row
 reused: both tokens feed the one `actionTypes` param (include semantics; empty = all), which
@@ -820,8 +1074,11 @@ admin-only types + org-wide scope via `isOrgAdmin`.
   time-bounded (`EXPORT_ENQUEUE_TIMEOUT_MS`) so a wedged Redis 503s instead of hanging.
 - `POST /estimate` — same body as `POST /`, same scope gate (a shared `resolveExportScope`, so
   the preview can never see a campaign the create would refuse), then the registry's `estimate`.
-  Returns `{type, contentKind, rows, dncWithheld, approx, files?}` (`files[]` = per-template
-  breakdown when survey-results will ZIP). Counts only: no artifact, no `addAuditSubjects`;
+  Returns `{type, contentKind, rows, dncWithheld, approx, files?, rowsAreFloor?, surveyRows?,
+  rowsUnavailable?}` (`files[]` = per-template breakdown when survey-results will ZIP; `rowsAreFloor`
+  when the fanned count hit its time cap; `surveyRows` — the `Row source: survey` rows inside `rows` —
+  and `rowsUnavailable` — a capped per-knock count, sent with no number — only for a `onePerKnock`
+  request, which only an updated phone sends). Counts only: no artifact, no `addAuditSubjects`;
   read-only, so it neither checks nor counts toward the active-job throttle.
 - `GET /types` — the registry's
   `label/desc/descNotTargetInUse/oneRowIs/adminOnly/requiresCampaign/filters/estimate` per type,
@@ -829,7 +1086,8 @@ admin-only types + org-wide scope via `isOrgAdmin`.
   `descNotTargetInUse` is `null` for every type but canvass-activity and results-by-voter.
 - `GET /worker-status` — the imports worker-status pattern against the export queue.
 - `GET /` — history, paged; admins also see org-wide (`campaignId:null`) rows; leads only
-  managed campaigns; `audit.subjectIds` projected out of every list.
+  managed campaigns; `audit.subjectIds` projected out of every list (an exclusion projection, so
+  `surveyRowCount` rides along; jobs from before 2026-11-09 lack it).
 - `GET /:id` — poll target (the ImportPage refetchInterval-predicate pattern client-side).
 - `GET /:id/download` — 410 when expired, 409 when not ready; tags `addAuditSubjects` from the
   job's persisted post-DNC ids BEFORE streaming; AccessLog `rows` is null for streams — the doc
@@ -869,21 +1127,62 @@ extracted); its local `TYPES` list is filter-UI wiring plus fallback copy — `G
 overlays label/desc and decides visibility when present. The narrowing filters render inline for
 
 every type; a type whose `filters` carry an *options* token (`OPTION_TOKENS` = `outcome`,
-`perVoterRows`, `surveyAnswers` — canvass-activity carries all three, `results-by-voter` carries
-`outcome`) gets an **options dialog** instead of queueing straight from **Queue export**:
-the NotesPage export-dialog pattern, carrying the outcome chips, the per-voter checkbox and the
-survey-answers checkbox, with the dialog's own Queue button doing the POST. `voterDetail` and
-`surveyNote` are NOT options tokens — they render inline, beside the pickers, as the survey types'
-detail toggle always has. Mobile:
+`onePerKnock`, `perVoterRows`, `surveyAnswers` — canvass-activity carries all four,
+`results-by-voter` carries `outcome`) gets an **options dialog** instead of queueing straight from
+**Queue export**: the NotesPage export-dialog pattern, carrying (in order) a scope line, the
+one-row-per-knock checkbox, the outcome chips, the per-voter checkbox and the survey-answers checkbox,
+with the dialog's own Queue button doing the POST. The scope line (*For: {range in words} · {walk list
+or all walk lists} · {round or all rounds} · {canvasser or all canvassers}*, from `labelForRange` (a
+one-sided range said as *through* / *from*, as the history's Scope column says it),
+`effortName`, `roundChoices` and `canvasserName`; the walk list is left out when the picked round's name
+already carries it) names what the file will cover, because a round picked on another type carries over
+(only a walk-list change resets it). While **One row per knock**
+is ticked, `chipOutcomes` drops `NOT_KNOCK_OUTCOMES` (`restricted`, `note_added`) and
+`paramsForCreate` already narrows `actionTypes` to the offered chips, so a chip ticked earlier rides
+nowhere and comes back when the box is unticked; the outcome hint has three forms (off; on with no
+canvasser, which explains door results; on with a canvasser picked, "nothing ticked means every
+knock"), and the checkbox body and the hint say *Lit dropped* instead of *Surveyed* on a lit-drop
+campaign (`campaign.type`). The local fallback `filters` gained `surveyAnswers` (missing until then)
+and `onePerKnock`, since the web only queues against the deploy that served it. History: `scopeLabel`
+writes a one-sided range as `through <to>` / `from <from>` (every type) and adds `one row per knock`;
+under a per-knock row's count, `knockSplitLine` from
+[`lib/exportSplit.js`](../client/src/lib/exportSplit.js) prints "N knocks + M more people surveyed"
+(N = `rowCount` − `surveyRowCount`; "includes M more people surveyed" with `perVoterRows`; nothing when
+M is 0 or the file isn't per knock) beside an `InfoHint` (`KNOCK_SPLIT_HINT`, `align="right"` so it
+opens inward from the Rows cell); the row count itself is formatted with thousands separators. A
+campaign switch — the switcher pushes a new history entry, so Back and Forward too — clears the walk
+list, round, canvasser, import and saved search and closes an open options dialog, during render (a
+`seededFor` state, the phone screen's pattern; an effect ran a commit late). The page doesn't remount on a
+route-param change, so stale ids used to ride the next export (a stale canvasser quietly emptied it; a
+stale import or saved search came back as a 400). Queue export clears the last attempt's error with the
+box. The web still has no pre-queue row count. `voterDetail` and `surveyNote` are NOT options tokens — they render inline, beside
+the pickers, as the survey types' detail toggle always has. Mobile:
 [`admin/exports.jsx`](../mobile/app/(app)/admin/exports.jsx) — tapping one of the four everyday
 types opens [`components/ExportSheet.jsx`](../mobile/components/ExportSheet.jsx) (MetricSheet's
 Modal anatomy): description, "one row is…", contents, the web's filters for that type, and a
 live `POST /estimate` count (debounced on the serialized params, `keepPreviousData`, advisory —
-an estimate error never blocks Queue, so either deploy order works). Two of the sheet's switches move that count, both Canvassing activity only and both ROW options
-that ride `paramsFor` onto the estimate wire: **Rows** (`perVoterRows`), which also rewrites the
-"one row is…" line while on, and **Survey answers** (`includeSurveyAnswers`). A `rowsAreFloor`
-answer renders as "at least N rows", and the count is gated on `prefsLoaded` so it is never
-computed for a remembered state the sheet is about to replace.
+an estimate error never blocks Queue, so either deploy order works). Three of the sheet's switches move
+that count, all Canvassing activity only and all ROW options that ride `paramsFor` onto the estimate
+wire: **One row per knock** (`onePerKnock`, in its own **Knocks** block above *Door outcome*, rendered
+only when the merged meta's `filters` carry the token — the local `EXPORT_TYPE_META` leaves it out, so
+an older server, or a failed `/types`, never shows a switch whose param would be dropped), **Rows**
+(`perVoterRows`) and **Survey answers** (`includeSurveyAnswers`); the first two rewrite the "one row
+is…" line while on. `outcomeKeysFor(meta, keys, { onePerKnock, notTargetInUse })` in
+`lib/exportTypes.js` is the one chip rule (Not a target voter by campaign; no Restricted or Note added
+while per knock is on), and `paramsFor` narrows `actionTypes` by the same rule, so a hidden chip stays in
+state and rides nowhere; a caption under the chips says they pick door results (not with a canvasser
+picked). The lit-drop wording comes from the campaign the screen already holds (the `campaignType`
+prop). The row-count line is `estimateLineFor(est)` in `lib/exportTypes.js`, and the sheet's queryFn
+attaches the params each answer was counted for (`asked`), so the line is labelled by what was counted:
+the sheet keeps the previous answer on screen through the debounce and the next fetch, and labelling
+it by the live switches would call an old per-voter count "knocks". A `rowsAreFloor` answer renders as
+"at least N rows"; a per-knock answer as "≈ N knocks + M more people surveyed" (`knockSplitLine`,
+hand-mirrored from the web's and held in step by `client/src/lib/exportSplit.parity.test.js`),
+"≈ R rows · includes M more people surveyed" with the fan, or "≈ N knocks" when there are no survey rows;
+`rowsUnavailable` as "Row count not available for this one — you can still queue"; and the count is
+gated on `prefsLoaded` so it is never computed for a remembered state the sheet is about to replace.
+The history line (`jobSub`) formats the row count and adds `perKnockJobBits(job)` — `per knock`, and
+the split — for a per-knock job. The four switches carry an `accessibilityLabel`.
 Type copy comes from
 [`lib/exportTypes.js`](../mobile/lib/exportTypes.js) (local fallback, server registry overlaid).
 History rows: failed/expired taps offer Retry (re-POST of the frozen params) and Delete;
@@ -950,7 +1249,17 @@ months-old choice as the default. The memory is a convenience; the frozen `Expor
 history's Scope column remain the record — which is what makes it acceptable that two admins queueing
 "the same" export can get different files. Mobile gates the live estimate on `prefsLoaded`, so the
 count is never computed for a state the sheet is about to replace; the web page re-seeds on a
-`campaignId` change, because it does not remount on a route-param change.
+`campaignId` change, because it does not remount on a route-param change. `onePerKnock` is
+deliberately not remembered (owner ruling 2026-11-09, the proposal's D1: ticked for every export): on
+the web it is page state seeded `false` AND cleared each time Queue export opens the options dialog —
+the page keeps its state between exports and across a campaign switch (it does not remount), so a reset
+per page load alone would carry a tick into the next export; on the phone it is sheet state, off every
+time the sheet opens. (The owner's ruling covers One row per knock: on the web **One row per voter at the
+door** still keeps its tick for the page visit, as it always has; the phone's sheet starts both fresh.) The phone now saves only what `optionsToRemember(meta, params)` returns — `{
+includeSurveyAnswers }` for a type whose `filters` carry `surveyAnswers`, `null` for the others — which
+fixes a wipe: the screen saved `includeSurveyAnswers: false` after a successful queue of ANY of the
+sheet's four types, so queueing Doors by round, Survey results or Voter file reset the remembered
+choice (the web already saved only under `wants('surveyAnswers')`).
 
 ## Tests
 
@@ -1025,6 +1334,42 @@ outcome chips, one-row-per-voter hint — while one that uses it gets the naming
 the chip, and one that switched it off since keeps the naming copy. The mobile test pins that
 `mergeTypeMeta` carries `descNotTargetInUse` and that no local fallback names the outcome.
 
+One row per knock (2026-11-09) has its own suite, `test/activityPerKnock.int.test.js` — its own
+database, with the indexes built before the fixtures (the hint fails without `{campaignId: 1}`). The
+fixture is a survey campaign holding every pair kind seen in the client's real file plus a sticky
+survey, two surveys of different people (one of them do-not-contact), an exact tie, Restricted marks
+(field and desk), notes, desk-authored knocks, legacy doors with a null and a missing round, and a
+lit-drop campaign. It pins one row per pair, the expected entry under its own canvasser; the knock rows
+equal to `buildKnocksByPassData` for all time, two date ranges, a walk list, a round and legacy; the
+kept outcome equal to `resolveStatus` over each door-round sorted `{timestamp: 1, _id: 1}`, the tie
+keeping the lower `_id`; the chips as door results and the refusal for Restricted and Note added; Lit
+dropped sticky; a canvasser filter equal to that canvasser's own non-desk knock entries; survey rows
+after every knock row, no survey printed twice, the withheld figure; estimate == build (rows, withheld,
+survey rows and the progress denominator) over 26 combinations of chips, fan, answers, canvasser, legacy
+and dates; the coverage-key fix, option on and off; `rowsUnavailable` from a stubbed timeout of either
+pass; writes mid-build (a re-tap of a kept entry, a conversion in place, a new door surveyed after the
+fence) leaving the knock rows as gathered; the hint (`explain()` names `campaignId_1`); the eight file
+names and slugs; and `surveyRowCount` (per-knock files only, zeroed on a retry, `files[]` keeping
+`{name, rows}`). `test/exportBuilders.int.test.js` now builds `CanvassActivity`'s indexes before its
+fixtures, sweeps a third keyed DNC artifact, `canvass-activity:perKnock` (option, fan and answers on),
+and adds six per-knock rows to the estimate-parity table; `test/exports.int.test.js` pins the new token
+list (the anti-drift gate, failing by design), that `desc` never mentions it, and the `/estimate`
+route's `surveyRows` (asked by a lead, who gets the option too), its unchanged plain response and the
+400. Client:
+`client/src/lib/perKnockExportsRender.smoke.test.js` (renderToString of the real page: the checkbox, the
+hidden chips, the three hints, the scope line with a round carried over, the lit-drop copy, the history
+split and the scope label), `client/src/lib/perKnockExportsFlow.smoke.test.js` (the REAL page mounted on
+react-dom with a minimal DOM and driven through the owner's steps: the box clears each time the options
+open, after a queue and after a cancel; the POST carries `onePerKnock` and never a hidden chip; Include
+survey answers stays remembered; a failed queue's error never greets the next dialog; a walk list and
+round picked on another type are named once in the For: line; a campaign switch clears the walk list,
+round and canvasser and closes an open dialog — a review proved the render test could not fail on the
+first two, and each of these assertions was checked by deleting the line it guards), `client/src/lib/exportSplit.test.js` and
+`client/src/lib/exportSplit.parity.test.js` (the web and phone split wording, over a grid). Phone:
+`mobile/lib/exportTypes.test.js` (the local fallback never carries the token, `outcomeKeysFor`,
+`paramsFor` narrowing, `optionsToRemember` `null` for the other types, `knockSplitLine` mirroring the web
+wording, `estimateLineFor` labelling by the params counted, `perKnockJobBits`).
+
 ## The hours-stamp rule (standing)
 
 **Any frozen artifact that carries an hours or per-hour figure must say inside the file when those
@@ -1098,8 +1443,16 @@ a statement (`type: 'statement'`, read-aloud text or a closing) is never a colum
   columns in the same order; each voter-less event repeats once per kept voter at its door with
   the five identity cells and Voter DB id filled from the door ROSTER (never from the event), so
   **Activity DB id is no longer unique per row** — it is the dedupe key back to events.
+  **`activity-log-per-knock.csv`** (`onePerKnock`) — the SAME 34 columns in the same order; one row
+  per (household, round), the door's knock result for the round (`knockPlan`), so the Action is never
+  `restricted` or `note_added`, each row is one whole entry and Activity DB id stays unique per row.
+  It composes with the other two options: in `activity-log-per-knock-by-voter*.csv` a kept voter-less
+  row repeats per kept voter (Activity DB id is then the dedupe key back to KNOCKS), and in the
+  `…-with-surveys` forms every `Row source: survey` row comes after the last knock row instead of being
+  merged by time.
   **`activity-log-with-surveys.csv`** / **`activity-log-by-voter-with-surveys.csv`**
-  (`includeSurveyAnswers`; all four names come from `activityFileNames`) — the same columns, then
+  (`includeSurveyAnswers`; with the `-per-knock` forms, all eight names come from
+  `activityFileNames`) — the same columns, then
   after **Note**: Row source (`knock`|`survey`), Survey, Survey version, Survey submitted (ISO),
   Survey taken by, Desk entered, one column per question (the union across templates in scope,
   prefixed `<survey name> — ` when more than one), then **Response DB id** after the three DB ids,

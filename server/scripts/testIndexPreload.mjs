@@ -21,6 +21,8 @@ import { Db } from 'mongodb';
 const HINTED = [
   ['canvassactivities', { userId: 1, timestamp: -1 }],
   ['canvassactivities', { campaignId: 1, timestamp: -1 }],
+  // One row per knock's rows scan in saved order (services/export/exportBuilders.js knockRowsAggregate).
+  ['canvassactivities', { campaignId: 1 }],
   ['surveyresponses', { userId: 1 }],
   ['surveyresponses', { campaignId: 1, submittedAt: -1 }],
 ];

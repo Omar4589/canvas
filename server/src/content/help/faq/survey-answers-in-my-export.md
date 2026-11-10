@@ -6,7 +6,7 @@ kind: faq
 order: 72
 sourceDoc: EXPORTS.md
 summary: Tick Include survey answers when you queue Canvassing activity to put the answers beside each knock, or use Results by voter for one row per person; Survey results is still the file that is only surveys.
-tags: export, csv, survey, answers, activity, results by voter, download, answers edited
+tags: export, csv, survey, answers, activity, results by voter, download, answers edited, one row per knock
 ---
 
 Because by default **Canvassing activity** records that a survey *happened* — the action, the
@@ -18,14 +18,19 @@ fill that in, and they are shaped for three different jobs.
 Press **Queue export** on **Canvassing activity** and tick **Include survey answers** (on the
 phone: the **Survey answers** switch on the sheet). Every survey row then carries what was
 recorded — one column per question — plus the survey's name and version, when it was submitted,
-who took it, and **Desk entered** when an admin typed it rather than a canvasser at the door. The last column, **Answers edited**, says *yes* when an admin changed that survey's answers after they were recorded — the question columns show them as they stand now. Your choice is remembered for this campaign, and whenever the option actually adds rows the file arrives
-named `activity-log-with-surveys` — the name is the tell.
+who took it, and **Desk entered** when an admin typed it rather than a canvasser at the door. The last column, **Answers edited**, says *yes* when an admin changed that survey's answers after they were recorded — the question columns show them as they stand now. Your choice is remembered for this campaign, and whenever the option actually adds rows the file's
+name includes `-with-surveys` — the name is the tell.
 
 It also adds rows, and that is the part to read twice. Surveying three people at one door in one
 round is **one** knock and **three** surveys, so two of those surveys have no knock row of their
 own. They come out as their own rows, marked **Row source: survey**, with the **Activity DB id**
-column empty. Never count those as knocks: for a knock count, count the rows that DO carry an
-**Activity DB id**, or use Doors by round, which counts doors per round and nothing else.
+column empty. Never count those as knocks. The rows that do carry an **Activity DB id** aren't a
+knock count either: they are entries, and a Restricted mark, a note, or a second canvasser's entry
+at a door already recorded that round is an entry too. For a knock count, tick **One row per knock**
+as well and leave the outcome boxes unticked — the knock rows then match your Knocks for the same
+dates and walk list, and the survey rows come after them, at the end of the file — or use Doors by
+round, which counts doors per round and nothing else. See [Why does my Canvassing activity export
+have more rows than my Knocks?](export-more-rows-than-knocks)
 
 Two things quietly change what you get:
 
@@ -38,7 +43,8 @@ Two things quietly change what you get:
 
 If two canvassers surveyed the same person in the same round, both of their rows carry the answers
 of record — the ones that are live — and the **Survey taken by** and **Desk entered** columns say
-whose survey each row is looking at.
+whose survey each row is looking at. With **One row per knock** ticked, that door has one row: the
+later survey's.
 
 ## One row per person instead
 

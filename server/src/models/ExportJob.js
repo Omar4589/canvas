@@ -57,6 +57,10 @@ const exportJobSchema = new mongoose.Schema(
     // Survey rows whose voter doc no longer exists (import undo) — dropped, but counted,
     // for the same honesty reason.
     orphanedRows: { type: Number, default: 0 },
+    // One row per knock only (canvass-activity, params.onePerKnock): how many of rowCount are
+    // `Row source: survey` rows, so the history can read "N knocks + M more people surveyed". 0 for
+    // every other file. A count, no personal data (PRIVACY_VERIFICATION item 57).
+    surveyRowCount: { type: Number, default: 0 },
 
     artifact: {
       gridFsId: { type: mongoose.Schema.Types.ObjectId, default: null }, // nulled by the sweeper

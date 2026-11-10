@@ -9,7 +9,7 @@ import { radius, spacing, ACTION_LABELS, actionLabel } from '../lib/theme';
 import { useTheme } from '../lib/ThemeContext';
 import { useThemedStyles } from '../lib/useThemedStyles';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
-import { paramsFor, ROUND_STATUSES } from '../lib/exportTypes';
+import { paramsFor, ROUND_STATUSES, outcomeKeysFor, estimateLineFor } from '../lib/exportTypes';
 import { walkListOptions, walkListLabel, passOptionLabel } from '../lib/walkListOptions';
 import { useOutcomeInUse } from '../lib/useOutcomeInUse';
 import DateRangeBar from './DateRangeBar';
@@ -31,12 +31,20 @@ import { SHEET_TIMING } from './PullableSheet';
 // The Door-outcome chips (the notes screen's row, same include semantics: none ticked = all).
 const OUTCOME_CHIPS = Object.keys(ACTION_LABELS).map((a) => ({ key: a, label: actionLabel(a) }));
 
-export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, onClose }) {
+export default function ExportSheet({ meta, campaignId, campaignType, tz, queueing, onQueue, onClose }) {
   // Not a target voter — named in the description and the per-voter hint, and offered as an outcome
   // chip and a round status, only on a campaign that has used it, so a customer who never turns it on
   // never sees the words.
   const notTargetInUse = useOutcomeInUse(campaignId);
-  const outcomeChips = OUTCOME_CHIPS.filter((c) => c.key !== 'not_target' || notTargetInUse);
+  // One row per knock (docs/PROPOSAL_ONE_ROW_PER_KNOCK.md). A row option, off on every open and never
+  // remembered (the owner's ruling, 2026-11-09). Shown only when the server advertises the token
+  // (the local fallback leaves it out), so an older server can never silently drop it.
+  const [onePerKnock, setOnePerKnock] = useState(false);
+  const perKnockOn = (meta.filters || []).includes('onePerKnock') && onePerKnock;
+  // The exports screen holds the active campaign with its type: the copy says Lit dropped there.
+  const isLitDrop = campaignType === 'lit_drop';
+  const outcomeKeys = outcomeKeysFor(meta, OUTCOME_CHIPS.map((c) => c.key), { onePerKnock, notTargetInUse });
+  const outcomeChips = OUTCOME_CHIPS.filter((c) => outcomeKeys.includes(c.key));
   const { colors } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const insets = useSafeAreaInsets();
@@ -135,19 +143,21 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
   });
   const imports = (importsQ.data?.jobs || []).filter((j) => j.status === 'completed' && !j.undone);
 
-  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows, includeSurveyAnswers });
+  const wire = paramsFor(meta, { range, effortId, passId, userId, roundStatus, importJobId, actionTypes, includeVoterDetail, perVoterRows, includeSurveyAnswers, onePerKnock });
   // Debouncing the SERIALIZED params gives a stable query key and kills object-identity
   // churn in one move; api() threads react-query's abort signal, so a superseded count
   // stops on the wire.
   const wireKey = useDebouncedValue(JSON.stringify(wire), 400);
   const estimateQ = useQuery({
     queryKey: ['admin', 'export-estimate', campaignId, meta.id, wireKey],
+    // The answer carries the params it was counted for (`asked`), so its line is labelled by what was
+    // counted, never by switches that have moved since (lib/exportTypes estimateLineFor).
     queryFn: ({ signal }) =>
       api('/admin/exports/estimate', {
         method: 'POST',
         body: { type: meta.id, campaignId, params: JSON.parse(wireKey) },
         signal,
-      }),
+      }).then((answer) => ({ ...answer, asked: JSON.parse(wireKey) })),
     enabled: !!campaignId && prefsLoaded,
     placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
@@ -189,22 +199,17 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
     ...[...ROUND_STATUSES, ...(notTargetInUse ? ['not_target'] : [])].map((s) => ({ key: s, label: colors.statusLabels[s] || s })),
   ];
 
-  // "One row is…" must not read "one door event" while the Rows switch is on.
-  const oneRowIs = wants('perVoterRows') && perVoterRows
-    ? 'one voter at one door event — a knock that named nobody repeats per registered voter at that address'
-    : meta.oneRowIs;
+  // "One row is…" must not read "one door event" while a Rows switch is on.
+  const fanOn = wants('perVoterRows') && perVoterRows;
+  const oneRowIs = perKnockOn
+    ? fanOn
+      ? 'one knock, or one voter at a knock that named nobody — each door once per round'
+      : 'one knock — each door once per round, the way your Knocks count it'
+    : fanOn
+      ? 'one voter at one door event — a knock that named nobody repeats per registered voter at that address'
+      : meta.oneRowIs;
 
-  const estimateLine = () => {
-    if (!est) return null;
-    // rowsAreFloor: the fanned count hit its time cap and the server answered with one row per
-    // knock — a floor, never above the truth — so say so instead of printing it as ≈.
-    const n = Number(est.rows || 0).toLocaleString();
-    const bits = [est.rowsAreFloor ? `at least ${n} rows` : `≈ ${n} rows`];
-    if (est.dncWithheld > 0) bits.push(`${est.dncWithheld} withheld (do not contact)`);
-    if (est.files?.length) bits.push(`${est.files.length} files — one per survey`);
-    if (est.contentKind === 'zip') bits.push('ZIP');
-    return bits.join(' · ');
-  };
+  const estimateLine = () => estimateLineFor(est);
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -319,10 +324,32 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                     </Text>
                   </View>
                   <Switch
+                    accessibilityLabel="Include contact and demographic details"
                     value={includeVoterDetail}
                     onValueChange={setIncludeVoterDetail}
                     trackColor={{ true: colors.brand }}
                   />
+                </View>
+              </View>
+            ) : null}
+
+            {/* One row per knock sits ABOVE the chips it changes (the web dialog's order): ticked, it
+                takes Restricted and Note added off the row and makes the chips pick door results. */}
+            {wants('onePerKnock') ? (
+              <View style={styles.filterBlock}>
+                <Text style={styles.filterLabel}>Knocks</Text>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchText}>
+                    <Text style={styles.switchLabel}>One row per knock</Text>
+                    <Text style={styles.switchSub}>
+                      Each door once per round, matching your Knocks when no outcome is ticked. Two
+                      canvassers at one door: one entry is kept, the door{'\u2019'}s result (
+                      {isLitDrop ? 'Lit dropped if anyone dropped literature' : 'Surveyed if anyone surveyed'}
+                      , otherwise the later visit), under one name, so don{'\u2019'}t total it by canvasser.
+                      Restricted marks and Note added entries are left out.
+                    </Text>
+                  </View>
+                  <Switch accessibilityLabel="One row per knock" value={onePerKnock} onValueChange={setOnePerKnock} trackColor={{ true: colors.brand }} />
                 </View>
               </View>
             ) : null}
@@ -335,6 +362,13 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                 <View style={styles.bleed}>
                   <SourceChips sources={outcomeChips} selected={actionTypes} onToggle={toggleOutcome} />
                 </View>
+                {/* With a canvasser picked there is no door result to pick between (a canvasser never
+                    has two entries at one door in a round), so no caption. */}
+                {perKnockOn && !userId ? (
+                  <Text style={styles.chipCaption}>
+                    These pick door results: each door is listed by its knock result for the round.
+                  </Text>
+                ) : null}
               </View>
             ) : null}
 
@@ -348,11 +382,12 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                       A knock that named nobody (not home, refused, {notTargetInUse ? 'not a target voter, ' : ''}lit
                       drop…) repeats once per
                       registered voter at that address, same outcome and note on each — repeated,
-                      not attributed. Same columns, more rows; the file is named
-                      activity-log-by-voter so its rows are never counted as knocks.
+                      not attributed. Same columns, more rows; the file name includes -by-voter so its
+                      rows are never counted as knocks.
                     </Text>
                   </View>
                   <Switch
+                    accessibilityLabel="One row per voter at the door"
                     value={perVoterRows}
                     onValueChange={setPerVoterRows}
                     trackColor={{ true: colors.brand }}
@@ -376,6 +411,7 @@ export default function ExportSheet({ meta, campaignId, tz, queueing, onQueue, o
                     </Text>
                   </View>
                   <Switch
+                    accessibilityLabel="Include survey answers"
                     value={includeSurveyAnswers}
                     onValueChange={setIncludeSurveyAnswers}
                     trackColor={{ true: colors.brand }}
@@ -490,6 +526,7 @@ function makeStyles(t) {
     switchText: { flex: 1 },
     switchLabel: { ...type.bodyStrong, marginBottom: 2 },
     switchSub: { ...type.caption },
+    chipCaption: { ...type.caption, marginTop: spacing.sm },
 
     warn: {
       backgroundColor: colors.warnBg,
