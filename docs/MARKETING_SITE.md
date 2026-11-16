@@ -56,7 +56,8 @@ where they say "this is a real, published app" rather than "install this now."
 
 Top to bottom (the AAPC brief's §7, Nov 2026): the AAPC banner (while it runs), the header, the hero,
 the **numbers** (three platform totals in red — door knocks, surveys, campaigns — each ending in a plus,
-"and counting", centered in a short band with the date they were counted under them, the same on /aapc;
+"and counting", centered in a short band with the date they were counted small in its bottom-right
+corner, the same on /aapc;
 no client names since the owner's addendum 3, no voter-record count since Nov 2, never an organizations
 count), **the problem** (four ways a door program goes
 wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit page and the map),
@@ -455,7 +456,9 @@ Two components changed shape on Nov 15 and 16 (the owner's reviews):
 - **`NumbersStrip`** is one layout on both pages, with no props (the Nov 15 `centered` prop was /aapc's
   alone; the owner asked for the homepage to match on Nov 16): centered, `py-8 sm:py-10` (it was
   `py-12 sm:py-14` with `mt-8` above the date), numbers `text-[22px]` on a phone and `sm:text-5xl` above,
-  labels `sm:text-base`, the date centered under them. The component appends the plus, so `siteFacts.js`
+  labels `sm:text-base`; the date is `absolute bottom-2` at the container's right padding, `text-[11px]` in
+  stone-500 (4.59:1 on the band), so it takes no height (the band is 158 px tall on a computer, 142 on a
+  phone). The component appends the plus, so `siteFacts.js`
   keeps the bare counts. 22 px is the phone size because the plus made `126,978+` 106 px wide at 24 px in a
   101 px column on a 360 px Android; at 22 px it is 97 px and fits from about 350 px up.
 - **`FounderNote`** is as it was before Nov 15: the **Your data** list at `text-[15px]` with 18 px checks

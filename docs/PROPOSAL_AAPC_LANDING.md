@@ -765,3 +765,5 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
   7. The owner's trial rule (*"they can get a free trial if its first time using the platform … its client
      to client basis"*): every risk-reversal line gains *"New to Doorline? Ask about a free trial."* —
      an invitation to ask, never a blanket promise.
+  8. The numbers' date line moves to the band's bottom-right corner, smaller, so it takes nothing from the
+     numbers (the owner: *"so it doenst get any attention away from the stats"*).
