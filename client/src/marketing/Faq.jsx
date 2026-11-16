@@ -1,6 +1,8 @@
-// FAQ — answers the objections a buyer actually raises before a demo call.
-// Static (no accordion): short answers read faster than clicks. Each answer is checked against the
-// code; docs/MARKETING_SITE.md → "Words to avoid" lists the phrasings that overstate it.
+// FAQ — answers the objections a buyer actually raises before a demo call. Each one folds (the owner,
+// Nov 15: ten open answers made the page long): a native <details>, so it works on the prerendered page
+// before any JavaScript, every answer stays in the HTML for search engines, and `name` makes it one open at a
+// time where browsers support it. Each answer is checked against the code; docs/MARKETING_SITE.md →
+// "Words to avoid" lists the phrasings that overstate it.
 const ITEMS = [
   {
     q: 'How fast can we be knocking doors?',
@@ -70,10 +72,25 @@ export default function Faq() {
         </div>
         <div className="mt-8 grid max-w-3xl gap-2 sm:mt-10 sm:gap-2.5">
           {ITEMS.map((item) => (
-            <div key={item.q} className="rounded-lg border border-stone-200 bg-white p-4 sm:p-5">
-              <h3 className="text-[15.5px] font-bold text-stone-900">{item.q}</h3>
-              <p className="mt-1.5 text-sm text-stone-500">{item.a}</p>
-            </div>
+            <details key={item.q} name="faq" className="group rounded-lg border border-stone-200 bg-white">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:p-5 [&::-webkit-details-marker]:hidden">
+                <h3 className="text-[15.5px] font-bold text-stone-900">{item.q}</h3>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  className="shrink-0 text-stone-400 transition-transform group-open:rotate-45"
+                  aria-hidden="true"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </summary>
+              <p className="-mt-1 px-4 pb-4 text-sm text-stone-500 sm:-mt-1.5 sm:px-5 sm:pb-5">{item.a}</p>
+            </details>
           ))}
         </div>
       </div>

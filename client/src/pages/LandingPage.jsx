@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { DemoRequestProvider } from '../marketing/DemoRequest.jsx';
+import { DemoRequestProvider, OpenDemoFromLink } from '../marketing/DemoRequest.jsx';
 import AapcBanner from '../marketing/AapcBanner.jsx';
 import { AAPC, stampAapc, unstampAapc } from '../marketing/aapc.js';
 import MarketingNav from '../marketing/MarketingNav.jsx';
@@ -41,6 +41,8 @@ export default function LandingPage() {
       {/* Wraps the whole page because the "Request a demo" controls that open the dialog sit in
           three different sections (nav, hero, cta band) at three different scroll depths. */}
       <DemoRequestProvider>
+        {/* The static pages' Request a demo lands here as /#demo and opens the dialog. */}
+        <OpenDemoFromLink />
         {/* Above the header, part of the page flow — it pushes the page down, never covers it. */}
         {AAPC.pageLive && <AapcBanner />}
         <MarketingNav />

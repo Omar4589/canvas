@@ -7,13 +7,16 @@ import NumbersStrip from '../marketing/NumbersStrip.jsx';
 import DemoButton from '../marketing/DemoButton.jsx';
 import SampleReport from '../marketing/SampleReport.jsx';
 import AapcMockupCard from '../marketing/AapcMockupCard.jsx';
+import { CONTACT_EMAIL } from '../marketing/contact.js';
 
 // /aapc — the printed AAPC ad's own page (the owner's addendum 2 §4). The homepage banner links here
 // with ?src=home-banner; a request from this page carries that tag, or 'aapc' when the URL has none
-// (DemoRequestProvider defaultSource). The page speaks in Omar's own voice (addendum 3 §7): its two
-// "Book 15 minutes with me" buttons book a meeting — the form asks When? and offers a mobile number,
-// because there's no table at the event — and Request a demo opens the plain demo form; both in the
-// first person (voice="first"). The homepage's banner and form stay in the third person.
+// (DemoRequestProvider defaultSource). The page speaks in Omar's own voice (addendum 3 §7). Through Nov 17
+// its two main buttons read "Find me at AAPC" (the owner, Nov 15: he'll be there and so will most people
+// who land here, with no table to find him at) and from Nov 18 "Book 15 minutes with me"; both open the
+// booking form — When? and an optional mobile number, so he can text to meet — whose words follow the same
+// date (DemoRequest.jsx). Request a demo opens the plain demo form. No phone number of his on the page
+// (scrapers): the address under the buttons is the shared inbox. The homepage stays in the third person.
 //
 // Prerendered with its own head and noindex (client/src/entry-prerender.jsx). The founder line
 // switches on Nov 18 by <html data-aapc-event> (marketing/aapc.js) — both lines are in the HTML,
@@ -48,6 +51,15 @@ const BLOCKS = [
     link: 'From voter file to knocking',
   },
 ];
+
+// The main button's words, both in the HTML (the page is prerendered): <html data-aapc-event> shows one
+// (index.css). Spans, with no display utility, so the CSS can restore their natural display.
+const BookLabel = () => (
+  <>
+    <span className="aapc-ev-before">Find me at AAPC</span>
+    <span className="aapc-ev-after">Book 15 minutes with me</span>
+  </>
+);
 
 const PRIMARY =
   'inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:w-auto';
@@ -111,24 +123,36 @@ const AapcPage = () => {
                     {/* Both lines are in the HTML; <html data-aapc-event> shows one (index.css). No
                         display utilities on these two: the CSS restores their natural display. */}
                     <p className="aapc-ev-before">
-                      I&apos;ll be at the Post-Mortem in person. Grab 15 minutes, or book a demo for after the event.
+                      I&apos;ll be at the Post-Mortem on Nov 17. Leave your name and I&apos;ll find you there, or we&apos;ll
+                      set a time after the event.
                     </p>
                     <p className="aapc-ev-after">Missed me at AAPC? Book 15 minutes and I&apos;ll walk you through it.</p>
                     <p className="mt-1 text-sm font-semibold text-stone-900">Omar Zumaya, Founder, Doorline</p>
                   </div>
                 </div>
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-3.5">
-                  <DemoButton className={PRIMARY}>Book 15 minutes with me</DemoButton>
+                  <DemoButton className={PRIMARY}>
+                    <BookLabel />
+                  </DemoButton>
                   <DemoButton options={{ askWhen: false }} className={SECONDARY}>
                     Request a demo
                   </DemoButton>
                 </div>
+                <p className="mt-4 text-sm text-stone-600">
+                  Prefer email?{' '}
+                  <a
+                    href={`mailto:${CONTACT_EMAIL}`}
+                    className="rounded font-semibold text-stone-900 underline transition-colors hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                  >
+                    {CONTACT_EMAIL}
+                  </a>
+                </p>
               </div>
               <AapcMockupCard />
             </div>
           </section>
 
-          <NumbersStrip />
+          <NumbersStrip centered />
 
           <section className="bg-white">
             <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-3.5 px-4 py-16 sm:px-6 sm:py-20 md:grid-cols-3 lg:px-8">
@@ -155,7 +179,9 @@ const AapcPage = () => {
               </h2>
               <p className="mt-3 text-base text-stone-600">Every canvasser and feature included.</p>
               <div className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-4 sm:max-w-none">
-                <DemoButton className={PRIMARY}>Book 15 minutes with me</DemoButton>
+                <DemoButton className={PRIMARY}>
+                  <BookLabel />
+                </DemoButton>
                 <SampleReport className="justify-center" />
               </div>
             </div>

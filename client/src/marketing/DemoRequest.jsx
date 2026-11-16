@@ -49,21 +49,43 @@ const SCHEDULING_URL = null;
 const MEETING = '15 minutes';
 
 // The dialog's words, in two voices: about Omar on the homepage, and Omar's own on /aapc, whose page he
-// signs (the provider's voice="first"; the owner's addendum 3 §7).
+// signs (the provider's voice="first"; the owner's addendum 3 §7). A booking reads by the event's own
+// clock (aapc.js aapcEventPhase): through Nov 17 it's about finding him at the Post-Mortem, where he has no
+// table (the owner, Nov 15: "find me"); from Nov 18, a 15-minute call. `replyNote` sits beside the button.
 const WORDS = {
   third: {
-    bookTitle: `Book ${MEETING} with ${OWNER}`,
-    bookIntro: `Book ${MEETING} with ${OWNER}, at the event or after. He'll email or text you to set a time.`,
+    book: {
+      before: {
+        title: `Book ${MEETING} with ${OWNER}`,
+        intro: `Book ${MEETING} with ${OWNER}, at the event or after. He'll email or text you to set a time.`,
+        thanks: `${OWNER} will email or text you to set a time.`,
+      },
+      after: {
+        title: `Book ${MEETING} with ${OWNER}`,
+        intro: `Book ${MEETING} with ${OWNER}. He'll email or text you to set a time.`,
+        thanks: `${OWNER} will email or text you to set a time.`,
+      },
+    },
     demoIntro: `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
-    bookThanks: `${OWNER} will email or text you to set a time.`,
     demoThanks: `${OWNER} will email you ${REPLY_WINDOW}.`,
+    replyNote: `${OWNER} will get back to you ${REPLY_WINDOW}.`,
   },
   first: {
-    bookTitle: `Book ${MEETING} with me`,
-    bookIntro: `Book ${MEETING} with me, at the event or after. I'll email or text you to set a time.`,
+    book: {
+      before: {
+        title: "Let's meet at AAPC",
+        intro: "I'll be at the Post-Mortem on Nov 17. Leave your details and I'll email or text you to find a time to meet there, or after the event.",
+        thanks: "I'll email or text you to find a time to meet.",
+      },
+      after: {
+        title: `Book ${MEETING} with me`,
+        intro: `Book ${MEETING} with me and I'll email or text you to set a time.`,
+        thanks: "I'll email or text you to set a time.",
+      },
+    },
     demoIntro: `Tell me about your team and I'll reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
-    bookThanks: `I'll email or text you to set a time.`,
     demoThanks: `I'll email you ${REPLY_WINDOW}.`,
+    replyNote: `I'll get back to you ${REPLY_WINDOW}.`,
   },
 };
 
@@ -135,6 +157,7 @@ const DemoDialog = ({ options, onClose }) => {
   const whenOptions = aapcEventPhase() === 'before' ? [WHEN_AT_AAPC, WHEN_AFTER] : [WHEN_AFTER];
   const booking = options.askWhen;
   const words = WORDS[options.voice] || WORDS.third;
+  const book = words.book[aapcEventPhase()];
 
   const set = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
@@ -237,224 +260,243 @@ const DemoDialog = ({ options, onClose }) => {
 
   const firstName = values.name.trim().split(/\s+/)[0];
 
+  // A card that floats with a margin on every screen. The overlay scrolls and the card sits centred in a
+  // full-height wrapper, so a form taller than the window scrolls from its top instead of losing it (the
+  // old centred overlay cut the top off on short windows, and phones got an edge-to-edge sheet).
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-stone-900/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-900/50 backdrop-blur-[2px]">
       <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="demo-dialog-title"
-        tabIndex={-1}
-        className="relative w-full max-w-lg rounded-t-2xl bg-white p-6 shadow-2xl focus:outline-none sm:rounded-2xl sm:p-7"
+        className="flex min-h-full items-center justify-center p-4 sm:p-6"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-md text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="demo-dialog-title"
+          tabIndex={-1}
+          className="relative w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl focus:outline-none sm:p-8"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-md text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
 
-        {status === SENT ? (
-          <>
-            <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
-              Thanks, {firstName}.
-            </h2>
-            <p className="mt-3 text-[15px] text-stone-600">
-              {booking ? words.bookThanks : words.demoThanks}
-            </p>
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              {SCHEDULING_URL && (
-                <a
-                  href={SCHEDULING_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
-                >
-                  Pick a time now
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={onClose}
-                className={
-                  SCHEDULING_URL
-                    ? 'inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2'
-                    : 'inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2'
-                }
-              >
-                Close
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
-              {booking ? words.bookTitle : 'See Doorline run your next canvass'}
-            </h2>
-            <p className="mt-2 text-[15px] text-stone-600">
-              {booking ? words.bookIntro : words.demoIntro}
-            </p>
-
-            <form onSubmit={onSubmit} noValidate className="mt-5 space-y-4">
-              {/* Honeypot. Hidden from sight AND from assistive tech, and never autofilled — a
-                  person can't fill it, so anything in it came from a bot. */}
-              <input
-                ref={honeypotRef}
-                type="text"
-                name="company"
-                tabIndex={-1}
-                autoComplete="off"
-                aria-hidden="true"
-                className="absolute left-[-9999px] h-px w-px opacity-0"
-              />
-
-              <div>
-                <label htmlFor="demo-name" className={LABEL_CLASS}>Name</label>
-                <input
-                  ref={firstFieldRef}
-                  id="demo-name"
-                  name="name"
-                  autoComplete="name"
-                  value={values.name}
-                  onChange={set('name')}
-                  className={FIELD_CLASS}
-                  placeholder="Dana Reyes"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="demo-email" className={LABEL_CLASS}>Work email</label>
-                <input
-                  id="demo-email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  value={values.email}
-                  onChange={set('email')}
-                  className={FIELD_CLASS}
-                  placeholder="you@yourfirm.com"
-                />
-                {touched && problem === 'email' && (
-                  <p className="mt-1.5 text-[13px] text-brand-600">Please enter a valid email address.</p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="demo-org" className={LABEL_CLASS}>Organization</label>
-                <input
-                  id="demo-org"
-                  name="organization"
-                  autoComplete="organization"
-                  value={values.organization}
-                  onChange={set('organization')}
-                  className={FIELD_CLASS}
-                  placeholder="Firm, campaign, or committee"
-                />
-              </div>
-
-              <Select id="demo-role" label="You are" value={values.role} onChange={set('role')} options={ROLES} />
-              <Select
-                id="demo-team"
-                label="Team size"
-                value={values.teamSize}
-                onChange={set('teamSize')}
-                options={TEAM_SIZES}
-                display={(size) => (size === 'Just me' ? size : `${size} canvassers`)}
-              />
-              <Select
-                id="demo-heard"
-                label="How did you hear about us?"
-                value={values.heardAbout}
-                onChange={set('heardAbout')}
-                options={HEARD_ABOUT}
-              />
-              {booking && (
-                <>
-                  <Select id="demo-when" label="When?" value={values.when} onChange={set('when')} options={whenOptions} />
-                  <div>
-                    <label htmlFor="demo-phone" className={LABEL_CLASS}>
-                      Mobile number (for a text) {OPTIONAL}
-                    </label>
-                    <input
-                      id="demo-phone"
-                      name="phone"
-                      type="tel"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={values.phone}
-                      onChange={set('phone')}
-                      className={FIELD_CLASS}
-                    />
-                    {touched && problem === 'phone' && (
-                      <p className="mt-1.5 text-[13px] text-brand-600">Please enter a number we can text, or leave it blank.</p>
-                    )}
-                  </div>
-                </>
-              )}
-
-              <div>
-                <label htmlFor="demo-message" className={LABEL_CLASS}>
-                  Anything else? {OPTIONAL}
-                </label>
-                <textarea
-                  id="demo-message"
-                  name="message"
-                  rows={3}
-                  value={values.message}
-                  onChange={set('message')}
-                  className={`${FIELD_CLASS} resize-y`}
-                  placeholder="Races you're working, timeline, anything you want to see."
-                />
-              </div>
-
-              {touched && problem && problem !== 'email' && problem !== 'phone' && (
-                <p className="text-[13px] text-brand-600">Please fill in your {problem}.</p>
-              )}
-              {error && (
-                <p className="rounded-lg bg-brand-50 px-3 py-2.5 text-[13px] text-brand-700">
-                  {error}{' '}
-                  <a href={`mailto:${CONTACT_EMAIL}`} className="font-semibold underline">
-                    {CONTACT_EMAIL}
-                  </a>
-                </p>
-              )}
-
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <button
-                  type="submit"
-                  disabled={status === SENDING}
-                  className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:opacity-60"
-                >
-                  {status === SENDING ? 'Sending…' : 'Request a demo'}
-                </button>
-                {/* The address stays visible, not just as an error fallback: some people would
-                    rather write their own email, and the old mailto CTA was the only way they
-                    knew to reach us. */}
-                <p className="text-[13px] text-stone-500">
-                  or email{' '}
+          {status === SENT ? (
+            <>
+              <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
+                Thanks, {firstName}.
+              </h2>
+              <p className="mt-3 text-[15px] text-stone-600">
+                {booking ? book.thanks : words.demoThanks}
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+                {SCHEDULING_URL && (
                   <a
-                    href={`mailto:${CONTACT_EMAIL}`}
-                    className="rounded font-semibold text-stone-700 underline transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    href={SCHEDULING_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                   >
-                    {CONTACT_EMAIL}
+                    Pick a time now
                   </a>
-                </p>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={
+                    SCHEDULING_URL
+                      ? 'inline-flex items-center justify-center rounded-lg border border-stone-300 bg-white px-5 py-3 text-[15px] font-semibold text-stone-900 shadow-sm transition-colors hover:border-stone-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2'
+                      : 'inline-flex items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2'
+                  }
+                >
+                  Close
+                </button>
               </div>
-            </form>
-          </>
-        )}
+            </>
+          ) : (
+            <>
+              <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
+                {booking ? book.title : 'See Doorline run your next canvass'}
+              </h2>
+              <p className="mt-2 text-[15px] text-stone-600">
+                {booking ? book.intro : words.demoIntro}
+              </p>
+
+              <form onSubmit={onSubmit} noValidate className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-end">
+                {/* Honeypot. Hidden from sight AND from assistive tech, and never autofilled — a
+                    person can't fill it, so anything in it came from a bot. */}
+                <input
+                  ref={honeypotRef}
+                  type="text"
+                  name="company"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                  className="absolute left-[-9999px] h-px w-px opacity-0"
+                />
+
+                <div>
+                  <label htmlFor="demo-name" className={LABEL_CLASS}>Name</label>
+                  <input
+                    ref={firstFieldRef}
+                    id="demo-name"
+                    name="name"
+                    autoComplete="name"
+                    value={values.name}
+                    onChange={set('name')}
+                    className={FIELD_CLASS}
+                    placeholder="Dana Reyes"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="demo-email" className={LABEL_CLASS}>Work email</label>
+                  <input
+                    id="demo-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    value={values.email}
+                    onChange={set('email')}
+                    className={FIELD_CLASS}
+                    placeholder="you@yourfirm.com"
+                  />
+                  {touched && problem === 'email' && (
+                    <p className="mt-1.5 text-[13px] text-brand-600">Please enter a valid email address.</p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="demo-org" className={LABEL_CLASS}>Organization</label>
+                  <input
+                    id="demo-org"
+                    name="organization"
+                    autoComplete="organization"
+                    value={values.organization}
+                    onChange={set('organization')}
+                    className={FIELD_CLASS}
+                    placeholder="Firm, campaign, or committee"
+                  />
+                </div>
+
+                <Select id="demo-role" label="You are" value={values.role} onChange={set('role')} options={ROLES} />
+                <Select
+                  id="demo-team"
+                  label="Team size"
+                  value={values.teamSize}
+                  onChange={set('teamSize')}
+                  options={TEAM_SIZES}
+                  display={(size) => (size === 'Just me' ? size : `${size} canvassers`)}
+                />
+                <Select
+                  id="demo-heard"
+                  label="How did you hear about us?"
+                  value={values.heardAbout}
+                  onChange={set('heardAbout')}
+                  options={HEARD_ABOUT}
+                />
+                {booking && (
+                  <>
+                    <Select id="demo-when" label="When?" value={values.when} onChange={set('when')} options={whenOptions} />
+                    <div>
+                      <label htmlFor="demo-phone" className={LABEL_CLASS}>
+                        Mobile number (for a text) {OPTIONAL}
+                      </label>
+                      <input
+                        id="demo-phone"
+                        name="phone"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={values.phone}
+                        onChange={set('phone')}
+                        className={FIELD_CLASS}
+                      />
+                      {touched && problem === 'phone' && (
+                        <p className="mt-1.5 text-[13px] text-brand-600">Please enter a number we can text, or leave it blank.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                <div className="sm:col-span-2">
+                  <label htmlFor="demo-message" className={LABEL_CLASS}>
+                    Anything else? {OPTIONAL}
+                  </label>
+                  <textarea
+                    id="demo-message"
+                    name="message"
+                    rows={2}
+                    value={values.message}
+                    onChange={set('message')}
+                    className={`${FIELD_CLASS} resize-y`}
+                    placeholder="Races you're working, timeline, anything you want to see."
+                  />
+                </div>
+
+                {touched && problem && problem !== 'email' && problem !== 'phone' && (
+                  <p className="text-[13px] text-brand-600 sm:col-span-2">Please fill in your {problem}.</p>
+                )}
+                {error && (
+                  <p className="rounded-lg bg-brand-50 px-3 py-2.5 text-[13px] text-brand-700 sm:col-span-2">
+                    {error}{' '}
+                    <a href={`mailto:${CONTACT_EMAIL}`} className="font-semibold underline">
+                      {CONTACT_EMAIL}
+                    </a>
+                  </p>
+                )}
+
+                <div className="flex flex-col gap-3 pt-1 sm:col-span-2 sm:flex-row sm:items-center">
+                  <button
+                    type="submit"
+                    disabled={status === SENDING}
+                    className="inline-flex shrink-0 items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:opacity-60"
+                  >
+                    {status === SENDING ? 'Sending…' : booking ? 'Send' : 'Request a demo'}
+                  </button>
+                  {/* When they'll hear back, then the address: some people would rather write their own
+                      email, and the old mailto CTA was the only way they knew to reach us. No phone
+                      number on the page, on purpose (scrapers — the owner, Nov 15). */}
+                  <p className="text-[13px] text-stone-500">
+                    {words.replyNote} Prefer email?{' '}
+                    <a
+                      href={`mailto:${CONTACT_EMAIL}`}
+                      className="rounded font-semibold text-stone-700 underline transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                    >
+                      {CONTACT_EMAIL}
+                    </a>
+                  </p>
+                </div>
+              </form>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
+};
+
+// The static pages (privacy, terms, the app page, …) run no JavaScript, so they can't open this dialog:
+// their Request a demo links to /#demo, and the homepage opens the dialog on arrival and drops the hash,
+// so a reload or a copied link doesn't open it again. Mounted inside LandingPage's provider.
+export const DEMO_HASH = '#demo';
+export const OpenDemoFromLink = () => {
+  const { open } = useDemoRequest();
+  useEffect(() => {
+    if (window.location.hash !== DEMO_HASH) return;
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+    open();
+  }, [open]);
+  return null;
 };
 
 // defaultSource: the tag a request from this page carries when its URL has none ('aapc' on /aapc).

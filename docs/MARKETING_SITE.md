@@ -52,9 +52,17 @@ wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit
 **Client reports**, **Setup** (from the voter file to the first knock), the feature cards, the founder's
 note with the **Your data** list, the FAQ, and the closing band. The founder's note is Omar's own words,
 set as a quote in the site's usual type — semibold, inside quotation marks (a serif without them was tried
-on Nov 2 and dropped the next day) — signed *Omar Zumaya, Founder, Doorline*. A monogram stands in for his photo until he sends one, and a
-scan of his signature will sit above his name when he sends that. The section links in the header are
-Proof · Reports · Setup · FAQ.
+on Nov 2 and dropped the next day) — signed *Omar Zumaya, Founder, Doorline*. The **Your data** list beside
+it is the same size as the quote (since Nov 15; it used to be smaller), in regular weight so the quote still
+leads. A monogram stands in for his photo until he sends one, and a
+scan of his signature will sit above his name when he sends that. The FAQ shows each question on one line;
+a tap opens its answer and closes the one that was open (since Nov 15; it used to print every answer, a long
+scroll). The section links in the header are Proof · Reports · Setup · FAQ.
+
+**Every public page has the same header** (since Nov 15): the privacy, terms and delete-account pages, the
+`/app` page and the not-found page now show the homepage's header too — the same four links, **Sign in**,
+**Request a demo**, and the same menu button on a phone. On those pages **Request a demo** goes to the
+homepage and opens the form there. Before, they had an older header of their own.
 
 ## Requesting a demo
 
@@ -65,14 +73,24 @@ firm, campaign, party or committee, advocacy group), team size, **how they heard
 event, referral, search, other — the printed AAPC ad's QR code carries no tag, so this question is
 the only way to tie a scan to a lead), and anything else.
 
-On `/aapc` the page speaks in Omar's own voice. Its two **Book 15 minutes with me** buttons book a
-meeting: the form reads *"Book 15 minutes with me, at the event or after. I'll email or text you to set a
-time."*, asks **when** (*"At AAPC, Nov 17"* is offered through Nov 17 itself), and offers an optional
-**mobile number** — there's no table at the event, so Omar texts or emails to set the time. Its **Request
-a demo** opens the demo form, also in the first person: *"Tell me about your team and I'll reply within
-one business day to set up a 20-minute walkthrough."* The thank-you follows the same voice. On the
-homepage the form, the banner (*"…Book 15 minutes with Omar"*) and the thank-you stay in the third
-person.
+On `/aapc` the page speaks in Omar's own voice. Through Nov 17 its two main buttons read **Find me at
+AAPC** — Omar will be at the Post-Mortem with no table, and so will most people who land on the page (the
+owner, Nov 15) — and from Nov 18 they read **Book 15 minutes with me**. Either opens the booking form.
+Through Nov 17 it is titled *"Let's meet at AAPC"* and reads *"I'll be at the Post-Mortem on Nov 17. Leave
+your details and I'll email or text you to find a time to meet there, or after the event."*; from Nov 18 it
+reads *"Book 15 minutes with me and I'll email or text you to set a time."* It asks **when** (*"At AAPC,
+Nov 17"* is offered through Nov 17 itself) and offers an optional **mobile number**, so Omar can text or
+email to set the time; its button says **Send**. Its **Request a demo** opens the demo form, also in the
+first person: *"Tell me about your team and I'll reply within one business day to set up a 20-minute
+walkthrough."* The thank-you follows the same voice. On the homepage the form, the banner (*"…Book 15
+minutes with Omar"*) and the thank-you stay in the third person.
+
+The form floats in the middle of the screen with the page dimmed behind it (since Nov 15; it used to fill
+the window from top to bottom). On a computer it is two columns wide, so the whole form fits a laptop
+screen; on a phone or a short window it scrolls, and its top is never cut off. Beside the button it says
+*"Omar will get back to you within one business day. Prefer email? hello@doorline.app"* — on `/aapc`,
+*"I'll get back to you within one business day."* There is **no phone number anywhere on the site, on
+purpose**: scrapers (the owner, Nov 15).
 
 The buttons work even before the page has finished loading: until then a tap opens an email to
 `hello@doorline.app`; once the page is ready, the same tap opens the form.
@@ -92,8 +110,8 @@ The form used to be a `mailto:` link that opened your mail app. That did nothing
 reading the site in a browser with no mail app configured, which is most people — so the only way
 to buy Doorline silently failed for a large share of visitors.
 
-`hello@doorline.app` is still shown inside the dialog and in the footer for anyone who would
-rather write their own email.
+`hello@doorline.app` is still shown inside the dialog, under `/aapc`'s buttons and in the footer for
+anyone who would rather write their own email.
 
 ## The page loads as real HTML
 
@@ -116,10 +134,12 @@ days.
 
 `doorline.app/aapc` is the printed AAPC ad's own page: the ad's headline (*Every door. Every pass.
 Every number.*), its subhead and its three bullets word for word, a copy of its "Beaverdale · Pass 2"
-card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem in
-person…"*, switching on Nov 18 to *"Missed me at AAPC?…"*), **Book 15 minutes with me** and
-**Request a demo**, the numbers, three short blocks (Proof, Client reports, Many campaigns) and the
-price. It stays up after the event with the after-event line. Search engines are asked not to list it
+card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem on Nov 17.
+Leave your name and I'll find you there, or we'll set a time after the event."*, switching on Nov 18 to
+*"Missed me at AAPC?…"*), **Find me at AAPC** (from Nov 18, **Book 15 minutes with me**) and **Request a
+demo**, with *"Prefer email? hello@doorline.app"* under them, the numbers (centered here, and larger on a
+computer, to catch the eye — the owner, Nov 15), three short blocks (Proof, Client reports, Many
+campaigns) and the price. It stays up after the event with the after-event line. Search engines are asked not to list it
 (it's an event page), and a link shared from it previews as Doorline's.
 
 ## The sample report
@@ -294,6 +314,19 @@ divergence in either direction; it runs under plain `npm test`.
 
 Then add a `<url>` block to [`client/public/sitemap.xml`](../client/public/sitemap.xml).
 
+**Copy the header and footer from an existing static page.** The header is a static port of
+`MarketingNav`: the four section links (`/#proof`, `/#reports`, `/#setup`, `/#faq`), Sign in, and
+Request a demo as `/#demo`, which the homepage turns into an open form (`OpenDemoFromLink` in
+`DemoRequest.jsx`, rendered first inside `LandingPage`'s provider; it drops the hash with
+`history.replaceState`, so a reload doesn't reopen the form). Below 1024 px the links move into a native
+`<details class="menu">` disclosure, so the menu needs no script. The five static pages (privacy, terms,
+delete-account, app, 404) carry the identical block — markup and its CSS, from `.site-header{` through the
+`.menu` media query; the header's button row is `.nav-actions` because `404.html` has an `.actions` of its
+own. Add a new page to `STATIC_PAGES` in the brand-chrome test of
+[`server/test/staticPages.int.test.js`](../server/test/staticPages.int.test.js), which requires the header's
+markup and styles to match on every page. These pages draw in the system font stack; so does the React site
+in practice (below).
+
 Assets a static page references must live in `client/public/` too — Vite hashes anything under
 `client/src/assets/`. The store badges are therefore committed twice on purpose:
 `client/public/badge-*.{svg,png}` for `/app`, and `client/src/assets/marketing/badge-*` for the
@@ -367,9 +400,12 @@ the matching text:
 
 - `<html data-aapc="before|after|off">` — **the banner's window**: off before `start` and from `end`.
 - `<html data-aapc-event="before|after">` — **the event itself, no window**: `before` until `switchOn`,
-  `after` from then, for good. `/aapc`'s founder line (`.aapc-ev-before` / `.aapc-ev-after`, the
-  before-line shown by default) and the demo form's *"At AAPC, Nov 17"* follow this one, so `/aapc`
-  never shows both lines and the option is offered from launch through Nov 17.
+  `after` from then, for good. `/aapc`'s founder line and its two main buttons' labels (`BookLabel`:
+  *Find me at AAPC* / *Book 15 minutes with me*) use `.aapc-ev-before` / `.aapc-ev-after` (the before
+  text shown by default); the booking form's words (`WORDS[voice].book[aapcEventPhase()]` in
+  `DemoRequest.jsx`) and its *"At AAPC, Nov 17"* option follow the same switch, so `/aapc` never shows both
+  texts and the option is offered from launch through Nov 17. The two classes set `display: revert`, so put
+  them on an element with no display utility of its own.
 
 `aapcPhase()` and `aapcEventPhase()` are the same rules for code that runs later; `stampAapc()` sets
 both attributes on a client-side arrival. `aapc.test.js` pins the script to both functions hour by
@@ -391,6 +427,24 @@ The homepage (Phase 2, Nov 2026): `Hero`, `NumbersStrip`, `ProblemStrip`, `Proof
 four-claim strip and How it works are gone, but **their ids stay as aliases** (`#turf`, `#field`,
 `#how` on Setup; `#oversight` on Proof): `privacy.html`, `terms.html`, `app.html`,
 `delete-account.html` and `404.html` link to them, and the legal pages are owner-edited.
+
+Three components changed shape on Nov 15 (the owner's review):
+
+- **`Faq`** renders each entry as a native `<details name="faq">`, so it folds with no script and works
+  before hydration. The shared `name` keeps one answer open at a time where the browser supports it;
+  an older browser lets several open, which is harmless. The plus turns into an × with `group-open:`.
+- **`NumbersStrip`** takes `centered`: `/aapc` passes it (centered text, `sm:text-5xl` numbers,
+  `sm:text-base` labels, the date centered); the homepage keeps the left-aligned strip with the date on the
+  right.
+- **`FounderNote`**'s **Your data** list is `text-xl sm:text-2xl` at regular weight, the quote's size.
+
+**The typeface.** `tailwind.config.js` asks for `InterVariable`, but `@fontsource-variable/inter`
+registers the family as `Inter Variable`, and `index.css` sets `body` to the system stack anyway, so
+every page — the site and the console — draws in the device's own font (San Francisco on Apple devices),
+and the Inter files are never downloaded. Checked in Chrome on Nov 15 (`CSS.getPlatformFontsForNode`).
+That's the look everything has been approved in, and it is what keeps the static pages' lettering
+matching. Switching to Inter would change every page at once, so it is the owner's call, not a fix to
+slip into another change.
 
 Three rules from the Nov 2026 fixes:
 
@@ -417,7 +471,11 @@ Single sources of truth, and CTAs must read from them rather than hard-coding:
   `mailto:` link in the markup, so a tap does something before the page hydrates (seconds on venue
   Wi-Fi); once live, its click opens the dialog. The provider wraps each page; `/aapc` passes
   `defaultSource="aapc"` and `askWhen`, so every control there books a meeting. The source a request
-  sends is `pageSource() || options.source || defaultSource` — a tagged URL always wins.
+  sends is `pageSource() || options.source || defaultSource` — a tagged URL always wins. The dialog is a
+  `fixed inset-0 overflow-y-auto` overlay around a `flex min-h-full items-center` wrapper that centers the
+  panel (`max-w-xl`, a two-column form from `sm`): a panel taller than the window scrolls the overlay from
+  its top, where centering the panel alone would cut its top off. `replyNote` sits beside the button with
+  the `mailto:` address. There is no phone number on purpose (the owner, Nov 15: scrapers).
 - [`siteFacts.js`](../client/src/marketing/siteFacts.js) — the three platform totals and the sample
   report's link and password (*The facts the pages state* below).
 - [`SampleReport.jsx`](../client/src/marketing/SampleReport.jsx) — every "Open a sample report",
@@ -431,7 +489,8 @@ plain `#proof` — a `/#proof` would reload a tagged `/?src=…` and lose the ta
 - **Platform totals** (`PLATFORM_TOTALS`): refresh from `npm run migrate:platform-stats` in the Heroku
   Run console — without `--apply` it only reads — using its *"Would set the LIVE bucket to"* line
   (customer organizations only; the Control Room's overview cards count demo campaigns, and its
-  lifetime panel banks deleted test campaigns). Round down, and date the caption. The printed ad says
+  lifetime panel banks deleted test campaigns). Publish the exact count or round it down — never up —
+  and date the caption; since Nov 15 the strip shows the owner's exact counts. The printed ad says
   95,000+ door knocks and 23,000+ surveys, so never publish lower.
 - **Client names**: none on the site since the owner's addendum 3 (the numbers strip's client line is
   gone). Any that come back need the client's written OK.

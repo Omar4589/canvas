@@ -68,9 +68,11 @@ are, team size, how they heard about us, and anything they wrote — plus **Sent
 were on, and the link's tag if it had one (for example `src=home-banner` when they came through the
 AAPC banner on the homepage; a request from /aapc with no tag says `src=aapc`).
 
-A request from **/aapc** is a booking: *Book 15 minutes with Omar, at the event or after.* It also
-shows **When** (at AAPC on Nov 17, or after the event) and, if they gave one, a **Mobile** number —
-there's no table at the event, so you text or email them to set the time.
+A request from **/aapc** is a booking. Through Nov 17 the page's button reads *Find me at AAPC*: the
+person leaves their details so Omar can find a time to meet them at the Post-Mortem, or after it. From
+Nov 18 it reads *Book 15 minutes with me*. The request also shows **When** (at AAPC on Nov 17, or after
+the event) and, if they gave one, a **Mobile** number — there's no table at the event, so you text or
+email them to set the time.
 
 - **Open** is your to-do list. Reply from your inbox (Reply goes straight to them), then press
   **Mark handled** so nobody replies twice. **Reopen** puts it back.

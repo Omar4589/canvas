@@ -719,4 +719,22 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
 - **Founder note, Nov 3 (the owner):** *"change the font back on my quote … and add quotation marks so it's
   more like a quote"* — §6's serif typography is undone: the note is back in the site's sans, semibold, inside
   quotation marks, with the new words kept; Source Serif 4 and its package are removed.
+- **Follow-ups, Nov 15 (the owner, two days before the event):**
+  1. *"i bascially just wanna in a way say like 'find me'"* — through Nov 17, /aapc's two main buttons read
+     **Find me at AAPC**, Omar's line reads *"I'll be at the Post-Mortem on Nov 17. Leave your name and I'll
+     find you there, or we'll set a time after the event."*, the booking form is titled *"Let's meet at
+     AAPC"*, and *"Prefer email? hello@doorline.app"* sits under the buttons. From Nov 18 everything
+     returns to *Book 15 minutes with me*. No phone number anywhere (*"because of scrapers and stuff"*).
+  2. The demo and booking form floats, centered, instead of filling the window's height: two columns on a
+     computer, scrolling with its top intact on a phone; beside the button, *"I'll get back to you within
+     one business day"* (Omar's name in the third person on the homepage).
+  3. Totals: 126,936 door knocks, 29,840 surveys, 27 campaigns, as of Nov 15 — exact counts now. The labels
+     stay the printed ad's (*door knocks logged*, not the owner's *doors knocked*).
+  4. /aapc's totals are centered and larger on a computer.
+  5. The privacy, terms, delete-account, /app and not-found pages get the homepage's header (the same four
+     links, Sign in, Request a demo → `/#demo`, a script-free menu on a phone); the static-pages test now
+     requires the header to match on all five.
+  6. The founder section's **Your data** list is the quote's size, in regular weight.
+  7. *"what do you think about the common questions section.. too long and scrolly?"* — kept, made
+     collapsible: one question per line, one answer open at a time.
 

@@ -229,15 +229,31 @@ test('the committed legal documents carry the load-bearing sentences and no scri
 test('every static page carries the brand chrome — logo, header nav, footer cross-links', { skip }, () => {
   const read = (f) => fs.readFileSync(path.join(PUBLIC_DIR, f), 'utf8');
   // The Doorline pin — the exact path from client/src/components/Logo.jsx. If the brand mark
-  // changes there, change it here and in the four static pages together.
+  // changes there, change it here and in the five static pages together.
   const LOGO_PATH = 'M18 0 C8.06 0 0 8.06 0 18';
-  for (const f of ['privacy.html', 'terms.html', 'delete-account.html', '404.html']) {
+  // The header is a static port of MarketingNav (docs/MARKETING_SITE.md → Static pages): the same
+  // four section links, Sign in, and Request a demo, which lands on the homepage as /#demo and opens
+  // its form there. One header, five copies: its markup and its styles must match on every page.
+  const STATIC_PAGES = ['privacy.html', 'terms.html', 'delete-account.html', '404.html', 'app.html'];
+  const headerOf = (html) => html.match(/<header class="site-header">[\s\S]*?<\/header>/)?.[0];
+  const headerCssOf = (html) => html.match(/\.site-header\{[\s\S]*?\{\.menu\{display:none\}\}/)?.[0];
+  const first = read(STATIC_PAGES[0]);
+  assert.ok(headerOf(first) && headerCssOf(first), `${STATIC_PAGES[0]}: header markup and styles found`);
+  for (const f of STATIC_PAGES) {
     const html = read(f);
     assert.ok(html.includes(LOGO_PATH), `${f}: logo mark present`);
     assert.match(html, /class="site-header"/, `${f}: header present`);
     assert.match(html, /class="signin" href="\/login"/, `${f}: Sign in`);
+    assert.match(html, /class="demo" href="\/#demo"/, `${f}: Request a demo opens the homepage form`);
+    for (const id of ['proof', 'reports', 'setup', 'faq']) assert.ok(html.includes(`href="/#${id}"`), `${f}: links /#${id}`);
+    assert.match(html, /<details class="menu">/, `${f}: the phone menu needs no script`);
+    assert.strictEqual(headerOf(html), headerOf(first), `${f}: header markup matches ${STATIC_PAGES[0]}`);
+    assert.strictEqual(headerCssOf(html), headerCssOf(first), `${f}: header styles match ${STATIC_PAGES[0]}`);
     assert.match(html, /class="site-footer"/, `${f}: footer present`);
     assert.match(html, /© 2026 Doorline LLC/, `${f}: copyright line`);
+  }
+  for (const f of ['privacy.html', 'terms.html', 'delete-account.html', '404.html']) {
+    const html = read(f);
     // Cross-links: each page's footer must reach the other legal pages (its own entry renders
     // as unlinked text, so only require the two/three OTHER hrefs).
     for (const target of ['/privacy', '/terms', '/delete-account']) {

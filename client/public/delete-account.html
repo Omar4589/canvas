@@ -25,16 +25,34 @@
     :root{color-scheme:light}
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#f9fafb;color:#111827;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;min-height:100vh}
-    .site-header{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid #e5e7eb}
-    .site-header .bar{max-width:72rem;margin:0 auto;padding:0 1rem;height:4rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+    .site-header{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border-bottom:1px solid #e7e5e4}
+    .site-header .bar{max-width:72rem;margin:0 auto;padding:0 1rem;height:4rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+    @media(min-width:640px){.site-header .bar{padding:0 1.5rem}}
+    @media(min-width:1024px){.site-header .bar{padding:0 2rem}}
     .brand{display:flex;align-items:center;gap:.5rem;text-decoration:none}
-    .brand span{font-weight:700;font-size:1.35rem;letter-spacing:-.5px;color:#111827}
+    .brand span{font-weight:700;font-size:1.365rem;letter-spacing:-.5px;color:#111827}
     .site-nav{display:none;align-items:center;gap:2rem}
-    @media(min-width:768px){.site-nav{display:flex}}
-    .site-nav a{font-size:.875rem;color:#4b5563;text-decoration:none;font-weight:400}
-    .site-nav a:hover{color:#111827}
-    .signin{border:1px solid #d1d5db;background:#fff;border-radius:.375rem;padding:.6rem 1rem;font-size:.875rem;font-weight:600;color:#111827;text-decoration:none;box-shadow:0 1px 2px 0 rgb(0 0 0/.05);white-space:nowrap}
-    .signin:hover{background:#f9fafb}
+    @media(min-width:1024px){.site-nav{display:flex}}
+    .site-nav a{font-size:.875rem;color:#57534e;text-decoration:none;font-weight:400}
+    .site-nav a:hover{color:#1c1917}
+    .nav-actions{display:flex;align-items:center;gap:.5rem}
+    @media(min-width:640px){.nav-actions{gap:.75rem}}
+    .signin,.demo{display:inline-flex;align-items:center;justify-content:center;border-radius:.375rem;padding:.625rem .75rem;font-size:.875rem;line-height:1.25rem;font-weight:600;text-decoration:none;white-space:nowrap;box-shadow:0 1px 2px 0 rgb(0 0 0/.05)}
+    @media(min-width:640px){.signin,.demo{padding:.625rem 1rem}}
+    .signin{border:1px solid #d6d3d1;background:#fff;color:#1c1917}
+    .signin:hover{background:#fafaf9}
+    .demo{border:1px solid #dc2626;background:#dc2626;color:#fff}
+    .demo:hover{background:#b91c1c;border-color:#b91c1c}
+    .demo .long{display:none}
+    @media(min-width:640px){.demo .short{display:none}.demo .long{display:inline}}
+    .menu summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;width:2.5rem;height:2.5rem;border:1px solid #d6d3d1;border-radius:.375rem;background:#fff;color:#1c1917;cursor:pointer;box-shadow:0 1px 2px 0 rgb(0 0 0/.05)}
+    .menu summary::-webkit-details-marker{display:none}
+    .menu summary:hover{background:#fafaf9}
+    .menu .x,.menu[open] .bars{display:none}
+    .menu[open] .x{display:block}
+    .menu .panel{position:absolute;left:0;right:0;top:100%;background:#fff;border-top:1px solid #e7e5e4;border-bottom:1px solid #e7e5e4;padding:.5rem 1rem}
+    .menu .panel a{display:block;padding:.75rem 0;font-size:.9375rem;font-weight:500;color:#1c1917;text-decoration:none}
+    @media(min-width:1024px){.menu{display:none}}
     .content{flex:1;width:100%;padding:2.5rem 1rem}
     main{max-width:46rem;margin:0 auto;background:#fff;border-radius:.5rem;box-shadow:0 1px 2px 0 rgb(0 0 0/.05);padding:2rem}
     .site-footer{border-top:1px solid #e5e7eb;background:#fff;margin-top:2.5rem}
@@ -57,9 +75,11 @@
   </style>
 </head>
 <body>
-<!-- Static port of the marketing site's chrome (MarketingNav/MarketingFooter) — pure HTML/CSS,
-     deliberately no hamburger and no auth-aware button, because this page must stay zero-JS
-     and reachable without a login (Google Play requirement). -->
+<!-- Static port of the marketing site's chrome (MarketingNav/MarketingFooter) — pure HTML/CSS, because
+     this page must stay zero-JS and reachable without a login (Google Play requirement). The header
+     matches MarketingNav: the same four section links, Sign in, Request a demo (it opens the homepage's
+     demo form: LandingPage reads /#demo), and below 1024 px a native <details> menu, so it needs no
+     script. Change this block in all five static pages together (server/test/staticPages.int.test.js). -->
 <header class="site-header">
   <div class="bar">
     <a class="brand" href="/" aria-label="Doorline home">
@@ -67,13 +87,27 @@
       <span>Doorline</span>
     </a>
     <nav class="site-nav" aria-label="Primary">
-      <a href="/#turf">Turf</a>
-      <a href="/#field">Field app</a>
-      <a href="/#oversight">Oversight</a>
+      <a href="/#proof">Proof</a>
       <a href="/#reports">Reports</a>
-      <a href="/#how">How it works</a>
+      <a href="/#setup">Setup</a>
+      <a href="/#faq">FAQ</a>
     </nav>
-    <a class="signin" href="/login">Sign in</a>
+    <div class="nav-actions">
+      <a class="signin" href="/login">Sign in</a>
+      <a class="demo" href="/#demo"><span class="short">Demo</span><span class="long">Request a demo</span></a>
+      <details class="menu">
+        <summary aria-label="Menu">
+          <svg class="bars" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          <svg class="x" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </summary>
+        <nav class="panel" aria-label="Sections">
+          <a href="/#proof">Proof</a>
+          <a href="/#reports">Reports</a>
+          <a href="/#setup">Setup</a>
+          <a href="/#faq">FAQ</a>
+        </nav>
+      </details>
+    </div>
   </div>
 </header>
 <div class="content">
