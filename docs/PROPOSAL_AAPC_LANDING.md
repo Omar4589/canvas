@@ -762,3 +762,6 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
      months). No "free trial" (the owner offers first-time customers 7 days free, client by client, and
      bills each one himself, so it is not a blanket promise) and no "cancel anytime" or "no contract" (set
      by each ordering agreement) — MARKETING_SITE.md → the words we avoid.
+  7. The owner's trial rule (*"they can get a free trial if its first time using the platform … its client
+     to client basis"*): every risk-reversal line gains *"New to Doorline? Ask about a free trial."* —
+     an invitation to ask, never a blanket promise.

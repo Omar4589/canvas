@@ -15,7 +15,7 @@ export default function CtaBand() {
           <p className="mx-auto mt-4 max-w-[54ch] text-base text-stone-600">
             Bring a race you&apos;re working. We&apos;ll walk through the console and the field app on a
             live demo campaign, and set up yours the day you sign up. Setup is free, and billing starts
-            with your first knock.
+            with your first knock. New to Doorline? Ask about a free trial.
           </p>
           {/* Same stack-then-row treatment as the hero, so the two CTA rows behave identically
               on a phone instead of one wrapping raggedly and the other centring. */}

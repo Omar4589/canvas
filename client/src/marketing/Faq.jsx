@@ -53,11 +53,11 @@ const ITEMS = [
     // account manager's proposal. What everything-included buys us is the comparison — the
     // per-seat/support/storage/dashboard add-ons a consultant is used to pricing separately — and
     // the printed AAPC ad promises it, so no add-on may ever appear on the site. "Setup is free, and
-    // billing starts with your first knock" is the hero's, the closing band's and /aapc's sentence word
-    // for word: a campaign first out since Nov 5, 2026 bills from the day of its first field visit and
+    // billing starts with your first knock. New to Doorline? Ask about a free trial." are the hero's, the
+    // closing band's and /aapc's sentences word for word (the trial is client by client, so never promised): a campaign first out since Nov 5, 2026 bills from the day of its first field visit and
     // renews on that date (docs/BILLING.md); it said "the month of" while campaigns used calendar months.
     q: 'What does it cost?',
-    a: 'A flat monthly rate per campaign, sized to the race. Local races start at $300 per campaign, per month, with every canvasser, feature and door included. No per-seat fees, per-door charges or add-ons. Setup is free, and billing starts with your first knock. Request a demo and we\'ll quote your race.',
+    a: 'A flat monthly rate per campaign, sized to the race. Local races start at $300 per campaign, per month, with every canvasser, feature and door included. No per-seat fees, per-door charges or add-ons. Setup is free, and billing starts with your first knock. New to Doorline? Ask about a free trial. Request a demo and we\'ll quote your race.',
   },
 ];
 

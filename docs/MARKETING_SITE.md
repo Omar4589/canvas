@@ -36,13 +36,16 @@ without a call:
 
 The starting-price line under those buttons is **copy, not a third CTA** — it carries no link and
 opens nothing. Its job is to answer the question that otherwise closes the tab, so the demo
-requests that do arrive come from people who already know the number. It ends with the site's one
-risk-reversal sentence (since Nov 16): *"Setup is free, and billing starts with your first knock."* The
-same words close the **Get started** band's paragraph, sit under `/aapc`'s buttons and in its closing
-band, and end the FAQ's *What does it cost?* answer — one sentence, never reworded, so no page can
-promise more than another. It is exactly the billing rule: a campaign's setup months bill nothing, and it
-bills from its first field visit (monthly from that day, for a campaign first out since Nov 5, 2026 —
-[BILLING.md](BILLING.md)). Words that would promise more are in the table below.
+requests that do arrive come from people who already know the number. It ends with the site's
+risk-reversal (since Nov 16): *"Setup is free, and billing starts with your first knock. New to Doorline?
+Ask about a free trial."* The same two sentences close the **Get started** band's paragraph, sit under
+`/aapc`'s buttons and in its closing band, and close the FAQ's *What does it cost?* answer (before its
+*Request a demo*) — always together, never reworded, so no page can promise more than another. The first
+is exactly the billing rule: a campaign's setup months bill nothing, and it bills from its first field
+visit (monthly from that day, for a campaign first out since Nov 5, 2026 — [BILLING.md](BILLING.md)). The
+second says *ask about* because trials are real but decided client by client: the owner gives a
+first-time customer 7 days free, and one who keeps going after them, having knocked, pays; he sets up and
+bills every client himself. Words that would promise more are in the table below.
 
 There is deliberately **no "Download the app" button on the homepage**. Installing Doorline without
 an invitation gets you a sign-in screen you cannot get past, so a download button aimed at the
@@ -284,7 +287,7 @@ Rows added by the Phase 2 claim check (Nov 2026 — every new line checked again
 | "drops out of every count" (unknock) | a published client report keeps its numbers until refreshed | "drops out of every live count, and out of a client report when you refresh it" |
 | "We'll help you get a voter file" | Doorline never obtains or handles a voter file for anyone | "We'll connect you with a vendor" |
 | "We set up your first campaign on the demo call" | that would load a prospect's voter file before any agreement | "set up yours the day you sign up" |
-| "free trial", "try it before you commit", "risk-free" | trials are real but decided client by client (the owner, Nov 16: a first-time customer can have 7 days free, and one who keeps going after them, having knocked, pays; he sets up and bills every client himself), so a blanket promise would be false for some. The billing meter can't tell: it counts a trial's knocks like any other (statement.js reads the subscription only for its rate), and the owner decides what to invoice. And setup needs a signed-up account | "Setup is free, and billing starts with your first knock" |
+| "free trial", "try it before you commit", "risk-free" | trials are real but decided client by client (the owner, Nov 16: a first-time customer can have 7 days free, and one who keeps going after them, having knocked, pays; he sets up and bills every client himself), so a blanket promise would be false for some. The billing meter can't tell: it counts a trial's knocks like any other (statement.js reads the subscription only for its rate), and the owner decides what to invoice. And setup needs a signed-up account | "New to Doorline? Ask about a free trial." after "Setup is free, and billing starts with your first knock." |
 | "cancel anytime", "no contract", "no minimum" | how a customer ends service is set by their ordering agreement (terms.html §8, §13), which the code can't see; archiving stops a campaign's next renewal, but the month it's in has billed | nothing, until the owner confirms the terms |
 | "billing starts the month of your first knock" | written for calendar months; a campaign first out since Nov 5, 2026 bills from the day of its first visit | "billing starts with your first knock" |
 

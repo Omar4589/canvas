@@ -139,8 +139,10 @@ const AapcPage = () => {
                     Request a demo
                   </DemoButton>
                 </div>
-                {/* The risk-reversal, the homepage's sentence word for word (Hero.jsx says why). */}
-                <p className="mt-4 text-sm text-stone-600">Setup is free, and billing starts with your first knock.</p>
+                {/* The risk-reversal, the homepage's sentences word for word (Hero.jsx says why). */}
+                <p className="mt-4 text-sm text-stone-600">
+                  Setup is free, and billing starts with your first knock. New to Doorline? Ask about a free trial.
+                </p>
                 <p className="mt-1.5 text-sm text-stone-600">
                   Prefer email?{' '}
                   <a
@@ -182,6 +184,7 @@ const AapcPage = () => {
               </h2>
               <p className="mt-3 text-base text-stone-600">
                 Every canvasser and feature included. Setup is free, and billing starts with your first knock.
+                New to Doorline? Ask about a free trial.
               </p>
               <div className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-4 sm:max-w-none">
                 <DemoButton className={PRIMARY}>
