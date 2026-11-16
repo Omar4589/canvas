@@ -36,7 +36,13 @@ without a call:
 
 The starting-price line under those buttons is **copy, not a third CTA** — it carries no link and
 opens nothing. Its job is to answer the question that otherwise closes the tab, so the demo
-requests that do arrive come from people who already know the number.
+requests that do arrive come from people who already know the number. It ends with the site's one
+risk-reversal sentence (since Nov 16): *"Setup is free, and billing starts with your first knock."* The
+same words close the **Get started** band's paragraph, sit under `/aapc`'s buttons and in its closing
+band, and end the FAQ's *What does it cost?* answer — one sentence, never reworded, so no page can
+promise more than another. It is exactly the billing rule: a campaign's setup months bill nothing, and it
+bills from its first field visit (monthly from that day, for a campaign first out since Nov 5, 2026 —
+[BILLING.md](BILLING.md)). Words that would promise more are in the table below.
 
 There is deliberately **no "Download the app" button on the homepage**. Installing Doorline without
 an invitation gets you a sign-in screen you cannot get past, so a download button aimed at the
@@ -91,11 +97,13 @@ The form floats in the middle of the screen with the page dimmed behind it (sinc
 the window from top to bottom). On a computer it is two columns wide, so the whole form fits a laptop
 screen; on a phone or a short window it scrolls, and its top is never cut off. Beside the button it says
 *"Omar will get back to you within one business day. Prefer email? hello@doorline.app"* — on `/aapc`,
-*"I'll get back to you within one business day."* There is **no phone number anywhere on the site, on
+*"I'll get back to you within one business day. Prefer email? omar@doorline.app"* (Omar's own address
+on his own page since Nov 16; hello@ is for general questions). There is **no phone number anywhere on the site, on
 purpose**: scrapers (the owner, Nov 15).
 
 The buttons work even before the page has finished loading: until then a tap opens an email to
-`hello@doorline.app`; once the page is ready, the same tap opens the form.
+`hello@doorline.app` (`omar@doorline.app` on `/aapc`); once the page is ready, the same tap opens the
+form.
 
 Submitting it **saves the request** and emails the Doorline team. Saving comes first, so a failed
 email can no longer lose a lead; the request waits on the super-admin **Website** page either way,
@@ -112,8 +120,10 @@ The form used to be a `mailto:` link that opened your mail app. That did nothing
 reading the site in a browser with no mail app configured, which is most people — so the only way
 to buy Doorline silently failed for a large share of visitors.
 
-`hello@doorline.app` is still shown inside the dialog, under `/aapc`'s buttons and in the footer for
-anyone who would rather write their own email.
+An address is still shown for anyone who would rather write their own email: `hello@doorline.app`
+inside the homepage's dialog and in every page's footer **Contact** link, and `omar@doorline.app` under
+`/aapc`'s buttons and inside its dialog. Requests sent through the form are still emailed to hello@ (the
+Website page's inbox), whichever page they come from.
 
 ## The page loads as real HTML
 
@@ -139,7 +149,7 @@ Every number.*), its subhead and its three bullets word for word, a copy of its 
 card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem on Nov 17.
 Leave your name and I'll find you there, or we'll set a time after the event."*, switching on Nov 18 to
 *"Missed me at AAPC?…"*), **Find me at AAPC** (from Nov 18, **Book 15 minutes with me**) and **Request a
-demo**, with *"Prefer email? hello@doorline.app"* under them, the numbers (the homepage's band, larger
+demo**, with *"Prefer email? omar@doorline.app"* under them (his own address, since Nov 16), the numbers (the homepage's band, larger
 on a computer to catch the eye), three short blocks (Proof, Client reports, Many
 campaigns) and the price. It stays up after the event with the after-event line. Search engines are asked not to list it
 (it's an event page), and a link shared from it previews as Doorline's.
@@ -226,7 +236,8 @@ from the footer.
 - **No self-signup.** There is no "create account" anywhere, on the site or in the app.
 - **No pricing page, but the starting price is published** *(ruling revised Aug 2026 — it used to
   be "no price anywhere")*. Three places say it and no more: the line under the hero buttons
-  (**"Local races from $300 per campaign, per month. Every canvasser and feature included."**), the
+  (**"Local races from $300 per campaign, per month. Every canvasser and feature included."**, then the
+  risk-reversal sentence, which names no price), the
   **"What does it cost?"** FAQ entry, and the `offers` node in `client/index.html`'s JSON-LD (an
   `Offer` at 300 USD with a per-campaign, per-month unit). Nothing else is public: the tier card
   (District, Federal) is an account-manager document, and every negotiated org/campaign rate stays
@@ -273,6 +284,9 @@ Rows added by the Phase 2 claim check (Nov 2026 — every new line checked again
 | "drops out of every count" (unknock) | a published client report keeps its numbers until refreshed | "drops out of every live count, and out of a client report when you refresh it" |
 | "We'll help you get a voter file" | Doorline never obtains or handles a voter file for anyone | "We'll connect you with a vendor" |
 | "We set up your first campaign on the demo call" | that would load a prospect's voter file before any agreement | "set up yours the day you sign up" |
+| "free trial", "try it before you commit", "risk-free" | trials are real but decided client by client (the owner, Nov 16: a first-time customer can have 7 days free, and one who keeps going after them, having knocked, pays; he sets up and bills every client himself), so a blanket promise would be false for some. The billing meter can't tell: it counts a trial's knocks like any other (statement.js reads the subscription only for its rate), and the owner decides what to invoice. And setup needs a signed-up account | "Setup is free, and billing starts with your first knock" |
+| "cancel anytime", "no contract", "no minimum" | how a customer ends service is set by their ordering agreement (terms.html §8, §13), which the code can't see; archiving stops a campaign's next renewal, but the month it's in has billed | nothing, until the owner confirms the terms |
+| "billing starts the month of your first knock" | written for calendar months; a campaign first out since Nov 5, 2026 bills from the day of its first visit | "billing starts with your first knock" |
 
 Platform totals say **"door knocks"**, never "doors knocked" — the printed AAPC ad's wording.
 
@@ -475,8 +489,11 @@ Single sources of truth, and CTAs must read from them rather than hard-coding:
 - [`DemoRequest.jsx`](../client/src/marketing/DemoRequest.jsx) — `useDemoRequest().open()`, reached
   only through [`DemoButton.jsx`](../client/src/marketing/DemoButton.jsx). A DemoButton is a
   `mailto:` link in the markup, so a tap does something before the page hydrates (seconds on venue
-  Wi-Fi); once live, its click opens the dialog. The provider wraps each page; `/aapc` passes
-  `defaultSource="aapc"` and `askWhen`, so every control there books a meeting. The source a request
+  Wi-Fi); once live, its click opens the dialog. The link's address comes from the provider's context
+  (`email`: `WORDS[voice].email` — `CONTACT_EMAIL` for `third`, `FOUNDER_EMAIL` for `first`, both in
+  [`contact.js`](../client/src/marketing/contact.js)), the same address the dialog prints. The footer's
+  Contact link always uses `CONTACT_EMAIL`. The provider wraps each page; `/aapc` passes
+  `defaultSource="aapc"`, `askWhen` and `voice="first"`, so every control there books a meeting. The source a request
   sends is `pageSource() || options.source || defaultSource` — a tagged URL always wins. The dialog is a
   `fixed inset-0 overflow-y-auto` overlay around a `flex min-h-full items-center` wrapper that centers the
   panel (`max-w-xl`, a two-column form from `sm`): a panel taller than the window scrolls the overlay from

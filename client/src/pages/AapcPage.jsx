@@ -7,7 +7,7 @@ import NumbersStrip from '../marketing/NumbersStrip.jsx';
 import DemoButton from '../marketing/DemoButton.jsx';
 import SampleReport from '../marketing/SampleReport.jsx';
 import AapcMockupCard from '../marketing/AapcMockupCard.jsx';
-import { CONTACT_EMAIL } from '../marketing/contact.js';
+import { FOUNDER_EMAIL } from '../marketing/contact.js';
 
 // /aapc — the printed AAPC ad's own page (the owner's addendum 2 §4). The homepage banner links here
 // with ?src=home-banner; a request from this page carries that tag, or 'aapc' when the URL has none
@@ -16,7 +16,8 @@ import { CONTACT_EMAIL } from '../marketing/contact.js';
 // who land here, with no table to find him at) and from Nov 18 "Book 15 minutes with me"; both open the
 // booking form — When? and an optional mobile number, so he can text to meet — whose words follow the same
 // date (DemoRequest.jsx). Request a demo opens the plain demo form. No phone number of his on the page
-// (scrapers): the address under the buttons is the shared inbox. The homepage stays in the third person.
+// (scrapers): the address under the buttons is his own (contact.js FOUNDER_EMAIL, Nov 16). The homepage
+// stays in the third person.
 //
 // Prerendered with its own head and noindex (client/src/entry-prerender.jsx). The founder line
 // switches on Nov 18 by <html data-aapc-event> (marketing/aapc.js) — both lines are in the HTML,
@@ -138,13 +139,15 @@ const AapcPage = () => {
                     Request a demo
                   </DemoButton>
                 </div>
-                <p className="mt-4 text-sm text-stone-600">
+                {/* The risk-reversal, the homepage's sentence word for word (Hero.jsx says why). */}
+                <p className="mt-4 text-sm text-stone-600">Setup is free, and billing starts with your first knock.</p>
+                <p className="mt-1.5 text-sm text-stone-600">
                   Prefer email?{' '}
                   <a
-                    href={`mailto:${CONTACT_EMAIL}`}
+                    href={`mailto:${FOUNDER_EMAIL}`}
                     className="rounded font-semibold text-stone-900 underline transition-colors hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                   >
-                    {CONTACT_EMAIL}
+                    {FOUNDER_EMAIL}
                   </a>
                 </p>
               </div>
@@ -177,7 +180,9 @@ const AapcPage = () => {
               <h2 className="mx-auto max-w-2xl text-3xl font-extrabold tracking-tight text-stone-900 [text-wrap:balance] sm:text-4xl">
                 Local races from $300 per campaign, per month.
               </h2>
-              <p className="mt-3 text-base text-stone-600">Every canvasser and feature included.</p>
+              <p className="mt-3 text-base text-stone-600">
+                Every canvasser and feature included. Setup is free, and billing starts with your first knock.
+              </p>
               <div className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-4 sm:max-w-none">
                 <DemoButton className={PRIMARY}>
                   <BookLabel />

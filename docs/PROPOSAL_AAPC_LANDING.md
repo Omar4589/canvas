@@ -751,3 +751,14 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
   4. *"the control room shouldnt even count the demo"* — its Platform totals never did; the top cards
      (Organizations, Users, Active now, Today, and the phone's Campaigns) did, and now leave internal orgs
      out (PLATFORM.md).
+  5. *"change the email from hello@doorline.app to omar@doorline.app … the hello one is more for general
+     stuff"* — /aapc shows omar@doorline.app under its buttons, inside its booking form, and in the buttons'
+     before-loading mail links; the footer's Contact link and the homepage keep hello@. Requests still
+     arrive in hello@.
+  6. Risk-reversal (the owner's brief, Nov 16: make the calls to action feel low-risk with only what's
+     true): one sentence, *"Setup is free, and billing starts with your first knock."*, ends the homepage's
+     price line, the Get started paragraph and /aapc's closing band, and sits under /aapc's buttons; the
+     FAQ's cost answer now uses the same words (it said "the month of your first knock", from calendar
+     months). No "free trial" (the owner offers first-time customers 7 days free, client by client, and
+     bills each one himself, so it is not a blanket promise) and no "cancel anytime" or "no contract" (set
+     by each ordering agreement) — MARKETING_SITE.md → the words we avoid.

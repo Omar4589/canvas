@@ -122,10 +122,13 @@ export default function Hero() {
                 races pays three times, and "$300/month" would be the kind of surprise that sours a
                 first invoice. "Every canvasser and feature included" must stay true — the printed
                 AAPC ad promises "everything included", so nothing priced separately may appear
-                anywhere on the site. Tracks DEFAULT_RATE_CENTS in server/src/services/billing/rate.js. */}
+                anywhere on the site. Tracks DEFAULT_RATE_CENTS in server/src/services/billing/rate.js.
+                The last sentence is the risk-reversal (the owner, Nov 16), in the FAQ's own words:
+                setup months bill nothing and a campaign bills from its first field visit
+                (docs/BILLING.md). Never "free trial" or "cancel anytime" here (MARKETING_SITE.md). */}
             <p className="mt-4 text-sm text-stone-500">
               <span className="font-semibold text-stone-700">Local races from $300 per campaign, per month.</span>{' '}
-              Every canvasser and feature included.
+              Every canvasser and feature included. Setup is free, and billing starts with your first knock.
             </p>
             {/* The app half of the sentence is a real link now — this line was the only place
                 above the footer that mentioned iOS/Android, and it pointed nowhere. It is also

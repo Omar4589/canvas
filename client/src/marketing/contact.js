@@ -12,6 +12,12 @@
 
 export const CONTACT_EMAIL = 'hello@doorline.app';
 
+// Omar's own address, for /aapc: the page he signs, in his own voice, for people he'll meet at the
+// event (the owner, Nov 16: hello@ is for general stuff). It replaces CONTACT_EMAIL wherever the
+// page speaks as him (DemoRequest.jsx WORDS.first) — its "Prefer email?" line, the dialog, and
+// DemoButton's before-JavaScript mail link. The footer's Contact link stays general everywhere.
+export const FOUNDER_EMAIL = 'omar@doorline.app';
+
 /** `mailto:` for the plain "Contact" affordances — never for the primary demo CTA. */
 export function contactMailto() {
   return `mailto:${CONTACT_EMAIL}`;

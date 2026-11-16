@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { CONTACT_EMAIL } from './contact.js';
+import { CONTACT_EMAIL, FOUNDER_EMAIL } from './contact.js';
 import { isValidEmail } from '../lib/validators.js';
 import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN_AT_AAPC, WHEN_AFTER, SOURCE_PATTERN } from './demoOptions.js';
 import { aapcEventPhase } from './aapc.js';
@@ -52,6 +52,7 @@ const MEETING = '15 minutes';
 // signs (the provider's voice="first"; the owner's addendum 3 §7). A booking reads by the event's own
 // clock (aapc.js aapcEventPhase): through Nov 17 it's about finding him at the Post-Mortem, where he has no
 // table (the owner, Nov 15: "find me"); from Nov 18, a 15-minute call. `replyNote` sits beside the button.
+// `email` is the address each voice shows: the general one about Omar, his own in his words (Nov 16).
 const WORDS = {
   third: {
     book: {
@@ -69,6 +70,7 @@ const WORDS = {
     demoIntro: `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
     demoThanks: `${OWNER} will email you ${REPLY_WINDOW}.`,
     replyNote: `${OWNER} will get back to you ${REPLY_WINDOW}.`,
+    email: CONTACT_EMAIL,
   },
   first: {
     book: {
@@ -86,6 +88,7 @@ const WORDS = {
     demoIntro: `Tell me about your team and I'll reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
     demoThanks: `I'll email you ${REPLY_WINDOW}.`,
     replyNote: `I'll get back to you ${REPLY_WINDOW}.`,
+    email: FOUNDER_EMAIL,
   },
 };
 
@@ -449,8 +452,8 @@ const DemoDialog = ({ options, onClose }) => {
                 {error && (
                   <p className="rounded-lg bg-brand-50 px-3 py-2.5 text-[13px] text-brand-700 sm:col-span-2">
                     {error}{' '}
-                    <a href={`mailto:${CONTACT_EMAIL}`} className="font-semibold underline">
-                      {CONTACT_EMAIL}
+                    <a href={`mailto:${words.email}`} className="font-semibold underline">
+                      {words.email}
                     </a>
                   </p>
                 )}
@@ -469,10 +472,10 @@ const DemoDialog = ({ options, onClose }) => {
                   <p className="text-[13px] text-stone-500">
                     {words.replyNote} Prefer email?{' '}
                     <a
-                      href={`mailto:${CONTACT_EMAIL}`}
+                      href={`mailto:${words.email}`}
                       className="rounded font-semibold text-stone-700 underline transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                     >
-                      {CONTACT_EMAIL}
+                      {words.email}
                     </a>
                   </p>
                 </div>
@@ -527,7 +530,7 @@ export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = 
   }, []);
 
   return (
-    <DemoRequestContext.Provider value={{ open: openDialog }}>
+    <DemoRequestContext.Provider value={{ open: openDialog, email: (WORDS[voice] || WORDS.third).email }}>
       {children}
       {openWith && <DemoDialog options={openWith} onClose={closeDialog} />}
     </DemoRequestContext.Provider>
