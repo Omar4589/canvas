@@ -152,7 +152,7 @@ const AapcPage = () => {
             </div>
           </section>
 
-          <NumbersStrip centered />
+          <NumbersStrip />
 
           <section className="bg-white">
             <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-3.5 px-4 py-16 sm:px-6 sm:py-20 md:grid-cols-3 lg:px-8">

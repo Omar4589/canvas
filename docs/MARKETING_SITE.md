@@ -46,15 +46,17 @@ where they say "this is a real, published app" rather than "install this now."
 ## What's on the homepage
 
 Top to bottom (the AAPC brief's §7, Nov 2026): the AAPC banner (while it runs), the header, the hero,
-the **numbers** (three platform totals in red — door knocks, surveys, campaigns — dated small on the
-right; no client names since the owner's addendum 3, no voter-record count since Nov 2), **the problem** (four ways a door program goes
+the **numbers** (three platform totals in red — door knocks, surveys, campaigns — each ending in a plus,
+"and counting", centered in a short band with the date they were counted under them, the same on /aapc;
+no client names since the owner's addendum 3, no voter-record count since Nov 2, never an organizations
+count), **the problem** (four ways a door program goes
 wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit page and the map),
 **Client reports**, **Setup** (from the voter file to the first knock), the feature cards, the founder's
 note with the **Your data** list, the FAQ, and the closing band. The founder's note is Omar's own words,
 set as a quote in the site's usual type — semibold, inside quotation marks (a serif without them was tried
 on Nov 2 and dropped the next day) — signed *Omar Zumaya, Founder, Doorline*. The **Your data** list beside
-it is the same size as the quote (since Nov 15; it used to be smaller), in regular weight so the quote still
-leads. A monogram stands in for his photo until he sends one, and a
+it is in smaller type than the quote (it was set to the quote's size on Nov 15 and put back the next day:
+it looked off). A monogram stands in for his photo until he sends one, and a
 scan of his signature will sit above his name when he sends that. The FAQ shows each question on one line;
 a tap opens its answer and closes the one that was open (since Nov 15; it used to print every answer, a long
 scroll). The section links in the header are Proof · Reports · Setup · FAQ.
@@ -137,8 +139,8 @@ Every number.*), its subhead and its three bullets word for word, a copy of its 
 card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem on Nov 17.
 Leave your name and I'll find you there, or we'll set a time after the event."*, switching on Nov 18 to
 *"Missed me at AAPC?…"*), **Find me at AAPC** (from Nov 18, **Book 15 minutes with me**) and **Request a
-demo**, with *"Prefer email? hello@doorline.app"* under them, the numbers (centered here, and larger on a
-computer, to catch the eye — the owner, Nov 15), three short blocks (Proof, Client reports, Many
+demo**, with *"Prefer email? hello@doorline.app"* under them, the numbers (the homepage's band, larger
+on a computer to catch the eye), three short blocks (Proof, Client reports, Many
 campaigns) and the price. It stays up after the event with the after-event line. Search engines are asked not to list it
 (it's an event page), and a link shared from it previews as Doorline's.
 
@@ -428,15 +430,19 @@ four-claim strip and How it works are gone, but **their ids stay as aliases** (`
 `#how` on Setup; `#oversight` on Proof): `privacy.html`, `terms.html`, `app.html`,
 `delete-account.html` and `404.html` link to them, and the legal pages are owner-edited.
 
-Three components changed shape on Nov 15 (the owner's review):
+Two components changed shape on Nov 15 and 16 (the owner's reviews):
 
 - **`Faq`** renders each entry as a native `<details name="faq">`, so it folds with no script and works
   before hydration. The shared `name` keeps one answer open at a time where the browser supports it;
   an older browser lets several open, which is harmless. The plus turns into an × with `group-open:`.
-- **`NumbersStrip`** takes `centered`: `/aapc` passes it (centered text, `sm:text-5xl` numbers,
-  `sm:text-base` labels, the date centered); the homepage keeps the left-aligned strip with the date on the
-  right.
-- **`FounderNote`**'s **Your data** list is `text-xl sm:text-2xl` at regular weight, the quote's size.
+- **`NumbersStrip`** is one layout on both pages, with no props (the Nov 15 `centered` prop was /aapc's
+  alone; the owner asked for the homepage to match on Nov 16): centered, `py-8 sm:py-10` (it was
+  `py-12 sm:py-14` with `mt-8` above the date), numbers `text-[22px]` on a phone and `sm:text-5xl` above,
+  labels `sm:text-base`, the date centered under them. The component appends the plus, so `siteFacts.js`
+  keeps the bare counts. 22 px is the phone size because the plus made `126,978+` 106 px wide at 24 px in a
+  101 px column on a 360 px Android; at 22 px it is 97 px and fits from about 350 px up.
+- **`FounderNote`** is as it was before Nov 15: the **Your data** list at `text-[15px]` with 18 px checks
+  (set to the quote's size on Nov 15, reverted Nov 16).
 
 **The typeface.** `tailwind.config.js` asks for `InterVariable`, but `@fontsource-variable/inter`
 registers the family as `Inter Variable`, and `index.css` sets `body` to the system stack anyway, so
@@ -488,10 +494,13 @@ plain `#proof` — a `/#proof` would reload a tagged `/?src=…` and lose the ta
 
 - **Platform totals** (`PLATFORM_TOTALS`): refresh from `npm run migrate:platform-stats` in the Heroku
   Run console — without `--apply` it only reads — using its *"Would set the LIVE bucket to"* line
-  (customer organizations only; the Control Room's overview cards count demo campaigns, and its
-  lifetime panel banks deleted test campaigns). Publish the exact count or round it down — never up —
-  and date the caption; since Nov 15 the strip shows the owner's exact counts. The printed ad says
-  95,000+ door knocks and 23,000+ surveys, so never publish lower.
+  (customer organizations only, and only what they have today). Not the Control Room's **Platform
+  totals**: those leave the demo out too, but add the banked contribution of deleted orgs and campaigns —
+  on Nov 16 that was 5 deleted campaigns that never knocked a door, so the panel read 27 campaigns where
+  the live line read 22. Publish the exact count or round it down — never up — and date the caption;
+  the strip shows exact counts with a plus (since Nov 16; the component adds it). Never publish the
+  organizations count (the owner, Nov 16). The printed ad says 95,000+ door knocks and 23,000+ surveys,
+  so never publish lower.
 - **Client names**: none on the site since the owner's addendum 3 (the numbers strip's client line is
   gone). Any that come back need the client's written OK.
 - **The sample report** (`SAMPLE_REPORT`): `/r/<token>` and its password, set after the four steps in

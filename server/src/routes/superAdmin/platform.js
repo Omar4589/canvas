@@ -25,14 +25,50 @@ function startOfTodayUTC() {
   return d;
 }
 
+// Doorline's own demo/internal orgs: the born-immutable flag, or the billing status coupled to it —
+// the either-or the lifetime totals read (services/platform/platformStats.js isInternalOrg).
+const internalOrgIds = async () => {
+  const [flagged, billed] = await Promise.all([
+    Organization.distinct('_id', { isInternal: true }),
+    Subscription.distinct('organizationId', { status: 'internal' }),
+  ]);
+  return [...flagged, ...billed];
+};
+
 router.get('/platform-overview', async (req, res, next) => {
   try {
     const since = new Date(Date.now() - FIFTEEN_MIN_MS);
     const todayStart = startOfTodayUTC();
 
+    // The platform-wide numbers count customers only (the owner, Nov 16: the Control Room shouldn't
+    // count the demo). Rebuild demo day stages a "today" of knocks running up to the minute it was
+    // pressed, which used to read as real work in Today and Active now. The per-org rows still
+    // describe every org, the demo included: that list is where staff switch into it.
+    const internal = await internalOrgIds();
+    const internalSet = new Set(internal.map(String));
+    const customer = { organizationId: { $nin: internal } };
+
     // Platform-wide "active" filter: only count activity tied to active campaigns,
     // matching the campaign COUNT aggregation which already filters isActive:true.
-    const activeCampaignIds = await Campaign.distinct('_id', { isActive: true });
+    // The per-org rows read every org's; the totals read customers' only.
+    const activeCampaigns = await Campaign.find({ isActive: true }, { organizationId: 1 }).lean();
+    const activeCampaignIds = activeCampaigns.map((c) => c._id);
+    const customerCampaignIds = activeCampaigns
+      .filter((c) => !internalSet.has(String(c.organizationId)))
+      .map((c) => c._id);
+
+    // Accounts that exist only for the demo (its canvassers, the app-review logins): members of
+    // internal orgs and of nothing else. A super admin always counts: staff aren't the demo.
+    const inInternal = internal.length
+      ? await Membership.distinct('userId', { organizationId: { $in: internal } })
+      : [];
+    const alsoCustomer = new Set(
+      (inInternal.length
+        ? await Membership.distinct('userId', { userId: { $in: inInternal }, ...customer })
+        : []
+      ).map(String)
+    );
+    const demoOnlyUserIds = inInternal.filter((id) => !alsoCustomer.has(String(id)));
 
     const [
       orgsAgg,
@@ -47,9 +83,11 @@ router.get('/platform-overview', async (req, res, next) => {
       lastActivityByOrg,
     ] = await Promise.all([
       Organization.aggregate([
+        { $match: { _id: { $nin: internal } } },
         { $group: { _id: '$isActive', count: { $sum: 1 } } },
       ]),
       User.aggregate([
+        { $match: { $or: [{ _id: { $nin: demoOnlyUserIds } }, { isSuperAdmin: true }] } },
         {
           $group: {
             _id: null,
@@ -61,14 +99,15 @@ router.get('/platform-overview', async (req, res, next) => {
       ]),
       CanvassActivity.distinct('userId', {
         timestamp: { $gte: since },
-        campaignId: { $in: activeCampaignIds },
+        campaignId: { $in: customerCampaignIds },
         via: { $ne: 'bulk' }, // an admin's bulk mark isn't field activity
       }),
       Campaign.aggregate([
+        { $match: customer },
         { $group: { _id: '$isActive', count: { $sum: 1 } } },
       ]),
       CanvassActivity.aggregate([
-        { $match: { timestamp: { $gte: todayStart }, campaignId: { $in: activeCampaignIds } } },
+        { $match: { timestamp: { $gte: todayStart }, campaignId: { $in: customerCampaignIds } } },
         { $group: { _id: '$actionType', count: { $sum: 1 } } },
       ]),
       Organization.find().sort({ createdAt: -1 }).lean(),

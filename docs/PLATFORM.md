@@ -48,8 +48,11 @@ so "signed out then in" and "session expired then in" landed in different places
 
 - **Control Room** — the platform's home page: headline totals (organizations, users, super admins,
   campaigns), **who's active right now** (canvassers who logged something in the last 15 minutes),
-  **today's activity** (doors knocked, surveys, lit drops — across every org), and a table of every
-  organization with its members, campaigns, who's live, and when it was last active. Alongside it, a
+  **today's activity** (doors knocked, surveys, lit drops — across every customer org), and a table of every
+  organization with its members, campaigns, who's live, and when it was last active. **None of the
+  headline numbers count Doorline's own demo or other internal orgs** (since Nov 16 — a demo rebuild
+  used to show up as a day of real work); those orgs still have their row in the table, marked
+  Internal, with their own activity, because that's where you switch into them. Alongside it, a
   **live activity feed** streams recent door events (Not home / Wrong address / **Refused** / No
   soliciting / Not a target voter / **Restricted** / Survey / Lit drop) from across all orgs. Two
   more blocks (moved here from Support
@@ -287,7 +290,8 @@ data**, never a customer's. Because there's no customer information inside one, 
 is set **when the org is created** (and only by the highest, "break-glass" tier of staff); **no screen
 or API request can add it to an existing customer org afterward** — the only remaining paths are
 operator-run maintenance scripts on the server itself, which sit outside the app entirely (Part 2 lists
-each one). An internal org is permanently free and off the books. So the grant-and-log requirement
+each one). An internal org is permanently free and off the books, and none of the Control Room's numbers
+count it. So the grant-and-log requirement
 above always applies to **your** organization; the carve-out reaches only Doorline's own practice data.
 
 ---
@@ -409,6 +413,19 @@ customer owns.
   explicit `MemoryStore` so state is readable, not just blind-clearable. Same per-process caveat as
   clearing — one dyno's view, reset on redeploy; the response says `scope: 'this-process'` and the UI
   prints "on this server". The env allowlist stays the durable fix.
+- **`platform-overview`'s `totals` count customers only** (since 2026-11-16, the owner: the Control Room
+  shouldn't count the demo). An org is internal by the lifetime totals' either-or — `Organization.isInternal`
+  or a `Subscription` in `'internal'` (`internalOrgIds` in
+  [platform.js](../server/src/routes/superAdmin/platform.js)) — and internal orgs are left out of
+  `orgs` and `campaigns`, their campaigns' activity out of `activeNow` and `today`, and `users` drops the
+  accounts whose every membership is in an internal org (the demo's canvassers and app-review logins;
+  a super admin always counts). Before this, Rebuild demo day — which stages a "today" of knocks up to
+  the minute it was pressed — read as real work in Today and Active now. The `organizations[]` rows are
+  untouched: every org, internal included, with its own member, campaign, active-now and last-activity
+  figures, since that list is where staff switch into the demo. Same shape, so already-shipped phones
+  read it unchanged; the ⓘ copy (`OVERVIEW_HELP` in `platformStatsMeta.js`, web and mobile) says so, and
+  the phone's copy arrives with its next update. Pinned by
+  [test/platformOverview.int.test.js](../server/test/platformOverview.int.test.js).
 - **`platform-overview`** aggregates platform-wide but counts only activity tied to **active** campaigns
   (matching the campaign count). "Today" is a UTC-day window; "active now" is a 15-minute window of
   distinct `userId`s. `today.doorsKnocked` sums the door actions in `ACTION_DOOR` — which **includes

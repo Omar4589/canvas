@@ -6,14 +6,16 @@
 // only. The printed AAPC ad says 95,000+ door knocks and 23,000+ surveys, so a refresh must never
 // publish lower than that. "Door knocks", never "doors knocked" (the ad's wording). Three numbers, all
 // work done: voter records came out on Nov 2 (records loaded aren't work, and read badly to a buyer who
-// cares about data). Exact counts since the owner's post-Election-Day numbers (Nov 15): change the numbers
-// and `asOf` together. The labels stay the printed ad's ("door knocks logged", "surveys taken").
+// cares about data). Exact counts since the owner's post-Election-Day numbers: change the numbers and
+// `asOf` together (the strip adds the plus). The labels stay the printed ad's ("door knocks logged",
+// "surveys taken"). Never an organizations count (the owner, Nov 16). Campaigns are the LIVE line's too:
+// the Control Room's lifetime 27 on Nov 16 added 5 deleted campaigns that never knocked a door.
 export const PLATFORM_TOTALS = {
-  asOf: 'Nov 15, 2026',
+  asOf: 'Nov 16, 2026',
   items: [
-    { value: '126,936', label: 'door knocks logged' },
-    { value: '29,840', label: 'surveys taken' },
-    { value: '27', label: 'campaigns' },
+    { value: '126,978', label: 'door knocks logged' },
+    { value: '29,847', label: 'surveys taken' },
+    { value: '22', label: 'campaigns' },
   ],
 };
 

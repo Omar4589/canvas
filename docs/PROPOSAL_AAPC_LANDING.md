@@ -738,3 +738,16 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
   7. *"what do you think about the common questions section.. too long and scrolly?"* — kept, made
      collapsible: one question per line, one answer open at a time.
 
+- **Follow-ups, Nov 16 (the owner):**
+  1. The numbers strip is centered on the homepage too, the same band as /aapc's (larger on a computer),
+     shorter (*"lessen the height … theres alot of white space"*), and every number ends in a plus
+     (*"so its like 'and counting'"*), as the printed ad's do.
+  2. *"make it back to what it was"* — the founder section's **Your data** list is back to its pre-Nov 15
+     size (item 6 of Nov 15 undone).
+  3. Totals from the owner's `migrate:platform-stats` dry run, the *"Would set the LIVE bucket to"* line:
+     126,978 door knocks, 29,847 surveys, 22 campaigns, as of Nov 16; never the organizations count. Nov 15's
+     27 came from the Control Room's Platform totals, which leave the demo out but add the banked deleted
+     campaigns (5, none of which knocked a door).
+  4. *"the control room shouldnt even count the demo"* — its Platform totals never did; the top cards
+     (Organizations, Users, Active now, Today, and the phone's Campaigns) did, and now leave internal orgs
+     out (PLATFORM.md).

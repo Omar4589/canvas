@@ -36,18 +36,19 @@ export const PLATFORM_TOTALS = [
   },
 ];
 
-// The Control Room's operational overview cards (GET /super-admin/platform-overview).
+// The Control Room's operational overview cards (GET /super-admin/platform-overview). Customers only
+// since Nov 16: none of them counts Doorline's internal/demo orgs (the per-org cards still list them).
 export const OVERVIEW_HELP = {
   orgs:
-    'Every organization on the platform — active and deactivated — INCLUDING Doorline’s own internal/demo orgs. An operational count, not the lifetime total below (which excludes internal orgs and remembers deleted ones).',
+    'Every customer organization on the platform, active and deactivated. Doorline’s own internal/demo orgs are left out (they still appear in the organization list, marked Internal). An operational count, not the lifetime total below (which also remembers deleted orgs).',
   users:
-    'Every user account on the platform, whatever orgs they belong to. “Active” is the account flag, not recent activity; “super” counts super admins.',
+    'Every user account on the platform, whatever orgs they belong to, except accounts that belong only to Doorline’s internal/demo orgs (the demo’s canvassers and app-review logins). Staff always count. “Active” is the account flag, not recent activity; “super” counts super admins.',
   activeNow:
-    'Distinct canvassers who logged a door action in the past 15 minutes on an active campaign. Admin bulk marks don’t count. Includes the demo org — it lights up after “Refresh demo day”.',
+    'Distinct canvassers who logged a door action in the past 15 minutes on an active customer campaign. Admin bulk marks don’t count, and neither does the demo org: after “Rebuild demo day” its activity shows on its own org card, not here.',
   today:
-    'Door actions since midnight UTC (not your local midnight), on active campaigns across all orgs: not-home, wrong address, refused, no soliciting, not a target voter, surveys, lit drops. Includes admin bulk marks; “restricted” doors are tallied separately, never as knocks.',
+    'Door actions since midnight UTC (not your local midnight), on active customer campaigns: not-home, wrong address, refused, no soliciting, not a target voter, surveys, lit drops. Includes admin bulk marks; leaves out the demo org; “restricted” doors are tallied separately, never as knocks.',
   campaigns:
-    'Every campaign across every organization — archived ones included in the total, with the currently-active count alongside. Same population as the Orgs card (internal/demo orgs included), so the two can be read together.',
+    'Every campaign in a customer organization — archived ones included in the total, with the currently-active count alongside. Same population as the Orgs card (internal/demo orgs left out), so the two can be read together.',
 };
 
 export const TOTALS_INTRO =

@@ -41,11 +41,10 @@ const FounderNote = () => (
       </figure>
       <div>
         <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-brand-600 lg:text-sm">Your data</h2>
-        {/* The list in the quote's size (the owner, Nov 15), at regular weight so the quote still leads. */}
-        <ul className="mt-5 grid gap-4">
+        <ul className="mt-5 grid gap-3.5">
           {TRUST.map((t) => (
-            <li key={t} className="flex gap-3 text-xl leading-relaxed text-stone-900 sm:text-2xl sm:leading-relaxed">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="mt-1.5 shrink-0 text-brand-600 sm:mt-2" aria-hidden="true">
+            <li key={t} className="flex gap-2.5 text-[15px] text-stone-900">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-brand-600" aria-hidden="true">
                 <path d="M5 12.5l4.5 4.5L19 7.5" />
               </svg>
               {t}
@@ -55,7 +54,7 @@ const FounderNote = () => (
         {/* A full page load: /privacy is a static document, not a React route. */}
         <a
           href="/privacy"
-          className="mt-6 inline-flex items-center gap-1.5 rounded text-base font-semibold text-brand-700 sm:text-lg transition-colors hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+          className="mt-6 inline-flex items-center gap-1.5 rounded text-[15px] font-semibold text-brand-700 transition-colors hover:text-brand-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
         >
           Privacy policy
           <span aria-hidden="true">→</span>
