@@ -4720,6 +4720,11 @@ The rewrite added hard, checkable claims. Any change touching these paths must r
       - **`/aapc` is counted** like the homepage (`PRERENDERED_PAGES`), one more `path` value.
       - **A new source label, `internal`**: a request whose `Sec-Fetch-Site` header says it came from one
         of our own pages. Still a label, nothing about the visitor; tests in `test/siteVisits.test.js`.
+      - *[2026-11-20: `/aapc` retired after the event (the owner). Less is collected, not more: no form asks
+        for a mobile number or When? any more (`DemoRequest.jsx` lost its booking mode). The requests that
+        have a `phone` keep it until their own 24-month TTL, and the route still accepts both fields. `/aapc`
+        is no longer counted — its address 302s to `/` (`app.js` `RETIRED_PAGES`), which counts the visit
+        as usual; its past rows stay. The Demo requests paragraph stays true as written; no policy edit.]*
 53. **[v7 2026-11-01 — AAPC landing Phase 2: the public sample report, and a read-only import-timing
     report. Committed with Phase 2. No new data collected, no new recipient, no subprocessor; one
     exposure that is ours, not a customer's.]**

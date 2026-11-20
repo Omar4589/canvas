@@ -767,3 +767,15 @@ Replace "i360, L2, Data Trust, the state or your client" with "any major vendor"
      an invitation to ask, never a blanket promise.
   8. The numbers' date line moves to the band's bottom-right corner, smaller, so it takes nothing from the
      numbers (the owner: *"so it doenst get any attention away from the stats"*).
+
+### Retired, Nov 20
+
+The owner, after the event: *"we are past nov 17, the post mortem.. we can remove the page now and all."* The
+`/aapc` page, the homepage banner, the date switch behind them (the inline `<head>` script, `data-aapc`
+attributes and their CSS) and the booking form only `/aapc` used (When?, the mobile number, Omar's voice and
+address) are removed. `/aapc` now 302s to the homepage (`app.js` `RETIRED_PAGES`), so a shared link still
+lands; the printed ad's QR code always went to the homepage. Kept as history: the Website page's AAPC chart
+line (`AAPC.day`, all that's left in `aapc.js`), its labels for `/aapc` visits and `home-banner`, the
+*AAPC event* answer to *How did you hear about us?*, and the When and Mobile answers on old requests (the
+server still accepts both fields). The banner was due to switch itself off on Nov 25 anyway. Details:
+MARKETING_SITE.md → *The AAPC page, retired* and *The AAPC dates (retired)*.

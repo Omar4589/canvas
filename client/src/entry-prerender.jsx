@@ -3,8 +3,6 @@ import { StaticRouter } from 'react-router-dom/server';
 import { QueryClient } from '@tanstack/react-query';
 import AppTree from './AppTree.jsx';
 import LandingPage from './pages/LandingPage.jsx';
-import AapcPage from './pages/AapcPage.jsx';
-import { AAPC, aapcPhaseScript } from './marketing/aapc.js';
 
 // Build-time entry: `vite build --ssr src/entry-prerender.jsx --outDir .ssr`, then
 // client/scripts/prerender.js renders each page below to dist/.prerendered/<file>, which
@@ -17,27 +15,10 @@ import { AAPC, aapcPhaseScript } from './marketing/aapc.js';
 // source path as the client build's manifest names it, so the script can preload exactly that chunk.
 //
 // `head` (optional) replaces index.html's page-head block for that page. Without one, the page keeps
-// the shell's — the homepage's — head.
+// the shell's — the homepage's — head. (/aapc, the one page that had its own — noindex, a
+// self-canonical — was retired on 2026-11-20; docs/MARKETING_SITE.md → "Adding a prerendered page".)
 export const PAGES = {
   landing: { path: '/', file: 'index.html', module: 'src/pages/LandingPage.jsx', Component: LandingPage },
-  aapc: {
-    path: '/aapc',
-    file: 'aapc.html',
-    module: 'src/pages/AapcPage.jsx',
-    Component: AapcPage,
-    // An event page, not a search landing page: noindex, with a self-canonical so a search engine can
-    // never fold it into the homepage (or the homepage's canonical into it).
-    head: {
-      title: 'Doorline at the AAPC Election Post-Mortem',
-      description:
-        'Meet Omar at the AAPC Election Post-Mortem on Nov 17, or book 15 minutes after. Doorline: GPS-stamped knocks, numbers by pass, book and canvasser, and client reports shared by private link.',
-      url: 'https://doorline.app/aapc',
-      robots: 'noindex',
-      ogTitle: 'Doorline — Every door. Every pass. Every number.',
-      ogDescription:
-        'Simple for your canvassers. Total visibility for you. Book 15 minutes with Omar at the AAPC Election Post-Mortem, or after.',
-    },
-  },
 };
 
 export const render = (name) => {
@@ -51,7 +32,3 @@ export const render = (name) => {
     />
   );
 };
-
-// The AAPC date switch, inlined into <head> before first paint (marketing/aapc.js). Null while /aapc
-// isn't live — the banner isn't in the page then either.
-export const headScript = () => (AAPC.pageLive ? aapcPhaseScript() : null);

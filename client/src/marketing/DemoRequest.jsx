@@ -1,12 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { CONTACT_EMAIL, FOUNDER_EMAIL } from './contact.js';
+import { CONTACT_EMAIL } from './contact.js';
 import { isValidEmail } from '../lib/validators.js';
-import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN_AT_AAPC, WHEN_AFTER, SOURCE_PATTERN } from './demoOptions.js';
-import { aapcEventPhase } from './aapc.js';
+import { ROLES, TEAM_SIZES, HEARD_ABOUT, SOURCE_PATTERN } from './demoOptions.js';
 
 // The demo request — the site's ONLY conversion action, and the single source of truth for it.
-// Every "Request a demo" control (nav, hero, cta band, /aapc) is a DemoButton (DemoButton.jsx), which
+// Every "Request a demo" control (nav, hero, cta band) is a DemoButton (DemoButton.jsx), which
 // calls open() from useDemoRequest() — the same way every auth CTA reads from useAuthCta(). Many
 // buttons, one dialog, one form. The footer's "Contact" is deliberately NOT one of them — it stays a
 // plain mailto, the escape hatch for someone who'd rather write their own email.
@@ -21,16 +20,17 @@ import { aapcEventPhase } from './aapc.js';
 // Every request is saved on the server as well as emailed (server/src/routes/public/demoRequest.js),
 // with the ?src= tag and path of the page it came from — the Website page in the super-admin console
 // lists them.
+//
+// The booking form /aapc used — When?, an optional mobile number, Omar's own voice and address — came
+// down with that page on 2026-11-20. The server still accepts `when` and `phone`, and the Website page
+// still shows them on the requests that carry them.
 
 const DemoRequestContext = createContext(null);
 
 /**
  * open(options) — show the demo dialog. Used by every "Request a demo" control on the marketing site.
  *   · source: an attribution tag for this one control. The page's own ?src= tag always wins over it,
- *     and it wins over the provider's defaultSource ('aapc' on /aapc).
- *   · askWhen: also ask "When?" (and offer a mobile number) — /aapc's "15 minutes at the event or
- *     after". Defaults to the provider's askWhen, so /aapc's controls ask unless one says otherwise
- *     (its Request a demo passes askWhen: false).
+ *     and it wins over the provider's defaultSource.
  */
 export const useDemoRequest = () => {
   const ctx = useContext(DemoRequestContext);
@@ -44,53 +44,10 @@ const OWNER = 'Omar';
 const REPLY_WINDOW = 'within one business day';
 const WALKTHROUGH = '20-minute';
 const SCHEDULING_URL = null;
-// A booking (any dialog that asks When?) is a 15-minute meeting, at the event or after. There's no
-// table at AAPC, so Omar emails or texts to set the time — hence the optional mobile number.
-const MEETING = '15 minutes';
-
-// The dialog's words, in two voices: about Omar on the homepage, and Omar's own on /aapc, whose page he
-// signs (the provider's voice="first"; the owner's addendum 3 §7). A booking reads by the event's own
-// clock (aapc.js aapcEventPhase): through Nov 17 it's about finding him at the Post-Mortem, where he has no
-// table (the owner, Nov 15: "find me"); from Nov 18, a 15-minute call. `replyNote` sits beside the button.
-// `email` is the address each voice shows: the general one about Omar, his own in his words (Nov 16).
-const WORDS = {
-  third: {
-    book: {
-      before: {
-        title: `Book ${MEETING} with ${OWNER}`,
-        intro: `Book ${MEETING} with ${OWNER}, at the event or after. He'll email or text you to set a time.`,
-        thanks: `${OWNER} will email or text you to set a time.`,
-      },
-      after: {
-        title: `Book ${MEETING} with ${OWNER}`,
-        intro: `Book ${MEETING} with ${OWNER}. He'll email or text you to set a time.`,
-        thanks: `${OWNER} will email or text you to set a time.`,
-      },
-    },
-    demoIntro: `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
-    demoThanks: `${OWNER} will email you ${REPLY_WINDOW}.`,
-    replyNote: `${OWNER} will get back to you ${REPLY_WINDOW}.`,
-    email: CONTACT_EMAIL,
-  },
-  first: {
-    book: {
-      before: {
-        title: "Let's meet at AAPC",
-        intro: "I'll be at the Post-Mortem on Nov 17. Leave your details and I'll email or text you to find a time to meet there, or after the event.",
-        thanks: "I'll email or text you to find a time to meet.",
-      },
-      after: {
-        title: `Book ${MEETING} with me`,
-        intro: `Book ${MEETING} with me and I'll email or text you to set a time.`,
-        thanks: "I'll email or text you to set a time.",
-      },
-    },
-    demoIntro: `Tell me about your team and I'll reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`,
-    demoThanks: `I'll email you ${REPLY_WINDOW}.`,
-    replyNote: `I'll get back to you ${REPLY_WINDOW}.`,
-    email: FOUNDER_EMAIL,
-  },
-};
+const DEMO_INTRO = `Tell us about your team. ${OWNER} will reply ${REPLY_WINDOW} to set up a ${WALKTHROUGH} walkthrough.`;
+const DEMO_THANKS = `${OWNER} will email you ${REPLY_WINDOW}.`;
+// Beside the button.
+const REPLY_NOTE = `${OWNER} will get back to you ${REPLY_WINDOW}.`;
 
 // Neutral focus on the fields: a red ring reads as an error on a form. Buttons keep the brand ring.
 const FIELD_CLASS =
@@ -105,9 +62,9 @@ const IDLE = 'idle';
 const SENDING = 'sending';
 const SENT = 'sent';
 
-const EMPTY = { name: '', email: '', organization: '', role: '', teamSize: '', heardAbout: '', when: '', phone: '', message: '' };
+const EMPTY = { name: '', email: '', organization: '', role: '', teamSize: '', heardAbout: '', message: '' };
 
-// The page's own ?src= tag, if it carries a valid one (the AAPC banner links /aapc?src=home-banner).
+// The page's own ?src= tag, if it carries a valid one (a tagged link, say /?src=linkedin).
 const pageSource = () => {
   try {
     const src = (new URLSearchParams(window.location.search).get('src') || '').trim().toLowerCase();
@@ -115,15 +72,6 @@ const pageSource = () => {
   } catch {
     return null;
   }
-};
-
-// A number someone can be texted on: 7 to 15 digits, with the usual separators. Optional — blank passes.
-// The server applies the same rule (routes/public/demoRequest.js).
-const phoneProblem = (raw) => {
-  const v = raw.trim();
-  if (!v) return false;
-  const digits = v.replace(/\D/g, '');
-  return /[^0-9+().\-\s]/.test(v) || digits.length < 7 || digits.length > 15;
 };
 
 const Select = ({ id, label, value, onChange, options, display = (o) => o }) => (
@@ -155,20 +103,12 @@ const DemoDialog = ({ options, onClose }) => {
   const honeypotRef = useRef(null);
   const openedAt = useRef(Date.now());
 
-  // "At AAPC, Nov 17" is offered through the event day itself — the event's own clock, not the banner's
-  // window (marketing/aapc.js aapcEventPhase).
-  const whenOptions = aapcEventPhase() === 'before' ? [WHEN_AT_AAPC, WHEN_AFTER] : [WHEN_AFTER];
-  const booking = options.askWhen;
-  const words = WORDS[options.voice] || WORDS.third;
-  const book = words.book[aapcEventPhase()];
-
   const set = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
   const problem =
     !values.name.trim() ? 'name'
     : !isValidEmail(values.email) ? 'email'
     : !values.organization.trim() ? 'organization'
-    : booking && phoneProblem(values.phone) ? 'phone'
     : null;
 
   // Escape to close + a Tab loop that can't leave the dialog. Both listeners are removed on
@@ -236,11 +176,9 @@ const DemoDialog = ({ options, onClose }) => {
           role: values.role,
           teamSize: values.teamSize,
           heardAbout: values.heardAbout,
-          when: booking ? values.when : '',
-          phone: booking ? values.phone.trim() : '',
           message: values.message.trim(),
-          // A tagged arrival (/aapc?src=home-banner) always wins; then this control's own tag; then the
-          // page's default ('aapc' on /aapc).
+          // A tagged arrival (/?src=linkedin) always wins; then this control's own tag; then the page's
+          // default.
           source: pageSource() || options.source || options.defaultSource || '',
           page: window.location.pathname,
           company: honeypotRef.current?.value || '',
@@ -299,7 +237,7 @@ const DemoDialog = ({ options, onClose }) => {
                 Thanks, {firstName}.
               </h2>
               <p className="mt-3 text-[15px] text-stone-600">
-                {booking ? book.thanks : words.demoThanks}
+                {DEMO_THANKS}
               </p>
               <div className="mt-6 flex flex-wrap items-center gap-3">
                 {SCHEDULING_URL && (
@@ -328,10 +266,10 @@ const DemoDialog = ({ options, onClose }) => {
           ) : (
             <>
               <h2 id="demo-dialog-title" className="pr-10 text-2xl font-extrabold tracking-tight text-stone-900">
-                {booking ? book.title : 'See Doorline run your next canvass'}
+                See Doorline run your next canvass
               </h2>
               <p className="mt-2 text-[15px] text-stone-600">
-                {booking ? book.intro : words.demoIntro}
+                {DEMO_INTRO}
               </p>
 
               <form onSubmit={onSubmit} noValidate className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-end">
@@ -407,30 +345,6 @@ const DemoDialog = ({ options, onClose }) => {
                   onChange={set('heardAbout')}
                   options={HEARD_ABOUT}
                 />
-                {booking && (
-                  <>
-                    <Select id="demo-when" label="When?" value={values.when} onChange={set('when')} options={whenOptions} />
-                    <div>
-                      <label htmlFor="demo-phone" className={LABEL_CLASS}>
-                        Mobile number (for a text) {OPTIONAL}
-                      </label>
-                      <input
-                        id="demo-phone"
-                        name="phone"
-                        type="tel"
-                        inputMode="tel"
-                        autoComplete="tel"
-                        value={values.phone}
-                        onChange={set('phone')}
-                        className={FIELD_CLASS}
-                      />
-                      {touched && problem === 'phone' && (
-                        <p className="mt-1.5 text-[13px] text-brand-600">Please enter a number we can text, or leave it blank.</p>
-                      )}
-                    </div>
-                  </>
-                )}
-
                 <div className="sm:col-span-2">
                   <label htmlFor="demo-message" className={LABEL_CLASS}>
                     Anything else? {OPTIONAL}
@@ -446,14 +360,14 @@ const DemoDialog = ({ options, onClose }) => {
                   />
                 </div>
 
-                {touched && problem && problem !== 'email' && problem !== 'phone' && (
+                {touched && problem && problem !== 'email' && (
                   <p className="text-[13px] text-brand-600 sm:col-span-2">Please fill in your {problem}.</p>
                 )}
                 {error && (
                   <p className="rounded-lg bg-brand-50 px-3 py-2.5 text-[13px] text-brand-700 sm:col-span-2">
                     {error}{' '}
-                    <a href={`mailto:${words.email}`} className="font-semibold underline">
-                      {words.email}
+                    <a href={`mailto:${CONTACT_EMAIL}`} className="font-semibold underline">
+                      {CONTACT_EMAIL}
                     </a>
                   </p>
                 )}
@@ -464,18 +378,18 @@ const DemoDialog = ({ options, onClose }) => {
                     disabled={status === SENDING}
                     className="inline-flex shrink-0 items-center justify-center rounded-lg bg-brand-600 px-5 py-3 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:opacity-60"
                   >
-                    {status === SENDING ? 'Sending…' : booking ? 'Send' : 'Request a demo'}
+                    {status === SENDING ? 'Sending…' : 'Request a demo'}
                   </button>
                   {/* When they'll hear back, then the address: some people would rather write their own
                       email, and the old mailto CTA was the only way they knew to reach us. No phone
                       number on the page, on purpose (scrapers — the owner, Nov 15). */}
                   <p className="text-[13px] text-stone-500">
-                    {words.replyNote} Prefer email?{' '}
+                    {REPLY_NOTE} Prefer email?{' '}
                     <a
-                      href={`mailto:${words.email}`}
+                      href={`mailto:${CONTACT_EMAIL}`}
                       className="rounded font-semibold text-stone-700 underline transition-colors hover:text-stone-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                     >
-                      {words.email}
+                      {CONTACT_EMAIL}
                     </a>
                   </p>
                 </div>
@@ -502,10 +416,8 @@ export const OpenDemoFromLink = () => {
   return null;
 };
 
-// defaultSource: the tag a request from this page carries when its URL has none ('aapc' on /aapc).
-// askWhen: whether the page's controls book a meeting (When? + mobile number) unless one says otherwise —
-// /aapc. voice: 'third' (about Omar, the homepage) or 'first' (Omar's own words, /aapc).
-export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = false, voice = 'third' }) => {
+// defaultSource: the tag a request from this page carries when its URL has none.
+export const DemoRequestProvider = ({ children, defaultSource = null }) => {
   // null = closed; otherwise the options open() was called with.
   const [openWith, setOpenWith] = useState(null);
   // The control that opened the dialog, so focus goes back where it came from on close —
@@ -518,9 +430,9 @@ export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = 
     (opts) => {
       invoker.current = document.activeElement;
       const o = opts && typeof opts === 'object' && !('nativeEvent' in opts) ? opts : {};
-      setOpenWith({ source: o.source || null, defaultSource, askWhen: o.askWhen ?? askWhen, voice });
+      setOpenWith({ source: o.source || null, defaultSource });
     },
-    [defaultSource, askWhen, voice]
+    [defaultSource]
   );
 
   const closeDialog = useCallback(() => {
@@ -530,7 +442,7 @@ export const DemoRequestProvider = ({ children, defaultSource = null, askWhen = 
   }, []);
 
   return (
-    <DemoRequestContext.Provider value={{ open: openDialog, email: (WORDS[voice] || WORDS.third).email }}>
+    <DemoRequestContext.Provider value={{ open: openDialog }}>
       {children}
       {openWith && <DemoDialog options={openWith} onClose={closeDialog} />}
     </DemoRequestContext.Provider>

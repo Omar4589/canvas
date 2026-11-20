@@ -14,8 +14,9 @@ import { ROLES, TEAM_SIZES, HEARD_ABOUT, WHEN, SOURCE_PATTERN } from '../../serv
 // this page is written for), so the single entrance to a sales-led funnel failed invisibly.
 //
 // WHAT THIS COLLECTS, and why it is bounded the way it is: a name, work email, organization, a few
-// optional selects (role, team size, how they heard of us, and on /aapc when they'd like to meet), an
-// optional mobile number (only when the form books a meeting — Omar texts to set the time) and
+// optional selects (role, team size, how they heard of us; /aapc's booking form also asked when they'd
+// like to meet), an optional mobile number (only a booking asked it — Omar texted to set the time; no
+// form has asked for either since /aapc came down on 2026-11-20, but both are still accepted) and
 // optional free text, volunteered by a member of the public who is not a user, not a voter, and not a
 // customer — plus which page and ?src= tag the form was opened from. That is a data-subject class the
 // rest of the system never sees, so:

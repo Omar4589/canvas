@@ -1,8 +1,9 @@
 # The public marketing site
 
-Everything a signed-out visitor sees at `doorline.app`: the landing page, the `/aapc` page for the
-AAPC Election Post-Mortem, the demo-request form that is the product's only conversion action, and
-the `/app` install page for canvassers who arrive without an invite.
+Everything a signed-out visitor sees at `doorline.app`: the landing page, the demo-request form that is
+the product's only conversion action, and the `/app` install page for canvassers who arrive without an
+invite. (The `/aapc` page for the AAPC Election Post-Mortem ran from Nov 1 to Nov 20, 2026 — *The AAPC
+page, retired* below.)
 
 Related: [CANVASSER_APP.md](CANVASSER_APP.md) (how a canvasser actually gets the app),
 [EMAIL.md](EMAIL.md) (the demo-request notice), [USERS.md](USERS.md) (there is no self-signup —
@@ -38,9 +39,9 @@ The starting-price line under those buttons is **copy, not a third CTA** — it 
 opens nothing. Its job is to answer the question that otherwise closes the tab, so the demo
 requests that do arrive come from people who already know the number. It ends with the site's
 risk-reversal (since Nov 16): *"Setup is free, and billing starts with your first knock. New to Doorline?
-Ask about a free trial."* The same two sentences close the **Get started** band's paragraph, sit under
-`/aapc`'s buttons and in its closing band, and close the FAQ's *What does it cost?* answer (before its
-*Request a demo*) — always together, never reworded, so no page can promise more than another. The first
+Ask about a free trial."* The same two sentences close the **Get started** band's paragraph and the FAQ's
+*What does it cost?* answer (before its *Request a demo*) — always together, never reworded, so no section
+can promise more than another (they sat on `/aapc` too while it was up). The first
 is exactly the billing rule: a campaign's setup months bill nothing, and it bills from its first field
 visit (monthly from that day, for a campaign first out since Nov 5, 2026 — [BILLING.md](BILLING.md)). The
 second says *ask about* because trials are real but decided client by client: the owner gives a
@@ -54,11 +55,10 @@ where they say "this is a real, published app" rather than "install this now."
 
 ## What's on the homepage
 
-Top to bottom (the AAPC brief's §7, Nov 2026): the AAPC banner (while it runs), the header, the hero,
+Top to bottom (the AAPC brief's §7, Nov 2026): the header, the hero,
 the **numbers** (three platform totals in red — door knocks, surveys, campaigns — each ending in a plus,
 "and counting", centered in a short band with the date they were counted small in its bottom-right
-corner, the same on /aapc;
-no client names since the owner's addendum 3, no voter-record count since Nov 2, never an organizations
+corner; no client names since the owner's addendum 3, no voter-record count since Nov 2, never an organizations
 count), **the problem** (four ways a door program goes
 wrong), **Proof** (how Doorline checks every door, with screenshots of the Audit page and the map),
 **Client reports**, **Setup** (from the voter file to the first knock), the feature cards, the founder's
@@ -85,34 +85,20 @@ firm, campaign, party or committee, advocacy group), team size, **how they heard
 event, referral, search, other — the printed AAPC ad's QR code carries no tag, so this question is
 the only way to tie a scan to a lead), and anything else.
 
-On `/aapc` the page speaks in Omar's own voice. Through Nov 17 its two main buttons read **Find me at
-AAPC** — Omar will be at the Post-Mortem with no table, and so will most people who land on the page (the
-owner, Nov 15) — and from Nov 18 they read **Book 15 minutes with me**. Either opens the booking form.
-Through Nov 17 it is titled *"Let's meet at AAPC"* and reads *"I'll be at the Post-Mortem on Nov 17. Leave
-your details and I'll email or text you to find a time to meet there, or after the event."*; from Nov 18 it
-reads *"Book 15 minutes with me and I'll email or text you to set a time."* It asks **when** (*"At AAPC,
-Nov 17"* is offered through Nov 17 itself) and offers an optional **mobile number**, so Omar can text or
-email to set the time; its button says **Send**. Its **Request a demo** opens the demo form, also in the
-first person: *"Tell me about your team and I'll reply within one business day to set up a 20-minute
-walkthrough."* The thank-you follows the same voice. On the homepage the form, the banner (*"…Book 15
-minutes with Omar"*) and the thank-you stay in the third person.
-
 The form floats in the middle of the screen with the page dimmed behind it (since Nov 15; it used to fill
 the window from top to bottom). On a computer it is two columns wide, so the whole form fits a laptop
 screen; on a phone or a short window it scrolls, and its top is never cut off. Beside the button it says
-*"Omar will get back to you within one business day. Prefer email? hello@doorline.app"* — on `/aapc`,
-*"I'll get back to you within one business day. Prefer email? omar@doorline.app"* (Omar's own address
-on his own page since Nov 16; hello@ is for general questions). There is **no phone number anywhere on the site, on
-purpose**: scrapers (the owner, Nov 15).
+*"Omar will get back to you within one business day. Prefer email? hello@doorline.app"* There is **no
+phone number anywhere on the site, on purpose**: scrapers (the owner, Nov 15).
 
 The buttons work even before the page has finished loading: until then a tap opens an email to
-`hello@doorline.app` (`omar@doorline.app` on `/aapc`); once the page is ready, the same tap opens the
-form.
+`hello@doorline.app`; once the page is ready, the same tap opens the form.
 
 Submitting it **saves the request** and emails the Doorline team. Saving comes first, so a failed
 email can no longer lose a lead; the request waits on the super-admin **Website** page either way,
 marked if its email failed. Each request also records the page it was sent from and that link's tag
-(say `src=home-banner`; a request from `/aapc` with no tag records `aapc`). It is kept for **up to
+(say `src=linkedin`; a request sent from `/aapc` while it was up recorded `aapc` when it had no tag). It
+is kept for **up to
 24 months**, then deletes itself — or sooner, from
 the Website page, when the person asks. The person sees *"Thanks, Dana. Omar will email you within
 one business day."*, and replying to the notice email reaches them directly.
@@ -124,39 +110,32 @@ The form used to be a `mailto:` link that opened your mail app. That did nothing
 reading the site in a browser with no mail app configured, which is most people — so the only way
 to buy Doorline silently failed for a large share of visitors.
 
-An address is still shown for anyone who would rather write their own email: `hello@doorline.app`
-inside the homepage's dialog and in every page's footer **Contact** link, and `omar@doorline.app` under
-`/aapc`'s buttons and inside its dialog. Requests sent through the form are still emailed to hello@ (the
-Website page's inbox), whichever page they come from.
+`hello@doorline.app` is still shown inside the dialog and in every page's footer **Contact** link, for
+anyone who would rather write their own email; requests sent through the form are emailed there too.
 
 ## The page loads as real HTML
 
-The homepage and `/aapc` are built into finished web pages ahead of time, so the headline, the buttons and every
+The homepage is built into a finished web page ahead of time, so the headline, the buttons and every
 section appear the moment the page arrives — before any of the app's JavaScript has downloaded. That
 matters most for someone scanning the AAPC ad's QR code on conference Wi-Fi, who used to look at a
 blank white screen until about 300 KB of script arrived. The page then quietly "wakes up" (the demo
 button starts working) once the script is in.
 
-## The AAPC banner
+## The AAPC page, retired
 
-From the day `/aapc` launched (Nov 1, 2026 — the owner's call) through Nov 24, a slim red bar sits
-at the very top of the homepage, above the header. It is part of the page — it pushes everything down and never covers
-anything — and links to `/aapc?src=home-banner`. Through Nov 17 it reads *"At AAPC on Nov 17? Book 15
-minutes with Omar →"*; from Nov 18, *"Saw us at AAPC? Book 15 minutes with Omar →"*; from Nov 25 it is
-gone. The switch happens in the visitor's browser at midnight Eastern, so no deploy is needed on those
-days.
+For the AAPC Election Post-Mortem (Nov 17, 2026), `doorline.app/aapc` was the printed ad's own page: the
+ad's headline, subhead and three bullets word for word, a copy of its example card, Omar's own line and
+voice, a booking form that asked when to meet (at the event or after) and offered an optional mobile
+number so he could text to set a time, and his own address, omar@doorline.app. A slim red banner at the
+top of the homepage linked to it from Nov 1. Both came down on **Nov 20** (the owner: the event is
+over).
 
-## The `/aapc` page
-
-`doorline.app/aapc` is the printed AAPC ad's own page: the ad's headline (*Every door. Every pass.
-Every number.*), its subhead and its three bullets word for word, a copy of its "Beaverdale · Pass 2"
-card (tagged *Example* — the numbers are made up), Omar's line (*"I'll be at the Post-Mortem on Nov 17.
-Leave your name and I'll find you there, or we'll set a time after the event."*, switching on Nov 18 to
-*"Missed me at AAPC?…"*), **Find me at AAPC** (from Nov 18, **Book 15 minutes with me**) and **Request a
-demo**, with *"Prefer email? omar@doorline.app"* under them (his own address, since Nov 16), the numbers (the homepage's band, larger
-on a computer to catch the eye), three short blocks (Proof, Client reports, Many
-campaigns) and the price. It stays up after the event with the after-event line. Search engines are asked not to list it
-(it's an event page), and a link shared from it previews as Doorline's.
+The address now sends visitors to the homepage, so a link that was shared still lands somewhere instead
+of a "page not found". The printed ad's QR code always went to the homepage, so it is untouched, and the
+form still asks *how did you hear about us?* with *AAPC event* among the answers for anyone who scans it
+later. The Website page keeps the history: the visits and demo requests `/aapc` and its banner brought
+in, the AAPC line on the visits chart, and the *When* and *Mobile* answers on the requests that have
+them. A page for a future event starts from *Adding a prerendered page* in Part 2.
 
 ## The sample report
 
@@ -202,13 +181,13 @@ Below that, pick **7, 30 or 90 days**:
   in emails and texts — the printed ad's QR code has no tag, so its scans land here), **Search & AI**
   (Google, Bing, DuckDuckGo, ChatGPT and the like), **Social media**, **Other websites**, and **Tagged
   links** (links shared with a `?src=` tag). Then the top sites and tags by name.
-- **Where they landed**: the homepage or the AAPC page. Moving from one of our pages to another (the
-  homepage's AAPC banner, say) isn't a new visit; those moves are listed on their own, and so is the
+- **Where they landed**: the homepage, or the AAPC page while it was up (through Nov 20). Moving from
+  one of our pages to another (the homepage's AAPC banner, while it ran) isn't a new visit; those moves are listed on their own, and so is the
   canvasser app page, `/app`, whose visitors are mostly canvassers a customer sent there.
 - **Phones and computers** for the period.
 - **What it turned into**: the period's demo requests, about how many visits each one took, how people
-  said they heard about us, the page they sent it from, and whether they came through the homepage's AAPC
-  banner or a tagged link.
+  said they heard about us, the page they sent it from, and whether they came through a tagged link (or,
+  through Nov 20, the homepage's AAPC banner).
 
 With **Live** on, the tab refreshes itself every minute. The second tab, **Demo requests**, is the
 inbox; it shows how many are open.
@@ -219,8 +198,8 @@ again, so these are visits, not people. The hour and the kind of device are kept
 tied to where a visit came from. Counting them began the day this shipped, and so did counting the canvasser
 app page, so earlier days show a dash for those in the table. An iPad usually counts as a computer, because
 its browser describes itself as a Mac. A link in an email or a text counts as QR code & direct, even when
-an Android mail or messaging app names itself; the banner's AAPC-page address, copied and sent on, counts
-as a visit like any other link.
+an Android mail or messaging app names itself. The retired `/aapc` address isn't counted at all: it
+sends the visitor to the homepage, which counts the visit.
 
 ## The `/app` page
 
@@ -302,11 +281,11 @@ Platform totals say **"door knocks"**, never "doors knocked" — the printed AAP
 
 | | React route | Prerendered React page | Static document |
 |---|---|---|---|
-| Pages | `/login`, `/forgot-password`, `/reset-password/:token`, `/r/:token` (and the console) | `/` (landing) and `/aapc` | `/privacy`, `/terms`, `/delete-account`, `/app` |
+| Pages | `/login`, `/forgot-password`, `/reset-password/:token`, `/r/:token` (and the console) | `/` (landing; `/aapc` too, Nov 1–20) | `/privacy`, `/terms`, `/delete-account`, `/app` |
 | Lives in | [`client/src/pages/`](../client/src/pages/) | `client/src/pages/`, rendered at build time into `dist/.prerendered/` | [`client/public/*.html`](../client/public/) |
 | Served by | the SPA fallback in [`app.js`](../server/src/app.js) — the EMPTY shell | `PRERENDERED_PAGES` in `app.js`, **before** `express.static` | explicit `res.sendFile` routes, **before** the fallback |
 | Registered in | [`server/src/webRoutes.js`](../server/src/webRoutes.js) → `WEB_SEGMENTS` | `WEB_SEGMENTS` too (it is still a React route) + the four places in *Prerendered pages* below | `STATIC_PAGES` in `app.js` |
-| Head tags | inherited from `client/index.html` | `client/index.html`'s page-head block (the homepage's own); a page with a `head` in `entry-prerender.jsx` gets that block replaced whole (`/aapc`) | its own |
+| Head tags | inherited from `client/index.html` | `client/index.html`'s page-head block (the homepage's own); a page with a `head` in `entry-prerender.jsx` gets that block replaced whole (`/aapc` did) | its own |
 | Linked with | `<Link to>` | `<a href>` from outside the app, so the visitor gets the HTML; a `<Link>` from inside the app is fine | `<a href>` — must be a full page load |
 
 **The rule for choosing:** if the page has to be correct for a crawler or a link preview, it must
@@ -360,8 +339,8 @@ The homepage reaches the browser as finished HTML, then hydrates in place. The p
   `dist/.vite/manifest.json`), `vite build --ssr src/entry-prerender.jsx --outDir .ssr` (gitignored),
   and `node scripts/prerender.js`, which renders each page in `entry-prerender.jsx`'s `PAGES` and
   writes `dist/.prerendered/<file>`: the shell with `class="marketing"` on `<html>`, the markup inside
-  `#root` (marked `data-prerendered="<name>"`), `modulepreload` links for the page's own chunks, the
-  AAPC inline date script, and — for a page with a `head` of its own — that head in place of
+  `#root` (marked `data-prerendered="<name>"`), `modulepreload` links for the page's own chunks, and —
+  for a page with a `head` of its own — that head in place of
   `client/index.html`'s **page-head block** (everything between the `page-head:start` and
   `page-head:end` comments: title through JSON-LD). The block is swapped whole: three of its tags span
   several lines, and a half swap that left the homepage's canonical beside a `noindex` could get the
@@ -378,6 +357,10 @@ The homepage reaches the browser as finished HTML, then hydrates in place. The p
   so neither `/.prerendered/…` nor `/.vite/manifest.json` is reachable (the static default only skips a
   dot-NAMED file and would serve the folder's contents as duplicates). `dist/index.html` stays the
   empty shell for every console route. A missing file (a dist built before this) falls back to the shell.
+  `RETIRED_PAGES` sits beside it: an address that once held a page and now sends visitors elsewhere
+  (`/aapc` → `/`, since Nov 20), a **302** so a browser never caches it and the address can carry a page
+  again. It is mounted before the static files, so a stale `aapc.html` in an old dist is never served,
+  and it isn't visit-counted (the page it lands on is).
 - **Caching** — hashed files under `/assets` are sent with `max-age=1y, immutable`; every HTML document
   keeps `max-age=0`, so a deploy shows on the next request.
 
@@ -390,46 +373,42 @@ flash):**
 2. The first render must not depend on anything the build can't know. Auth renders signed out on
    both sides (AuthProvider starts in `loading`); `localStorage` reads return null at build time
    (`api/client.js`); a date-dependent text renders **every** variant and lets an attribute pick one
-   (the AAPC banner: `<html data-aapc>`).
+   (the AAPC banner did, with `<html data-aapc>` stamped by an inline `<head>` script — see this file's
+   history and `client/src/marketing/aapc.js`'s for the pattern).
 3. Nothing starts invisible — no `opacity-0` entrance animations; the HTML is the first paint.
 4. The SSR render and the client bundle come from the same build (the one `build` script).
 
-**Adding a prerendered page (how `/aapc` shipped):** (1) the page component, its route in `App.jsx`
+**Adding a prerendered page (how `/aapc` shipped; removing one is the same steps in reverse, plus a
+`RETIRED_PAGES` row if its address was shared):** (1) the page component, its route in `App.jsx`
 (`pages.<name> || lazy(...)`), and its segment in `WEB_SEGMENTS`; (2) an entry in
 `entry-prerender.jsx`'s `PAGES` — `path`, `file`, `module`, `Component`, and a `head` (title,
 description, canonical `url`, optional `robots`, OG title and description) unless it should carry the
 homepage's; (3) a loader in `main.jsx`'s `PRERENDERED` map, so it loads its module before hydrating;
 (4) a row in `PRERENDERED_PAGES` (it's then visit-counted too, a landing page on the Website page's
 Traffic tab — give it a name in `pageLabel`, `client/src/lib/siteTraffic.js`, or it shows its path). Its
-`useEffect` adds the `marketing` class and `stampAapc()` for a client-side arrival, as both pages do.
+`useEffect` adds the `marketing` class for a client-side arrival, as `LandingPage` does.
 
-**Check a build:** `npm run build` ends with `prerendered / → dist/.prerendered/index.html` and
-`prerendered /aapc → dist/.prerendered/aapc.html`; then with
+**Check a build:** `npm run build` ends with `prerendered / → dist/.prerendered/index.html`; then with
 `NODE_ENV=production npm start`, `curl -s localhost:$PORT/ | grep 'Know exactly what happened'` finds
 the headline, `curl -s localhost:$PORT/login` is still the empty shell, and
 `curl -sI localhost:$PORT/.prerendered/index.html` is a 404. `server/test/staticPages.int.test.js`
 pins the serving rules.
 
-## The AAPC banner and dates
+## The AAPC dates (retired)
 
-`client/src/marketing/aapc.js` is the one config for every date-driven piece: `start` (Nov 1 — the
-day `/aapc` shipped), `switchOn` (Nov 18), `end` (Nov 25), the event's time zone (Eastern), the
-banner link, and `pageLive` (on). The prerendered pages can't know the date, so the build inlines
-`aapcPhaseScript()` into `<head>`; before first paint it stamps two attributes, and `index.css` shows
-the matching text:
+`client/src/marketing/aapc.js` was the one config for every date-driven piece of the AAPC run: the
+banner's window (Nov 1 to Nov 24), the switch to after-event wording (Nov 18), the event's time zone, and
+`pageLive`. Prerendered pages can't know the date, so the build inlined a tiny script into `<head>` that
+stamped `<html data-aapc>` (the banner's window) and `<html data-aapc-event>` (before or after the event)
+before first paint, and `index.css` showed the matching text. `/aapc`'s booking form (When?, a mobile
+number, Omar's voice and address in `DemoRequest.jsx`'s `first` words) followed the same switch.
 
-- `<html data-aapc="before|after|off">` — **the banner's window**: off before `start` and from `end`.
-- `<html data-aapc-event="before|after">` — **the event itself, no window**: `before` until `switchOn`,
-  `after` from then, for good. `/aapc`'s founder line and its two main buttons' labels (`BookLabel`:
-  *Find me at AAPC* / *Book 15 minutes with me*) use `.aapc-ev-before` / `.aapc-ev-after` (the before
-  text shown by default); the booking form's words (`WORDS[voice].book[aapcEventPhase()]` in
-  `DemoRequest.jsx`) and its *"At AAPC, Nov 17"* option follow the same switch, so `/aapc` never shows both
-  texts and the option is offered from launch through Nov 17. The two classes set `display: revert`, so put
-  them on an element with no display utility of its own.
-
-`aapcPhase()` and `aapcEventPhase()` are the same rules for code that runs later; `stampAapc()` sets
-both attributes on a client-side arrival. `aapc.test.js` pins the script to both functions hour by
-hour, past Nov 25.
+All of it came out with the page on Nov 20: the script, the attributes, the CSS, the banner, the booking
+mode (`askWhen`, `voice`, `FOUNDER_EMAIL`) and `aapc.test.js`. `aapc.js` now holds only `AAPC.day`, the
+Website page's chart marker. The server still accepts a request's `when` and `phone` (and the shared
+`WHEN` options stay in both copies of `demoOptions.js`, so `demoOptionsMirror.test.js` holds), because
+the requests that have them still show them. The pattern is in git history (up to `4526356`) for the next
+event.
 
 ## Marketing components
 
@@ -443,7 +422,8 @@ every focusable element carries `focus-visible:ring-2 focus-visible:ring-brand-6
 
 The homepage (Phase 2, Nov 2026): `Hero`, `NumbersStrip`, `ProblemStrip`, `ProofSection` (`#proof`),
 `PortalSpotlight` (`#reports`), `SetupSection` (`#setup`), `FeatureGrid`, `FounderNote`, `Faq`
-(`#faq`), `CtaBand`. `/aapc` is `pages/AapcPage.jsx` with `AapcMockupCard`. The old product tour,
+(`#faq`), `CtaBand`. (`/aapc` was `pages/AapcPage.jsx` with `AapcMockupCard`, and `AapcBanner` sat above
+the homepage's header; all three were removed on Nov 20.) The old product tour,
 four-claim strip and How it works are gone, but **their ids stay as aliases** (`#turf`, `#field`,
 `#how` on Setup; `#oversight` on Proof): `privacy.html`, `terms.html`, `app.html`,
 `delete-account.html` and `404.html` link to them, and the legal pages are owner-edited.
@@ -453,8 +433,8 @@ Two components changed shape on Nov 15 and 16 (the owner's reviews):
 - **`Faq`** renders each entry as a native `<details name="faq">`, so it folds with no script and works
   before hydration. The shared `name` keeps one answer open at a time where the browser supports it;
   an older browser lets several open, which is harmless. The plus turns into an × with `group-open:`.
-- **`NumbersStrip`** is one layout on both pages, with no props (the Nov 15 `centered` prop was /aapc's
-  alone; the owner asked for the homepage to match on Nov 16): centered, `py-8 sm:py-10` (it was
+- **`NumbersStrip`** is one layout with no props (the Nov 15 `centered` prop was /aapc's alone; the owner
+  asked for the homepage to match on Nov 16, and /aapc is gone since Nov 20): centered, `py-8 sm:py-10` (it was
   `py-12 sm:py-14` with `mt-8` above the date), numbers `text-[22px]` on a phone and `sm:text-5xl` above,
   labels `sm:text-base`; the date is `absolute bottom-2` at the container's right padding, `text-[11px]` in
   stone-500 (4.59:1 on the band), so it takes no height (the band is 158 px tall on a computer, 142 on a
@@ -495,11 +475,10 @@ Single sources of truth, and CTAs must read from them rather than hard-coding:
 - [`DemoRequest.jsx`](../client/src/marketing/DemoRequest.jsx) — `useDemoRequest().open()`, reached
   only through [`DemoButton.jsx`](../client/src/marketing/DemoButton.jsx). A DemoButton is a
   `mailto:` link in the markup, so a tap does something before the page hydrates (seconds on venue
-  Wi-Fi); once live, its click opens the dialog. The link's address comes from the provider's context
-  (`email`: `WORDS[voice].email` — `CONTACT_EMAIL` for `third`, `FOUNDER_EMAIL` for `first`, both in
-  [`contact.js`](../client/src/marketing/contact.js)), the same address the dialog prints. The footer's
-  Contact link always uses `CONTACT_EMAIL`. The provider wraps each page; `/aapc` passes
-  `defaultSource="aapc"`, `askWhen` and `voice="first"`, so every control there books a meeting. The source a request
+  Wi-Fi); once live, its click opens the dialog. Its mail link, the dialog's address and the footer's
+  Contact link are all `CONTACT_EMAIL` ([`contact.js`](../client/src/marketing/contact.js)). The provider
+  wraps the page and takes an optional `defaultSource` (`/aapc` passed `aapc`, with the booking-mode
+  props `askWhen` and `voice` that left with it). The source a request
   sends is `pageSource() || options.source || defaultSource` — a tagged URL always wins. The dialog is a
   `fixed inset-0 overflow-y-auto` overlay around a `flex min-h-full items-center` wrapper that centers the
   panel (`max-w-xl`, a two-column form from `sm`): a panel taller than the window scrolls the overlay from
@@ -511,7 +490,8 @@ Single sources of truth, and CTAs must read from them rather than hard-coding:
   always with its password; the hero's falls back to "See how it works" until the link exists.
 
 The nav's section links (`SECTIONS` in `MarketingNav.jsx`) take a `base`: `''` on the homepage (a
-plain `#proof` — a `/#proof` would reload a tagged `/?src=…` and lose the tag) and `'/'` on `/aapc`.
+plain `#proof` — a `/#proof` would reload a tagged `/?src=…` and lose the tag) and `'/'` on any other page
+(`/aapc` used it).
 
 ### The facts the pages state
 
@@ -606,8 +586,8 @@ page; the returned promise settles when both have, for tests):
 - **`SiteVisitDay {day, path, source, count}`**, for every visit. `day` is the owner's calendar day
   (Central). `source` is the page's valid `?src=` tag (never the reserved words `direct` or `internal`;
   a tag in `OWN_PAGE_TAGS` only when `Sec-Fetch-Site` is `same-origin` or absent, so the banner's /aapc
-  address shared elsewhere is filed by where it really came from), else `internal` when the browser says the request came from one of our own pages (`Sec-Fetch-Site:
-  same-origin` — our pages send no Referer, so a hop from `/aapc` to the homepage would otherwise read as
+  address shared elsewhere was filed by where it really came from), else `internal` when the browser says the request came from one of our own pages (`Sec-Fetch-Site:
+  same-origin` — our pages send no Referer, so a hop from one page to another would otherwise read as
   `direct`, the QR-scan bucket), else the referring site's host without `www.` (only the host — never the
   URL), else `direct`. Its unique `{day, path, source}` index needs `migrate:build-indexes`; until then
   racing first visits can split a key across rows, which the reader sums.
@@ -619,9 +599,8 @@ page; the returned promise settles when both have, for tests):
   (`server.js` → `syncSiteVisitIndexes`), so no build-indexes step.
 
 No IP, cookie or user agent is stored. **Arrivals vs moves:** `channelOf(source)` returns `null` for a move
-— `internal`, or a tag in `OWN_PAGE_TAGS` (`home-banner`, the homepage banner's link to `/aapc`, pinned to
-`client/src/marketing/aapc.js` by `siteVisits.test.js`; add any new tag our own pages put on a link to
-each other) — else the channel: `direct` (also webmail sites and the Android mail and messaging apps that
+— `internal`, or a tag in `OWN_PAGE_TAGS` (`home-banner`, the retired homepage banner's link to `/aapc`,
+kept so the tag still reads as a move; add any new tag our own pages put on a link to each other) — else the channel: `direct` (also webmail sites and the Android mail and messaging apps that
 name themselves as the referrer, `DIRECT_HOSTS`), `search` (a search engine's own address on any country
 domain, plus AI assistants), `social` (networks, their shorteners and apps; subdomains match), `tagged` (no
 dot: a `?src=` tag) or `other`.
@@ -634,8 +613,9 @@ pages), `channels`, `moves`, `appPage`, `devices`, `hours[24]`, `demoRequests` (
 of hours from UTC — or `null` unless the day came after `hoursSince`, the first day with hour rows, which
 began mid-day), read from at least 8 days whatever the range; and for
 the range, `sources` (non-direct arrivals with their channel, top 25), `pages`, `movesTo`, and
-`demoRequests {total, heardAbout, pages, tags}` (an untagged `/aapc` request's `aapc` is its page, not a
-tag; the tab names `home-banner` as the homepage's AAPC banner, `tagLabel`). Ranked biggest first, ties
+`demoRequests {total, heardAbout, pages, tags}` (an untagged request from `/aapc`, while it was up,
+carries `aapc` — its page, not a tag; the tab names `home-banner` as the homepage's AAPC banner,
+`tagLabel`; both labels stay for the history). Ranked biggest first, ties
 alphabetical with "didn't say" (`null`) last. The open count comes from `GET /demo-requests` (`open`). The
 table shows a dash, not a zero, for devices and the app page on days before `hoursSince`: both began with
 the same release.
@@ -661,8 +641,10 @@ user, not a voter, and not a customer**. What keeps that bounded, all load-beari
   emailed. The Privacy Policy's *Demo requests* paragraph names what is collected, why (reply and
   arrange a demo) and for how long (up to 24 months — the TTL). Only super-admins can see them, and a
   person's deletion request is a Delete on the Website page. The visit counter stores no personal
-  information at all. A booking (`/aapc`) may add a **mobile number** — optional, kept with the rest
-  of the request; the policy's *"anything else you choose to tell us in the form"* covers it.
+  information at all. A booking on `/aapc` (Nov 1–20) could add a **mobile number** — optional, kept with
+  the rest of the request; the policy's *"anything else you choose to tell us in the form"* covers it. No
+  form asks for one since `/aapc` came down; the requests that have one keep it until their 24 months
+  run out.
 - **The sample report is ours, not a customer's.** It's the internal demo organization's report, on the
   area map (no addresses), and its password is public by design; its view count records no IP or
   device. Its one exemption from the wrong-password limits applies only while it belongs to an
@@ -678,9 +660,9 @@ See the watchlist entry in [`PRIVACY_VERIFICATION.md`](PRIVACY_VERIFICATION.md).
 
 - `client/index.html` owns the head for **every** React route, and the prerendered homepage is built
   from it — treat any change there as a change to the homepage's identity. A prerendered page of its
-  own (like `/aapc`) gets its head from its `PAGES` entry, swapped in by `scripts/prerender.js`.
-- `/aapc` is `noindex` with a self-canonical: an event page, not a search landing page. It stays out
-  of `sitemap.xml` and must never be disallowed in `robots.txt` (a crawler has to read the noindex).
+  own gets its head from its `PAGES` entry, swapped in by `scripts/prerender.js` (`/aapc` did, `noindex`
+  with a self-canonical, until Nov 20). An event page like it stays out of `sitemap.xml` and must never be
+  disallowed in `robots.txt` (a crawler has to read the noindex).
 - Its JSON-LD carries an **`offers` node — an `Offer` with `price: "300"` USD and a
   `UnitPriceSpecification` reading "per campaign, per month"** — so search results can show the
   starting price without implying a flat 300. It must track the published number: it is one of the three places that move

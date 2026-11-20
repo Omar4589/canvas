@@ -440,7 +440,7 @@ export const TrafficView = ({ data, days, onDays, picked, onPick, open, live = n
       </section>
 
       <p className="max-w-3xl text-xs text-fg-subtle">
-        How this is counted: page loads of the homepage, the AAPC page and the canvasser app page, counted on our own server — no
+        How this is counted: page loads of the homepage and the canvasser app page (and the AAPC page until Nov 20), counted on our own server — no
         cookies, no stored IP addresses or browser details. Crawlers and link previews are left out, and a reload counts again, so
         read these as visits, not people. A QR scan carries no tag, so it counts as QR code &amp; direct; the demo form&apos;s
         &ldquo;How did you hear about us?&rdquo; tells those leads apart.

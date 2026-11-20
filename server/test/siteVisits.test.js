@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { countsAsVisit, visitSource, visitDay, visitHour, deviceOf, channelOf, CHANNELS, OWN_PAGE_TAGS } from '../src/services/site/siteVisits.js';
-import { AAPC } from '../../client/src/marketing/aapc.js';
 
 // The first-party visit counter's rules (services/site/siteVisits.js): what counts as a visit, how a
 // visit's source is named and grouped into a channel, and its hour and kind of device. Pure functions
@@ -91,10 +90,10 @@ test('channels: QR and direct (with email and texts), search and AI, social, oth
   assert.strictEqual(channelOf(''), null);
 });
 
-test("the homepage banner's tag is one of our own: a click on it is a move, not an arrival", () => {
-  const tag = new URL(AAPC.bannerHref, 'https://doorline.app').searchParams.get('src');
-  assert.ok(tag, 'the banner link carries a tag');
-  assert.ok(OWN_PAGE_TAGS.has(tag), `${tag} is listed in OWN_PAGE_TAGS`);
+test("the retired homepage banner's tag is still one of our own: a stray click on it is a move, not an arrival", () => {
+  // The banner linked /aapc?src=home-banner until /aapc came down (2026-11-20). Kept, so the tag still
+  // reads as a move if one turns up, as it did while the banner ran.
+  assert.ok(OWN_PAGE_TAGS.has('home-banner'));
 });
 
 test('the kind of device: phone, tablet or computer, from the browser’s own description', () => {

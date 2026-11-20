@@ -44,7 +44,6 @@ const rootEl = document.getElementById('root');
 // One loader per name in entry-prerender.jsx's PAGES.
 const PRERENDERED = {
   landing: () => import('./pages/LandingPage.jsx'),
-  aapc: () => import('./pages/AapcPage.jsx'),
 };
 const name = rootEl.dataset.prerendered;
 if (PRERENDERED[name]) {

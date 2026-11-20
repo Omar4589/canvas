@@ -53,8 +53,12 @@ const STATIC_PAGES = [
 const PRERENDERED_DIR = path.join(CLIENT_DIST, '.prerendered');
 const PRERENDERED_PAGES = [
   ['/', 'index.html'],
-  ['/aapc', 'aapc.html'],
 ];
+// Retired public pages, and where their address sends people now. /aapc, the AAPC Election Post-Mortem
+// page, came down after the event (the owner, 2026-11-20); its address was shared, so it lands on the
+// homepage rather than a 404. A 302, never a 301: browsers don't cache it, so the address can carry a page
+// again (next year's event). Not counted itself: the homepage counts the visit it lands on.
+const RETIRED_PAGES = [['/aapc', '/']];
 
 // The zero-JS 404 document. If a stale dist lacks it, serve the SPA shell WITH a 404 status —
 // App.jsx's catch-all renders its NotFoundPage, so the status code stays honest either way.
@@ -145,6 +149,8 @@ export function createApp() {
     app.get(['/privacy.html', '/terms.html', '/delete-account.html', '/app.html'], (req, res) => {
       res.redirect(301, req.path.replace(/\.html$/i, ''));
     });
+
+    for (const [route, to] of RETIRED_PAGES) app.get(route, (req, res) => res.redirect(302, to));
 
     // Every serve of a public marketing page bumps that day's first-party visit count — counted here
     // so the prerendered document, or the shell standing in for it, counts the same. No cookie, no

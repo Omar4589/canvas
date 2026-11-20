@@ -27,7 +27,6 @@ fs.writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><body><
 fs.writeFileSync(path.join(fixture, 'app.html'), '<!doctype html><html><body><h1>APP-PAGE</h1></body></html>');
 fs.mkdirSync(path.join(fixture, '.prerendered'));
 fs.writeFileSync(path.join(fixture, '.prerendered', 'index.html'), '<!doctype html><html><body><h1>HOME</h1></body></html>');
-fs.writeFileSync(path.join(fixture, '.prerendered', 'aapc.html'), '<!doctype html><html><body><h1>AAPC</h1></body></html>');
 
 process.env.NODE_ENV = 'production';
 process.env.CLIENT_DIST = fixture;
@@ -104,12 +103,13 @@ test('page loads count by day, page and source — and arrivals by hour and devi
   assert.strictEqual(await page('/', { 'user-agent': IPHONE }), 200, 'a QR scan: direct, on a phone');
   assert.strictEqual(await page('/?src=qr', { 'user-agent': WINDOWS }), 200, 'a tagged link, on a computer');
   assert.strictEqual(await page('/', { 'user-agent': WINDOWS, referer: 'https://www.google.com/' }), 200, 'from a search');
-  assert.strictEqual(await page('/aapc?src=home-banner', { 'user-agent': IPHONE, 'sec-fetch-site': 'same-origin' }), 200, 'the banner: a move');
+  // /aapc is retired (2026-11-20): its address redirects home and is never counted itself.
+  assert.strictEqual(await page('/aapc?src=home-banner', { 'user-agent': IPHONE }), 302, 'the retired AAPC page redirects');
   assert.strictEqual(await page('/', { 'user-agent': IPHONE, 'sec-fetch-site': 'same-origin' }), 200, 'back to the homepage: a move');
   assert.strictEqual(await page('/app', { 'user-agent': IPHONE }), 200, 'the canvasser app page');
   assert.strictEqual(await page('/', { 'user-agent': 'Googlebot/2.1' }), 200, 'a crawler');
   assert.strictEqual(await page('/app.html', { 'user-agent': IPHONE }), 301, 'the .html twin redirects');
-  await settle(6);
+  await settle(5);
   await new Promise((r) => setTimeout(r, 150)); // anything stray would have landed by now
   const t1 = new Date();
 
@@ -117,8 +117,8 @@ test('page loads count by day, page and source — and arrivals by hour and devi
   const key = (r) => `${r.path} ${r.source}`;
   assert.deepStrictEqual(
     Object.fromEntries(days.map((r) => [key(r), r.count])),
-    { '/ direct': 1, '/ qr': 1, '/ google.com': 1, '/aapc home-banner': 1, '/ internal': 1, '/app direct': 1 },
-    'one count per page load; the crawler and the redirect are not counted'
+    { '/ direct': 1, '/ qr': 1, '/ google.com': 1, '/ internal': 1, '/app direct': 1 },
+    'one count per page load; the crawler and the two redirects are not counted'
   );
   assert.ok(days.every((r) => [visitDay(t0), visitDay(t1)].includes(r.day)), "the owner's day");
 

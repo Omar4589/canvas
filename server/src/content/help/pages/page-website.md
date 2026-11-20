@@ -39,14 +39,15 @@ Then pick **7, 30 or 90 days**:
   - **Tagged links** — links you shared with a tag on the end, like `doorline.app/?src=linkedin`.
 
   Under them, the top sites and tags by name.
-- **Where they landed** — the homepage or the AAPC page. Moving from one of our pages to another (say,
-  clicking the AAPC banner on the homepage) isn't a new visit, so those moves are listed separately.
+- **Where they landed** — the homepage, or the AAPC page for days up to Nov 20, when it came down.
+  Moving from one of our pages to another (say, clicking the homepage's AAPC banner while it ran) isn't a
+  new visit, so those moves are listed separately.
   The **canvasser app page** (/app) has its own line too: most people who open it are canvassers a
   customer sent there, not prospects.
 - **Phones and computers** for the period. An iPad usually counts as a computer.
 - **What it turned into** — the period's demo requests, roughly how many visits it took for each one,
-  how people said they heard about us, which page they sent it from, and whether they came through the
-  homepage's AAPC banner or a tagged link.
+  how people said they heard about us, which page they sent it from, and whether they came through a
+  tagged link (or, until Nov 20, the homepage's AAPC banner).
 
 With **Live** on (top right), the tab refreshes itself every minute — handy on a busy day. Press it to
 pause.
@@ -65,14 +66,14 @@ didn't go out, the request still shows here, marked **email failed**.
 
 Each request shows what the person told us — name, organization, work email, what kind of team they
 are, team size, how they heard about us, and anything they wrote — plus **Sent from**: the page they
-were on, and the link's tag if it had one (for example `src=home-banner` when they came through the
-AAPC banner on the homepage; a request from /aapc with no tag says `src=aapc`).
+were on, and the link's tag if it had one (for example `src=linkedin` for a link you shared with that
+tag).
 
-A request from **/aapc** is a booking. Through Nov 17 the page's button reads *Find me at AAPC*: the
-person leaves their details so Omar can find a time to meet them at the Post-Mortem, or after it. From
-Nov 18 it reads *Book 15 minutes with me*. The request also shows **When** (at AAPC on Nov 17, or after
-the event) and, if they gave one, a **Mobile** number — there's no table at the event, so you text or
-email them to set the time.
+**Requests from the AAPC page.** The /aapc page ran from Nov 1 to Nov 20 and came down after the event;
+its address now takes people to the homepage. Its requests stay here: they were bookings, so they show
+**When** (at AAPC on Nov 17, or after the event) and, if the person gave one, a **Mobile** number. Their
+**Sent from** says /aapc (`src=aapc` when the link had no tag, `src=home-banner` when they came through
+the homepage's AAPC banner). New requests no longer ask either question.
 
 - **Open** is your to-do list. Reply from your inbox (Reply goes straight to them), then press
   **Mark handled** so nobody replies twice. **Reopen** puts it back.

@@ -12,7 +12,8 @@ export const TEAM_SIZES = ['Just me', '2–10', '11–50', '51–200', '200+'];
 // someone who scanned it back to the ad.
 export const HEARD_ABOUT = ['AAPC event', 'Referral', 'Search', 'Other'];
 
-// /aapc only. "At AAPC" is offered through the event day (marketing/aapc.js decides).
+// The When? select /aapc's booking form offered. No form asks it since /aapc came down (2026-11-20); kept so
+// the server's copy still matches and the requests that carry an answer still read as they did.
 export const WHEN_AT_AAPC = 'At AAPC, Nov 17';
 export const WHEN_AFTER = 'After the event';
 export const WHEN = [WHEN_AT_AAPC, WHEN_AFTER];

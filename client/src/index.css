@@ -138,34 +138,6 @@ html.marketing body {
   color-scheme: light;
 }
 
-/* The AAPC banner (marketing/AapcBanner.jsx) carries both of its texts; <html data-aapc>, stamped
-   before first paint by an inline script (marketing/aapc.js), picks one — or hides the bar. */
-.aapc-banner {
-  display: none;
-}
-html[data-aapc='before'] .aapc-banner,
-html[data-aapc='after'] .aapc-banner {
-  display: block;
-}
-html[data-aapc='before'] .aapc-after,
-html[data-aapc='after'] .aapc-before {
-  display: none;
-}
-
-/* /aapc's own lines (pages/AapcPage.jsx) follow the event, not the banner's window: <html
-   data-aapc-event> reads 'before' through Nov 17 and 'after' from Nov 18, for good. The before-line
-   is the default, so exactly one line shows even before the script runs. Put these classes only on
-   elements with no display utility of their own — `revert` restores the element's natural display. */
-.aapc-ev-after {
-  display: none;
-}
-html[data-aapc-event='after'] .aapc-ev-before {
-  display: none;
-}
-html[data-aapc-event='after'] .aapc-ev-after {
-  display: revert;
-}
-
 /* Respect reduced-motion globally: neutralize token animations + transitions. */
 @media (prefers-reduced-motion: reduce) {
   *,

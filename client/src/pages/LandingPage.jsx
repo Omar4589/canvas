@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import { DemoRequestProvider, OpenDemoFromLink } from '../marketing/DemoRequest.jsx';
-import AapcBanner from '../marketing/AapcBanner.jsx';
-import { AAPC, stampAapc, unstampAapc } from '../marketing/aapc.js';
 import MarketingNav from '../marketing/MarketingNav.jsx';
 import Hero from '../marketing/Hero.jsx';
 import NumbersStrip from '../marketing/NumbersStrip.jsx';
@@ -24,16 +22,12 @@ export default function LandingPage() {
     document.title = 'Doorline — Door-to-door canvassing software for campaigns and causes';
   }, []);
 
-  // `marketing` paints <html> and <body> white (index.css). The AAPC attributes are stamped before
-  // first paint on a prerendered load; this covers a client-side navigation onto the page.
+  // `marketing` paints <html> and <body> white (index.css); the prerendered page carries it from the
+  // first byte, and this covers a client-side navigation onto the page.
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add('marketing');
-    stampAapc(root);
-    return () => {
-      root.classList.remove('marketing');
-      unstampAapc(root);
-    };
+    return () => root.classList.remove('marketing');
   }, []);
 
   return (
@@ -43,8 +37,6 @@ export default function LandingPage() {
       <DemoRequestProvider>
         {/* The static pages' Request a demo lands here as /#demo and opens the dialog. */}
         <OpenDemoFromLink />
-        {/* Above the header, part of the page flow — it pushes the page down, never covers it. */}
-        {AAPC.pageLive && <AapcBanner />}
         <MarketingNav />
         <main>
           <Hero />

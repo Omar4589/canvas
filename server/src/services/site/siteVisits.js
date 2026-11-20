@@ -25,9 +25,9 @@ export const visitHour = (now = new Date()) => Number(hourFormat.format(now)) % 
 // who open it are mostly canvassers a customer sent there, not prospects.
 export const APP_PAGE = '/app';
 
-// ?src= tags our own pages put on links to each other: the homepage's AAPC banner links
-// /aapc?src=home-banner (client/src/marketing/aapc.js; siteVisits.test.js pins the two together). A visit
-// carrying one is a move between our pages, like "internal" — never an arrival.
+// ?src= tags our own pages put on links to each other: the homepage's AAPC banner linked
+// /aapc?src=home-banner until /aapc came down (2026-11-20; the address now redirects home without the
+// tag). A visit carrying one is a move between our pages, like "internal" — never an arrival.
 export const OWN_PAGE_TAGS = new Set(['home-banner']);
 
 // Crawlers, link unfurlers, uptime monitors and scripted fetches. Deliberately broad: a missed bot

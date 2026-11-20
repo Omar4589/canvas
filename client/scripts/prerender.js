@@ -15,7 +15,7 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT = path.join(DIST, '.prerendered');
 
-const { PAGES, render, headScript } = await import(pathToFileURL(path.join(ROOT, '.ssr', 'entry-prerender.js')).href);
+const { PAGES, render } = await import(pathToFileURL(path.join(ROOT, '.ssr', 'entry-prerender.js')).href);
 const manifest = JSON.parse(fs.readFileSync(path.join(DIST, '.vite', 'manifest.json'), 'utf8'));
 const shell = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8');
 
@@ -89,7 +89,6 @@ const checkHead = (page, html) => {
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
-const script = headScript();
 
 for (const [name, page] of Object.entries(PAGES)) {
   const markup = render(name);
@@ -97,7 +96,6 @@ for (const [name, page] of Object.entries(PAGES)) {
   if (!manifest[page.module]) throw new Error(`prerender: ${page.module} is not in the build manifest`);
   const head = [
     ...chunkFiles(page.module).map((f) => `<link rel="modulepreload" crossorigin href="/${f}">`),
-    ...(script ? [`<script>${script}</script>`] : []),
   ];
   let html = shell;
   // `marketing` paints <html> and <body> white from the first byte (index.css) — LandingPage keeps it.
